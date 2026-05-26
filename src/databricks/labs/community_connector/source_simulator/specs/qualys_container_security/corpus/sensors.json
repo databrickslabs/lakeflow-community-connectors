@@ -1,0 +1,10 @@
+[
+  {
+    "sensorId": "sensor-1",
+    "hostname": "k8s-node-1",
+    "platform": "LINUX_SENSOR",
+    "sensorVersion": "1.43.0",
+    "ipv4": "10.2.1.10",
+    "lastCheckedIn": "1736699000000"
+  }
+]

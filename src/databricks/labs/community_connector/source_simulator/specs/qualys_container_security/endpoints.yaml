@@ -1,0 +1,47 @@
+endpoints:
+  - path: /csapi/v1.3/containers
+    method: GET
+    corpus: containers
+    response:
+      pagination_style: none
+      wrapper:
+        records_key: data
+        extras:
+          count: 2
+
+  - path: /csapi/v1.3/images
+    method: GET
+    corpus: images
+    response:
+      pagination_style: none
+      wrapper:
+        records_key: data
+        extras:
+          count: 2
+
+  - path: /csapi/v1.3/images/{image_sha}/vuln
+    method: GET
+    corpus: image_vulns
+    response:
+      single_entity: true
+      pagination_style: none
+
+  - path: /csapi/v1.3/registry
+    method: GET
+    corpus: registries
+    response:
+      pagination_style: none
+      wrapper:
+        records_key: data
+        extras:
+          count: 1
+
+  - path: /csapi/v1.3/sensors
+    method: GET
+    corpus: sensors
+    response:
+      pagination_style: none
+      wrapper:
+        records_key: data
+        extras:
+          count: 1

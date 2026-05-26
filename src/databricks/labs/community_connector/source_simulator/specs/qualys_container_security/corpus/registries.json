@@ -1,0 +1,10 @@
+[
+  {
+    "registryId": "reg-1",
+    "registryName": "registry-prod",
+    "registryType": "DockerHub",
+    "registryUri": "https://registry.example.com",
+    "created": "1736000000000",
+    "updated": "1736670000000"
+  }
+]

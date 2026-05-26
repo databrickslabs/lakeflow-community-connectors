@@ -1,0 +1,40 @@
+[
+  {
+    "sha": "img-sha-1",
+    "imageId": "img-1001",
+    "repoTags": [
+      {
+        "repo": "registry.example.com/payments",
+        "tag": "1.2.3"
+      }
+    ],
+    "created": "1736400000000",
+    "updated": "1736685000000",
+    "imagesInUse": true,
+    "registry": "registry-prod",
+    "vulnSummary": {
+      "critical": 1,
+      "high": 2,
+      "medium": 3
+    }
+  },
+  {
+    "sha": "img-sha-2",
+    "imageId": "img-1002",
+    "repoTags": [
+      {
+        "repo": "registry.example.com/checkout",
+        "tag": "2.0.1"
+      }
+    ],
+    "created": "1736410000000",
+    "updated": "1736695000000",
+    "imagesInUse": false,
+    "registry": "registry-prod",
+    "vulnSummary": {
+      "critical": 0,
+      "high": 1,
+      "medium": 2
+    }
+  }
+]

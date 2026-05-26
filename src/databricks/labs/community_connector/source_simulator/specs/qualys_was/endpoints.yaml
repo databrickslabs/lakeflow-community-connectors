@@ -1,0 +1,32 @@
+endpoints:
+  - path: /qps/rest/3.0/search/was/webapp
+    method: POST
+    corpus: webapps_xml
+    handler: databricks.labs.community_connector.source_simulator.specs.qualys_vmdr.handlers.xml_payload:serve_xml
+    response:
+      single_entity: true
+      pagination_style: none
+
+  - path: /qps/rest/3.0/search/was/finding
+    method: POST
+    corpus: findings_xml
+    handler: databricks.labs.community_connector.source_simulator.specs.qualys_vmdr.handlers.xml_payload:serve_xml
+    response:
+      single_entity: true
+      pagination_style: none
+
+  - path: /qps/rest/3.0/search/was/wasscan
+    method: POST
+    corpus: scans_xml
+    handler: databricks.labs.community_connector.source_simulator.specs.qualys_vmdr.handlers.xml_payload:serve_xml
+    response:
+      single_entity: true
+      pagination_style: none
+
+  - path: /qps/rest/3.0/get/was/wasscan/{scan_id}
+    method: GET
+    corpus: scan_details_xml
+    handler: databricks.labs.community_connector.source_simulator.specs.qualys_vmdr.handlers.xml_payload:serve_xml
+    response:
+      single_entity: true
+      pagination_style: none

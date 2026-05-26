@@ -1,0 +1,48 @@
+endpoints:
+  - path: /api/2.0/fo/asset/host/
+    method: GET
+    corpus: host_list_xml
+    handler: databricks.labs.community_connector.source_simulator.specs.qualys_vmdr.handlers.xml_payload:serve_xml
+    response:
+      single_entity: true
+      pagination_style: none
+
+  - path: /api/2.0/fo/asset/host/vm/detection/
+    method: GET
+    corpus: host_detection_xml
+    handler: databricks.labs.community_connector.source_simulator.specs.qualys_vmdr.handlers.xml_payload:serve_xml
+    response:
+      single_entity: true
+      pagination_style: none
+
+  - path: /api/2.0/fo/knowledge_base/vuln/
+    method: POST
+    corpus: knowledgebase_xml
+    handler: databricks.labs.community_connector.source_simulator.specs.qualys_vmdr.handlers.xml_payload:serve_xml
+    response:
+      single_entity: true
+      pagination_style: none
+
+  - path: /api/2.0/fo/scan/
+    method: GET
+    corpus: scan_list_xml
+    handler: databricks.labs.community_connector.source_simulator.specs.qualys_vmdr.handlers.xml_payload:serve_xml
+    response:
+      single_entity: true
+      pagination_style: none
+
+  - path: /api/2.0/fo/scan/vm/summary/
+    method: GET
+    corpus: scan_summary_xml
+    handler: databricks.labs.community_connector.source_simulator.specs.qualys_vmdr.handlers.xml_payload:serve_xml
+    response:
+      single_entity: true
+      pagination_style: none
+
+  - path: /api/2.0/fo/asset/group/
+    method: GET
+    corpus: asset_groups_xml
+    handler: databricks.labs.community_connector.source_simulator.specs.qualys_vmdr.handlers.xml_payload:serve_xml
+    response:
+      single_entity: true
+      pagination_style: none

@@ -1,0 +1,17 @@
+display_name: Qualys Container Security
+connection:
+  parameters:
+    - name: token
+      type: string
+      required: true
+      secret: true
+      description: Bearer token for Qualys Container Security APIs.
+    - name: base_url
+      type: string
+      required: false
+      description: Qualys API base URL. Defaults to https://qualysapi.qualys.com.
+    - name: timeout_seconds
+      type: string
+      required: false
+      description: HTTP timeout in seconds. Default 30.
+external_options_allowlist: "filter,pageNumber,pageSize,sort"

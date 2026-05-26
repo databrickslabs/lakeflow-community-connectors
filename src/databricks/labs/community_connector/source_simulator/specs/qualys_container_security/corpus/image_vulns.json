@@ -1,0 +1,27 @@
+{
+  "vulnerabilities": [
+        {
+            "qid": 38170,
+            "severity": "4",
+            "status": "OPEN",
+            "containerSha": "cont-sha-1",
+            "firstFound": "2026-01-11T00:00:00Z",
+            "lastFound": "2026-01-13T00:00:00Z",
+            "cve": [
+        "CVE-2024-10001"
+      ],
+      "result": "openssl package vulnerable"
+    },
+    {
+      "qid": 105213,
+      "severity": "2",
+      "status": "OPEN",
+      "firstFound": "2026-01-10T00:00:00Z",
+      "lastFound": "2026-01-12T00:00:00Z",
+      "cve": [
+        "CVE-2023-22222"
+      ],
+      "result": "tls configuration issue"
+    }
+  ]
+}

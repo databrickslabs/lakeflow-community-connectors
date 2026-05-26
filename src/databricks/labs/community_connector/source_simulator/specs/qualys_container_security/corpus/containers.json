@@ -1,0 +1,28 @@
+[
+  {
+    "sha": "cont-sha-1",
+    "containerId": "c-1001",
+    "name": "payments-api",
+    "state": "RUNNING",
+    "imageSha": "img-sha-1",
+    "created": "1736500000000",
+    "updated": "1736680000000",
+    "host": {
+      "hostname": "k8s-node-1"
+    },
+    "sensorId": "sensor-1"
+  },
+  {
+    "sha": "cont-sha-2",
+    "containerId": "c-1002",
+    "name": "checkout-api",
+    "state": "STOPPED",
+    "imageSha": "img-sha-2",
+    "created": "1736510000000",
+    "updated": "1736690000000",
+    "host": {
+      "hostname": "k8s-node-2"
+    },
+    "sensorId": "sensor-1"
+  }
+]
