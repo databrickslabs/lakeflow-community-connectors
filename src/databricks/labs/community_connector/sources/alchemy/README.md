@@ -16,14 +16,16 @@ Ingest blockchain data from the **Alchemy Portfolio**, **Prices**, and **NFT v3*
 | Name | Type | Required | Description | Example |
 |------|------|----------|-------------|---------|
 | `api_key` | string (secret) | yes | Alchemy API key for authenticating requests. Obtain from the [Alchemy Dashboard](https://dashboard.alchemy.com). **The key appears in the URL path** — store it as a secret and apply per-key IP / referrer allowlists in the Dashboard. | `alch_AbC123…` |
-| `network` | string | no | Default network applied to tables that do not override it via `table_options`. Defaults to `eth-mainnet`. Common values: `eth-mainnet`, `base-mainnet`, `polygon-mainnet`, `arb-mainnet`, `opt-mainnet`, `sol-mainnet`. | `eth-mainnet` |
+| `network` | string | no | Network applied to every table on this connection. Defaults to `eth-mainnet`. Databricks does not permit table-level overrides of connection parameters, so **use one UC connection per network** — there is no per-table `network` override. Common values: `eth-mainnet`, `base-mainnet`, `polygon-mainnet`, `arb-mainnet`, `opt-mainnet`, `sol-mainnet`. | `eth-mainnet` |
 | `externalOptionsAllowList` | string | **yes** | Comma-separated list of allowed table-specific options. Because every table in this connector requires per-table options (wallet address, contract address, symbols, etc.), this field is required. Use the full allowlist below verbatim. | see below |
 
 The `externalOptionsAllowList` must contain (in any order) every option you intend to pass through `table_options`. The connector's full supported set is:
 
 ```
-wallet_address,network,contract_address,token_id,symbols,addresses,start_time,end_time,interval,with_market_data,max_records_per_batch,symbol,partition_days,limit,page_size,token_type,collection_slug
+wallet_address,contract_address,token_id,symbols,addresses,start_time,end_time,interval,with_market_data,max_records_per_batch,symbol,partition_days,limit,page_size,token_type,collection_slug
 ```
+
+`network` is intentionally not in this list — it's a connection-level parameter and Databricks rejects table-level overrides of connection params (`INVALID_DATASOURCE_OPTION_OVERRIDE_ATTEMPT`).
 
 ### Obtaining an Alchemy API key
 
@@ -90,13 +92,12 @@ Per-table options go in the `table_options` map for each `table` entry in the pi
 | Option | Type | Applies to | Description |
 |--------|------|------------|-------------|
 | `wallet_address` | string | `tokens_by_wallet`, `token_balances_by_wallet`, `nft_collections_by_wallet`, `wallet_transactions`, `nfts_by_wallet` | **Required.** Wallet address (hex for EVM, base58 for Solana). |
-| `network` | string | all tables | Per-table override for the connection-level default network. For tables that accept multiple networks (Portfolio family), use a comma-separated list (e.g. `eth-mainnet,base-mainnet`). Rejected for `nft_floor_prices` with anything other than `eth-mainnet`. |
-| `contract_address` | string | `nft_metadata`, `nft_contract_metadata`, `nft_floor_prices`, `token_prices_historical` (with `network`) | **Required** for NFT-by-contract tables. Token contract address (hex). |
+| `contract_address` | string | `nft_metadata`, `nft_contract_metadata`, `nft_floor_prices`, `token_prices_historical` | **Required** for NFT-by-contract tables and for the `token_prices_historical` address selector. Token contract address (hex). Uses the connection-level `network`. |
 | `token_id` | string | `nft_metadata` | **Required.** NFT token ID (decimal or hex string). |
 | `token_type` | string | `nft_metadata` | Optional hint: `ERC721` or `ERC1155`. Improves Alchemy response time when known. |
 | `symbols` | string | `token_prices_by_symbol` | **Required.** Comma-separated token symbols, max 25. Example: `ETH,BTC,USDC`. |
 | `addresses` | string | `token_prices_by_address` | **Required.** Comma-separated `network:address` pairs. Example: `eth-mainnet:0xA0b...,polygon-mainnet:0xC02...`. Max 25 pairs across 3 networks. |
-| `symbol` | string | `token_prices_historical` | One of two selectors. Provide either `symbol`, or `network` + `contract_address`. |
+| `symbol` | string | `token_prices_historical` | One of two selectors. Provide either `symbol` (cross-chain ticker like `ETH`), or `contract_address` (uses the connection-level network). |
 | `start_time` | string | `token_prices_historical` | ISO 8601 start of range. Defaults to `end_time − max_window` for the chosen interval. |
 | `end_time` | string | `token_prices_historical` | ISO 8601 end of range. Defaults to "now". |
 | `interval` | string | `token_prices_historical` | `5m` (max 7-day window), `1h` (max 30-day window), or `1d` (max 365-day window). Default `1d`. |
@@ -121,7 +122,7 @@ OPTIONS (
   api_key SECRET('alchemy', 'api_key'),
   network 'eth-mainnet',
   externalOptionsAllowList
-    'wallet_address,network,contract_address,token_id,symbols,addresses,start_time,end_time,interval,with_market_data,max_records_per_batch,symbol,partition_days,limit,page_size,token_type,collection_slug'
+    'wallet_address,contract_address,token_id,symbols,addresses,start_time,end_time,interval,with_market_data,max_records_per_batch,symbol,partition_days,limit,page_size,token_type,collection_slug'
 );
 ```
 
@@ -141,24 +142,19 @@ VITALIK = "0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045"
 pipeline_spec = {
     "connection_name": "my_alchemy_connection",
     "objects": [
-        # Snapshot: current token balances across ETH + Base + Polygon
+        # Snapshot: current token balances on the connection's network (eth-mainnet).
+        # To ingest other chains, create a separate UC connection per chain.
         {
             "table": {
                 "source_table": "tokens_by_wallet",
-                "table_options": {
-                    "wallet_address": VITALIK,
-                    "network": "eth-mainnet,base-mainnet,polygon-mainnet",
-                },
+                "table_options": {"wallet_address": VITALIK},
             }
         },
-        # Snapshot: NFTs owned on Ethereum
+        # Snapshot: NFTs owned on the connection's network
         {
             "table": {
                 "source_table": "nfts_by_wallet",
-                "table_options": {
-                    "wallet_address": VITALIK,
-                    "network": "eth-mainnet",
-                },
+                "table_options": {"wallet_address": VITALIK},
             }
         },
         # Append: daily ETH prices for 2025, with market data
@@ -190,7 +186,7 @@ Snapshot tables fully re-fetch each run. Append tables (`wallet_transactions`, `
   - Store the key as a secret (Databricks Secret Manager or equivalent).
   - Configure **per-key IP / referrer allowlists** on the Alchemy Dashboard → App → Security tab to limit blast radius.
   - Rotate the key periodically; the same key works across Portfolio / Prices / NFT v3, so rotation is a single update.
-- **Two URL shapes.** Portfolio and Prices APIs use `api.g.alchemy.com` with the network in the request **body**. NFT v3 uses `{network}.g.alchemy.com` with the network in the **subdomain**. The connector handles routing automatically — you set the network via `table_options['network']` (or the connection default) and the connector picks the right host.
+- **Two URL shapes.** Portfolio and Prices APIs use `api.g.alchemy.com` with the network in the request **body**. NFT v3 uses `{network}.g.alchemy.com` with the network in the **subdomain**. The connector handles routing automatically — you set the network once via the connection-level `network` parameter and the connector picks the right host for every table.
 
 ## Rate limits and cost (Compute Units)
 
@@ -240,9 +236,9 @@ The connector retries 429 / 500 / 503 responses with exponential backoff (initia
 
 ### `wallet_transactions` errors with "only supports ['base-mainnet', 'eth-mainnet']"
 
-**Cause:** `wallet_transactions` is Beta and only supports ETH mainnet and Base mainnet. Any other value in `table_options['network']` is rejected pre-flight.
+**Cause:** `wallet_transactions` is Beta and only supports ETH mainnet and Base mainnet. The connection-level `network` is anything else.
 
-**Fix:** Set `network` to `eth-mainnet`, `base-mainnet`, or `eth-mainnet,base-mainnet`.
+**Fix:** Set the connection's `network` parameter to `eth-mainnet` or `base-mainnet` — or create a dedicated UC connection for `wallet_transactions` on one of those chains.
 
 ### `nft_floor_prices` errors with "only supports network 'eth-mainnet'"
 

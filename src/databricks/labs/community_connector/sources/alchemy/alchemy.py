@@ -72,14 +72,13 @@ class AlchemyLakeflowConnect(LakeflowConnect, SupportsPartitionedStream):
 
     Connection options:
         api_key  (required, secret) — Alchemy API key.
-        network  (optional, default "eth-mainnet") — default network
-                 applied to tables that don't override it via
-                 ``table_options``.
+        network  (optional, default "eth-mainnet") — network applied
+                 to every table on this connection. Databricks does
+                 not permit table-level overrides of connection
+                 parameters, so use one UC connection per network.
 
     Per-table options (read from ``table_options`` per call):
         wallet_address    — required for the four wallet-scoped tables.
-        network           — per-table override; comma-separated for
-                            tables that accept multiple networks.
         contract_address  — required for nft_metadata,
                             nft_contract_metadata, nft_floor_prices.
         token_id          — required for nft_metadata.
@@ -585,17 +584,19 @@ class AlchemyLakeflowConnect(LakeflowConnect, SupportsPartitionedStream):
             "withMarketData": (table_options.get("with_market_data", "false").lower() == "true"),
         }
         symbol = table_options.get("symbol")
-        network = table_options.get("network")
-        address = table_options.get("contract_address") or table_options.get("address")
+        address = table_options.get("contract_address")
         if symbol:
             body["symbol"] = symbol
-        elif network and address:
-            body["network"] = network
+        elif address:
+            # ``network`` is connection-level — Databricks strips
+            # table-level overrides — so the selector pair is the
+            # connection-level network plus a per-call contract_address.
+            body["network"] = self._default_network
             body["address"] = address
         else:
             raise ValueError(
                 "token_prices_historical requires either 'symbol' or "
-                "('network' + 'contract_address') in table_options"
+                "'contract_address' in table_options"
             )
 
         url = self._prices_url("token_prices_historical")
@@ -611,7 +612,7 @@ class AlchemyLakeflowConnect(LakeflowConnect, SupportsPartitionedStream):
         for point in page.get("data", []) or []:
             rec = {
                 "symbol": page.get("symbol") or symbol,
-                "network": page.get("network") or network,
+                "network": page.get("network") or body.get("network"),
                 "address": page.get("address") or address,
                 "currency": currency,
                 "value": point.get("value"),
@@ -635,16 +636,22 @@ class AlchemyLakeflowConnect(LakeflowConnect, SupportsPartitionedStream):
         return f"{_nft_v3_base_url(network)}{path}"
 
     def _resolve_nft_network(self, table_options: dict[str, str], table_name: str) -> str:
+        # ``network`` is a connection-level parameter — Databricks strips
+        # any table-level override before the framework hands us
+        # ``table_options`` — so the network for every table is always
+        # the connection-level default.
+        del table_options
         if table_name in ETH_MAINNET_ONLY_TABLES:
-            # Floor prices only exist on ETH mainnet; reject overrides
-            # rather than silently 404 against another network.
-            requested = table_options.get("network", "eth-mainnet")
-            if requested != "eth-mainnet":
+            # Floor prices only exist on ETH mainnet; fail fast if the
+            # connection-level network is anything else.
+            if self._default_network != "eth-mainnet":
                 raise ValueError(
-                    f"{table_name} only supports network 'eth-mainnet'; got {requested!r}"
+                    f"{table_name} only supports network 'eth-mainnet'; "
+                    f"connection-level network is {self._default_network!r} — "
+                    "create a separate UC connection with network='eth-mainnet'"
                 )
             return "eth-mainnet"
-        return table_options.get("network") or self._default_network
+        return self._default_network
 
     def _read_nfts_by_wallet(self, table_options: dict[str, str]) -> tuple[Iterator[dict], dict]:
         wallet = require_option(table_options, "wallet_address", "nfts_by_wallet")

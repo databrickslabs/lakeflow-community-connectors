@@ -146,16 +146,16 @@ def parse_max_records(table_options: dict[str, str]) -> int | None:
 
 
 def parse_networks(table_options: dict[str, str], default_network: str) -> list[str]:
-    """Parse the ``network`` table option into a list of network ids.
+    """Return the list of networks the connector will hit for one call.
 
-    Accepts either a single network id (``"eth-mainnet"``) or a
-    comma-separated list (``"eth-mainnet,base-mainnet"``).  Falls back
-    to the connector-level default when unset.
+    ``network`` is a connection-level parameter on this connector —
+    Databricks strips any table-level override before the framework
+    hands us ``table_options`` — so the list is always a single
+    element: the connection-level default. The ``table_options``
+    argument is accepted for call-site symmetry but ignored.
     """
-    raw = table_options.get("network", default_network)
-    if not raw:
-        return [default_network]
-    return [n.strip() for n in raw.split(",") if n.strip()]
+    del table_options
+    return [default_network]
 
 
 def parse_csv_option(table_options: dict[str, str], key: str) -> list[str]:
