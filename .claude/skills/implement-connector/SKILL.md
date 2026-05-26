@@ -103,5 +103,16 @@ These options are **critical for testing**. Without them, tests may hang or take
 - **Prefer server-side filtering:** Push filters (`since`/`until` etc.) to the API instead of fetching everything and filtering in Python. Client-side filtering still forces the server to scan the full dataset, which can cause timeouts on large accounts.
 - **Design for large accounts:** What works on a small dev account may hang on a production account with millions of records. Avoid unbounded full-history parameters like `date_range=all`. Always scope queries to a bounded range.
 
+## Out of scope: ingestion-agent surface
+
+The framework exposes an experimental ingestion-agent operation surface
+(`spark.read.format("lakeflow_connect").option("operation", ...)`)
+that's derived automatically from the `LakeflowConnect` methods you
+implement. **Do not** subclass `SupportsIngestionAgent`, `AgentOperation`,
+or any of the built-in op classes (`ListObjectsOp`, `PreviewTableOp`,
+…); do not override `agent_operations()`. The shape of the
+customisation API is still being finalised. Just implement
+`LakeflowConnect` — the agent surface comes along for free.
+
 ## Merge files
 After completion, run `python tools/scripts/merge_python_source.py {source_name}` to generate the merged connector file `_generated_{source_name}_python_source.py`. 

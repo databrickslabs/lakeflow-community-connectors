@@ -1,0 +1,51 @@
+[
+  {
+    "id": 1,
+    "name": "engineering",
+    "rate": 110.0,
+    "archived": false,
+    "billable": true,
+    "default": true
+  },
+  {
+    "id": 12,
+    "name": "manufacturing",
+    "rate": 70.0,
+    "archived": false,
+    "billable": true,
+    "default": false
+  },
+  {
+    "id": 13,
+    "name": "repair: complex",
+    "rate": 95.0,
+    "archived": false,
+    "billable": true,
+    "default": false
+  },
+  {
+    "id": 14,
+    "name": "repair: standard",
+    "rate": 85.0,
+    "archived": false,
+    "billable": true,
+    "default": false
+  },
+  {
+    "id": 16,
+    "name": "testing",
+    "rate": 85.0,
+    "archived": false,
+    "billable": true,
+    "default": false
+  },
+  {
+    "id": 99001,
+    "name": "Synthetic — column coverage augmentation",
+    "description": "Synthetic type-of-work added to satisfy the simulator column-coverage invariant; not from any live tenant capture.",
+    "rate": 0.0,
+    "archived": false,
+    "billable": true,
+    "default": false
+  }
+]
