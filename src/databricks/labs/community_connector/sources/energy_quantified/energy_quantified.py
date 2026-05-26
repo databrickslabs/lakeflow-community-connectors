@@ -1060,8 +1060,17 @@ def _explode_srmc_response(
     embedded = _embedded_curve(curve)
     contract = body.get("contract") or (inner.get("contract") if inner else None) or {}
     # EQ names this ``srmc_options`` on the wire; tolerate the
-    # alternative ``options`` spelling for simulator corpora.
-    options = body.get("srmc_options") or body.get("options") or {}
+    # alternative ``options`` spelling for simulator corpora and the
+    # nested inner-envelope placement (simulator can only put extras
+    # at one nesting level, so corpora that key off the inner
+    # ``timeseries`` block carry ``srmc_options`` there).
+    options = (
+        body.get("srmc_options")
+        or body.get("options")
+        or (inner.get("srmc_options") if inner else None)
+        or (inner.get("options") if inner else None)
+        or {}
+    )
 
     period = contract.get("period") or table_options.get("period") or ""
     front = contract.get("front")

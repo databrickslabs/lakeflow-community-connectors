@@ -97,7 +97,10 @@ endpoints:
           contract: null
           scenario_names: null
           unit: "MWh"
-          denominator: null
+          # Denominator is non-null on rate-per-time curves (e.g. MWh/h).
+          # We set it here so the column-coverage invariant has at least
+          # one populated row to find on the timeseries table.
+          denominator: "h"
     params:
       begin:        {role: filter, field: d, op: gte}
       end:          {role: filter, field: d, op: lte}
@@ -161,7 +164,11 @@ endpoints:
             resolution: {frequency: "NONE", timezone: "CET"}
           instance: null
           unit: "MW"
-          denominator: null
+          # Non-null denominator so the column-coverage invariant has
+          # at least one populated row on the periods table. Real
+          # period curves can be rate-per-time (e.g. MW/h on flow
+          # curves); see EQ's curve catalog for examples.
+          denominator: "h"
     params:
       begin:    {role: filter, field: begin, op: gte}
       end:      {role: filter, field: begin, op: lte}
@@ -236,7 +243,22 @@ endpoints:
             data_type: "OHLC"
             commodity: "Coal"
             resolution: {frequency: "NONE", timezone: "CET"}
-          contract: {type: "CONTINUOUS", period: "month", front: 1, field: "settlement"}
+          # Live SRMC responses populate either ``front`` (continuous
+          # contract) or ``delivery`` (specific contract) depending on
+          # the request. We carry both fields here so the
+          # column-coverage invariant has a populated row for
+          # ``delivery``; the connector only emits whichever was
+          # actually requested per call.
+          contract: {type: "CONTINUOUS", period: "month", front: 1, delivery: "2026-05-01", field: "settlement"}
+          # srmc_options carries the SRMC calculation factors the API
+          # echoed back; populated so ``efficiency`` and
+          # ``carbon_emissions`` aren't always null on the srmc table.
+          srmc_options:
+            efficiency: 0.42
+            carbon_emissions: 0.34056
+            api2_tonne_to_mwh: 0.123
+            gas_therm_to_mwh: 0.0293
+            carbon_tax_area: null
           unit: "EUR"
           denominator: "MWh"
     params:

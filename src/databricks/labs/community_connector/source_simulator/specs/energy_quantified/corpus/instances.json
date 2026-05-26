@@ -13,9 +13,9 @@
         "frequency": "PT1H",
         "timezone": "CET"
       },
-      "unit": "MWh/h",
-      "denominator": null,
-      "source": null,
+      "unit": "MWh",
+      "denominator": "h",
+      "source": "ENTSO-E",
       "data_type": "FORECAST",
       "curve_type": "INSTANCE",
       "instance_issued_timezone": "CET",
@@ -28,6 +28,8 @@
       },
       "commodity": "Power"
     },
+    "denominator": "h",
+    "source": "ENTSO-E",
     "instance": {
       "issued": "2026-05-11 12:00:00+02:00",
       "tag": "postfix",

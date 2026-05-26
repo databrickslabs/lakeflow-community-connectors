@@ -648,5 +648,33 @@
       "area": "IT-CALA"
     },
     "commodity": "Power"
+  },
+  {
+    "name": "DE>FR Exchange Day-Ahead Schedule MWh/h H Actual",
+    "area": "DE>FR",
+    "area_sink": "FR",
+    "area_source": "DE",
+    "categories": [
+      "Exchange",
+      "Day-Ahead",
+      "Schedule"
+    ],
+    "resolution": {
+      "frequency": "PT1H",
+      "timezone": "CET"
+    },
+    "unit": "MWh",
+    "denominator": "h",
+    "source": "ENTSO-E",
+    "data_type": "ACTUAL",
+    "curve_type": "TIMESERIES",
+    "subscription": {
+      "access": "PAYING",
+      "type": "package_area",
+      "label": "Power – Germany",
+      "package": "Power",
+      "area": "DE"
+    },
+    "commodity": "Power"
   }
 ]
