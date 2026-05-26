@@ -456,7 +456,7 @@ Some curves include a `capacity` field per period (for outage data):
 | `unit` | string | From top-level `unit` |
 
 ### Primary Key
-`(curve_name, begin, end)` — note that end may be null for open-ended periods (e.g. ongoing outages). Use `(curve_name, begin)` if end nullability is an issue.
+`(curve_name, begin)` — `end` is nullable for open-ended periods (e.g. ongoing outages) so it's deliberately not part of the PK; the connector's `TABLE_METADATA["periods"]["primary_keys"]` reflects this.
 
 ### Cursor Field
 `begin` — filter by `begin >= <last_seen_begin>` on next run. Because periods can be updated (e.g. outage revised), use a lookback window of at least 7 days to catch revisions to recently opened intervals.
@@ -554,7 +554,7 @@ Fields `open`, `high`, `low`, `close`, `volume`, `open_interest` may be `null` f
 | `denominator` | string | Price denominator (e.g. `"MWh"`) |
 
 ### Primary Key
-`(curve_name, traded_at, period, delivery)` — uniquely identifies one contract's trading day record.
+`(curve_name, traded_at, period, front, delivery)` — uniquely identifies one contract's trading day record. `front` is part of the PK because a single trading day can carry rows for several front-contract positions on the same `(period, delivery)`.
 
 ### Cursor Field
 `traded_at` — append by advancing `begin` to last seen `traded_at` + 1 day.
@@ -655,7 +655,7 @@ The `options` block reflects the factors used in the SRMC calculation (useful fo
 | `carbon_emissions` | double | From `options.carbon_emissions` |
 
 ### Primary Key
-`(curve_name, date, period, front, delivery)`
+`(curve_name, date, period, front)` — `delivery` is deliberately excluded. The SRMC API's `contract` block only includes whichever of `front` or `delivery` the caller queried with; the other is always null. Including a perpetually-null column in the PK would cause DLT's `append_flow` to drop every row as null-PK invalid (see commit `537b4ff` and the explanatory comment in `energy_quantified_schemas.py:251-260`). The `(curve_name, date, period, front)` tuple is already unique per request. Callers who only have `delivery` should set `table_configuration.delivery` so it flows into the record's `delivery` column (still useful as a non-PK column for filtering downstream).
 
 ### Cursor Field
 `date` — append by advancing `begin`.

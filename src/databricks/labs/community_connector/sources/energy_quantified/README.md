@@ -49,7 +49,7 @@ The Energy Quantified connector exposes **6 tables** that map onto Energy Quanti
 | `instances` | Forecast instances for `INSTANCE` curves. Each row is one (issue, delivery) tuple — useful for forecast accuracy analysis where multiple issues coexist for the same delivery. | `(curve_name, issued, tag, datetime)` | `issued` | `append` | `curve_name` |
 | `periods` | Open-interval data for `PERIOD` curves — installed capacity, plant outages (REMIT), reservoir levels, maintenance windows. One row per interval. | `(curve_name, begin)` | `begin` | `cdc` | `curve_name` |
 | `ohlc` | Open/High/Low/Close market data for tradable energy contracts (power, gas, coal futures) on `OHLC` curves. One row per trading day per contract. | `(curve_name, traded_at, period, front, delivery)` | `traded_at` | `append` | `curve_name` |
-| `srmc` | Short-Run Marginal Cost derived from coal / gas OHLC curves. Daily series in EUR/MWh, parameterised by efficiency, carbon factors, and a specific contract. | `(curve_name, date, period, front, delivery)` | `date` | `append` | `curve_name`, `period`, and either `front` or `delivery` |
+| `srmc` | Short-Run Marginal Cost derived from coal / gas OHLC curves. Daily series in EUR/MWh, parameterised by efficiency, carbon factors, and a specific contract. | `(curve_name, date, period, front)` | `date` | `append` | `curve_name`, `period`, and either `front` or `delivery` |
 
 ### Partitioned reads
 
@@ -66,7 +66,7 @@ The Energy Quantified connector exposes **6 tables** that map onto Energy Quanti
 
 ## Table Options
 
-All curve-scoped tables (`timeseries`, `instances`, `periods`, `ohlc`, `srmc`) require `curve_name`. The other options below are forwarded verbatim to the Energy Quantified API for the table(s) they apply to. Set them under `table_conf` in your `pipeline_spec` per table.
+All curve-scoped tables (`timeseries`, `instances`, `periods`, `ohlc`, `srmc`) require `curve_name`. The other options below are forwarded verbatim to the Energy Quantified API for the table(s) they apply to. Set them under `table_configuration` in your `pipeline_spec` per table.
 
 ### Curve scope (all non-`curves` tables)
 
@@ -170,7 +170,7 @@ pipeline_spec = {
         {
             "table": {
                 "source_table": "curves",
-                "table_conf": {
+                "table_configuration": {
                     "only_subscribed": "true",
                     "commodity": "Power",
                 },
@@ -180,7 +180,7 @@ pipeline_spec = {
         {
             "table": {
                 "source_table": "timeseries",
-                "table_conf": {
+                "table_configuration": {
                     "curve_name": "DE Wind Power Production GWh H Actual",
                     "start_date": "2024-01-01",
                     "end_date": "2024-04-01",
@@ -217,7 +217,7 @@ The connector retries on connection errors, timeouts, and HTTP 429 / 5xx respons
 
 ## Limitations
 
-- **`curve_name` required on every non-catalog table** — Energy Quantified's API is curve-scoped (one curve per request), so every read of `timeseries`, `instances`, `periods`, `ohlc`, or `srmc` requires `curve_name` in `table_conf`. To ingest many curves, register multiple `objects` entries.
+- **`curve_name` required on every non-catalog table** — Energy Quantified's API is curve-scoped (one curve per request), so every read of `timeseries`, `instances`, `periods`, `ohlc`, or `srmc` requires `curve_name` in `table_configuration`. To ingest many curves, register multiple `objects` entries.
 - **`instances` walks backward, max 25 per request** — Energy Quantified's instances list is reverse-chronological and capped at 25 items per call (10 with ensembles). The connector walks backward via `issued-at-latest` and stays on the single-driver path; very deep historical backfills of forecast instances can be slow.
 - **Subscription gating** — many curves require a paid Energy Quantified subscription. Use the `only_subscribed=true` catalog filter to see exactly what your account can access, and expect `403` errors on attempted reads of unsubscribed curves.
 - **Trial accounts capped at 30 days** — historical depth on trial accounts is limited; configure `start_date` accordingly.
