@@ -38,12 +38,21 @@ name: Required CI Gate
 #   initial failure.
 
 on:
-  pull_request:
+  # `pull_request_target` (not `pull_request`) is required so the gate
+  # gets a writable GITHUB_TOKEN on fork PRs. With `pull_request`,
+  # fork-PR runs are forcibly downgraded to a read-only token across
+  # all scopes (regardless of what `permissions:` declares below), and
+  # the Checks API POST step fails with HTTP 403 "Resource not
+  # accessible by integration". `pull_request_target` runs in the
+  # context of the base branch, which is safe here because this
+  # workflow never checks out PR-controlled code — it only reads
+  # API metadata and posts a check-run.
+  pull_request_target:
     branches: [master]
     # `labeled` is needed so the gate re-evaluates when a maintainer
     # adds `safe-to-test` (which re-fires the pull_request_target-gated
     # Tests / Pylint workflows on a fork PR). Without it, the gate has
-    # no pull_request-path re-trigger after the initial sync — and the
+    # no pull-request-path re-trigger after the initial sync — and the
     # workflow_run path posts its verdict to the wrong SHA on fork PRs
     # (see HEAD_SHA below).
     types: [opened, synchronize, reopened, ready_for_review, labeled]
