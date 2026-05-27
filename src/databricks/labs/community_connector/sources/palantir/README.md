@@ -158,7 +158,8 @@ The connector dynamically discovers all object types in your configured ontology
 
 ### Step 1: Configure Pipeline Spec
 
-Create an ingestion notebook (see `ingest_notebook.py`):
+Create an ingestion notebook in your Databricks workspace with the
+following content:
 
 ```python
 from _generated_palantir_python_source import register_lakeflow_source
@@ -193,8 +194,8 @@ ingest(spark, pipeline_spec)
 
 ### Step 2: Deploy via SDP Pipeline
 
-1. Upload `_generated_palantir_python_source.py` and `ingest_notebook.py` to your Databricks workspace
-2. Create an SDP pipeline pointing to `ingest_notebook.py`
+1. Upload `_generated_palantir_python_source.py` to your Databricks workspace next to the ingestion notebook from Step 1
+2. Create an SDP pipeline pointing to that ingestion notebook
 3. Run with **Full refresh** for the initial load
 4. Subsequent runs will be incremental (if `cursor_field` is configured)
 
@@ -210,9 +211,7 @@ Create a Databricks Job to run on a schedule for automated incremental syncs.
 |---|---|---|
 | `palantir.py` | Source code (edit this) | Local dev + tests |
 | `_generated_palantir_python_source.py` | Auto-generated deployable (all code merged) | Databricks SDP pipeline |
-| `ingest_notebook.py` | Pipeline notebook (configures what to ingest) | Databricks SDP pipeline |
 | `connector_spec.yaml` | Connection parameter definitions | Framework reference |
-| `pipeline_spec.example.py` | Pipeline configuration examples | Developer reference |
 
 ### Data Flow
 
