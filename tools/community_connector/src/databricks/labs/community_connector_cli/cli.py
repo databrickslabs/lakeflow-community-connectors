@@ -229,7 +229,7 @@ def _validate_connection_options(
     return result.errors
 
 
-def _prepare_connection_options(
+def _prepare_connection_options(  # pylint: disable=too-many-arguments,too-many-positional-arguments
     source_name: str,
     options: str,
     spec_path: Optional[str],
@@ -1557,12 +1557,16 @@ def create_connection(
         # OAuth M2M:
         community-connector create_connection github my_github_conn \\
             --auth-type m2m \\
-            -o '{"client_id":"...","client_secret":"...","token_endpoint":"https://github.com/login/oauth/access_token"}'
+            -o '{"client_id":"...","client_secret":"...",
+                 "token_endpoint":"https://idp/token"}'
 
         # OAuth U2M (browser-based authorization-code flow against localhost):
         community-connector create_connection github my_github_conn \\
             --auth-type u2m \\
-            -o '{"client_id":"...","client_secret":"...","authorization_endpoint":"https://github.com/login/oauth/authorize","token_endpoint":"https://github.com/login/oauth/access_token","oauth_scope":"repo"}'
+            -o '{"client_id":"...","client_secret":"...",
+                 "authorization_endpoint":"https://idp/authorize",
+                 "token_endpoint":"https://idp/token",
+                 "oauth_scope":"repo"}'
 
         # With custom spec file:
         community-connector create_connection github my_github_conn \\

@@ -120,7 +120,7 @@ class _CallbackHandler(http.server.BaseHTTPRequestHandler):
     def log_message(self, format, *args):  # noqa: A002 - signature dictated by stdlib
         pass
 
-    def do_GET(self):  # noqa: N802 - signature dictated by stdlib
+    def do_GET(self):  # noqa: N802  # pylint: disable=invalid-name
         parsed = urllib.parse.urlparse(self.path)
         params = urllib.parse.parse_qs(parsed.query)
 
