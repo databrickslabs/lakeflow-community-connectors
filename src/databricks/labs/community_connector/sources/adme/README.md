@@ -89,13 +89,12 @@ A quick smoke test with `curl`:
 
 ```bash
 TOKEN=$(curl -s -X POST \
-  "https://login.microsoftonline.com/$TENANT_ID/oauth2/token" \
+  "https://login.microsoftonline.com/$TENANT_ID/oauth2/v2.0/token" \
   -H "Content-Type: application/x-www-form-urlencoded" \
   --data-urlencode "grant_type=client_credentials" \
   --data-urlencode "client_id=$CLIENT_ID" \
   --data-urlencode "client_secret=$CLIENT_SECRET" \
   --data-urlencode "scope=$CLIENT_ID/.default" \
-  --data-urlencode "resource=$CLIENT_ID" \
   | jq -r .access_token)
 
 curl -s -X POST \

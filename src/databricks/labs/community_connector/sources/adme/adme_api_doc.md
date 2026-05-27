@@ -16,7 +16,7 @@ ADME authenticates via Microsoft Entra ID (formerly Azure Active Directory). The
 **Token endpoint:**
 
 ```
-POST https://login.microsoftonline.com/<tenant-id>/oauth2/token
+POST https://login.microsoftonline.com/<tenant-id>/oauth2/v2.0/token
 Content-Type: application/x-www-form-urlencoded
 ```
 
@@ -28,19 +28,17 @@ Content-Type: application/x-www-form-urlencoded
 | `client_id` | App registration client ID (same as the one used to provision ADME) |
 | `client_secret` | App registration client secret |
 | `scope` | `<client-id>/.default` |
-| `resource` | `<client-id>` (same value as client_id; required by ADME's v1 token endpoint) |
 
 **Example request (curl):**
 
 ```bash
 curl --request POST \
-  'https://login.microsoftonline.com/<tenant-id>/oauth2/token' \
+  'https://login.microsoftonline.com/<tenant-id>/oauth2/v2.0/token' \
   --header 'Content-Type: application/x-www-form-urlencoded' \
   --data-urlencode 'grant_type=client_credentials' \
   --data-urlencode 'scope=<client-id>/.default' \
   --data-urlencode 'client_id=<client-id>' \
-  --data-urlencode 'client_secret=<client-secret>' \
-  --data-urlencode 'resource=<client-id>'
+  --data-urlencode 'client_secret=<client-secret>'
 ```
 
 **Example response:**

@@ -14,7 +14,6 @@ import os
 import re
 import time
 
-from __future__ import annotations
 from pyspark.sql import Row
 from pyspark.sql.datasource import (
     DataSource,
@@ -833,7 +832,7 @@ def register_lakeflow_source(spark):
         @property
         def token_url(self) -> str:
             return (
-                f"https://login.microsoftonline.com/{self._tenant_id}/oauth2/token"
+                f"https://login.microsoftonline.com/{self._tenant_id}/oauth2/v2.0/token"
             )
 
         def get(self, force_refresh: bool = False) -> str:
@@ -859,7 +858,6 @@ def register_lakeflow_source(spark):
                 "client_id": self._client_id,
                 "client_secret": self._client_secret,
                 "scope": f"{self._audience}/.default",
-                "resource": self._audience,
             }
             resp = requests.post(
                 self.token_url,
@@ -1289,10 +1287,16 @@ def register_lakeflow_source(spark):
 
         @staticmethod
         def _build_lucene_range(since: str, until: str) -> str:
-            """Build the OSDU Lucene range filter on modifyTime."""
+            """Build the OSDU Lucene range filter on modifyTime.
+
+            Uses exclusive lower bound (`{`) on non-first partitions so back-to-back
+            windows are disjoint — a record on a boundary is returned by exactly
+            one partition. First-run uses inclusive `[*` to catch everything from
+            the epoch.
+            """
             if since == EPOCH_ISO:
                 return f'modifyTime:[* TO "{until}"]'
-            return f'modifyTime:["{since}" TO "{until}"]'
+            return f'modifyTime:{{"{since}" TO "{until}"]'
 
         # ------------------------------------------------------------------
         # HTTP layer

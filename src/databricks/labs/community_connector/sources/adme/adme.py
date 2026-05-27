@@ -19,8 +19,6 @@ snapshot timestamp and get_partitions splits the time range into independent
 windows that executors process in parallel.
 """
 
-from __future__ import annotations
-
 import json
 import os
 import re
@@ -111,7 +109,7 @@ class _TokenCache:
     @property
     def token_url(self) -> str:
         return (
-            f"https://login.microsoftonline.com/{self._tenant_id}/oauth2/token"
+            f"https://login.microsoftonline.com/{self._tenant_id}/oauth2/v2.0/token"
         )
 
     def get(self, force_refresh: bool = False) -> str:
@@ -137,7 +135,6 @@ class _TokenCache:
             "client_id": self._client_id,
             "client_secret": self._client_secret,
             "scope": f"{self._audience}/.default",
-            "resource": self._audience,
         }
         resp = requests.post(
             self.token_url,
@@ -567,10 +564,16 @@ class ADMELakeflowConnect(LakeflowConnect, SupportsPartitionedStream):
 
     @staticmethod
     def _build_lucene_range(since: str, until: str) -> str:
-        """Build the OSDU Lucene range filter on modifyTime."""
+        """Build the OSDU Lucene range filter on modifyTime.
+
+        Uses exclusive lower bound (`{`) on non-first partitions so back-to-back
+        windows are disjoint — a record on a boundary is returned by exactly
+        one partition. First-run uses inclusive `[*` to catch everything from
+        the epoch.
+        """
         if since == EPOCH_ISO:
             return f'modifyTime:[* TO "{until}"]'
-        return f'modifyTime:["{since}" TO "{until}"]'
+        return f'modifyTime:{{"{since}" TO "{until}"]'
 
     # ------------------------------------------------------------------
     # HTTP layer
