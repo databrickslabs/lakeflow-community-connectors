@@ -689,11 +689,11 @@ def _flatten_record(raw: dict[str, Any]) -> dict[str, Any]:
 
     kind = raw.get("kind") or ""
 
-    if "Wellbore" in kind:
+    if "master-data--Wellbore" in kind:
         base.update(_flatten_wellbore(data))
-    elif "Reservoir" in kind:
+    elif "master-data--Reservoir" in kind:
         base.update(_flatten_reservoir(data))
-    elif "Sample" in kind:
+    elif "master-data--Sample" in kind:
         base.update(_flatten_sample(data))
 
     return base
