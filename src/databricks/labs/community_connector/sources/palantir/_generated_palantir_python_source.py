@@ -914,14 +914,14 @@ def register_lakeflow_source(spark):
                 )
             )
 
-            if start_offset:
-                next_offset = start_offset
-            else:
-                next_offset = {"done": "true"}
+            # if start_offset:
+            #     next_offset = start_offset
+            # else:
+            #     next_offset = {"done": "true"}
 
             return self._generate_all_pages(
                 table_name, page_size, max_records=max_records
-            ), next_offset
+            ), {}
 
         @staticmethod
         def _to_utc_datetime(value: Any) -> Any:
