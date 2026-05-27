@@ -251,7 +251,7 @@ Databricks Delta Table (Unity Catalog)
 ### 2. Optimize Page Size
 - Default: 1,000 records per page
 - Recommended for large datasets: 10,000 records per page
-- Maximum: 10,000 records per page (search endpoint limit)
+- Maximum: 10,000 records per page (loadObjects endpoint limit)
 - Larger page sizes = fewer API calls but longer individual requests
 
 ### 3. Start with Snapshot, Then CDC
