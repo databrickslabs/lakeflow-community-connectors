@@ -1,0 +1,179 @@
+name: Required CI Gate
+
+# Single aggregated check that branch protection on master should
+# require. It posts (and re-posts) a check_run named "Required CI Gate"
+# to the PR's head SHA via the Checks API, so the PR's check rollup
+# always reflects the gate's actual verdict.
+#
+# Why the explicit API call:
+#   * pull_request-fired runs already write their status to the PR
+#     head SHA via the workflow's own automatic check (cheap).
+#   * workflow_run-fired runs (after Tests/etc. complete on a
+#     pull_request_target-triggered upstream) write their status to the
+#     BASE ref's commit, not the PR head — which means the PR check
+#     rollup never sees the re-evaluation. Posting via the Checks API
+#     fixes that: the gate's verdict always lands on the PR head SHA,
+#     regardless of how the gate was fired.
+#
+# Per-workflow logic (unchanged from the original gate):
+#   * No upstream run record on this SHA → workflow's own trigger
+#     filters excluded the PR → not-applicable → OK.
+#   * Upstream conclusion == success → OK.
+#   * Upstream still in_progress / queued → FAIL (gate re-fires via
+#     workflow_run when the upstream completes).
+#   * Upstream completed but not success — skipped, failure, cancelled,
+#     timed_out, etc. → FAIL.
+#
+# Branch-protection setup (manual):
+#   Settings → Branches → master rule → Require status checks →
+#   add **"Required CI Gate"** (the API-posted check below). Do **not**
+#   require "Required CI Gate / gate" — that's the workflow's own
+#   automatic check, which lands on the wrong SHA for workflow_run
+#   re-evaluations and would freeze the PR's check rollup at the
+#   initial failure.
+
+on:
+  pull_request:
+    branches: [master]
+    types: [opened, synchronize, reopened, ready_for_review]
+  workflow_run:
+    workflows:
+      - Tests
+      - Generate Merged Source File
+      - Connector Self-Review
+    types: [completed]
+
+permissions:
+  contents: read
+  actions: read
+  checks: write   # required to post a check_run to PR head SHA
+
+# Only the most recent gate evaluation per head SHA is meaningful;
+# cancel older in-flight runs when a newer one starts.
+concurrency:
+  group: required-ci-gate-${{ github.event.pull_request.head.sha || github.event.workflow_run.head_sha }}
+  cancel-in-progress: true
+
+jobs:
+  gate:
+    runs-on:
+      group: databrickslabs-protected-runner-group
+      labels: linux-ubuntu-latest
+    steps:
+      - name: Aggregate required workflow conclusions
+        id: agg
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          # pull_request: PR head SHA. workflow_run: PR head SHA when the
+          # upstream was pull_request_target-triggered; base ref tip for
+          # master push-triggered upstreams.
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.event.workflow_run.head_sha }}
+        run: |
+          set -euo pipefail
+
+          REQUIRED=(
+            "Tests"
+            "Generate Merged Source File"
+            "Connector Self-Review"
+          )
+
+          echo "Checking required workflows for HEAD ${HEAD_SHA}:"
+          echo
+
+          FAILED=()
+          SUMMARY_LINES=()
+
+          for wf in "${REQUIRED[@]}"; do
+            RUNS=$(gh api \
+              "repos/${REPO}/actions/runs?head_sha=${HEAD_SHA}&per_page=50" \
+              --jq "[.workflow_runs[] | select(.name == \"$wf\")]")
+            COUNT=$(echo "$RUNS" | jq 'length')
+
+            if [ "$COUNT" = "0" ]; then
+              printf '  %-32s %s\n' "$wf" "not-applicable (no run record)"
+              SUMMARY_LINES+=("- **${wf}** — not applicable (no run record)")
+              continue
+            fi
+
+            LATEST=$(echo "$RUNS" | jq -c 'sort_by(.created_at) | reverse | .[0]')
+            STATUS=$(echo "$LATEST" | jq -r '.status')
+            CONCLUSION=$(echo "$LATEST" | jq -r '.conclusion // "null"')
+
+            if [ "$CONCLUSION" = "success" ]; then
+              printf '  %-32s %s\n' "$wf" "success"
+              SUMMARY_LINES+=("- **${wf}** — success")
+            elif [ "$STATUS" != "completed" ]; then
+              printf '  %-32s %s\n' "$wf" "${STATUS} (waiting)"
+              FAILED+=("${wf} (${STATUS})")
+              SUMMARY_LINES+=("- **${wf}** — ${STATUS} (gate re-fires when this completes)")
+            else
+              printf '  %-32s %s\n' "$wf" "$CONCLUSION"
+              FAILED+=("${wf} (${CONCLUSION})")
+              SUMMARY_LINES+=("- **${wf}** — ${CONCLUSION}")
+            fi
+          done
+
+          echo
+
+          if [ ${#FAILED[@]} -gt 0 ]; then
+            CONCLUSION_RESULT=failure
+            TITLE="Required CI Gate failed"
+            echo "::warning::Aggregation found failures: ${FAILED[*]}"
+          else
+            CONCLUSION_RESULT=success
+            TITLE="All required CI checks passed (or not applicable)"
+          fi
+
+          echo "conclusion=${CONCLUSION_RESULT}" >> "$GITHUB_OUTPUT"
+          echo "title=${TITLE}" >> "$GITHUB_OUTPUT"
+
+          # Multi-line summary via $GITHUB_OUTPUT heredoc syntax.
+          {
+            echo "summary<<EOF_GATE_SUMMARY"
+            echo "Evaluated for head SHA \`${HEAD_SHA}\`:"
+            echo
+            printf '%s\n' "${SUMMARY_LINES[@]}"
+            echo "EOF_GATE_SUMMARY"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Post or update PR-head check via Checks API
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.event.workflow_run.head_sha }}
+          CHECK_NAME: Required CI Gate
+          EXTERNAL_ID: required-ci-gate-aggregator
+          CONCLUSION: ${{ steps.agg.outputs.conclusion }}
+          TITLE: ${{ steps.agg.outputs.title }}
+          SUMMARY: ${{ steps.agg.outputs.summary }}
+        run: |
+          set -euo pipefail
+
+          # Find a previously-posted check_run (matched by external_id)
+          # so re-evaluations PATCH in place rather than stacking
+          # duplicate entries on the same SHA.
+          EXISTING_ID=$(gh api \
+            "/repos/${REPO}/commits/${HEAD_SHA}/check-runs?per_page=100" \
+            --jq "[.check_runs[] | select(.external_id == \"${EXTERNAL_ID}\")] | .[0].id // empty")
+
+          if [ -n "$EXISTING_ID" ]; then
+            gh api -X PATCH "/repos/${REPO}/check-runs/${EXISTING_ID}" \
+              --silent \
+              -f status=completed \
+              -f conclusion="${CONCLUSION}" \
+              -f "output[title]=${TITLE}" \
+              -f "output[summary]=${SUMMARY}"
+            echo "Updated existing check #${EXISTING_ID} on ${HEAD_SHA} → ${CONCLUSION}"
+          else
+            gh api -X POST "/repos/${REPO}/check-runs" \
+              --silent \
+              -f name="${CHECK_NAME}" \
+              -f head_sha="${HEAD_SHA}" \
+              -f external_id="${EXTERNAL_ID}" \
+              -f status=completed \
+              -f conclusion="${CONCLUSION}" \
+              -f "output[title]=${TITLE}" \
+              -f "output[summary]=${SUMMARY}"
+            echo "Created new check on ${HEAD_SHA} → ${CONCLUSION}"
+          fi

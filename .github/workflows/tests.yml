@@ -1,14 +1,31 @@
 name: Tests
 
 # Triggers: see pull_request_target rationale in .github/workflows/pylint.yml.
+#
+# The `paths:` filter is an outer gate — if none of these patterns match,
+# the workflow doesn't fire at all (no run record, gate sees not-applicable).
+# Inside the workflow, the `changes` job does *granular* sub-test selection
+# based on which specific files were touched. Both layers coexist: paths
+# filter is the "should this workflow exist for this PR?" check; the
+# `changes` job is the "of the sub-tests, which ones need to run?" check.
 on:
   push:
     branches: [master]
+    paths:
+      - '**/*.py'
+      - '**/pyproject.toml'
+      - 'requirements/**'
+      - '.github/workflows/tests.yml'
   pull_request_target:
     branches: [master]
     # Default types (opened, synchronize, reopened) plus `labeled` so a
     # maintainer's `safe-to-test` add fires CI on the exact labeled SHA.
     types: [opened, synchronize, reopened, labeled]
+    paths:
+      - '**/*.py'
+      - '**/pyproject.toml'
+      - 'requirements/**'
+      - '.github/workflows/tests.yml'
 
 permissions:
   contents: read
@@ -17,13 +34,6 @@ permissions:
 jobs:
   # Detect which paths changed
   changes:
-    # Fork PRs only run CI when a maintainer adds the `safe-to-test` label.
-    # Checking `event.action == 'labeled' && event.label.name == 'safe-to-test'`
-    # (not `contains(labels, ...)`) is intentional: it means a `synchronize`
-    # event after labeling does NOT auto-run on the new commit — the label
-    # gates the exact SHA the maintainer reviewed, not whatever gets pushed
-    # afterward. See CONTRIBUTING.md (H1 #3730634 pwn-request gate).
-    if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository || (github.event.action == 'labeled' && github.event.label.name == 'safe-to-test')
     runs-on:
       group: databrickslabs-protected-runner-group
       labels: linux-ubuntu-latest
@@ -34,6 +44,41 @@ jobs:
       community_connector: ${{ steps.check.outputs.community_connector }}
       sources: ${{ steps.check.outputs.sources }}
     steps:
+      # First step (runs before any fork-controlled code is on disk).
+      # Fork PRs only run CI when a maintainer adds the `safe-to-test`
+      # label, and only on the *exact event* (`action == 'labeled' &&
+      # label.name == 'safe-to-test'`) — a `synchronize` after labeling
+      # does NOT pass, so the label gates the exact SHA the maintainer
+      # reviewed, not whatever gets pushed afterward. (H1 #3730634
+      # pwn-request gate; see CONTRIBUTING.md.)
+      #
+      # We do this as an explicit failing shell step rather than a job-
+      # level `if:` so the workflow conclusion is `failure` (not
+      # `skipped`) when unauthorized — branch protection and the
+      # Required CI Gate both treat `failure` unambiguously, whereas
+      # `skipped` has historically been treated as `success`.
+      - name: Authorize
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
+          BASE_REPO: ${{ github.repository }}
+          ACTION: ${{ github.event.action }}
+          LABEL_NAME: ${{ github.event.label.name }}
+        run: |
+          if [ "$EVENT_NAME" = "push" ]; then
+            echo "OK: push to master."
+            exit 0
+          fi
+          if [ "$HEAD_REPO" = "$BASE_REPO" ]; then
+            echo "OK: same-repo PR ($HEAD_REPO)."
+            exit 0
+          fi
+          if [ "$ACTION" = "labeled" ] && [ "$LABEL_NAME" = "safe-to-test" ]; then
+            echo "OK: fork PR was just labeled 'safe-to-test'."
+            exit 0
+          fi
+          echo "::error title=Fork PR not authorized::Apply (or re-apply) the 'safe-to-test' label to authorize CI on this commit. See CONTRIBUTING.md."
+          exit 1
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
       # cannot use dorny because of ip allowlisting
       # - uses: dorny/paths-filter@v3
