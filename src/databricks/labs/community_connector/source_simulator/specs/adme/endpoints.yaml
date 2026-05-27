@@ -26,6 +26,16 @@ endpoints:
     handler: databricks.labs.community_connector.source_simulator.specs.adme.handlers.search:oauth_token
 
   # ---- OSDU Search Service (cursor pagination) ----
+  #
+  # Future-record synthesis (the equivalent of the declarative
+  # ``synthesize_future_records:`` directive) is implemented inside the
+  # handler at ``handlers/search.py::_augment_with_future`` — it appends a
+  # few future-dated ``modifyTime`` clones on top of the corpus so the
+  # connector's ``_init_time`` cap is actually exercised by
+  # ``test_microbatch_offset_convergence``. The declarative directive
+  # doesn't fit here because the request body shape (kind / Lucene /
+  # opaque cursor) isn't captured by the declarative param-role
+  # pipeline.
   - path: /api/search/v2/query_with_cursor
     method: POST
     handler: databricks.labs.community_connector.source_simulator.specs.adme.handlers.search:query_with_cursor

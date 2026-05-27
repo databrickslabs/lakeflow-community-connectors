@@ -293,6 +293,7 @@ The first run does a full backfill across all selected tables (a single open-end
 - **Tune `window_days` for your corpus size** — the default of `1` day is conservative. For partitions with millions of rarely-updated records, increase it to `7` or `30` to reduce per-partition overhead. For high-write partitions where each daily window already returns many pages, leave it at `1`.
 - **Avoid concurrent pipelines on the same partition** — the OSDU Search Service has a default cap of 500 concurrent cursors per data partition. Each table opens one cursor per partition window, so a heavily fanned-out pipeline can come close to that limit on full backfill.
 - **Prefer concrete kind queries over open wildcards** — the connector already does this (`osdu:wks:master-data--Wellbore:*` rather than `osdu:wks:*:*`), avoiding the ADME wildcard-query token-bucket rate limit (~12 wildcard queries / minute on the most permissive form).
+- **`max_records_per_batch` is intentionally not consumed.** Work is bounded by `window_days` (each `(since, until]` partition is fetched as one unit) and OSDU `page_size` (cursor-pagination depth per partition). The framework's `max_records_per_batch` cap would cut a partition mid-window, which conflicts with the partition-equals-watermark-step contract that `SupportsPartitionedStream` relies on for offset commits. Tune `window_days` down if you need smaller per-batch volume.
 
 #### Troubleshooting
 
