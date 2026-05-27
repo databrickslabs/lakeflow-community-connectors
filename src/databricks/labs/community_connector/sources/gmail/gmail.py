@@ -91,7 +91,7 @@ class GmailLakeflowConnect(LakeflowConnect, SupportsIngestionAgent):
     def agent_operations(self):
         """Expose Gmail-specific agent operations on top of the framework built-ins.
 
-        Replaces ``preview_table`` with a filter-aware variant and adds
+        Replaces ``read_table`` with a filter-aware variant and adds
         ``search_messages``, ``get_message``, ``list_attachments``,
         ``download_attachment``. See ``gmail_agent_ops`` for details.
         """

@@ -1,4 +1,4 @@
-# Gmail agent operations: typed filter preview + per-message tools.
+# Gmail agent operations: typed filter read + per-message tools.
 #
 # Exposed via ``GmailLakeflowConnect.agent_operations`` and dispatched
 # through the lakeflow_connect format with ``operation=<name>``. Agents
@@ -6,12 +6,12 @@
 # schemas.
 #
 # Five operations:
-#   - preview_table (override): adds typed filters that compose into Gmail's
+#   - read_table (override): adds typed filters that compose into Gmail's
 #     ``q`` syntax (after_date, before_date, newer_than, subject, from_address,
 #     to_address, label, has_attachment, is_unread, query). Other tables use
-#     the framework default.
+#     the framework default. Caller chains ``.limit(N)`` on the DataFrame.
 #   - search_messages: lightweight triage — id/threadId/from/subject/date/snippet
-#     without fetching message bodies. Same typed filters as preview_table.
+#     without fetching message bodies. Same typed filters as read_table.
 #   - get_message: fetch one message by id with decoded plain-text + HTML.
 #   - list_attachments: enumerate attachments on a message (gmail-native plus
 #     Drive-hosted links extracted from the body).
@@ -40,8 +40,8 @@ from databricks.labs.community_connector.interface import (
     Parameter,
 )
 from databricks.labs.community_connector.sparkpds.ingestion_agent_datasource import (
-    PreviewTableOp,
-    connector_options,
+    ReadTableOp,
+    _connector_options,
 )
 from databricks.labs.community_connector.sources.gmail.gmail_utils import (
     GmailApiError,
@@ -58,7 +58,7 @@ from databricks.labs.community_connector.sources.gmail.gmail_utils import (
 # previewed with the framework default (full table snapshot).
 _FILTERABLE_TABLES = frozenset({"messages", "threads"})
 
-# Typed filter parameters shared by preview_table override and search_messages.
+# Typed filter parameters shared by read_table override and search_messages.
 # Each tuple is (param, render_fn) where render_fn(value) → q fragment.
 def _q_quote(value: str) -> str:
     """Wrap a multi-word value in parentheses so Gmail treats it as one operand."""
@@ -198,7 +198,7 @@ def _table_options_with_query(
     keys; the connector sees only its own option namespace plus the merged
     ``q``.
     """
-    base = dict(connector_options(options))
+    base = dict(_connector_options(options))
     typed_keys = {name for name, _ in _FILTER_RENDERERS}
     for key in typed_keys:
         base.pop(key, None)
@@ -281,63 +281,31 @@ def _safe_int(value: Any) -> Optional[int]:
 
 
 # ---------------------------------------------------------------------------
-# preview_table override: apply typed filters to messages / threads
+# read_table override: apply typed filters to messages / threads
 # ---------------------------------------------------------------------------
 
-class GmailPreviewTableOp(PreviewTableOp):
-    """preview_table that composes typed filters into Gmail's ``q`` syntax.
+class GmailReadTableOp(ReadTableOp):
+    """read_table that composes typed filters into Gmail's ``q`` syntax.
 
     For ``messages`` and ``threads``, the typed parameters below are joined
     via AND and become the ``q`` option the connector sends to Gmail. For
-    every other table, behaviour matches the framework default (full
-    snapshot up to ``limit``).
+    every other table, behaviour matches the framework default. There is
+    no row cap — callers chain ``.limit(N)`` on the resulting DataFrame.
     """
 
     description = (
-        "Sample a tabular object. For messages/threads, accepts typed "
+        "Read a tabular object. For messages/threads, accepts typed "
         "filters (after_date, before_date, newer_than, subject, "
         "from_address, to_address, label, has_attachment, is_unread, "
         "query) that compose into Gmail search syntax."
     )
-    parameters = PreviewTableOp.parameters + _FILTER_PARAMETERS
-
-    def produce(
-        self,
-        connector,
-        *,
-        table_name: str,
-        limit: int,
-        table_options: Mapping[str, str],
-    ) -> Iterable[Mapping[str, Any]]:
-        del limit  # framework caps via itertools.islice
-        del table_options  # we re-derive from full options on pull
-        # ``produce`` doesn't see the original request options, so re-pull
-        # them from the connector's stashed last-request. The framework
-        # contract gives us only ``table_options`` (already stripped); we
-        # need the typed filter keys, so we override ``pull`` instead.
-        raise NotImplementedError("GmailPreviewTableOp routes through pull, not produce.")
+    parameters = ReadTableOp.parameters + _FILTER_PARAMETERS
 
     def pull(self, connector, options):
-        import itertools
-
         table_name = options["tableName"]
-        limit = self._int_limit(options)
         gmail_options = _table_options_with_query(options, table_name)
         records, _offset = connector.read_table(table_name, None, gmail_options)
-        return itertools.islice(records, limit)
-
-    @staticmethod
-    def _int_limit(options: Mapping[str, str]) -> int:
-        raw = options.get("limit")
-        if raw is None or raw == "":
-            return 100
-        try:
-            return int(raw)
-        except (TypeError, ValueError) as exc:
-            raise AgentError(
-                ErrorCode.BAD_REQUEST,
-                f"Option 'limit' must be an integer, got {raw!r}.",
-            ) from exc
+        return records
 
 
 # ---------------------------------------------------------------------------
@@ -867,10 +835,10 @@ def build_gmail_agent_operations() -> dict:
     """Return the agent-operation map for the Gmail connector.
 
     Wired in via :meth:`GmailLakeflowConnect.agent_operations`. The
-    ``preview_table`` entry overrides the framework built-in.
+    ``read_table`` entry overrides the framework built-in.
     """
     ops = [
-        GmailPreviewTableOp(),
+        GmailReadTableOp(),
         SearchMessagesOp(),
         GetMessageOp(),
         ListAttachmentsOp(),

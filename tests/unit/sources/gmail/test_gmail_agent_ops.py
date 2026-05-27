@@ -3,7 +3,7 @@
 Covers the five Gmail-specific operations dispatched through
 ``IngestionAgentDispatcher``:
 
-  - preview_table (override): typed filters compose into Gmail q syntax
+  - read_table (override): typed filters compose into Gmail q syntax
   - search_messages: triage view, metadata-format messages
   - get_message: single-message fetch with decoded bodies + drive IDs
   - list_attachments: gmail-native + Drive-hosted enumeration
@@ -120,7 +120,7 @@ def test_list_operations_includes_gmail_specific_ops(connector):
     rows = _dispatch(OP_LIST_OPERATIONS, connector)
     names = {r["name"] for r in rows}
     assert {
-        "preview_table",
+        "read_table",
         "search_messages",
         "get_message",
         "list_attachments",
@@ -128,20 +128,20 @@ def test_list_operations_includes_gmail_specific_ops(connector):
     }.issubset(names)
 
 
-def test_preview_table_description_mentions_gmail_filters(connector):
+def test_read_table_description_mentions_gmail_filters(connector):
     rows = _dispatch(OP_LIST_OPERATIONS, connector)
-    preview = next(r for r in rows if r["name"] == "preview_table")
-    assert "Gmail search syntax" in preview["description"]
+    op = next(r for r in rows if r["name"] == "read_table")
+    assert "Gmail search syntax" in op["description"]
     # Typed filter params show up in parameters_json
-    assert "after_date" in preview["parameters_json"]
-    assert "from_address" in preview["parameters_json"]
+    assert "after_date" in op["parameters_json"]
+    assert "from_address" in op["parameters_json"]
 
 
 # ---------------------------------------------------------------------------
-# preview_table override: routes typed filters into the connector q option
+# read_table override: routes typed filters into the connector q option
 # ---------------------------------------------------------------------------
 
-def test_preview_table_messages_routes_typed_filters_into_q(connector, monkeypatch):
+def test_read_table_messages_routes_typed_filters_into_q(connector, monkeypatch):
     captured: dict = {}
 
     def fake_read_table(table_name, start_offset, table_options):
@@ -151,13 +151,12 @@ def test_preview_table_messages_routes_typed_filters_into_q(connector, monkeypat
 
     monkeypatch.setattr(connector, "read_table", fake_read_table)
     rows = _dispatch(
-        "preview_table",
+        "read_table",
         connector,
         tableName="messages",
         after_date="2024/01/15",
         subject="invoice",
         has_attachment="true",
-        limit=10,
     )
     assert rows == []
     assert captured["table_name"] == "messages"
@@ -168,18 +167,17 @@ def test_preview_table_messages_routes_typed_filters_into_q(connector, monkeypat
     assert "has:attachment" in q
     # Typed filter keys should not leak through to the connector.
     # ``tableName`` is allowed through by the framework's ``connector_options``;
-    # only operation-layer reserved keys (operation/limit/etc.) are stripped.
+    # only operation-layer reserved keys (operation/search/path/etc.) are stripped.
     for stripped in (
         "after_date",
         "subject",
         "has_attachment",
         "operation",
-        "limit",
     ):
         assert stripped not in captured["table_options"]
 
 
-def test_preview_table_non_filterable_table_ignores_filters(connector, monkeypatch):
+def test_read_table_non_filterable_table_ignores_filters(connector, monkeypatch):
     captured: dict = {}
 
     def fake_read_table(table_name, start_offset, table_options):
@@ -188,24 +186,26 @@ def test_preview_table_non_filterable_table_ignores_filters(connector, monkeypat
 
     monkeypatch.setattr(connector, "read_table", fake_read_table)
     rows = _dispatch(
-        "preview_table",
+        "read_table",
         connector,
         tableName="labels",
         after_date="2024/01/15",  # ignored — labels isn't a filterable table
-        limit=5,
     )
     assert len(rows) == 2
     assert captured["q"] is None
 
 
-def test_preview_table_caps_rows_at_limit(connector, monkeypatch):
+def test_read_table_returns_all_rows_no_framework_cap(connector, monkeypatch):
+    # The Scala-aligned ReadTableOp dropped framework-side row capping —
+    # callers chain ``.limit(N)`` on the resulting DataFrame instead. The
+    # override must surface every row the source produces.
     monkeypatch.setattr(
         connector,
         "read_table",
         lambda t, s, o: (iter([{"id": str(i)} for i in range(20)]), {}),
     )
-    rows = _dispatch("preview_table", connector, tableName="messages", limit=3)
-    assert len(rows) == 3
+    rows = _dispatch("read_table", connector, tableName="messages")
+    assert len(rows) == 20
 
 
 # ---------------------------------------------------------------------------

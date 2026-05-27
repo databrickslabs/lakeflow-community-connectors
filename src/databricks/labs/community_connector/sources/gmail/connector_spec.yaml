@@ -32,7 +32,7 @@
 #     }'
 #
 # Provides 100% Gmail API coverage across 10 tables plus a Gmail-specific
-# ingestion-agent operation set (preview_table override, search_messages,
+# ingestion-agent operation set (read_table override, search_messages,
 # get_message, list_attachments, download_attachment).
 
 display_name: Gmail
@@ -105,9 +105,10 @@ external_options_allowlist: "q,labelIds,maxResults,includeSpamTrash,format,max_r
 #   - list_operations
 #
 # Gmail-specific:
-#   - preview_table (override): typed filters compose into Gmail q syntax
+#   - read_table (override): typed filters compose into Gmail q syntax
 #     for messages/threads (after_date, before_date, newer_than, subject,
 #     from_address, to_address, label, has_attachment, is_unread, query).
+#     No row cap — chain ``.limit(N)`` on the resulting DataFrame.
 #   - search_messages: lightweight header-only triage (format=metadata).
 #   - get_message: single-message fetch with decoded body_text/html and
 #     Drive file IDs extracted from the body.
