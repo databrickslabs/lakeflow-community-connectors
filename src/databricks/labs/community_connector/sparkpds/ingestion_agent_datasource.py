@@ -35,7 +35,6 @@ Source customisation goes through
 
 from __future__ import annotations
 
-import itertools
 import json
 import re
 from typing import Any, Iterable, Iterator, Mapping, Optional, Tuple
@@ -59,7 +58,6 @@ from databricks.labs.community_connector.libs.utils import parse_value
 # ---------------------------------------------------------------------------
 
 OPERATION = "operation"
-PARENT = "parent"
 SEARCH = "search"
 PATH = "path"
 NAME = "name"
@@ -67,13 +65,10 @@ METADATA_KEY = "metadataKey"
 TABLE_NAME = "tableName"
 CATALOG_NAME = "catalogName"
 SCHEMA_NAME = "schemaName"
-LIMIT = "limit"
-
-DEFAULT_PREVIEW_LIMIT = 100
 
 # Built-in operation names exposed for callers and tests.
 OP_LIST_OBJECTS = "list_objects"
-OP_PREVIEW_TABLE = "preview_table"
+OP_READ_TABLE = "read_table"
 OP_GET_OBJECT_METADATA = "get_object_metadata"
 OP_VALIDATE_CONNECTION = "validate_connection"
 OP_LIST_OPERATIONS = "list_operations"
@@ -96,7 +91,7 @@ def _requires_connector(op: AgentOperation) -> bool:
 # agent option as one of its own. The user's request options keep these
 # keys; ops read them via the AgentOperation.pull options dict.
 _AGENT_RESERVED_KEYS = frozenset(
-    {OPERATION, PARENT, SEARCH, PATH, NAME, METADATA_KEY, LIMIT}
+    {OPERATION, SEARCH, PATH, NAME, METADATA_KEY}
 )
 
 
@@ -190,15 +185,17 @@ class ListObjectsOp(AgentOperation):
 
     name = OP_LIST_OBJECTS
     description = (
-        "Hierarchical listing of objects. Returns rows of (name, type, full_path)."
+        "Hierarchical listing of objects. Returns rows of (name, type, full_path). "
+        "`type` is source-defined; conventional values are `schema` / `table` / "
+        "`view` / `synonym`."
     )
     kind = KIND_METADATA
     schema = _LIST_OBJECTS_BASE_SCHEMA
     parameters = (
         Parameter(
-            name=PARENT,
-            description="Path identifying the parent to list under. "
-            "Empty/missing lists from the source root.",
+            name=PATH,
+            description="Parent path to list under. Empty / missing = top level. "
+            "Format is source-defined.",
         ),
         Parameter(
             name=SEARCH,
@@ -207,15 +204,15 @@ class ListObjectsOp(AgentOperation):
     )
 
     def pull(self, connector, options):
-        parent = options.get(PARENT) or None
+        path = options.get(PATH) or None
         search = options.get(SEARCH) or None
-        return self.produce(connector, parent=parent, search=search)
+        return self.produce(connector, path=path, search=search)
 
     def produce(
         self,
         connector: LakeflowConnect,
         *,
-        parent: Optional[str],
+        path: Optional[str],
         search: Optional[str],
     ) -> Iterable[Mapping[str, Any]]:
         """Yield rows of ``(name, type, full_path)``.
@@ -224,11 +221,23 @@ class ListObjectsOp(AgentOperation):
         return hierarchical results or to bind to a source-native
         listing API.
         """
-        return _default_list_objects(connector, parent, search)
+        return _default_list_objects(connector, path, search)
 
 
 class GetObjectMetadataOp(AgentOperation):
-    """Built-in: per-object metadata as ``(key, value)`` rows."""
+    """Built-in: per-object metadata as ``(key, value)`` rows.
+
+    Conventional keys (sources are free to add more, but using these
+    for the shared concerns keeps results consistent across sources):
+
+    - ``primary_key`` — comma-joined ordered column list of the PK.
+    - ``table_size`` — source-reported size in bytes (string-encoded).
+    - ``index_columns`` — JSON array of ordered column lists, one per
+      index, e.g. ``[["id"], ["first_name", "last_name"]]``.
+
+    The framework applies the ``metadataKey`` filter case-insensitively
+    after ``produce`` emits, so sources don't need to handle it.
+    """
 
     name = OP_GET_OBJECT_METADATA
     description = "Per-object metadata as (key, value) rows."
@@ -236,24 +245,33 @@ class GetObjectMetadataOp(AgentOperation):
     schema = _GET_OBJECT_METADATA_BASE_SCHEMA
     parameters = (
         Parameter(name=NAME, required=True, description="Object name to describe."),
-        Parameter(name=PATH, description="Path of the parent (e.g. namespace)."),
+        Parameter(
+            name=PATH,
+            description="Parent path of the target object (source-defined).",
+        ),
         Parameter(
             name=METADATA_KEY,
-            description="If set, return only this specific metadata key.",
+            description=(
+                "Case-insensitive filter; if set, only rows whose `key` "
+                "matches are returned."
+            ),
         ),
     )
 
     def pull(self, connector, options):
         name = options[NAME]  # framework validated required.
         path = options.get(PATH) or None
-        metadata_key = options.get(METADATA_KEY) or None
-        return self.produce(
+        rows = self.produce(
             connector,
             path=path,
             name=name,
-            metadata_key=metadata_key,
             table_options=_connector_options(options),
         )
+        key_filter = options.get(METADATA_KEY)
+        if key_filter:
+            needle = key_filter.lower()
+            rows = (r for r in rows if str(r.get("key", "")).lower() == needle)
+        return rows
 
     def produce(
         self,
@@ -261,7 +279,6 @@ class GetObjectMetadataOp(AgentOperation):
         *,
         path: Optional[str],
         name: str,
-        metadata_key: Optional[str],
         table_options: Mapping[str, str],
     ) -> Iterable[Mapping[str, Any]]:
         """Yield ``(key, value)`` rows describing the named object.
@@ -276,36 +293,35 @@ class GetObjectMetadataOp(AgentOperation):
             connector,
             table_name=name,
             table_options=table_options,
-            metadata_key=metadata_key,
         )
 
 
-class PreviewTableOp(AgentOperation):
-    """Built-in: sample-read a tabular object.
+class ReadTableOp(AgentOperation):
+    """Built-in: read a tabular object in its native schema.
 
     Data-kind — rows pass through with the table's natural schema (no
-    ``_meta`` column) and errors surface as Spark exceptions. Override
-    :meth:`produce` to wire to a source-native sampling API.
+    ``_meta`` column) and errors surface as Spark exceptions. The
+    operation does not enforce a row cap of its own; callers wanting
+    a sample chain ``.limit(N)`` on the resulting DataFrame.
+
+    Override :meth:`produce` to wire to a source-native read path.
     """
 
-    name = OP_PREVIEW_TABLE
-    description = "Sample a tabular object. Returns the table's natural schema and rows."
+    name = OP_READ_TABLE
+    description = "Read a tabular object. Returns the table's natural schema and rows."
     kind = KIND_DATA
     parameters = (
-        Parameter(name=TABLE_NAME, required=True, description="Table to sample."),
-        Parameter(
-            name=CATALOG_NAME,
-            description="Catalog qualifier when the source supports it.",
-        ),
+        Parameter(name=TABLE_NAME, required=True, description="Target object name."),
         Parameter(
             name=SCHEMA_NAME,
-            description="Schema qualifier when the source supports it.",
+            description="Schema within the parent path (source-defined).",
         ),
         Parameter(
-            name=LIMIT,
-            type="integer",
-            default=DEFAULT_PREVIEW_LIMIT,
-            description=f"Maximum rows to return (default {DEFAULT_PREVIEW_LIMIT}).",
+            name=CATALOG_NAME,
+            description=(
+                "Top-level catalog (source-defined). Two-level sources should "
+                "reject this rather than silently dropping it."
+            ),
         ),
     )
 
@@ -315,32 +331,25 @@ class PreviewTableOp(AgentOperation):
 
     def pull(self, connector, options):
         table_name = options[TABLE_NAME]
-        limit = _int_option(options, LIMIT, DEFAULT_PREVIEW_LIMIT)
-        table_options = _connector_options(options)
-        records = self.produce(
+        return self.produce(
             connector,
             table_name=table_name,
-            limit=limit,
-            table_options=table_options,
+            table_options=_connector_options(options),
         )
-        # Framework-side cap. Defends against an override that ignores `limit`.
-        return itertools.islice(records, limit)
 
     def produce(
         self,
         connector: LakeflowConnect,
         *,
         table_name: str,
-        limit: int,
         table_options: Mapping[str, str],
     ) -> Iterable[Mapping[str, Any]]:
-        """Yield up to ``limit`` records from ``table_name``.
+        """Yield records from ``table_name``.
 
-        Default consumes ``read_table`` and lets the framework slice.
-        Override to use a source-native LIMIT clause when available.
+        Default reads through ``LakeflowConnect.read_table``. Override
+        to bind to a source-native scan.
         """
-        del limit
-        return _default_preview_records(connector, table_name, table_options)
+        return _default_read_records(connector, table_name, table_options)
 
 
 class ValidateConnectionOp(AgentOperation):
@@ -349,6 +358,11 @@ class ValidateConnectionOp(AgentOperation):
     Returns one row with the standard ``_meta`` struct. Override
     :meth:`produce` to use a source-native ping; the default attempts
     ``connector.list_tables()`` and reports any raised exception.
+
+    Sources reporting a failed health check should raise
+    ``AgentError(ErrorCode.CONNECTION_FAILED, ...)`` rather than the
+    generic ``internal_error`` so consumers can dispatch on a dedicated
+    code.
     """
 
     name = OP_VALIDATE_CONNECTION
@@ -365,14 +379,15 @@ class ValidateConnectionOp(AgentOperation):
     def produce(self, connector: LakeflowConnect) -> Mapping[str, Optional[str]]:
         """Return ``{status, code, message}`` for the connection.
 
-        Default: try ``list_tables``; report exceptions as ``error``.
+        Default: try ``list_tables``; report exceptions as
+        ``connection_failed``.
         """
         try:
             connector.list_tables()
         except Exception as exc:  # pylint: disable=broad-except
             return _meta(
                 status="error",
-                code=type(exc).__name__,
+                code=ErrorCode.CONNECTION_FAILED,
                 message=_error_str(exc),
             )
         return _meta(status="ok")
@@ -413,7 +428,7 @@ _BUILTIN_OPERATIONS: dict[str, AgentOperation] = {
     op.name: op
     for op in (
         ListObjectsOp(),
-        PreviewTableOp(),
+        ReadTableOp(),
         GetObjectMetadataOp(),
         ValidateConnectionOp(),
         ListOperationsOp(),
@@ -540,12 +555,19 @@ class IngestionAgentReader(DataSourceReader):
             return
 
         # If the connector failed and this op needs it, route by kind:
-        # metadata-kind → error row, data-kind → re-raise.
+        # metadata-kind → error row, data-kind → re-raise. validate_connection
+        # treats the init failure as the health-check answer and uses the
+        # canonical CONNECTION_FAILED code.
         if self.init_error is not None and _requires_connector(self.operation):
-            if self.operation.kind == KIND_METADATA:
+            if self.operation.kind == KIND_DATA:
+                raise self.init_error
+            if self.operation.name == OP_VALIDATE_CONNECTION:
+                yield from self._yield_error_rows(
+                    self.init_error, code=ErrorCode.CONNECTION_FAILED
+                )
+            else:
                 yield from self._yield_error_rows(self.init_error)
-                return
-            raise self.init_error
+            return
 
         request_options = _agent_options(self.options)
 
@@ -570,20 +592,28 @@ class IngestionAgentReader(DataSourceReader):
         for row in rows:
             yield parse_value(_with_default_meta(row), self.schema)
 
-    def _yield_error_rows(self, exc: BaseException):
-        yield parse_value(_with_default_meta(self._error_row(exc)), self.schema)
+    def _yield_error_rows(
+        self, exc: BaseException, code: Optional[str] = None
+    ):
+        yield parse_value(
+            _with_default_meta(self._error_row(exc, code=code)), self.schema
+        )
 
-    def _error_row(self, exc: BaseException) -> dict:
-        if isinstance(exc, AgentError):
-            code = exc.code
-            message = str(exc)
-        elif isinstance(exc, ValueError):
-            # Framework-detected input errors (legacy code paths still raise
-            # ValueError for missing options).
-            code = ErrorCode.BAD_REQUEST
+    def _error_row(
+        self, exc: BaseException, code: Optional[str] = None
+    ) -> dict:
+        if code is None:
+            if isinstance(exc, AgentError):
+                code = exc.code
+            elif isinstance(exc, ValueError):
+                # Framework-detected input errors (legacy code paths still raise
+                # ValueError for missing options).
+                code = ErrorCode.BAD_REQUEST
+            else:
+                code = ErrorCode.INTERNAL_ERROR
+        if isinstance(exc, (AgentError, ValueError)):
             message = str(exc)
         else:
-            code = ErrorCode.INTERNAL_ERROR
             message = _error_str(exc)
         return {"_meta": _meta(status="error", code=code, message=message)}
 
@@ -653,19 +683,6 @@ def _required_option(
             f"Operation '{operation}' requires option '{key}'.",
         )
     return value
-
-
-def _int_option(options: Mapping[str, str], key: str, default: int) -> int:
-    raw = options.get(key)
-    if raw is None or raw == "":
-        return default
-    try:
-        return int(raw)
-    except (TypeError, ValueError) as exc:
-        raise AgentError(
-            ErrorCode.BAD_REQUEST,
-            f"Option '{key}' must be an integer, got {raw!r}.",
-        ) from exc
 
 
 def _validate_required_parameters(
@@ -785,13 +802,13 @@ def _default_get_object_metadata(
     connector: LakeflowConnect,
     table_name: str,
     table_options: Mapping[str, str],
-    metadata_key: Optional[str],
 ) -> Iterator[dict]:
     """Flatten ``read_table_metadata`` into ``(key, value)`` rows.
 
     Maps the connector's metadata keys to the standardised ingestion-agent
     keys (``primary_key`` from ``primary_keys``, ``cursor_column`` from
-    ``cursor_field``) and preserves the others verbatim.
+    ``cursor_field``) and preserves the others verbatim. The framework
+    applies the ``metadataKey`` filter case-insensitively above this.
     """
     raw = connector.read_table_metadata(table_name, table_options)
 
@@ -808,31 +825,15 @@ def _default_get_object_metadata(
             continue
         standardized.append((key, value))
 
-    if metadata_key is not None:
-        standardized = [(k, v) for k, v in standardized if k == metadata_key]
-        if not standardized:
-            return iter([
-                {
-                    "key": metadata_key,
-                    "value": None,
-                    "_meta": _meta(
-                        status="warning",
-                        code="metadata_key_not_found",
-                        message=f"Metadata key '{metadata_key}' is not "
-                        f"available for '{table_name}'.",
-                    ),
-                }
-            ])
-
     return ({"key": k, "value": _to_str_value(v)} for k, v in standardized)
 
 
-def _default_preview_records(
+def _default_read_records(
     connector: LakeflowConnect,
     table_name: str,
     table_options: Mapping[str, str],
 ) -> Iterator[Mapping[str, Any]]:
-    """Pull records from ``read_table``; the caller slices to the limit."""
+    """Pull all records from ``connector.read_table`` and yield them."""
     records, _offset = connector.read_table(table_name, None, dict(table_options))
     return records
 

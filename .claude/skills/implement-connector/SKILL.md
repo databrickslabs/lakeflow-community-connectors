@@ -109,7 +109,7 @@ The framework exposes an experimental ingestion-agent operation surface
 (`spark.read.format("lakeflow_connect").option("operation", ...)`)
 that's derived automatically from the `LakeflowConnect` methods you
 implement. **Do not** subclass `SupportsIngestionAgent`, `AgentOperation`,
-or any of the built-in op classes (`ListObjectsOp`, `PreviewTableOp`,
+or any of the built-in op classes (`ListObjectsOp`, `ReadTableOp`,
 …); do not override `agent_operations()`. The shape of the
 customisation API is still being finalised. Just implement
 `LakeflowConnect` — the agent surface comes along for free.

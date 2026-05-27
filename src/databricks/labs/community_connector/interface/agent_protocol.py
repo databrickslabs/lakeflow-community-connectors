@@ -19,6 +19,11 @@ class ErrorCode:
     :class:`AgentOperation`. The framework defaults to ``internal_error``
     for uncategorised exceptions and ``bad_request`` for its own
     detected option errors.
+
+    ``CONNECTION_FAILED`` is the conventional code that
+    :class:`ValidateConnectionOp` implementations raise on a failed
+    health check — keep it consistent across sources so agents can
+    dispatch on it.
     """
 
     AUTH_FAILED = "auth_failed"
@@ -28,6 +33,7 @@ class ErrorCode:
     BAD_REQUEST = "bad_request"
     UNSUPPORTED = "unsupported"
     INTERNAL_ERROR = "internal_error"
+    CONNECTION_FAILED = "connection_failed"
 
 
 class AgentError(Exception):
