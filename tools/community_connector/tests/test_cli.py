@@ -966,6 +966,32 @@ class TestCreateConnectionConnectionType:
         assert "client_secret" in result.output
         assert "token_endpoint" in result.output
 
+    @patch("databricks.labs.community_connector_cli.cli._load_connector_spec")
+    def test_create_connection_u2m_requires_oauth_fields(self, mock_load_spec):
+        """--auth-type=u2m must error on missing required OAuth options before
+        kicking off the loopback flow."""
+        runner = CliRunner()
+        mock_load_spec.return_value = None
+
+        result = runner.invoke(
+            main,
+            [
+                "create_connection",
+                "github",
+                "my_conn",
+                "--auth-type",
+                "u2m",
+                "-o",
+                '{"client_id": "cid"}',
+            ],
+        )
+
+        assert result.exit_code != 0
+        assert "--auth-type=u2m" in result.output
+        assert "client_secret" in result.output
+        assert "authorization_endpoint" in result.output
+        assert "token_endpoint" in result.output
+
     @patch(
         "databricks.labs.community_connector_cli.cli.run_u2m_authorization_code_flow"
     )
@@ -1156,11 +1182,26 @@ class TestMakeWorkspaceClient:
     def test_falls_back_to_default_profile(self, mock_workspace_client, monkeypatch):
         """Without the env var, force the DEFAULT profile to disambiguate."""
         monkeypatch.delenv("DATABRICKS_CONFIG_PROFILE", raising=False)
+        monkeypatch.delenv("DATABRICKS_HOST", raising=False)
         from databricks.labs.community_connector_cli.cli import _make_workspace_client
 
         _make_workspace_client()
 
         mock_workspace_client.assert_called_once_with(profile="DEFAULT")
+
+    @patch("databricks.labs.community_connector_cli.cli.WorkspaceClient")
+    def test_databricks_host_env_skips_default_profile(
+        self, mock_workspace_client, monkeypatch
+    ):
+        """DATABRICKS_HOST signals env-var auth — defer to the SDK so users whose
+        ~/.databrickscfg has no [DEFAULT] section don't break on file resolution."""
+        monkeypatch.delenv("DATABRICKS_CONFIG_PROFILE", raising=False)
+        monkeypatch.setenv("DATABRICKS_HOST", "https://example.cloud.databricks.com")
+        from databricks.labs.community_connector_cli.cli import _make_workspace_client
+
+        _make_workspace_client()
+
+        mock_workspace_client.assert_called_once_with()
 
 
 class TestHelpOptions:

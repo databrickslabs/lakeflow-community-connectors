@@ -66,8 +66,13 @@ def _make_workspace_client() -> WorkspaceClient:
     ``~/.databrickscfg`` holds multiple profiles pointing at the same
     workspace host — the SDK cannot auto-pick one, so we explicitly select
     ``DEFAULT`` to keep the CLI deterministic.
+
+    We also defer to the SDK when ``DATABRICKS_HOST`` is set, because env-var
+    auth (host + token) bypasses ``~/.databrickscfg`` entirely. Forcing
+    ``profile="DEFAULT"`` in that case would push the SDK back into file
+    loading and raise on users whose config has only named profiles.
     """
-    if os.environ.get("DATABRICKS_CONFIG_PROFILE"):
+    if os.environ.get("DATABRICKS_CONFIG_PROFILE") or os.environ.get("DATABRICKS_HOST"):
         return WorkspaceClient()
     return WorkspaceClient(profile="DEFAULT")
 
