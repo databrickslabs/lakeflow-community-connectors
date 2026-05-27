@@ -173,6 +173,44 @@ community-connector update_connection github my_github_conn \
 | `--options` | `-o` | Connection options as JSON string (required) |
 | `--spec` | `-s` | Optional: local path to connector_spec.yaml, or a GitHub repo URL |
 
+### `upload`
+
+Build a connector wheel from its `pyproject.toml` and upload it to a UC Volume.
+The volume and any missing subdirectories are created automatically.
+
+```bash
+# Build sources/example/ and upload to a UC Volume
+community-connector upload example \
+  --volume-path /Volumes/main/default/community_connector/packages
+
+# Skip the build step and upload a pre-built wheel
+community-connector upload example \
+  --volume-path /Volumes/main/default/community_connector/packages \
+  --wheel ./dist/lakeflow_community_connectors_example-0.1.0-py3-none-any.whl
+
+# Build from a non-conventional source location and keep the wheel locally
+community-connector upload my_source \
+  --volume-path /Volumes/main/default/community_connector/packages \
+  --source-dir ./my_connector \
+  --keep-wheel ./dist
+```
+
+The build step shells out to `python -m build`, which runs setuptools inside a
+PEP 517 isolated environment — no per-connector venv setup needed. Install the
+`build` frontend once into the venv that owns the CLI:
+
+```bash
+pip install build
+```
+
+**Options:**
+| Option | Short | Description |
+|--------|-------|-------------|
+| `--volume-path` | `-v` | UC Volume directory to upload into (required). Auto-creates the volume and any subdirectories. |
+| `--wheel` | | Skip the build step and upload this pre-built wheel. |
+| `--source-dir` | | Override the connector source directory (default: locate `sources/<source_name>/`). |
+| `--keep-wheel` | | After upload, copy the built wheel into this local directory. Ignored when `--wheel` is supplied. |
+
 ## Pipeline Spec Format
 
 The pipeline spec defines which tables to ingest and how:

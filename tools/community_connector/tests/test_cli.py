@@ -35,6 +35,9 @@ from databricks.labs.community_connector_cli.cli import (
     _merge_external_options_allowlist,
     _get_ingest_path_from_pipeline,
     _extract_source_name_from_ingest,
+    _parse_volume_path,
+    _ensure_volume_directory,
+    _validate_wheel_layout,
 )
 from databricks.labs.community_connector_cli.connector_spec import (
     ParsedConnectorSpec,
@@ -2046,3 +2049,331 @@ objects:
                 assert "not found" in result.output
         finally:
             os.unlink(temp_path)
+
+
+def _make_fake_wheel(path: Path, source_name: str) -> Path:
+    """Build a minimal in-process zip that looks like a connector wheel.
+
+    Only used by the wheel-layout and upload-command tests — we never invoke
+    the real ``python -m build`` from unit tests.
+    """
+    import zipfile  # local to keep top-of-file imports unchanged
+    wheel = path / f"lakeflow_community_connectors_{source_name}-0.1.0-py3-none-any.whl"
+    namespace = f"databricks/labs/community_connector/sources/{source_name}"
+    with zipfile.ZipFile(wheel, "w") as zf:
+        zf.writestr(f"{namespace}/__init__.py", "")
+        zf.writestr(f"{namespace}/{source_name}.py", "# connector code")
+        zf.writestr(
+            f"lakeflow_community_connectors_{source_name}-0.1.0.dist-info/METADATA",
+            "Metadata-Version: 2.1\nName: lakeflow-community-connectors-"
+            f"{source_name}\nVersion: 0.1.0\n",
+        )
+    return wheel
+
+
+class TestParseVolumePath:
+    """Tests for _parse_volume_path."""
+
+    def test_volume_root(self):
+        assert _parse_volume_path("/Volumes/main/default/cc") == (
+            "main", "default", "cc", "",
+        )
+
+    def test_with_subpath(self):
+        assert _parse_volume_path("/Volumes/main/default/cc/packages") == (
+            "main", "default", "cc", "packages",
+        )
+
+    def test_trailing_slash_normalized(self):
+        assert _parse_volume_path("/Volumes/main/default/cc/packages/") == (
+            "main", "default", "cc", "packages",
+        )
+
+    def test_nested_subpath(self):
+        assert _parse_volume_path("/Volumes/c/s/v/a/b/c") == ("c", "s", "v", "a/b/c")
+
+    def test_invalid_raises(self):
+        with pytest.raises(click.ClickException, match="Invalid volume path"):
+            _parse_volume_path("/Workspace/Users/me/wheels")
+
+    def test_missing_volume_part_raises(self):
+        with pytest.raises(click.ClickException, match="Invalid volume path"):
+            _parse_volume_path("/Volumes/main/default")
+
+
+class TestEnsureVolumeDirectory:
+    """Tests for _ensure_volume_directory — volume + subdir auto-create."""
+
+    def test_volume_exists_no_subpath(self):
+        ws = MagicMock()
+        ws.volumes.read.return_value = MagicMock()  # volume exists
+        result = _ensure_volume_directory(ws, "/Volumes/c/s/v", debug=False)
+        assert result == "/Volumes/c/s/v"
+        ws.volumes.create.assert_not_called()
+        ws.files.create_directory.assert_not_called()
+
+    def test_volume_created_when_missing(self):
+        ws = MagicMock()
+        ws.volumes.read.side_effect = Exception("NOT_FOUND")
+        result = _ensure_volume_directory(ws, "/Volumes/c/s/v", debug=False)
+        assert result == "/Volumes/c/s/v"
+        ws.volumes.create.assert_called_once()
+        kwargs = ws.volumes.create.call_args.kwargs
+        assert kwargs["catalog_name"] == "c"
+        assert kwargs["schema_name"] == "s"
+        assert kwargs["name"] == "v"
+
+    def test_subdir_created(self):
+        ws = MagicMock()
+        ws.volumes.read.return_value = MagicMock()
+        result = _ensure_volume_directory(ws, "/Volumes/c/s/v/pkg", debug=False)
+        assert result == "/Volumes/c/s/v/pkg"
+        ws.files.create_directory.assert_called_once_with("/Volumes/c/s/v/pkg")
+
+    def test_subdir_already_exists_is_swallowed(self):
+        ws = MagicMock()
+        ws.volumes.read.return_value = MagicMock()
+        ws.files.create_directory.side_effect = Exception("RESOURCE_ALREADY_EXISTS")
+        result = _ensure_volume_directory(ws, "/Volumes/c/s/v/pkg", debug=False)
+        assert result == "/Volumes/c/s/v/pkg"
+
+    def test_volume_create_already_exists_swallowed(self):
+        """Race condition: read fails but create reports ALREADY_EXISTS."""
+        ws = MagicMock()
+        ws.volumes.read.side_effect = Exception("NOT_FOUND")
+        ws.volumes.create.side_effect = Exception("ALREADY_EXISTS")
+        result = _ensure_volume_directory(ws, "/Volumes/c/s/v", debug=False)
+        assert result == "/Volumes/c/s/v"
+
+    def test_volume_create_other_error_raises(self):
+        ws = MagicMock()
+        ws.volumes.read.side_effect = Exception("NOT_FOUND")
+        ws.volumes.create.side_effect = Exception("PERMISSION_DENIED")
+        with pytest.raises(click.ClickException, match="Failed to create volume"):
+            _ensure_volume_directory(ws, "/Volumes/c/s/v", debug=False)
+
+    def test_subdir_unexpected_error_raises(self):
+        ws = MagicMock()
+        ws.volumes.read.return_value = MagicMock()
+        ws.files.create_directory.side_effect = Exception("PERMISSION_DENIED")
+        with pytest.raises(click.ClickException, match="Failed to create directory"):
+            _ensure_volume_directory(ws, "/Volumes/c/s/v/pkg", debug=False)
+
+
+class TestValidateWheelLayout:
+    """Tests for _validate_wheel_layout."""
+
+    def test_valid_layout(self, tmp_path):
+        wheel = _make_fake_wheel(tmp_path, "example")
+        _validate_wheel_layout(wheel, "example")  # no exception
+
+    def test_wrong_source_name_raises(self, tmp_path):
+        wheel = _make_fake_wheel(tmp_path, "example")
+        with pytest.raises(click.ClickException, match="does not contain"):
+            _validate_wheel_layout(wheel, "different_source")
+
+    def test_corrupt_wheel_raises(self, tmp_path):
+        bad = tmp_path / "bogus.whl"
+        bad.write_bytes(b"not a zip")
+        with pytest.raises(click.ClickException, match="not a valid wheel"):
+            _validate_wheel_layout(bad, "example")
+
+
+class TestUploadCommand:
+    """Tests for the `upload` Click command."""
+
+    def test_upload_with_prebuilt_wheel(self, tmp_path):
+        """--wheel skips the build step entirely."""
+        wheel = _make_fake_wheel(tmp_path, "example")
+
+        runner = CliRunner()
+        with patch(
+            "databricks.labs.community_connector_cli.cli._make_workspace_client"
+        ) as mock_ws_factory, patch(
+            "databricks.labs.community_connector_cli.cli._build_connector_wheel"
+        ) as mock_build:
+            mock_ws = MagicMock()
+            mock_ws.volumes.read.return_value = MagicMock()  # volume exists
+            mock_ws_factory.return_value = mock_ws
+
+            result = runner.invoke(
+                main,
+                [
+                    "upload",
+                    "example",
+                    "--volume-path",
+                    "/Volumes/main/default/cc/packages",
+                    "--wheel",
+                    str(wheel),
+                ],
+            )
+
+            assert result.exit_code == 0, result.output
+            mock_build.assert_not_called()
+            mock_ws.files.upload.assert_called_once()
+            dest = mock_ws.files.upload.call_args.args[0]
+            assert dest == f"/Volumes/main/default/cc/packages/{wheel.name}"
+
+    def test_upload_builds_when_wheel_not_given(self, tmp_path):
+        """Default path: invoke _build_connector_wheel."""
+        # Place a fake "source" tree the source-resolver can find via --source-dir.
+        source_dir = (
+            tmp_path / "src" / "databricks" / "labs"
+            / "community_connector" / "sources" / "example"
+        )
+        source_dir.mkdir(parents=True)
+        (source_dir / "pyproject.toml").write_text("[project]\nname='x'\n")
+
+        # Build helper writes a fake wheel into the temp outdir.
+        def fake_build(src, outdir, debug):
+            return _make_fake_wheel(outdir, "example")
+
+        runner = CliRunner()
+        with patch(
+            "databricks.labs.community_connector_cli.cli._make_workspace_client"
+        ) as mock_ws_factory, patch(
+            "databricks.labs.community_connector_cli.cli._build_connector_wheel",
+            side_effect=fake_build,
+        ) as mock_build:
+            mock_ws = MagicMock()
+            mock_ws.volumes.read.return_value = MagicMock()
+            mock_ws_factory.return_value = mock_ws
+
+            result = runner.invoke(
+                main,
+                [
+                    "upload",
+                    "example",
+                    "--volume-path",
+                    "/Volumes/main/default/cc/packages",
+                    "--source-dir",
+                    str(source_dir),
+                ],
+            )
+
+            assert result.exit_code == 0, result.output
+            mock_build.assert_called_once()
+            mock_ws.files.upload.assert_called_once()
+
+    def test_upload_raises_when_source_not_found(self):
+        """No --source-dir and the locator can't find anything → ClickException."""
+        runner = CliRunner()
+        with patch(
+            "databricks.labs.community_connector_cli.cli._make_workspace_client"
+        ) as mock_ws_factory, patch(
+            "databricks.labs.community_connector_cli.cli._find_local_source_path",
+            return_value=None,
+        ):
+            mock_ws = MagicMock()
+            mock_ws.volumes.read.return_value = MagicMock()
+            mock_ws_factory.return_value = mock_ws
+
+            result = runner.invoke(
+                main,
+                [
+                    "upload",
+                    "ghost_source",
+                    "--volume-path",
+                    "/Volumes/main/default/cc/packages",
+                ],
+            )
+
+            assert result.exit_code != 0
+            assert "Could not find source directory" in result.output
+
+    def test_upload_invalid_volume_path(self, tmp_path):
+        """Malformed --volume-path raises before any network call."""
+        wheel = _make_fake_wheel(tmp_path, "example")
+        runner = CliRunner()
+        with patch(
+            "databricks.labs.community_connector_cli.cli._make_workspace_client"
+        ) as mock_ws_factory:
+            mock_ws_factory.return_value = MagicMock()
+            result = runner.invoke(
+                main,
+                [
+                    "upload",
+                    "example",
+                    "--volume-path",
+                    "/Workspace/Users/me/wheels",
+                    "--wheel",
+                    str(wheel),
+                ],
+            )
+            assert result.exit_code != 0
+            assert "Invalid volume path" in result.output
+
+    def test_upload_keep_wheel_copies_artifact(self, tmp_path):
+        """--keep-wheel copies the built wheel to the requested local dir."""
+        source_dir = (
+            tmp_path / "src" / "databricks" / "labs"
+            / "community_connector" / "sources" / "example"
+        )
+        source_dir.mkdir(parents=True)
+        (source_dir / "pyproject.toml").write_text("[project]\nname='x'\n")
+
+        def fake_build(src, outdir, debug):
+            return _make_fake_wheel(outdir, "example")
+
+        keep_dir = tmp_path / "kept"
+
+        runner = CliRunner()
+        with patch(
+            "databricks.labs.community_connector_cli.cli._make_workspace_client"
+        ) as mock_ws_factory, patch(
+            "databricks.labs.community_connector_cli.cli._build_connector_wheel",
+            side_effect=fake_build,
+        ):
+            mock_ws = MagicMock()
+            mock_ws.volumes.read.return_value = MagicMock()
+            mock_ws_factory.return_value = mock_ws
+
+            result = runner.invoke(
+                main,
+                [
+                    "upload",
+                    "example",
+                    "--volume-path",
+                    "/Volumes/main/default/cc/packages",
+                    "--source-dir",
+                    str(source_dir),
+                    "--keep-wheel",
+                    str(keep_dir),
+                ],
+            )
+
+            assert result.exit_code == 0, result.output
+            kept_files = list(keep_dir.glob("*.whl"))
+            assert len(kept_files) == 1
+
+    def test_upload_keep_wheel_ignored_when_wheel_provided(self, tmp_path):
+        """--keep-wheel is a no-op when the user already supplied --wheel."""
+        wheel = _make_fake_wheel(tmp_path, "example")
+        keep_dir = tmp_path / "kept"
+
+        runner = CliRunner()
+        with patch(
+            "databricks.labs.community_connector_cli.cli._make_workspace_client"
+        ) as mock_ws_factory:
+            mock_ws = MagicMock()
+            mock_ws.volumes.read.return_value = MagicMock()
+            mock_ws_factory.return_value = mock_ws
+
+            result = runner.invoke(
+                main,
+                [
+                    "upload",
+                    "example",
+                    "--volume-path",
+                    "/Volumes/main/default/cc/packages",
+                    "--wheel",
+                    str(wheel),
+                    "--keep-wheel",
+                    str(keep_dir),
+                ],
+            )
+
+            assert result.exit_code == 0, result.output
+            # When --wheel is given there's nothing fresh to "keep" — don't
+            # silently copy the user's input. Directory may not even exist.
+            assert not keep_dir.exists() or not list(keep_dir.glob("*.whl"))

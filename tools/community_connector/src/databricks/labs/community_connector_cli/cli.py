@@ -14,9 +14,14 @@ import dataclasses
 import json
 import os
 import re
+import shutil
+import subprocess
+import sys
+import tempfile
 import traceback
+import zipfile
 from pathlib import Path
-from typing import Optional, List, Set
+from typing import Optional, List, Set, Tuple
 
 import click
 import yaml
@@ -742,6 +747,167 @@ def _resolve_package_catalog_schema(
             "Provide --catalog and --schema, or ensure the pipeline service assigns them."
         )
     return pkg_catalog, pkg_schema
+
+
+# ---- Helpers for the standalone `upload` command -----------------------------
+
+_VOLUME_PATH_RE = re.compile(r"^/Volumes/([^/]+)/([^/]+)/([^/]+)(?:/(.*))?$")
+
+
+def _parse_volume_path(volume_path: str) -> Tuple[str, str, str, str]:
+    """Parse a UC Volume path into (catalog, schema, volume, subpath).
+
+    Accepts ``/Volumes/<catalog>/<schema>/<volume>`` with or without a trailing
+    subpath. The subpath is normalized: empty string when the path points at
+    the volume root, with no leading or trailing slash.
+    """
+    cleaned = volume_path.rstrip("/")
+    match = _VOLUME_PATH_RE.match(cleaned)
+    if not match:
+        raise click.ClickException(
+            f"Invalid volume path '{volume_path}'. "
+            "Expected /Volumes/<catalog>/<schema>/<volume>[/<subdir>...]."
+        )
+    catalog, schema, volume, subpath = match.groups()
+    return catalog, schema, volume, (subpath or "")
+
+
+def _ensure_volume_directory(workspace_client, volume_path: str, debug: bool) -> str:
+    """Ensure the UC Volume and any subdirectory in ``volume_path`` exist.
+
+    Creates the volume (MANAGED) if missing, then creates the nested
+    subdirectory tree via the Files API. Returns the normalized destination
+    path (no trailing slash) ready for an upload.
+    """
+    catalog, schema, volume, subpath = _parse_volume_path(volume_path)
+    volume_fqn = f"{catalog}.{schema}.{volume}"
+
+    try:
+        workspace_client.volumes.read(volume_fqn)
+        if debug:
+            click.echo(f"[DEBUG] Volume '{volume_fqn}' already exists")
+    except Exception:
+        click.echo(f"  Creating volume '{volume_fqn}'...")
+        try:
+            workspace_client.volumes.create(
+                catalog_name=catalog,
+                schema_name=schema,
+                name=volume,
+                volume_type=VolumeType.MANAGED,
+            )
+            click.echo("  ✓ Volume created")
+        except Exception as e:
+            if "ALREADY_EXISTS" in str(e):
+                if debug:
+                    click.echo(f"[DEBUG] Volume already exists (race condition): {e}")
+            else:
+                raise click.ClickException(f"Failed to create volume: {e}")
+
+    dest_dir = f"/Volumes/{catalog}/{schema}/{volume}"
+    if subpath:
+        dest_dir = f"{dest_dir}/{subpath}"
+        try:
+            workspace_client.files.create_directory(dest_dir)
+            if debug:
+                click.echo(f"[DEBUG] Ensured directory: {dest_dir}")
+        except Exception as e:
+            # SDKs differ: some return success on existing dirs, some raise.
+            if "ALREADY_EXISTS" in str(e) or "exists" in str(e).lower():
+                if debug:
+                    click.echo(f"[DEBUG] Directory already exists: {dest_dir}")
+            else:
+                raise click.ClickException(
+                    f"Failed to create directory '{dest_dir}': {e}"
+                )
+
+    return dest_dir
+
+
+def _check_build_module_available() -> None:
+    """Verify the ``build`` PEP 517 frontend is importable.
+
+    Raises a ClickException with a clear install hint if it is missing. We do
+    not declare ``build`` as a CLI dependency to keep the runtime install
+    light, so users opt in by installing it themselves.
+    """
+    result = subprocess.run(
+        [sys.executable, "-c", "import build"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if result.returncode != 0:
+        raise click.ClickException(
+            "The `build` package is required to build connector wheels. "
+            f"Install it with: {sys.executable} -m pip install build"
+        )
+
+
+def _build_connector_wheel(source_dir: Path, outdir: Path, debug: bool) -> Path:
+    """Build the connector wheel at ``source_dir`` into ``outdir``.
+
+    Shells out to ``python -m build`` so the actual setuptools build runs in a
+    PEP 517 isolated environment. Returns the path to the built ``.whl``.
+    """
+    _check_build_module_available()
+
+    if not (source_dir / "pyproject.toml").is_file():
+        raise click.ClickException(
+            f"No pyproject.toml found at {source_dir}. "
+            "Each connector source directory must have its own pyproject.toml."
+        )
+
+    click.echo(f"  Building wheel from: {source_dir}")
+    cmd = [sys.executable, "-m", "build", "--wheel", str(source_dir), "--outdir", str(outdir)]
+    if debug:
+        click.echo(f"[DEBUG] Running: {' '.join(cmd)}")
+
+    result = subprocess.run(cmd, capture_output=True, text=True, check=False)
+    if result.returncode != 0:
+        if debug:
+            click.echo(result.stdout)
+            click.echo(result.stderr)
+        # Surface the last few lines of stderr to give users a useful hint
+        # without dumping the entire build log.
+        tail = "\n".join(result.stderr.strip().splitlines()[-10:])
+        raise click.ClickException(f"`python -m build` failed:\n{tail}")
+
+    wheels = sorted(outdir.glob("*.whl"))
+    if not wheels:
+        raise click.ClickException(
+            f"Build succeeded but no wheel was produced in {outdir}."
+        )
+    if len(wheels) > 1:
+        # Take the newest by mtime; warn so the user knows.
+        click.echo(
+            f"  ⚠️  Multiple wheels found in {outdir}; using {wheels[-1].name}"
+        )
+    click.echo(f"  ✓ Built wheel: {wheels[-1].name}")
+    return wheels[-1]
+
+
+def _validate_wheel_layout(wheel_path: Path, source_name: str) -> None:
+    """Sanity check: the wheel must ship files under the connector's namespace.
+
+    Catches mistakes like building from a directory whose pyproject.toml
+    doesn't include the right package — without this the upload would silently
+    publish an unusable wheel.
+    """
+    expected_prefix = f"databricks/labs/community_connector/sources/{source_name}/"
+    try:
+        with zipfile.ZipFile(wheel_path) as zf:
+            names = zf.namelist()
+    except zipfile.BadZipFile as e:
+        raise click.ClickException(f"Built artifact {wheel_path} is not a valid wheel: {e}")
+
+    if not any(name.startswith(expected_prefix) for name in names):
+        raise click.ClickException(
+            f"Wheel {wheel_path.name} does not contain '{expected_prefix}'. "
+            "Check the connector's pyproject.toml [tool.setuptools.packages]."
+        )
+
+
+# ---- end upload helpers ------------------------------------------------------
 
 
 def _upload_packages_and_update_pipeline(
@@ -1692,6 +1858,109 @@ def update_connection(
             click.echo(f"\n[DEBUG] Full connection info: {connection_info}")
     except Exception as e:
         _handle_api_error(e, "update", debug)
+
+
+@main.command("upload")
+@click.argument("source_name")
+@click.option(
+    "--volume-path",
+    "-v",
+    required=True,
+    help="UC Volume directory to upload the wheel into, "
+    "e.g. /Volumes/main/default/community_connector/packages. "
+    "The volume and any missing subdirectories are created automatically.",
+)
+@click.option(
+    "--wheel",
+    "wheel_path",
+    type=click.Path(exists=True, dir_okay=False),
+    help="Skip the build step and upload this pre-built wheel.",
+)
+@click.option(
+    "--source-dir",
+    type=click.Path(exists=True, file_okay=False),
+    help="Override the connector source directory (default: locate sources/<source_name>/).",
+)
+@click.option(
+    "--keep-wheel",
+    "keep_wheel_dir",
+    type=click.Path(file_okay=False),
+    help="After upload, copy the built wheel into this local directory.",
+)
+@click.pass_context
+def upload(
+    ctx: click.Context,
+    source_name: str,
+    volume_path: str,
+    wheel_path: Optional[str],
+    source_dir: Optional[str],
+    keep_wheel_dir: Optional[str],
+):
+    """
+    Build a connector wheel and upload it to a UC Volume.
+
+    Builds the wheel from the connector's pyproject.toml (or uses --wheel if
+    given) and uploads it to --volume-path. Auto-creates the volume and any
+    missing subdirectories.
+
+    Example:
+
+        community-connector upload example \
+            --volume-path /Volumes/main/default/community_connector/packages
+    """
+    debug = ctx.obj.get("debug", False)
+    workspace_client = _make_workspace_client()
+
+    click.echo(f"Uploading connector: {source_name}")
+
+    click.echo("\nStep 1: Ensuring destination volume and directory exist...")
+    dest_dir = _ensure_volume_directory(workspace_client, volume_path, debug)
+    click.echo(f"  Destination: {dest_dir}")
+
+    cleanup_dir: Optional[Path] = None
+    try:
+        if wheel_path:
+            click.echo("\nStep 2: Using pre-built wheel (--wheel provided)")
+            wheel = Path(wheel_path).resolve()
+        else:
+            click.echo("\nStep 2: Building wheel...")
+            if source_dir:
+                src = Path(source_dir).resolve()
+            else:
+                src = _find_local_source_path(source_name)
+                if src is None:
+                    raise click.ClickException(
+                        f"Could not find source directory for '{source_name}'. "
+                        "Run from the repo root, or pass --source-dir explicitly."
+                    )
+            cleanup_dir = Path(tempfile.mkdtemp(prefix=f"cc-build-{source_name}-"))
+            wheel = _build_connector_wheel(src, cleanup_dir, debug)
+
+        _validate_wheel_layout(wheel, source_name)
+
+        click.echo("\nStep 3: Uploading wheel...")
+        dest_path = f"{dest_dir}/{wheel.name}"
+        click.echo(f"  Uploading to: {dest_path}")
+        try:
+            with open(wheel, "rb") as f:
+                workspace_client.files.upload(dest_path, f, overwrite=True)
+        except Exception as e:
+            raise click.ClickException(f"Failed to upload wheel: {e}")
+        click.echo("  ✓ Uploaded")
+
+        if keep_wheel_dir and not wheel_path:
+            keep = Path(keep_wheel_dir)
+            keep.mkdir(parents=True, exist_ok=True)
+            kept = keep / wheel.name
+            shutil.copy2(wheel, kept)
+            click.echo(f"  ✓ Wheel retained at: {kept}")
+
+        click.echo(f"\n{'=' * 60}")
+        click.echo(f"Uploaded: {dest_path}")
+        click.echo(f"{'=' * 60}")
+    finally:
+        if cleanup_dir and cleanup_dir.exists():
+            shutil.rmtree(cleanup_dir, ignore_errors=True)
 
 
 if __name__ == "__main__":
