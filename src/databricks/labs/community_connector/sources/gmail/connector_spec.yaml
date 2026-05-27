@@ -58,6 +58,16 @@ connection:
         workflows with domain-wide delegation can specify a target user
         email here.
 
+  # OAuth defaults: standard RFC 6749 fields that are fixed for Google's
+  # identity provider. The community-connector CLI auto-fills these when
+  # --auth-type is m2m / u2m / u2m_per_user, so the user only needs to
+  # supply client_id and client_secret (their app registration). Override
+  # any of these via --options if needed (e.g. a narrower oauth_scope).
+  oauth:
+    authorization_endpoint: https://accounts.google.com/o/oauth2/v2/auth
+    token_endpoint: https://oauth2.googleapis.com/token
+    oauth_scope: https://www.googleapis.com/auth/gmail.readonly https://www.googleapis.com/auth/drive.readonly
+
 # ============================================================================
 # External Options Allowlist
 # Table-specific and agent-operation options that the UC connection passes

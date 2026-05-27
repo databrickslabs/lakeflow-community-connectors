@@ -70,6 +70,8 @@ If a token expires or is revoked mid-query, Gmail returns 401 and the agent surf
 
 Run the `community-connector` CLI. The `--auth-type u2m` flag triggers an in-process loopback authorization-code + PKCE flow against Google; your browser opens, you sign in and grant consent, and the CLI captures the authorization code and registers it with the Databricks connection.
 
+The connector spec ships with Google's OAuth endpoints and the required `oauth_scope` baked in (see the `connection.oauth` block in `connector_spec.yaml`), so the user only supplies the OAuth app identity:
+
 ```bash
 community-connector create-connection \
   --name gmail_connector \
@@ -77,10 +79,7 @@ community-connector create-connection \
   --auth-type u2m \
   --options '{
     "client_id": "<YOUR_CLIENT_ID>",
-    "client_secret": "<YOUR_CLIENT_SECRET>",
-    "authorization_endpoint": "https://accounts.google.com/o/oauth2/v2/auth",
-    "token_endpoint": "https://oauth2.googleapis.com/token",
-    "oauth_scope": "https://www.googleapis.com/auth/gmail.readonly https://www.googleapis.com/auth/drive.readonly"
+    "client_secret": "<YOUR_CLIENT_SECRET>"
   }'
 ```
 
@@ -91,25 +90,28 @@ community-connector create-connection \
   --name gmail_connector_per_user \
   --source-name gmail \
   --auth-type u2m_per_user \
-  --options '{ ...same options as above... }'
+  --options '{
+    "client_id": "<YOUR_CLIENT_ID>",
+    "client_secret": "<YOUR_CLIENT_SECRET>"
+  }'
 ```
 
-What Databricks stores in the connection:
+To override a baked-in default (e.g. narrow the scope to gmail-only — Drive downloads will then return `permission_denied`), pass it explicitly in `--options`:
 
-| Key | Set by | Used for |
+```bash
+--options '{ ..., "oauth_scope": "https://www.googleapis.com/auth/gmail.readonly" }'
+```
+
+What ends up in the connection vs the connector:
+
+| Layer | Keys | Source |
 |---|---|---|
-| `client_id`, `client_secret` | you | OAuth app identity |
-| `authorization_endpoint`, `token_endpoint` | you | Google's OAuth endpoints |
-| `oauth_scope` | you | scopes requested at consent time — **must include both gmail.readonly and drive.readonly** |
-| `community_oauth_flow` | CLI | set to `u2m` or `u2m_per_user` |
-| `authorization_code`, `pkce_verifier`, `oauth_redirect_uri` | CLI (loopback flow) | exchanged for tokens by UC |
-
-What Databricks injects into the connector at query time:
-
-| Key | Description |
-|---|---|
-| `access_token` | Bearer token UC mints from the connection's stored grant. Refreshed automatically. |
-| `user_id` (optional) | User email or `me` (default `me`). Useful for Workspace domain-wide delegation. |
+| Connection (UC) | `client_id`, `client_secret` | you |
+| Connection (UC) | `authorization_endpoint`, `token_endpoint`, `oauth_scope` | spec defaults (or your `--options` override) |
+| Connection (UC) | `community_oauth_flow` | CLI sets to `u2m` or `u2m_per_user` |
+| Connection (UC) | `authorization_code`, `pkce_verifier`, `oauth_redirect_uri` | CLI's loopback flow |
+| Connector (runtime) | `access_token` | UC mints + refreshes from the stored grant |
+| Connector (runtime) | `user_id` (optional) | you, via pipeline spec; defaults to `me` |
 
 You never set `access_token` manually — UC handles it.
 
