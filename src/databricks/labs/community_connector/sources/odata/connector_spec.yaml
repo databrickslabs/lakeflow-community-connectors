@@ -1,0 +1,92 @@
+# odata Community Connector Spec
+# Connection-level options live here; table-level options must appear in
+# external_options_allowlist so the pipeline can pass them through.
+
+display_name: OData
+connection:
+  auth_methods:
+    - name: bearer
+      description: >
+        Bearer token in the Authorization header. Works for most modern OData
+        APIs (Microsoft Graph, Dynamics 365, SAP S/4HANA Cloud).
+      parameters:
+        - name: token
+          type: string
+          required: true
+          secret: true
+          description: Bearer access token.
+
+    - name: basic
+      description: >
+        HTTP Basic. Common for on-prem SAP NetWeaver / Gateway OData services.
+      parameters:
+        - name: username
+          type: string
+          required: true
+          description: Username.
+        - name: password
+          type: string
+          required: true
+          secret: true
+          description: Password.
+
+    - name: api_key
+      description: >
+        API key delivered in a custom header. Header name defaults to
+        ``x-api-key`` but can be overridden via ``api_key_header``.
+      parameters:
+        - name: api_key
+          type: string
+          required: true
+          secret: true
+          description: API key value.
+        - name: api_key_header
+          type: string
+          required: false
+          description: Header name to carry the API key. Default ``x-api-key``.
+
+    - name: oauth2
+      description: >
+        OAuth 2.0 client-credentials. The connector fetches a token at run
+        time from ``oauth2_token_url`` using the supplied client id/secret.
+      parameters:
+        - name: oauth2_token_url
+          type: string
+          required: true
+          description: Token endpoint URL.
+        - name: oauth2_client_id
+          type: string
+          required: true
+          description: OAuth2 client id.
+        - name: oauth2_client_secret
+          type: string
+          required: true
+          secret: true
+          description: OAuth2 client secret.
+        - name: oauth2_scope
+          type: string
+          required: false
+          description: Optional scope string.
+
+  parameters:
+    - name: service_url
+      type: string
+      required: true
+      description: >
+        OData v4 service root URL, e.g.
+        ``https://services.odata.org/V4/Northwind/Northwind.svc/``.
+
+    - name: timeout_seconds
+      type: string
+      required: false
+      description: HTTP timeout per request (seconds). Default 60.
+
+    - name: extra_headers
+      type: string
+      required: false
+      description: >
+        Extra request headers as ``Key:Value,Key2:Value2``. Useful for tenant
+        IDs, CSRF tokens, etc.
+
+# Per-table options the pipeline may pass through.
+external_options_allowlist: "namespace,cursor_field,select,filter,page_size,max_records_per_batch"
