@@ -854,7 +854,7 @@ class TestCreateConnectionConnectionType:
     @patch("databricks.labs.community_connector_cli.cli._load_connector_spec")
     @patch("databricks.labs.community_connector_cli.cli.WorkspaceClient")
     def test_create_connection_uses_community_type(self, mock_workspace_client, mock_load_spec):
-        """create_connection POSTs connection_type=COMMUNITY (not GENERIC_LAKEFLOW_CONNECT)."""
+        """create_connection POSTs connection_type=COMMUNITY."""
         runner = CliRunner()
 
         mock_load_spec.return_value = {
