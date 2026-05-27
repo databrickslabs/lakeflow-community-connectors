@@ -20,6 +20,22 @@ It is recommended to use a configuration profile with the CLI tool, just as you 
 - [How to create configuration profile](https://docs.databricks.com/aws/en/dev-tools/auth/config-profiles)
 - [How to use configuration profile](https://docs.databricks.com/aws/en/dev-tools/cli/profiles)
 
+**Selecting a Profile**:
+When `~/.databrickscfg` contains multiple profiles — especially several pointing at the same workspace host — the Databricks SDK cannot auto-pick one. Use the `DATABRICKS_CONFIG_PROFILE` environment variable to choose:
+
+```bash
+export DATABRICKS_CONFIG_PROFILE=my-profile
+community-connector create_pipeline github my_pipeline -n my_conn
+```
+
+Or set it inline for a single command:
+
+```bash
+DATABRICKS_CONFIG_PROFILE=my-profile community-connector show_pipeline my_pipeline
+```
+
+When the variable is not set, the CLI falls back to the `[DEFAULT]` profile in `~/.databrickscfg`, so that case is unambiguous regardless of how many other profiles target the same host.
+
 
 ## Installation
 

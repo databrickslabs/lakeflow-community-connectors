@@ -13,7 +13,7 @@ import urllib.request
 import urllib.error
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Optional, Tuple, List, Set, Callable
+from typing import Optional, Tuple, List, Set, Callable, Dict
 
 import yaml
 
@@ -42,6 +42,13 @@ class ParsedConnectorSpec:
     common_optional_params: Set[str] = field(default_factory=set)
 
     external_options_allowlist: str = ""
+
+    # Defaults for COMMUNITY OAuth subtypes (M2M/U2M/U2M_PER_USER). Keys are
+    # the standard RFC 6749 / Databricks community-connection option names —
+    # typically authorization_endpoint, token_endpoint, oauth_scope. The CLI
+    # merges these into --options for non-static auth modes so the user only
+    # has to supply per-app values (client_id, client_secret).
+    oauth_defaults: Dict[str, str] = field(default_factory=dict)
 
     def has_auth_methods(self) -> bool:
         """Check if this spec uses auth_methods (Option B)."""
@@ -299,6 +306,16 @@ def parse_connector_spec(spec: dict) -> ParsedConnectorSpec:
     if external_options_allowlist is None:
         external_options_allowlist = ""
     parsed.external_options_allowlist = external_options_allowlist
+
+    # Parse OAuth defaults: connection.oauth maps standard RFC 6749 option
+    # names (authorization_endpoint, token_endpoint, oauth_scope, etc.) to
+    # provider-specific values. Used to auto-populate options the user
+    # shouldn't have to retype per connection.
+    oauth_block = connection.get("oauth")
+    if isinstance(oauth_block, dict):
+        parsed.oauth_defaults = {
+            str(k): str(v) for k, v in oauth_block.items() if v is not None
+        }
 
     return parsed
 

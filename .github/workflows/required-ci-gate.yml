@@ -1,0 +1,264 @@
+name: Required CI Gate
+
+# Single aggregated check that branch protection on master should
+# require. It posts (and re-posts) a check_run named "Required CI Gate"
+# to the PR's head SHA via the Checks API, so the PR's check rollup
+# always reflects the gate's actual verdict.
+#
+# Why the explicit API call:
+#   Both event types this workflow listens for run with a context
+#   that is NOT the PR head:
+#     * `pull_request_target` runs on the base branch (master). Its
+#       workflow-level automatic check is recorded against
+#       github.sha (master's tip), not the PR head.
+#     * `workflow_run` runs after an upstream completes. For
+#       pull_request_target-triggered upstreams on fork PRs,
+#       workflow_run.head_sha is also the base branch tip — not the
+#       PR head.
+#   So the workflow's automatic check never lands on the PR head SHA,
+#   and the PR check rollup would be permanently empty without an
+#   explicit Checks API POST that names the PR head as head_sha.
+#
+# Per-workflow logic:
+#   * No upstream run record on this SHA → workflow's own trigger
+#     filters excluded the PR → not-applicable → OK.
+#   * Upstream conclusion == success → OK.
+#   * Upstream conclusion == skipped → OK. A skip means the upstream
+#     workflow's own paths / job-level `if:` decided this PR does not
+#     apply (e.g. Connector Self-Review skipping when no source code
+#     under sources/ changed). That is a successful no-op, not a merge
+#     blocker.
+#   * Upstream still in_progress / queued → FAIL (gate re-fires via
+#     workflow_run when the upstream completes).
+#   * Upstream completed but not success / not skipped — failure,
+#     cancelled, timed_out, etc. → FAIL.
+#
+# Branch-protection setup (manual):
+#   Settings → Branches → master rule → Require status checks →
+#   add **"Required CI Gate"** — the API-posted check named below in
+#   CHECK_NAME. Do **not** require "Required CI Gate / gate"; that is
+#   this workflow's automatic per-run check, which lands on the base
+#   branch tip (not the PR head) for both pull_request_target and
+#   workflow_run events. Requiring it would freeze the PR's check
+#   rollup at the very first evaluation.
+#
+# Security note:
+#   This workflow runs on `pull_request_target`, which executes with
+#   the base branch's elevated GITHUB_TOKEN. That's safe HERE because
+#   the workflow never checks out PR-controlled code and never executes
+#   any string sourced from the PR (it only reads API metadata via
+#   `gh api` and writes a check-run). Any future change that adds
+#   `actions/checkout` of the PR head, or runs/`eval`s a PR-controlled
+#   value, would re-introduce code-execution risk. Treat this as a
+#   privileged workflow and review such changes accordingly.
+#
+# WARNING — self-modification bootstrap:
+#   This workflow runs from the BASE branch's copy of this file (per
+#   GitHub Actions' rules for pull_request_target and workflow_run).
+#   A PR that modifies this workflow itself therefore runs against
+#   master's OLD version of the file — the new triggers / required
+#   list / aggregation rules don't take effect until the PR is merged
+#   to master. Any such PR will need a one-time admin merge override.
+
+on:
+  # `pull_request_target` (not `pull_request`) is required so the gate
+  # gets a writable GITHUB_TOKEN on fork PRs. With `pull_request`,
+  # fork-PR runs are forcibly downgraded to a read-only token across
+  # all scopes (regardless of what `permissions:` declares below), and
+  # the Checks API POST step fails with HTTP 403 "Resource not
+  # accessible by integration". `pull_request_target` runs in the
+  # context of the base branch, which is safe here because this
+  # workflow never checks out PR-controlled code — it only reads
+  # API metadata and posts a check-run.
+  pull_request_target:
+    branches: [master]
+    # `labeled` is needed so the gate re-evaluates when a maintainer
+    # adds `safe-to-test` (which re-fires the pull_request_target-gated
+    # Tests / Pylint workflows on a fork PR). Without it, the gate has
+    # no pull-request-path re-trigger after the initial sync — and the
+    # workflow_run path posts its verdict to the wrong SHA on fork PRs
+    # (see HEAD_SHA below).
+    types: [opened, synchronize, reopened, ready_for_review, labeled]
+  workflow_run:
+    # Keep this list in sync with REQUIRED below — if a workflow is
+    # required for the gate's verdict, it also has to trigger the gate
+    # so the verdict re-evaluates when that workflow completes.
+    workflows:
+      - Tests
+      - Pylint
+      - Verify Dependency Locks
+      - Generate Merged Source File
+      - Connector Self-Review
+    types: [completed]
+  # Escape hatch: a maintainer can re-run the gate against an arbitrary
+  # PR head SHA from the Actions tab if a PR's check rollup is stuck
+  # (e.g. self-modifying PR like #202 that needs the new triggers to
+  # take effect before it can run). Copy the PR head SHA from the PR
+  # page into `pr_head_sha`.
+  workflow_dispatch:
+    inputs:
+      pr_head_sha:
+        description: 'PR head SHA to re-evaluate (full 40-char hex). Gate posts its verdict on this commit.'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+  checks: write   # required to post a check_run to PR head SHA
+
+# Canonical PR-head expression. Repeated in three places (concurrency
+# group + two HEAD_SHA env vars in the gate job) because GitHub Actions
+# does not support reusable expression aliases at workflow scope. The
+# fallback order resolves the right SHA across all of this workflow's
+# event sources:
+#   * pull_request_target           → github.event.pull_request.head.sha
+#   * workflow_run (pr_target up)   → github.event.workflow_run.pull_requests[0].head.sha
+#   * workflow_run (master push)    → github.event.workflow_run.head_sha
+#   * workflow_dispatch (manual)    → inputs.pr_head_sha
+#
+# Only the most recent gate evaluation per head SHA is meaningful;
+# cancel older in-flight runs when a newer one starts.
+concurrency:
+  group: required-ci-gate-${{ github.event.pull_request.head.sha || github.event.workflow_run.pull_requests[0].head.sha || github.event.workflow_run.head_sha || inputs.pr_head_sha }}
+  cancel-in-progress: true
+
+jobs:
+  gate:
+    # Draft PRs don't gate merges, so the gate has nothing to evaluate.
+    # Skip them to avoid noise — gate fires again on `ready_for_review`.
+    if: ${{ github.event_name != 'pull_request_target' || !github.event.pull_request.draft }}
+    runs-on:
+      group: databrickslabs-protected-runner-group
+      labels: linux-ubuntu-latest
+    steps:
+      - name: Aggregate required workflow conclusions
+        id: agg
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          # See "Canonical PR-head expression" block near the top of
+          # this file for the fallback semantics.
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.event.workflow_run.pull_requests[0].head.sha || github.event.workflow_run.head_sha || inputs.pr_head_sha }}
+        run: |
+          set -euo pipefail
+
+          # Workflows whose conclusion gates merge. Branch protection
+          # requires only "Required CI Gate" (the API-posted check) —
+          # everything below has to be in this list to be gated.
+          # Keep in sync with the `workflow_run.workflows` trigger
+          # above so the gate re-fires when any of these complete.
+          REQUIRED=(
+            "Tests"
+            "Pylint"
+            "Verify Dependency Locks"
+            "Generate Merged Source File"
+            "Connector Self-Review"
+          )
+
+          echo "Checking required workflows for HEAD ${HEAD_SHA}:"
+          echo
+
+          FAILED=()
+          SUMMARY_LINES=()
+
+          for wf in "${REQUIRED[@]}"; do
+            # per_page=100 (API max). A single SHA accumulating more
+            # than 100 runs across all required workflows is implausible
+            # in practice; if it ever happens, switch to `--paginate`
+            # and merge the pages with jq.
+            RUNS=$(gh api \
+              "repos/${REPO}/actions/runs?head_sha=${HEAD_SHA}&per_page=100" \
+              --jq "[.workflow_runs[] | select(.name == \"$wf\")]")
+            COUNT=$(echo "$RUNS" | jq 'length')
+
+            if [ "$COUNT" = "0" ]; then
+              printf '  %-32s %s\n' "$wf" "not-applicable (no run record)"
+              SUMMARY_LINES+=("- **${wf}** — not applicable (no run record)")
+              continue
+            fi
+
+            LATEST=$(echo "$RUNS" | jq -c 'sort_by(.created_at) | reverse | .[0]')
+            STATUS=$(echo "$LATEST" | jq -r '.status')
+            CONCLUSION=$(echo "$LATEST" | jq -r '.conclusion // "null"')
+
+            if [ "$CONCLUSION" = "success" ] || [ "$CONCLUSION" = "skipped" ]; then
+              # Skipped = the upstream workflow's paths filter or
+              # job-level `if:` decided this PR doesn't apply. That is
+              # a successful no-op, not a merge blocker.
+              printf '  %-32s %s\n' "$wf" "$CONCLUSION"
+              SUMMARY_LINES+=("- **${wf}** — ${CONCLUSION}")
+            elif [ "$STATUS" != "completed" ]; then
+              printf '  %-32s %s\n' "$wf" "${STATUS} (waiting)"
+              FAILED+=("${wf} (${STATUS})")
+              SUMMARY_LINES+=("- **${wf}** — ${STATUS} (gate re-fires when this completes)")
+            else
+              printf '  %-32s %s\n' "$wf" "$CONCLUSION"
+              FAILED+=("${wf} (${CONCLUSION})")
+              SUMMARY_LINES+=("- **${wf}** — ${CONCLUSION}")
+            fi
+          done
+
+          echo
+
+          if [ ${#FAILED[@]} -gt 0 ]; then
+            CONCLUSION_RESULT=failure
+            TITLE="Required CI Gate failed"
+            echo "::warning::Aggregation found failures: ${FAILED[*]}"
+          else
+            CONCLUSION_RESULT=success
+            TITLE="All required CI checks passed (or not applicable)"
+          fi
+
+          echo "conclusion=${CONCLUSION_RESULT}" >> "$GITHUB_OUTPUT"
+          echo "title=${TITLE}" >> "$GITHUB_OUTPUT"
+
+          # Multi-line summary via $GITHUB_OUTPUT heredoc syntax.
+          {
+            echo "summary<<EOF_GATE_SUMMARY"
+            echo "Evaluated for head SHA \`${HEAD_SHA}\`:"
+            echo
+            printf '%s\n' "${SUMMARY_LINES[@]}"
+            echo "EOF_GATE_SUMMARY"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Post or update PR-head check via Checks API
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.event.workflow_run.pull_requests[0].head.sha || github.event.workflow_run.head_sha || inputs.pr_head_sha }}
+          CHECK_NAME: Required CI Gate
+          EXTERNAL_ID: required-ci-gate-aggregator
+          CONCLUSION: ${{ steps.agg.outputs.conclusion }}
+          TITLE: ${{ steps.agg.outputs.title }}
+          SUMMARY: ${{ steps.agg.outputs.summary }}
+        run: |
+          set -euo pipefail
+
+          # Find a previously-posted check_run (matched by external_id)
+          # so re-evaluations PATCH in place rather than stacking
+          # duplicate entries on the same SHA.
+          EXISTING_ID=$(gh api \
+            "/repos/${REPO}/commits/${HEAD_SHA}/check-runs?per_page=100" \
+            --jq "[.check_runs[] | select(.external_id == \"${EXTERNAL_ID}\")] | .[0].id // empty")
+
+          if [ -n "$EXISTING_ID" ]; then
+            gh api -X PATCH "/repos/${REPO}/check-runs/${EXISTING_ID}" \
+              --silent \
+              -f status=completed \
+              -f conclusion="${CONCLUSION}" \
+              -f "output[title]=${TITLE}" \
+              -f "output[summary]=${SUMMARY}"
+            echo "Updated existing check #${EXISTING_ID} on ${HEAD_SHA} → ${CONCLUSION}"
+          else
+            gh api -X POST "/repos/${REPO}/check-runs" \
+              --silent \
+              -f name="${CHECK_NAME}" \
+              -f head_sha="${HEAD_SHA}" \
+              -f external_id="${EXTERNAL_ID}" \
+              -f status=completed \
+              -f conclusion="${CONCLUSION}" \
+              -f "output[title]=${TITLE}" \
+              -f "output[summary]=${SUMMARY}"
+            echo "Created new check on ${HEAD_SHA} → ${CONCLUSION}"
+          fi

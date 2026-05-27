@@ -20,6 +20,9 @@ on:
       - '.github/workflows/pylint.yml'
   pull_request_target:
     branches: [master]
+    # Default types (opened, synchronize, reopened) plus `labeled` so a
+    # maintainer's `safe-to-test` add fires CI on the exact labeled SHA.
+    types: [opened, synchronize, reopened, labeled]
     paths:
       - '**/*.py'
       - 'pyproject.toml'
@@ -39,6 +42,35 @@ jobs:
       matrix:
         python-version: ["3.10"]
     steps:
+    # First step (runs before any fork-controlled code is on disk).
+    # Fork PRs only run CI when a maintainer adds the `safe-to-test`
+    # label, and only on the exact event (`action == 'labeled' &&
+    # label.name == 'safe-to-test'`) — a synchronize after labeling
+    # does NOT pass. Explicit failure (rather than a job-level `if:`
+    # skip) ensures the Required CI Gate sees `failure`, not the
+    # ambiguous `skipped`. See CONTRIBUTING.md.
+    - name: Authorize
+      env:
+        EVENT_NAME: ${{ github.event_name }}
+        HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
+        BASE_REPO: ${{ github.repository }}
+        ACTION: ${{ github.event.action }}
+        LABEL_NAME: ${{ github.event.label.name }}
+      run: |
+        if [ "$EVENT_NAME" = "push" ]; then
+          echo "OK: push to master."
+          exit 0
+        fi
+        if [ "$HEAD_REPO" = "$BASE_REPO" ]; then
+          echo "OK: same-repo PR ($HEAD_REPO)."
+          exit 0
+        fi
+        if [ "$ACTION" = "labeled" ] && [ "$LABEL_NAME" = "safe-to-test" ]; then
+          echo "OK: fork PR was just labeled 'safe-to-test'."
+          exit 0
+        fi
+        echo "::error title=Fork PR not authorized::Apply (or re-apply) the 'safe-to-test' label to authorize CI on this commit. See CONTRIBUTING.md."
+        exit 1
     - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
       with:
         # pull_request_target defaults to checking out the base ref; we want

@@ -192,7 +192,7 @@ Run the following SQL command in Databricks SQL Editor or a notebook:
 
 ```sql
 CREATE CONNECTION gmail_connector
-TYPE GENERIC_LAKEFLOW_CONNECT
+TYPE COMMUNITY
 OPTIONS (
   sourceName = 'gmail',
   client_id = '<YOUR_CLIENT_ID>',

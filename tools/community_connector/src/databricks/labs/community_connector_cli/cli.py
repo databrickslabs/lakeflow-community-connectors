@@ -12,6 +12,7 @@ Configuration Precedence:
 import base64
 import dataclasses
 import json
+import os
 import re
 import traceback
 from pathlib import Path
@@ -25,6 +26,17 @@ from databricks.sdk.service.pipelines import PipelineSpec, PipelinesEnvironment
 from databricks.sdk.service.workspace import ImportFormat, Language
 
 from databricks.labs.community_connector_cli.config import build_config, load_default_config
+from databricks.labs.community_connector_cli.oauth_flow import (
+    AUTH_TYPE_M2M,
+    AUTH_TYPE_STATIC,
+    AUTH_TYPE_U2M,
+    AUTH_TYPE_U2M_PER_USER,
+    AUTH_TYPE_CHOICES,
+    AUTH_TYPE_OAUTH_FLOW_VALUE,
+    AUTH_TYPE_REQUIRED_OPTIONS,
+    OAUTH_OPTION_KEYS,
+    run_u2m_authorization_code_flow,
+)
 from databricks.labs.community_connector_cli.pipeline_client import PipelineClient
 from databricks.labs.community_connector_cli.pipeline_spec_validator import (
     PipelineSpecValidationError,
@@ -41,6 +53,28 @@ from databricks.labs.community_connector_cli.connector_spec import (
     validate_connection_options,
     validate_connection_options_legacy,
 )
+
+
+CONNECTION_TYPE = "COMMUNITY"
+
+
+def _make_workspace_client() -> WorkspaceClient:
+    """Construct a WorkspaceClient, forcing the DEFAULT profile when unset.
+
+    The SDK already honors ``DATABRICKS_CONFIG_PROFILE`` directly. The only
+    gap this helper fills is the case where that env var is *not* set and
+    ``~/.databrickscfg`` holds multiple profiles pointing at the same
+    workspace host — the SDK cannot auto-pick one, so we explicitly select
+    ``DEFAULT`` to keep the CLI deterministic.
+
+    We also defer to the SDK when ``DATABRICKS_HOST`` is set, because env-var
+    auth (host + token) bypasses ``~/.databrickscfg`` entirely. Forcing
+    ``profile="DEFAULT"`` in that case would push the SDK back into file
+    loading and raise on users whose config has only named profiles.
+    """
+    if os.environ.get("DATABRICKS_CONFIG_PROFILE") or os.environ.get("DATABRICKS_HOST"):
+        return WorkspaceClient()
+    return WorkspaceClient(profile="DEFAULT")
 
 
 # Re-export for backward compatibility with tests
@@ -195,10 +229,27 @@ def _validate_connection_options(
     return result.errors
 
 
-def _prepare_connection_options(
-    source_name: str, options: str, spec_path: Optional[str], debug: bool
+def _prepare_connection_options(  # pylint: disable=too-many-arguments,too-many-positional-arguments
+    source_name: str,
+    options: str,
+    spec_path: Optional[str],
+    debug: bool,
+    auth_type: str = AUTH_TYPE_STATIC,
+    redirect_port: Optional[int] = None,
 ) -> dict:
-    """Parse, validate, and enrich connection options. Raises ClickException on failure."""
+    """Parse, validate, and enrich connection options. Raises ClickException on failure.
+
+    For ``auth_type != static``:
+      - Validates that the user-supplied ``--options`` JSON contains the fixed
+        set of OAuth fields required by the chosen flow.
+      - Sets ``community_oauth_flow`` on the options dict so the connection
+        resolves to the correct CONNECTION_COMMUNITY_OAUTH_* securable kind.
+      - For ``u2m``, runs an in-process authorization-code + PKCE flow against
+        a loopback redirect and injects ``authorization_code``,
+        ``pkce_verifier``, and ``oauth_redirect_uri``.
+      - OAuth keys are exempted from connector-spec parameter validation
+        (connector specs only describe runtime/source-side options).
+    """
     # Parse options JSON
     try:
         options_dict = json.loads(options)
@@ -211,15 +262,33 @@ def _prepare_connection_options(
     # Get constant allowlist and load spec
     constant_allowlist = _get_constant_external_options_allowlist()
     connector_spec = _load_connector_spec(source_name, spec_path)
+    parsed_spec = _parse_connector_spec(connector_spec) if connector_spec else None
 
-    if connector_spec:
-        parsed_spec = _parse_connector_spec(connector_spec)
+    # Merge OAuth defaults from the spec BEFORE auth-type validation, so the
+    # required-field check sees the auto-populated values. User-supplied
+    # values in --options win over spec defaults.
+    if parsed_spec and auth_type != AUTH_TYPE_STATIC and parsed_spec.oauth_defaults:
+        _apply_oauth_defaults(options_dict, parsed_spec.oauth_defaults)
+
+    _apply_auth_type(options_dict, auth_type, redirect_port)
+
+    if parsed_spec:
         _debug_print_spec(parsed_spec, constant_allowlist, debug)
 
-        # Validate connection options
-        errors = _validate_connection_options_with_spec(source_name, options_dict, parsed_spec)
-        if errors:
-            raise click.ClickException("\n".join(errors))
+        if auth_type == AUTH_TYPE_STATIC:
+            # Static credentials: the user supplies all connector-runtime
+            # parameters listed in the spec; validate them.
+            errors = _validate_connection_options_with_spec(
+                source_name, options_dict, parsed_spec
+            )
+            if errors:
+                raise click.ClickException("\n".join(errors))
+        # For non-static auth modes the connector spec's parameters describe
+        # what the connector reads at *runtime* (typically OAuth-issued tokens
+        # like access_token / refresh_token that UC injects after the OAuth
+        # dance). Those are not user-supplied at create-connection time, so
+        # we skip parameter validation. The OAuth field set is already
+        # validated by _apply_auth_type.
 
         # Auto-add externalOptionsAllowList
         _add_external_options_allowlist(
@@ -241,6 +310,68 @@ def _prepare_connection_options(
         click.echo(f"[DEBUG] Options (with source_name): {options_dict}")
 
     return options_dict
+
+
+def _apply_oauth_defaults(options_dict: dict, oauth_defaults: dict) -> None:
+    """Fill in standard OAuth options from the connector spec, only when
+    the user did not already supply a value for that key."""
+    applied = []
+    for key, value in oauth_defaults.items():
+        if key not in options_dict and value:
+            options_dict[key] = value
+            applied.append(key)
+    if applied:
+        click.echo(
+            "  ✓ Auto-populated OAuth defaults from connector spec: "
+            f"{', '.join(sorted(applied))}"
+        )
+
+
+def _apply_auth_type(
+    options_dict: dict, auth_type: str, redirect_port: Optional[int]
+) -> None:
+    """Validate auth-type-specific required options and stamp the flow value.
+
+    For ``u2m`` this also runs the loopback authorization-code flow and writes
+    the resulting code / verifier / redirect URI back into ``options_dict``.
+    """
+    if auth_type == AUTH_TYPE_STATIC:
+        # Static credentials: user-supplied option set is arbitrary; the
+        # connection layer treats this as the plain CONNECTION_COMMUNITY kind
+        # (no community_oauth_flow). Forbid the user from sneaking the
+        # discriminator in alongside --auth-type=static so the resolved kind
+        # is unambiguous.
+        if "community_oauth_flow" in options_dict:
+            raise click.ClickException(
+                "--options must not contain 'community_oauth_flow' when "
+                "--auth-type is 'static'. Re-run with --auth-type set to the "
+                "matching OAuth mode instead."
+            )
+        return
+
+    required = AUTH_TYPE_REQUIRED_OPTIONS[auth_type]
+    missing = [k for k in required if not options_dict.get(k)]
+    if missing:
+        raise click.ClickException(
+            f"--auth-type={auth_type} requires these connection options: "
+            f"{', '.join(required)}. Missing: {', '.join(missing)}."
+        )
+
+    options_dict["community_oauth_flow"] = AUTH_TYPE_OAUTH_FLOW_VALUE[auth_type]
+
+    if auth_type == AUTH_TYPE_U2M:
+        click.echo("Running OAuth 2.0 authorization-code flow (PKCE) ...")
+        code, verifier, redirect_uri = run_u2m_authorization_code_flow(
+            client_id=options_dict["client_id"],
+            authorization_endpoint=options_dict["authorization_endpoint"],
+            scope=options_dict.get("oauth_scope"),
+            redirect_port=redirect_port,
+            echo=lambda msg: click.echo(msg),
+        )
+        options_dict["authorization_code"] = code
+        options_dict["pkce_verifier"] = verifier
+        options_dict["oauth_redirect_uri"] = redirect_uri
+        click.echo("  ✓ Captured authorization code from loopback redirect.")
 
 
 def _debug_print_spec(
@@ -937,7 +1068,7 @@ def create_pipeline(
         click.echo(f"[DEBUG] Repo config: {repo_config}")
         click.echo(f"[DEBUG] Pipeline config: {pipeline_config}")
 
-    workspace_client = WorkspaceClient()
+    workspace_client = _make_workspace_client()
     current_user = workspace_client.current_user.me()
     workspace_path = _resolve_workspace_paths(
         workspace_path, repo_config, pipeline_config, current_user.user_name
@@ -1205,7 +1336,7 @@ def update_pipeline(
             "At least one of --pipeline-spec or --package must be provided"
         )
 
-    workspace_client = WorkspaceClient()
+    workspace_client = _make_workspace_client()
     pipeline_client = PipelineClient(workspace_client)
 
     try:
@@ -1254,7 +1385,7 @@ def run_pipeline(ctx: click.Context, pipeline_name: str, full_refresh: bool):
     """
     debug = ctx.obj.get("debug", False)
 
-    workspace_client = WorkspaceClient()
+    workspace_client = _make_workspace_client()
     pipeline_client = PipelineClient(workspace_client)
 
     try:
@@ -1302,7 +1433,7 @@ def show_pipeline(ctx: click.Context, pipeline_name: str):
     """
     debug = ctx.obj.get("debug", False)
 
-    workspace_client = WorkspaceClient()
+    workspace_client = _make_workspace_client()
     pipeline_client = PipelineClient(workspace_client)
 
     try:
@@ -1352,6 +1483,29 @@ def show_pipeline(ctx: click.Context, pipeline_name: str):
     help='Connection options as JSON string (e.g., \'{"key": "value"}\')',
 )
 @click.option(
+    "--auth-type",
+    "auth_type",
+    type=click.Choice(list(AUTH_TYPE_CHOICES), case_sensitive=False),
+    default=AUTH_TYPE_STATIC,
+    show_default=True,
+    help=(
+        "Authentication mode for the COMMUNITY connection. "
+        "'static' (default) accepts arbitrary key/value options; other modes "
+        "require a fixed set of OAuth options and set 'community_oauth_flow' "
+        "automatically."
+    ),
+)
+@click.option(
+    "--redirect-port",
+    "redirect_port",
+    type=int,
+    default=None,
+    help=(
+        "Loopback port for the OAuth U2M redirect (only used with "
+        "--auth-type=u2m). Defaults to an OS-assigned free port."
+    ),
+)
+@click.option(
     "--spec",
     "-s",
     "spec_path",
@@ -1366,6 +1520,8 @@ def create_connection(
     source_name: str,
     connection_name: str,
     options: str,
+    auth_type: str,
+    redirect_port: Optional[int],
     spec_path: Optional[str],
 ):
     """
@@ -1375,7 +1531,20 @@ def create_connection(
 
     CONNECTION_NAME is the name for the new connection.
 
-    The connection type is set to GENERIC_LAKEFLOW_CONNECT.
+    The connection type is set to COMMUNITY. The --auth-type flag selects the
+    auth mode:
+
+    \b
+      - static       (default) arbitrary key/value options; no OAuth flow.
+      - m2m          requires client_id, client_secret, token_endpoint.
+      - u2m          requires client_id, client_secret, authorization_endpoint,
+                     token_endpoint. The CLI opens a browser, runs the OAuth
+                     authorization-code + PKCE flow against a localhost
+                     loopback redirect, and injects the captured authorization
+                     code into the connection options.
+      - u2m_per_user requires client_id, client_secret, authorization_endpoint,
+                     token_endpoint. The per-user OAuth happens at runtime per
+                     end-user; the connection only stores app config.
 
     Connection options are validated against the connector spec (connector_spec.yaml).
     The externalOptionsAllowList is automatically added from the spec.
@@ -1384,6 +1553,20 @@ def create_connection(
     Example:
         community-connector create_connection github my_github_conn \\
             -o '{"token": "ghp_xxxx"}'
+
+        # OAuth M2M:
+        community-connector create_connection github my_github_conn \\
+            --auth-type m2m \\
+            -o '{"client_id":"...","client_secret":"...",
+                 "token_endpoint":"https://idp/token"}'
+
+        # OAuth U2M (browser-based authorization-code flow against localhost):
+        community-connector create_connection github my_github_conn \\
+            --auth-type u2m \\
+            -o '{"client_id":"...","client_secret":"...",
+                 "authorization_endpoint":"https://idp/authorize",
+                 "token_endpoint":"https://idp/token",
+                 "oauth_scope":"repo"}'
 
         # With custom spec file:
         community-connector create_connection github my_github_conn \\
@@ -1394,17 +1577,20 @@ def create_connection(
             -o '{"token": "ghp_xxxx"}' --spec https://github.com/myorg/myrepo
     """
     debug = ctx.obj.get("debug", False)
+    auth_type = auth_type.lower()
 
     click.echo(f"Creating connection for source: {source_name}")
     click.echo(f"Connection name: {connection_name}")
-    click.echo("Connection type: GENERIC_LAKEFLOW_CONNECT")
+    click.echo(f"Connection type: {CONNECTION_TYPE} (auth_type={auth_type})")
 
-    options_dict = _prepare_connection_options(source_name, options, spec_path, debug)
+    options_dict = _prepare_connection_options(
+        source_name, options, spec_path, debug, auth_type, redirect_port
+    )
 
-    workspace_client = WorkspaceClient()
+    workspace_client = _make_workspace_client()
     body = {
         "name": connection_name,
-        "connection_type": "GENERIC_LAKEFLOW_CONNECT",
+        "connection_type": CONNECTION_TYPE,
         "options": options_dict,
         "comment": "created by lakeflow community-connector CLI tool",
     }
@@ -1460,7 +1646,9 @@ def update_connection(
 
     CONNECTION_NAME is the name of the existing connection to update.
 
-    The connection type is set to GENERIC_LAKEFLOW_CONNECT.
+    The connection's auth mode (community_oauth_flow) is fixed at creation
+    time and cannot be changed here — recreate the connection to switch
+    between static, m2m, u2m, and u2m_per_user modes.
 
     Connection options are validated against the connector spec (connector_spec.yaml).
     The externalOptionsAllowList is automatically added from the spec.
@@ -1485,7 +1673,7 @@ def update_connection(
 
     options_dict = _prepare_connection_options(source_name, options, spec_path, debug)
 
-    workspace_client = WorkspaceClient()
+    workspace_client = _make_workspace_client()
     body = {"name": connection_name, "options": options_dict}
 
     if debug:
