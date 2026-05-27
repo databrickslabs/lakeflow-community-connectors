@@ -6,14 +6,18 @@ name: Required CI Gate
 # always reflects the gate's actual verdict.
 #
 # Why the explicit API call:
-#   * pull_request-fired runs already write their status to the PR
-#     head SHA via the workflow's own automatic check (cheap).
-#   * workflow_run-fired runs (after Tests/etc. complete on a
-#     pull_request_target-triggered upstream) write their status to the
-#     BASE ref's commit, not the PR head — which means the PR check
-#     rollup never sees the re-evaluation. Posting via the Checks API
-#     fixes that: the gate's verdict always lands on the PR head SHA,
-#     regardless of how the gate was fired.
+#   Both event types this workflow listens for run with a context
+#   that is NOT the PR head:
+#     * `pull_request_target` runs on the base branch (master). Its
+#       workflow-level automatic check is recorded against
+#       github.sha (master's tip), not the PR head.
+#     * `workflow_run` runs after an upstream completes. For
+#       pull_request_target-triggered upstreams on fork PRs,
+#       workflow_run.head_sha is also the base branch tip — not the
+#       PR head.
+#   So the workflow's automatic check never lands on the PR head SHA,
+#   and the PR check rollup would be permanently empty without an
+#   explicit Checks API POST that names the PR head as head_sha.
 #
 # Per-workflow logic:
 #   * No upstream run record on this SHA → workflow's own trigger
@@ -31,11 +35,30 @@ name: Required CI Gate
 #
 # Branch-protection setup (manual):
 #   Settings → Branches → master rule → Require status checks →
-#   add **"Required CI Gate"** (the API-posted check below). Do **not**
-#   require "Required CI Gate / gate" — that's the workflow's own
-#   automatic check, which lands on the wrong SHA for workflow_run
-#   re-evaluations and would freeze the PR's check rollup at the
-#   initial failure.
+#   add **"Required CI Gate"** — the API-posted check named below in
+#   CHECK_NAME. Do **not** require "Required CI Gate / gate"; that is
+#   this workflow's automatic per-run check, which lands on the base
+#   branch tip (not the PR head) for both pull_request_target and
+#   workflow_run events. Requiring it would freeze the PR's check
+#   rollup at the very first evaluation.
+#
+# Security note:
+#   This workflow runs on `pull_request_target`, which executes with
+#   the base branch's elevated GITHUB_TOKEN. That's safe HERE because
+#   the workflow never checks out PR-controlled code and never executes
+#   any string sourced from the PR (it only reads API metadata via
+#   `gh api` and writes a check-run). Any future change that adds
+#   `actions/checkout` of the PR head, or runs/`eval`s a PR-controlled
+#   value, would re-introduce code-execution risk. Treat this as a
+#   privileged workflow and review such changes accordingly.
+#
+# WARNING — self-modification bootstrap:
+#   This workflow runs from the BASE branch's copy of this file (per
+#   GitHub Actions' rules for pull_request_target and workflow_run).
+#   A PR that modifies this workflow itself therefore runs against
+#   master's OLD version of the file — the new triggers / required
+#   list / aggregation rules don't take effect until the PR is merged
+#   to master. Any such PR will need a one-time admin merge override.
 
 on:
   # `pull_request_target` (not `pull_request`) is required so the gate
@@ -57,25 +80,54 @@ on:
     # (see HEAD_SHA below).
     types: [opened, synchronize, reopened, ready_for_review, labeled]
   workflow_run:
+    # Keep this list in sync with REQUIRED below — if a workflow is
+    # required for the gate's verdict, it also has to trigger the gate
+    # so the verdict re-evaluates when that workflow completes.
     workflows:
       - Tests
+      - Pylint
+      - Verify Dependency Locks
       - Generate Merged Source File
       - Connector Self-Review
     types: [completed]
+  # Escape hatch: a maintainer can re-run the gate against an arbitrary
+  # PR head SHA from the Actions tab if a PR's check rollup is stuck
+  # (e.g. self-modifying PR like #202 that needs the new triggers to
+  # take effect before it can run). Copy the PR head SHA from the PR
+  # page into `pr_head_sha`.
+  workflow_dispatch:
+    inputs:
+      pr_head_sha:
+        description: 'PR head SHA to re-evaluate (full 40-char hex). Gate posts its verdict on this commit.'
+        required: true
+        type: string
 
 permissions:
   contents: read
   actions: read
   checks: write   # required to post a check_run to PR head SHA
 
+# Canonical PR-head expression. Repeated in three places (concurrency
+# group + two HEAD_SHA env vars in the gate job) because GitHub Actions
+# does not support reusable expression aliases at workflow scope. The
+# fallback order resolves the right SHA across all of this workflow's
+# event sources:
+#   * pull_request_target           → github.event.pull_request.head.sha
+#   * workflow_run (pr_target up)   → github.event.workflow_run.pull_requests[0].head.sha
+#   * workflow_run (master push)    → github.event.workflow_run.head_sha
+#   * workflow_dispatch (manual)    → inputs.pr_head_sha
+#
 # Only the most recent gate evaluation per head SHA is meaningful;
 # cancel older in-flight runs when a newer one starts.
 concurrency:
-  group: required-ci-gate-${{ github.event.pull_request.head.sha || github.event.workflow_run.pull_requests[0].head.sha || github.event.workflow_run.head_sha }}
+  group: required-ci-gate-${{ github.event.pull_request.head.sha || github.event.workflow_run.pull_requests[0].head.sha || github.event.workflow_run.head_sha || inputs.pr_head_sha }}
   cancel-in-progress: true
 
 jobs:
   gate:
+    # Draft PRs don't gate merges, so the gate has nothing to evaluate.
+    # Skip them to avoid noise — gate fires again on `ready_for_review`.
+    if: ${{ github.event_name != 'pull_request_target' || !github.event.pull_request.draft }}
     runs-on:
       group: databrickslabs-protected-runner-group
       labels: linux-ubuntu-latest
@@ -85,18 +137,21 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPO: ${{ github.repository }}
-          # pull_request: PR head SHA directly. workflow_run: prefer
-          # `pull_requests[0].head.sha` so we land on the PR head even
-          # when the upstream was pull_request_target-triggered from a
-          # fork (in that case workflow_run.head_sha is the base branch
-          # tip, NOT the PR head). For master push-triggered upstreams
-          # the pull_requests array is empty, so fall back to head_sha.
-          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.event.workflow_run.pull_requests[0].head.sha || github.event.workflow_run.head_sha }}
+          # See "Canonical PR-head expression" block near the top of
+          # this file for the fallback semantics.
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.event.workflow_run.pull_requests[0].head.sha || github.event.workflow_run.head_sha || inputs.pr_head_sha }}
         run: |
           set -euo pipefail
 
+          # Workflows whose conclusion gates merge. Branch protection
+          # requires only "Required CI Gate" (the API-posted check) —
+          # everything below has to be in this list to be gated.
+          # Keep in sync with the `workflow_run.workflows` trigger
+          # above so the gate re-fires when any of these complete.
           REQUIRED=(
             "Tests"
+            "Pylint"
+            "Verify Dependency Locks"
             "Generate Merged Source File"
             "Connector Self-Review"
           )
@@ -108,8 +163,12 @@ jobs:
           SUMMARY_LINES=()
 
           for wf in "${REQUIRED[@]}"; do
+            # per_page=100 (API max). A single SHA accumulating more
+            # than 100 runs across all required workflows is implausible
+            # in practice; if it ever happens, switch to `--paginate`
+            # and merge the pages with jq.
             RUNS=$(gh api \
-              "repos/${REPO}/actions/runs?head_sha=${HEAD_SHA}&per_page=50" \
+              "repos/${REPO}/actions/runs?head_sha=${HEAD_SHA}&per_page=100" \
               --jq "[.workflow_runs[] | select(.name == \"$wf\")]")
             COUNT=$(echo "$RUNS" | jq 'length')
 
@@ -167,7 +226,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPO: ${{ github.repository }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.event.workflow_run.pull_requests[0].head.sha || github.event.workflow_run.head_sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.event.workflow_run.pull_requests[0].head.sha || github.event.workflow_run.head_sha || inputs.pr_head_sha }}
           CHECK_NAME: Required CI Gate
           EXTERNAL_ID: required-ci-gate-aggregator
           CONCLUSION: ${{ steps.agg.outputs.conclusion }}
