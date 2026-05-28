@@ -850,7 +850,11 @@ def _build_connector_wheel(source_dir: Path, outdir: Path, debug: bool) -> Path:
     """Build the connector wheel at ``source_dir`` into ``outdir``.
 
     Shells out to ``python -m build`` so the actual setuptools build runs in a
-    PEP 517 isolated environment. Returns the path to the built ``.whl``.
+    PEP 517 isolated environment. The build is sandboxed in a per-call
+    subdir of ``outdir`` so the post-build ``*.whl`` glob can't mistake a
+    sibling build's artifact (e.g. the framework wheel sitting next to a
+    connector build) for the wheel produced here. Returns the path to the
+    built ``.whl``.
     """
     _check_build_module_available()
 
@@ -860,8 +864,12 @@ def _build_connector_wheel(source_dir: Path, outdir: Path, debug: bool) -> Path:
             "Each connector source directory must have its own pyproject.toml."
         )
 
+    build_subdir = Path(tempfile.mkdtemp(prefix=f"{source_dir.name}-", dir=outdir))
     click.echo(f"  Building wheel from: {source_dir}")
-    cmd = [sys.executable, "-m", "build", "--wheel", str(source_dir), "--outdir", str(outdir)]
+    cmd = [
+        sys.executable, "-m", "build", "--wheel", str(source_dir),
+        "--outdir", str(build_subdir),
+    ]
     if debug:
         click.echo(f"[DEBUG] Running: {' '.join(cmd)}")
 
@@ -875,18 +883,25 @@ def _build_connector_wheel(source_dir: Path, outdir: Path, debug: bool) -> Path:
         tail = "\n".join(result.stderr.strip().splitlines()[-10:])
         raise click.ClickException(f"`python -m build` failed:\n{tail}")
 
-    wheels = sorted(outdir.glob("*.whl"))
+    wheels = list(build_subdir.glob("*.whl"))
     if not wheels:
         raise click.ClickException(
-            f"Build succeeded but no wheel was produced in {outdir}."
+            f"Build succeeded but no wheel was produced in {build_subdir}."
         )
     if len(wheels) > 1:
-        # Take the newest by mtime; warn so the user knows.
-        click.echo(
-            f"  ⚠️  Multiple wheels found in {outdir}; using {wheels[-1].name}"
+        # ``python -m build --wheel`` is documented to produce exactly one
+        # artifact. Multiple here means something is genuinely wrong with
+        # the source dir's build config; surface it as an error rather
+        # than silently pick one.
+        names = ", ".join(sorted(w.name for w in wheels))
+        raise click.ClickException(
+            f"`python -m build --wheel` produced {len(wheels)} wheels in "
+            f"{build_subdir}: {names}. Expected exactly one."
         )
-    click.echo(f"  ✓ Built wheel: {wheels[-1].name}")
-    return wheels[-1]
+
+    wheel = wheels[0]
+    click.echo(f"  ✓ Built wheel: {wheel.name}")
+    return wheel
 
 
 def _validate_wheel_layout(wheel_path: Path, source_name: str) -> None:
