@@ -26,25 +26,6 @@ from databricks.labs.community_connector.sparkpds.ingestion_agent_datasource imp
 )
 
 
-# =============================================================================
-# TEMPORARY WORKAROUND: Placeholder for merge script replacement
-# =============================================================================
-# Due to current Spark Declarative Pipeline (SDP) limitations, Python Data Source
-# implementations cannot use module imports. The merge script (tools/scripts/
-# merge_python_source.py) combines this file with source connector implementations
-# into a single deployable file.
-#
-# The line below is replaced during merge:
-#   - The marker `# __LAKEFLOW_CONNECT_IMPL__` is detected by the merge script
-#   - `LakeflowConnect` is replaced with the actual implementation class name
-#     (e.g., GithubLakeflowConnect, or the source's own LakeflowConnect class)
-#
-# This workaround will be removed once SDP supports proper module imports.
-# =============================================================================
-# fmt: off
-LakeflowConnectImpl = LakeflowConnect  # __LAKEFLOW_CONNECT_IMPL__
-# fmt: on
-
 # Constant option or column names
 METADATA_TABLE = "_community_table_metadata"
 NAMESPACES_TABLE = "_community_namespaces"
@@ -319,12 +300,42 @@ class LakeflowBatchReader(DataSourceReader):
 
 class LakeflowSource(DataSource):
     """
-    PySpark DataSource implementation for Lakeflow Connect.
+    PySpark DataSource base for Lakeflow Connect.
+
+    Subclass per source, set the connector class and the Spark format name,
+    then register with Spark::
+
+        from databricks.labs.community_connector.sparkpds import LakeflowSource
+        from .gmail import GmailLakeflowConnect
+
+        class GmailDataSource(LakeflowSource):
+            _lakeflow_connect_cls = GmailLakeflowConnect
+            _format_name = "gmail"
+
+        spark.dataSource.register(GmailDataSource)
+        spark.read.format("gmail").option(...).load()
     """
 
+    # Subclasses MUST set both. Left as ``None`` here so a missing override
+    # fails loudly at instantiation rather than silently going through with
+    # the abstract ``LakeflowConnect`` base.
+    _lakeflow_connect_cls: type[LakeflowConnect] | None = None
+    _format_name: str | None = None
+
     def __init__(self, options):
+        cls = type(self)
+        if cls._lakeflow_connect_cls is None or cls._format_name is None:
+            raise TypeError(
+                f"{cls.__name__} must set '_lakeflow_connect_cls' and "
+                f"'_format_name' class attributes. Subclass LakeflowSource "
+                f"per source, e.g.:\n\n"
+                f"    class GmailDataSource(LakeflowSource):\n"
+                f"        _lakeflow_connect_cls = GmailLakeflowConnect\n"
+                f"        _format_name = \"gmail\"\n"
+            )
         self.options = options
         self._agent_dispatcher: IngestionAgentDispatcher | None = None
+        connect_cls = cls._lakeflow_connect_cls
         # Agent-operation mode: ``operation`` option routes through the
         # ingestion-agent dispatcher instead of the table read path. The
         # dispatcher owns the option vocabulary and may run even when the
@@ -334,9 +345,7 @@ class LakeflowSource(DataSource):
             connector: LakeflowConnect | None = None
             init_error: BaseException | None = None
             try:
-                # TEMPORARY: LakeflowConnectImpl is replaced with the actual
-                # implementation class during merge.
-                connector = LakeflowConnectImpl(_connector_options(options))  # pylint: disable=abstract-class-instantiated
+                connector = connect_cls(_connector_options(options))
             except Exception as exc:  # pylint: disable=broad-except
                 init_error = exc
             self._agent_dispatcher = IngestionAgentDispatcher(
@@ -356,13 +365,11 @@ class LakeflowSource(DataSource):
                 f"For a regular source table, use a name that does not start "
                 f"with '_community_'."
             )
-        # TEMPORARY: LakeflowConnectImpl is replaced with the actual implementation
-        # class during merge. See the placeholder comment at the top of this file.
-        self.lakeflow_connect = LakeflowConnectImpl(options)  # pylint: disable=abstract-class-instantiated
+        self.lakeflow_connect = connect_cls(options)
 
     @classmethod
     def name(cls):
-        return "lakeflow_connect"
+        return cls._format_name
 
     def schema(self):
         if self._agent_dispatcher is not None:
