@@ -53,7 +53,7 @@ DEFAULT_LOOKBACK_MINUTES = 5
 EPOCH_ISO = "1970-01-01T00:00:00.000Z"
 FIRST_RUN_SENTINEL_THRESHOLD = "2000-01-01T00:00:00.000Z"
 
-_DATA_PARTITION_ID_PATTERN = re.compile(r"[A-Za-z0-9-]+")
+_DATA_PARTITION_ID_PATTERN = re.compile(r"[A-Za-z0-9]+(-[A-Za-z0-9]+)*")
 
 RETRIABLE_STATUS_CODES = {429, 500, 502, 503, 504}
 MAX_RETRIES = 5
@@ -359,9 +359,10 @@ class ADMELakeflowConnect(LakeflowConnect, SupportsPartitionedStream):
 
         if not _DATA_PARTITION_ID_PATTERN.fullmatch(data_partition_id):
             raise ValueError(
-                "ADME connector option 'data_partition_id' must match "
-                "[A-Za-z0-9-]+ (no whitespace, control chars, or "
-                "header separators)"
+                "ADME connector option 'data_partition_id' must be "
+                "alphanumeric segments joined by single hyphens "
+                "(e.g. 'opendes', 'dp-int'); no leading/trailing hyphens, "
+                "no consecutive hyphens, no whitespace or control chars"
             )
 
         self._instance_url = instance_url.rstrip("/")
@@ -581,9 +582,11 @@ class ADMELakeflowConnect(LakeflowConnect, SupportsPartitionedStream):
         Uses exclusive lower bound (`{`) on non-first partitions so back-to-back
         windows are disjoint — a record on a boundary is returned by exactly
         one partition. First-run uses inclusive `[*` to catch everything from
-        the epoch.
+        the epoch. The epoch check parses the cursor so a hand-edited
+        checkpoint that's chronologically at-or-before epoch still hits the
+        open-ended branch.
         """
-        if since == EPOCH_ISO:
+        if ADMELakeflowConnect._parse_iso(since) <= ADMELakeflowConnect._parse_iso(EPOCH_ISO):
             return f'modifyTime:[* TO "{until}"]'
         return f'modifyTime:{{"{since}" TO "{until}"]'
 
