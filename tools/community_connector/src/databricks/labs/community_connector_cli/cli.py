@@ -910,6 +910,64 @@ def _validate_wheel_layout(wheel_path: Path, source_name: str) -> None:
         )
 
 
+def _validate_framework_wheel(wheel_path: Path) -> None:
+    """Sanity check: the framework wheel must ship the interface package.
+
+    The connector wheel declares ``lakeflow-community-connectors>=0.1.0`` as a
+    runtime dep, so the framework wheel must satisfy that import path on the
+    cluster.
+    """
+    expected_prefix = "databricks/labs/community_connector/interface/"
+    try:
+        with zipfile.ZipFile(wheel_path) as zf:
+            names = zf.namelist()
+    except zipfile.BadZipFile as e:
+        raise click.ClickException(f"Built artifact {wheel_path} is not a valid wheel: {e}")
+
+    if not any(name.startswith(expected_prefix) for name in names):
+        raise click.ClickException(
+            f"Framework wheel {wheel_path.name} does not contain "
+            f"'{expected_prefix}'. Check the root pyproject.toml."
+        )
+
+
+def _find_repo_root(start: Path) -> Optional[Path]:
+    """Walk up from ``start`` looking for the framework's repo root.
+
+    The repo root is identified by a ``pyproject.toml`` whose ``[project]``
+    name is ``lakeflow-community-connectors`` (the framework package, not a
+    connector). Returns None if no such directory is found.
+    """
+    for candidate in [start, *start.parents]:
+        pyproject = candidate / "pyproject.toml"
+        if not pyproject.is_file():
+            continue
+        try:
+            content = pyproject.read_text(encoding="utf-8")
+        except OSError:
+            continue
+        # Cheap check: the framework root's [project] block is the only one
+        # whose name is exactly ``lakeflow-community-connectors`` (connectors
+        # are named ``lakeflow-community-connectors-<source>``).
+        if re.search(r'^\s*name\s*=\s*"lakeflow-community-connectors"\s*$',
+                     content, re.MULTILINE):
+            return candidate.resolve()
+    return None
+
+
+def _upload_wheel(workspace_client, wheel: Path, dest_dir: str) -> str:
+    """Upload a single wheel to ``dest_dir`` and return the destination path."""
+    dest_path = f"{dest_dir}/{wheel.name}"
+    click.echo(f"  Uploading {wheel.name} → {dest_path}")
+    try:
+        with open(wheel, "rb") as f:
+            workspace_client.files.upload(dest_path, f, overwrite=True)
+    except Exception as e:
+        raise click.ClickException(f"Failed to upload {wheel.name}: {e}")
+    click.echo("  ✓ Uploaded")
+    return dest_path
+
+
 # ---- end upload helpers ------------------------------------------------------
 
 
@@ -1869,7 +1927,7 @@ def update_connection(
     "--volume-path",
     "-v",
     required=True,
-    help="UC Volume directory to upload the wheel into, "
+    help="UC Volume directory to upload wheels into, "
     "e.g. /Volumes/main/default/community_connector/packages. "
     "The volume and any missing subdirectories are created automatically.",
 )
@@ -1877,7 +1935,19 @@ def update_connection(
     "--wheel",
     "wheel_path",
     type=click.Path(exists=True, dir_okay=False),
-    help="Skip the build step and upload this pre-built wheel.",
+    help="Pre-built connector wheel; skip building it.",
+)
+@click.option(
+    "--framework-wheel",
+    "framework_wheel_path",
+    type=click.Path(exists=True, dir_okay=False),
+    help="Pre-built framework (root) wheel; skip building it.",
+)
+@click.option(
+    "--skip-framework",
+    is_flag=True,
+    help="Do not upload the framework wheel "
+    "(use when it is already present on the volume from a prior run).",
 )
 @click.option(
     "--source-dir",
@@ -1888,7 +1958,7 @@ def update_connection(
     "--keep-wheel",
     "keep_wheel_dir",
     type=click.Path(file_okay=False),
-    help="After upload, copy the built wheel into this local directory.",
+    help="After upload, copy any wheels built in this run into this local directory.",
 )
 @click.pass_context
 def upload(
@@ -1896,15 +1966,21 @@ def upload(
     source_name: str,
     volume_path: str,
     wheel_path: Optional[str],
+    framework_wheel_path: Optional[str],
+    skip_framework: bool,
     source_dir: Optional[str],
     keep_wheel_dir: Optional[str],
 ):
     """
-    Build a connector wheel and upload it to a UC Volume.
+    Build and upload connector wheels to a UC Volume.
 
-    Builds the wheel from the connector's pyproject.toml (or uses --wheel if
-    given) and uploads it to --volume-path. Auto-creates the volume and any
-    missing subdirectories.
+    By default uploads two wheels: the root framework wheel
+    (``lakeflow_community_connectors-*.whl``) and the connector wheel
+    (``lakeflow_community_connectors_<source>-*.whl``). The connector wheel
+    declares the framework as a runtime dep, so shipping both keeps clusters
+    from trying to fetch the framework from PyPI.
+
+    Use ``--skip-framework`` once the framework wheel is already on the volume.
 
     Example:
 
@@ -1914,53 +1990,100 @@ def upload(
     debug = ctx.obj.get("debug", False)
     workspace_client = _make_workspace_client()
 
+    if skip_framework and framework_wheel_path:
+        raise click.ClickException(
+            "--skip-framework and --framework-wheel are mutually exclusive."
+        )
+
     click.echo(f"Uploading connector: {source_name}")
 
     click.echo("\nStep 1: Ensuring destination volume and directory exist...")
     dest_dir = _ensure_volume_directory(workspace_client, volume_path, debug)
     click.echo(f"  Destination: {dest_dir}")
 
+    # Resolve source dir up front — we need it for both connector-build and
+    # repo-root discovery.
+    if source_dir:
+        src = Path(source_dir).resolve()
+    else:
+        src = _find_local_source_path(source_name)
+        if src is None:
+            raise click.ClickException(
+                f"Could not find source directory for '{source_name}'. "
+                "Run from the repo root, or pass --source-dir explicitly."
+            )
+
+    # Resolve repo root only when we will actually build the framework wheel.
+    repo_root: Optional[Path] = None
+    if not skip_framework and not framework_wheel_path:
+        repo_root = _find_repo_root(src)
+        if repo_root is None:
+            raise click.ClickException(
+                "Could not find the framework repo root (a pyproject.toml with "
+                "name = \"lakeflow-community-connectors\"). Pass --framework-wheel, "
+                "or use --skip-framework if the framework is already on the volume."
+            )
+
     cleanup_dir: Optional[Path] = None
     try:
-        if wheel_path:
-            click.echo("\nStep 2: Using pre-built wheel (--wheel provided)")
-            wheel = Path(wheel_path).resolve()
-        else:
-            click.echo("\nStep 2: Building wheel...")
-            if source_dir:
-                src = Path(source_dir).resolve()
+        cleanup_dir = Path(tempfile.mkdtemp(prefix=f"cc-build-{source_name}-"))
+
+        # Step 2: assemble the list of wheels to upload (framework first so
+        # the connector's dep on it resolves when both are installed in order).
+        click.echo("\nStep 2: Preparing wheels...")
+        # Each entry: (wheel_path, validator, was_built_in_this_run)
+        wheels: List[Tuple[Path, str, bool]] = []
+
+        if not skip_framework:
+            if framework_wheel_path:
+                fw = Path(framework_wheel_path).resolve()
+                click.echo(f"  Using pre-built framework wheel: {fw.name}")
+                _validate_framework_wheel(fw)
+                wheels.append((fw, "framework", False))
             else:
-                src = _find_local_source_path(source_name)
-                if src is None:
-                    raise click.ClickException(
-                        f"Could not find source directory for '{source_name}'. "
-                        "Run from the repo root, or pass --source-dir explicitly."
-                    )
-            cleanup_dir = Path(tempfile.mkdtemp(prefix=f"cc-build-{source_name}-"))
-            wheel = _build_connector_wheel(src, cleanup_dir, debug)
+                assert repo_root is not None
+                click.echo(f"  Building framework wheel from: {repo_root}")
+                fw = _build_connector_wheel(repo_root, cleanup_dir, debug)
+                _validate_framework_wheel(fw)
+                wheels.append((fw, "framework", True))
 
-        _validate_wheel_layout(wheel, source_name)
+        if wheel_path:
+            conn = Path(wheel_path).resolve()
+            click.echo(f"  Using pre-built connector wheel: {conn.name}")
+            _validate_wheel_layout(conn, source_name)
+            wheels.append((conn, "connector", False))
+        else:
+            click.echo(f"  Building connector wheel from: {src}")
+            conn = _build_connector_wheel(src, cleanup_dir, debug)
+            _validate_wheel_layout(conn, source_name)
+            wheels.append((conn, "connector", True))
 
-        click.echo("\nStep 3: Uploading wheel...")
-        dest_path = f"{dest_dir}/{wheel.name}"
-        click.echo(f"  Uploading to: {dest_path}")
-        try:
-            with open(wheel, "rb") as f:
-                workspace_client.files.upload(dest_path, f, overwrite=True)
-        except Exception as e:
-            raise click.ClickException(f"Failed to upload wheel: {e}")
-        click.echo("  ✓ Uploaded")
+        # Step 3: upload each wheel.
+        click.echo("\nStep 3: Uploading wheels...")
+        dest_paths: List[str] = []
+        for wheel, _kind, _built in wheels:
+            dest_paths.append(_upload_wheel(workspace_client, wheel, dest_dir))
 
-        if keep_wheel_dir and not wheel_path:
+        # Step 4: optionally retain the wheels we built (not the ones the
+        # user supplied — those are already on their disk).
+        if keep_wheel_dir:
             keep = Path(keep_wheel_dir)
             keep.mkdir(parents=True, exist_ok=True)
-            kept = keep / wheel.name
-            shutil.copy2(wheel, kept)
-            click.echo(f"  ✓ Wheel retained at: {kept}")
+            for wheel, _kind, was_built in wheels:
+                if was_built:
+                    kept = keep / wheel.name
+                    shutil.copy2(wheel, kept)
+                    click.echo(f"  ✓ Wheel retained at: {kept}")
 
         click.echo(f"\n{'=' * 60}")
-        click.echo(f"Uploaded: {dest_path}")
+        click.echo("Uploaded:")
+        for path in dest_paths:
+            click.echo(f"  - {path}")
         click.echo(f"{'=' * 60}")
+        click.echo(
+            "\nReference both paths in your pipeline's "
+            "`environment.dependencies` to install on the cluster."
+        )
     finally:
         if cleanup_dir and cleanup_dir.exists():
             shutil.rmtree(cleanup_dir, ignore_errors=True)

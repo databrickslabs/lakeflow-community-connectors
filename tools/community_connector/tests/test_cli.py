@@ -38,6 +38,8 @@ from databricks.labs.community_connector_cli.cli import (
     _parse_volume_path,
     _ensure_volume_directory,
     _validate_wheel_layout,
+    _validate_framework_wheel,
+    _find_repo_root,
 )
 from databricks.labs.community_connector_cli.connector_spec import (
     ParsedConnectorSpec,
@@ -2071,6 +2073,44 @@ def _make_fake_wheel(path: Path, source_name: str) -> Path:
     return wheel
 
 
+def _make_fake_framework_wheel(path: Path) -> Path:
+    """Build a minimal in-process zip that looks like the framework wheel."""
+    import zipfile
+    wheel = path / "lakeflow_community_connectors-0.1.0-py3-none-any.whl"
+    namespace = "databricks/labs/community_connector/interface"
+    with zipfile.ZipFile(wheel, "w") as zf:
+        zf.writestr(f"{namespace}/__init__.py", "")
+        zf.writestr(f"{namespace}/lakeflow_connect.py", "# framework code")
+        zf.writestr(
+            "lakeflow_community_connectors-0.1.0.dist-info/METADATA",
+            "Metadata-Version: 2.1\nName: lakeflow-community-connectors\nVersion: 0.1.0\n",
+        )
+    return wheel
+
+
+def _make_fake_repo_root(tmp_path: Path, source_name: str = "example") -> tuple:
+    """Lay out a tmp directory that looks like the connectors repo.
+
+    Returns (repo_root, source_dir). Both have ``pyproject.toml`` files: the
+    root's marks itself as ``name = "lakeflow-community-connectors"`` so
+    ``_find_repo_root`` can identify it.
+    """
+    repo_root = tmp_path / "repo"
+    source_dir = (
+        repo_root / "src" / "databricks" / "labs"
+        / "community_connector" / "sources" / source_name
+    )
+    source_dir.mkdir(parents=True)
+    (repo_root / "pyproject.toml").write_text(
+        '[project]\nname = "lakeflow-community-connectors"\nversion = "0.1.0"\n'
+    )
+    (source_dir / "pyproject.toml").write_text(
+        f'[project]\nname = "lakeflow-community-connectors-{source_name}"\n'
+        'version = "0.1.0"\n'
+    )
+    return repo_root, source_dir
+
+
 class TestParseVolumePath:
     """Tests for _parse_volume_path."""
 
@@ -2179,54 +2219,64 @@ class TestValidateWheelLayout:
             _validate_wheel_layout(bad, "example")
 
 
-class TestUploadCommand:
-    """Tests for the `upload` Click command."""
+class TestValidateFrameworkWheel:
+    """Tests for _validate_framework_wheel."""
 
-    def test_upload_with_prebuilt_wheel(self, tmp_path):
-        """--wheel skips the build step entirely."""
+    def test_valid_framework_wheel(self, tmp_path):
+        wheel = _make_fake_framework_wheel(tmp_path)
+        _validate_framework_wheel(wheel)  # no exception
+
+    def test_connector_wheel_rejected_as_framework(self, tmp_path):
+        """A connector wheel does not contain the interface/ namespace."""
         wheel = _make_fake_wheel(tmp_path, "example")
+        with pytest.raises(click.ClickException, match="does not contain"):
+            _validate_framework_wheel(wheel)
 
-        runner = CliRunner()
-        with patch(
-            "databricks.labs.community_connector_cli.cli._make_workspace_client"
-        ) as mock_ws_factory, patch(
-            "databricks.labs.community_connector_cli.cli._build_connector_wheel"
-        ) as mock_build:
-            mock_ws = MagicMock()
-            mock_ws.volumes.read.return_value = MagicMock()  # volume exists
-            mock_ws_factory.return_value = mock_ws
+    def test_corrupt_framework_wheel_raises(self, tmp_path):
+        bad = tmp_path / "bogus.whl"
+        bad.write_bytes(b"not a zip")
+        with pytest.raises(click.ClickException, match="not a valid wheel"):
+            _validate_framework_wheel(bad)
 
-            result = runner.invoke(
-                main,
-                [
-                    "upload",
-                    "example",
-                    "--volume-path",
-                    "/Volumes/main/default/cc/packages",
-                    "--wheel",
-                    str(wheel),
-                ],
-            )
 
-            assert result.exit_code == 0, result.output
-            mock_build.assert_not_called()
-            mock_ws.files.upload.assert_called_once()
-            dest = mock_ws.files.upload.call_args.args[0]
-            assert dest == f"/Volumes/main/default/cc/packages/{wheel.name}"
+class TestFindRepoRoot:
+    """Tests for _find_repo_root."""
 
-    def test_upload_builds_when_wheel_not_given(self, tmp_path):
-        """Default path: invoke _build_connector_wheel."""
-        # Place a fake "source" tree the source-resolver can find via --source-dir.
-        source_dir = (
-            tmp_path / "src" / "databricks" / "labs"
-            / "community_connector" / "sources" / "example"
-        )
-        source_dir.mkdir(parents=True)
-        (source_dir / "pyproject.toml").write_text("[project]\nname='x'\n")
+    def test_walks_up_from_source_dir(self, tmp_path):
+        repo_root, source_dir = _make_fake_repo_root(tmp_path)
+        assert _find_repo_root(source_dir) == repo_root.resolve()
 
-        # Build helper writes a fake wheel into the temp outdir.
+    def test_returns_none_when_no_framework_root(self, tmp_path):
+        """No pyproject anywhere in the parent chain → None."""
+        nested = tmp_path / "a" / "b" / "c"
+        nested.mkdir(parents=True)
+        assert _find_repo_root(nested) is None
+
+    def test_skips_connector_pyproject(self, tmp_path):
+        """A connector pyproject (different name) must not be mistaken for root."""
+        _, source_dir = _make_fake_repo_root(tmp_path, "example")
+        # The source_dir itself has a pyproject named
+        # `lakeflow-community-connectors-example` — it should be skipped, and
+        # the walk should continue until it finds the framework root above.
+        result = _find_repo_root(source_dir)
+        assert result is not None
+        assert (result / "pyproject.toml").is_file()
+        # Sanity: it's not the connector's pyproject.
+        assert "sources" not in str(result)
+
+
+class TestUploadCommand:
+    """Tests for the `upload` Click command (two-wheel flow)."""
+
+    def test_upload_default_builds_both_wheels(self, tmp_path):
+        """Default path: framework + connector wheels are both built and uploaded."""
+        repo_root, source_dir = _make_fake_repo_root(tmp_path, "example")
+
         def fake_build(src, outdir, debug):
-            return _make_fake_wheel(outdir, "example")
+            # Distinguish the two builds by the source path we receive.
+            if Path(src).resolve() == source_dir.resolve():
+                return _make_fake_wheel(outdir, "example")
+            return _make_fake_framework_wheel(outdir)
 
         runner = CliRunner()
         with patch(
@@ -2252,8 +2302,222 @@ class TestUploadCommand:
             )
 
             assert result.exit_code == 0, result.output
-            mock_build.assert_called_once()
+            # Two builds (framework + connector), two uploads.
+            assert mock_build.call_count == 2
+            assert mock_ws.files.upload.call_count == 2
+
+            # Framework must be uploaded first so that, if the cluster's pip
+            # processes the deps array in order, the connector's
+            # lakeflow-community-connectors dep resolves locally.
+            first_dest = mock_ws.files.upload.call_args_list[0].args[0]
+            second_dest = mock_ws.files.upload.call_args_list[1].args[0]
+            assert "lakeflow_community_connectors-" in first_dest
+            assert "lakeflow_community_connectors_example-" in second_dest
+
+    def test_upload_skip_framework(self, tmp_path):
+        """--skip-framework uploads only the connector wheel."""
+        repo_root, source_dir = _make_fake_repo_root(tmp_path, "example")
+
+        def fake_build(src, outdir, debug):
+            return _make_fake_wheel(outdir, "example")
+
+        runner = CliRunner()
+        with patch(
+            "databricks.labs.community_connector_cli.cli._make_workspace_client"
+        ) as mock_ws_factory, patch(
+            "databricks.labs.community_connector_cli.cli._build_connector_wheel",
+            side_effect=fake_build,
+        ) as mock_build:
+            mock_ws = MagicMock()
+            mock_ws.volumes.read.return_value = MagicMock()
+            mock_ws_factory.return_value = mock_ws
+
+            result = runner.invoke(
+                main,
+                [
+                    "upload",
+                    "example",
+                    "--volume-path",
+                    "/Volumes/main/default/cc/packages",
+                    "--source-dir",
+                    str(source_dir),
+                    "--skip-framework",
+                ],
+            )
+
+            assert result.exit_code == 0, result.output
+            mock_build.assert_called_once()  # only the connector
             mock_ws.files.upload.assert_called_once()
+
+    def test_upload_with_prebuilt_connector_wheel(self, tmp_path):
+        """--wheel skips the connector build but still builds the framework."""
+        repo_root, source_dir = _make_fake_repo_root(tmp_path, "example")
+        prebuilt = _make_fake_wheel(tmp_path, "example")
+
+        def fake_build(src, outdir, debug):
+            return _make_fake_framework_wheel(outdir)
+
+        runner = CliRunner()
+        with patch(
+            "databricks.labs.community_connector_cli.cli._make_workspace_client"
+        ) as mock_ws_factory, patch(
+            "databricks.labs.community_connector_cli.cli._build_connector_wheel",
+            side_effect=fake_build,
+        ) as mock_build:
+            mock_ws = MagicMock()
+            mock_ws.volumes.read.return_value = MagicMock()
+            mock_ws_factory.return_value = mock_ws
+
+            result = runner.invoke(
+                main,
+                [
+                    "upload",
+                    "example",
+                    "--volume-path",
+                    "/Volumes/main/default/cc/packages",
+                    "--source-dir",
+                    str(source_dir),
+                    "--wheel",
+                    str(prebuilt),
+                ],
+            )
+
+            assert result.exit_code == 0, result.output
+            mock_build.assert_called_once()  # only the framework
+            assert mock_ws.files.upload.call_count == 2
+
+    def test_upload_with_prebuilt_framework_wheel(self, tmp_path):
+        """--framework-wheel skips the framework build but still builds the connector."""
+        repo_root, source_dir = _make_fake_repo_root(tmp_path, "example")
+        fw_prebuilt = _make_fake_framework_wheel(tmp_path)
+
+        def fake_build(src, outdir, debug):
+            return _make_fake_wheel(outdir, "example")
+
+        runner = CliRunner()
+        with patch(
+            "databricks.labs.community_connector_cli.cli._make_workspace_client"
+        ) as mock_ws_factory, patch(
+            "databricks.labs.community_connector_cli.cli._build_connector_wheel",
+            side_effect=fake_build,
+        ) as mock_build:
+            mock_ws = MagicMock()
+            mock_ws.volumes.read.return_value = MagicMock()
+            mock_ws_factory.return_value = mock_ws
+
+            result = runner.invoke(
+                main,
+                [
+                    "upload",
+                    "example",
+                    "--volume-path",
+                    "/Volumes/main/default/cc/packages",
+                    "--source-dir",
+                    str(source_dir),
+                    "--framework-wheel",
+                    str(fw_prebuilt),
+                ],
+            )
+
+            assert result.exit_code == 0, result.output
+            mock_build.assert_called_once()  # only the connector
+            assert mock_ws.files.upload.call_count == 2
+
+    def test_upload_with_both_prebuilt_wheels(self, tmp_path):
+        """Pre-built connector + pre-built framework → no build at all."""
+        repo_root, source_dir = _make_fake_repo_root(tmp_path, "example")
+        conn_prebuilt = _make_fake_wheel(tmp_path, "example")
+        fw_prebuilt = _make_fake_framework_wheel(tmp_path)
+
+        runner = CliRunner()
+        with patch(
+            "databricks.labs.community_connector_cli.cli._make_workspace_client"
+        ) as mock_ws_factory, patch(
+            "databricks.labs.community_connector_cli.cli._build_connector_wheel"
+        ) as mock_build:
+            mock_ws = MagicMock()
+            mock_ws.volumes.read.return_value = MagicMock()
+            mock_ws_factory.return_value = mock_ws
+
+            result = runner.invoke(
+                main,
+                [
+                    "upload",
+                    "example",
+                    "--volume-path",
+                    "/Volumes/main/default/cc/packages",
+                    "--source-dir",
+                    str(source_dir),
+                    "--wheel",
+                    str(conn_prebuilt),
+                    "--framework-wheel",
+                    str(fw_prebuilt),
+                ],
+            )
+
+            assert result.exit_code == 0, result.output
+            mock_build.assert_not_called()
+            assert mock_ws.files.upload.call_count == 2
+
+    def test_upload_skip_framework_and_framework_wheel_mutually_exclusive(self, tmp_path):
+        """--skip-framework + --framework-wheel is contradictory and must error."""
+        repo_root, source_dir = _make_fake_repo_root(tmp_path, "example")
+        fw_prebuilt = _make_fake_framework_wheel(tmp_path)
+
+        runner = CliRunner()
+        with patch(
+            "databricks.labs.community_connector_cli.cli._make_workspace_client"
+        ) as mock_ws_factory:
+            mock_ws_factory.return_value = MagicMock()
+            result = runner.invoke(
+                main,
+                [
+                    "upload",
+                    "example",
+                    "--volume-path",
+                    "/Volumes/main/default/cc/packages",
+                    "--source-dir",
+                    str(source_dir),
+                    "--skip-framework",
+                    "--framework-wheel",
+                    str(fw_prebuilt),
+                ],
+            )
+
+            assert result.exit_code != 0
+            assert "mutually exclusive" in result.output
+
+    def test_upload_raises_when_repo_root_not_found(self, tmp_path):
+        """No framework root in the source's parent chain → ClickException."""
+        # Build a source dir that has no root pyproject anywhere above it.
+        bare_source = tmp_path / "isolated_source"
+        bare_source.mkdir()
+        (bare_source / "pyproject.toml").write_text(
+            '[project]\nname = "lakeflow-community-connectors-example"\n'
+        )
+
+        runner = CliRunner()
+        with patch(
+            "databricks.labs.community_connector_cli.cli._make_workspace_client"
+        ) as mock_ws_factory:
+            mock_ws = MagicMock()
+            mock_ws.volumes.read.return_value = MagicMock()
+            mock_ws_factory.return_value = mock_ws
+
+            result = runner.invoke(
+                main,
+                [
+                    "upload",
+                    "example",
+                    "--volume-path",
+                    "/Volumes/main/default/cc/packages",
+                    "--source-dir",
+                    str(bare_source),
+                ],
+            )
+
+            assert result.exit_code != 0
+            assert "Could not find the framework repo root" in result.output
 
     def test_upload_raises_when_source_not_found(self):
         """No --source-dir and the locator can't find anything → ClickException."""
@@ -2283,6 +2547,7 @@ class TestUploadCommand:
 
     def test_upload_invalid_volume_path(self, tmp_path):
         """Malformed --volume-path raises before any network call."""
+        repo_root, source_dir = _make_fake_repo_root(tmp_path, "example")
         wheel = _make_fake_wheel(tmp_path, "example")
         runner = CliRunner()
         with patch(
@@ -2296,21 +2561,23 @@ class TestUploadCommand:
                     "example",
                     "--volume-path",
                     "/Workspace/Users/me/wheels",
+                    "--source-dir",
+                    str(source_dir),
                     "--wheel",
                     str(wheel),
+                    "--skip-framework",
                 ],
             )
             assert result.exit_code != 0
             assert "Invalid volume path" in result.output
 
-    def test_upload_keep_wheel_copies_artifact(self, tmp_path):
-        """--keep-wheel copies the built wheel to the requested local dir."""
-        source_dir = (
-            tmp_path / "src" / "databricks" / "labs"
-            / "community_connector" / "sources" / "example"
-        )
-        source_dir.mkdir(parents=True)
-        (source_dir / "pyproject.toml").write_text("[project]\nname='x'\n")
+    def test_upload_keep_wheel_copies_only_built_artifacts(self, tmp_path):
+        """--keep-wheel copies wheels we built in this run, not user-supplied ones."""
+        repo_root, source_dir = _make_fake_repo_root(tmp_path, "example")
+        # User supplies framework wheel; CLI builds the connector wheel.
+        user_supplied_dir = tmp_path / "user_supplied"
+        user_supplied_dir.mkdir()
+        fw_prebuilt = _make_fake_framework_wheel(user_supplied_dir)
 
         def fake_build(src, outdir, debug):
             return _make_fake_wheel(outdir, "example")
@@ -2337,6 +2604,8 @@ class TestUploadCommand:
                     "/Volumes/main/default/cc/packages",
                     "--source-dir",
                     str(source_dir),
+                    "--framework-wheel",
+                    str(fw_prebuilt),
                     "--keep-wheel",
                     str(keep_dir),
                 ],
@@ -2344,36 +2613,7 @@ class TestUploadCommand:
 
             assert result.exit_code == 0, result.output
             kept_files = list(keep_dir.glob("*.whl"))
+            # Only the connector wheel (which we built) should be copied —
+            # not the user-supplied framework wheel.
             assert len(kept_files) == 1
-
-    def test_upload_keep_wheel_ignored_when_wheel_provided(self, tmp_path):
-        """--keep-wheel is a no-op when the user already supplied --wheel."""
-        wheel = _make_fake_wheel(tmp_path, "example")
-        keep_dir = tmp_path / "kept"
-
-        runner = CliRunner()
-        with patch(
-            "databricks.labs.community_connector_cli.cli._make_workspace_client"
-        ) as mock_ws_factory:
-            mock_ws = MagicMock()
-            mock_ws.volumes.read.return_value = MagicMock()
-            mock_ws_factory.return_value = mock_ws
-
-            result = runner.invoke(
-                main,
-                [
-                    "upload",
-                    "example",
-                    "--volume-path",
-                    "/Volumes/main/default/cc/packages",
-                    "--wheel",
-                    str(wheel),
-                    "--keep-wheel",
-                    str(keep_dir),
-                ],
-            )
-
-            assert result.exit_code == 0, result.output
-            # When --wheel is given there's nothing fresh to "keep" — don't
-            # silently copy the user's input. Directory may not even exist.
-            assert not keep_dir.exists() or not list(keep_dir.glob("*.whl"))
+            assert "example" in kept_files[0].name
