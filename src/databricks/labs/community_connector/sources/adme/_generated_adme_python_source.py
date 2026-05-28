@@ -1166,24 +1166,36 @@ def register_lakeflow_source(spark):
                 start_iso = (start_offset or {}).get("cursor") or EPOCH_ISO
                 end_iso = (end_offset or {}).get("cursor") or self._init_time
 
-            if start_iso >= end_iso:
+            # Compare on parsed datetimes so hand-edited or non-canonical
+            # cursor strings (different precision, missing time component)
+            # don't lex-order incorrectly against canonical EPOCH_ISO / init_time.
+            start_dt = self._parse_iso(start_iso)
+            end_dt = self._parse_iso(end_iso)
+            if start_dt >= end_dt:
                 return []
 
             # First-run optimization: single open-ended partition
-            if start_iso <= FIRST_RUN_SENTINEL_THRESHOLD:
+            if start_dt <= self._parse_iso(FIRST_RUN_SENTINEL_THRESHOLD):
                 return [{"since": EPOCH_ISO, "until": end_iso}]
 
             if lookback_minutes > 0:
                 start_iso = self._subtract_minutes(start_iso, lookback_minutes)
-                if start_iso >= end_iso:
+                start_dt = self._parse_iso(start_iso)
+                if start_dt >= end_dt:
                     return []
 
             partitions: list[dict] = []
             cursor = start_iso
-            while cursor < end_iso:
-                window_end = min(self._add_days(cursor, window_days), end_iso)
-                partitions.append({"since": cursor, "until": window_end})
-                cursor = window_end
+            cursor_dt = start_dt
+            while cursor_dt < end_dt:
+                next_iso = self._add_days(cursor, window_days)
+                next_dt = self._parse_iso(next_iso)
+                if next_dt > end_dt:
+                    next_iso = end_iso
+                    next_dt = end_dt
+                partitions.append({"since": cursor, "until": next_iso})
+                cursor = next_iso
+                cursor_dt = next_dt
 
             return partitions
 
@@ -1217,7 +1229,7 @@ def register_lakeflow_source(spark):
             self._validate_table(table_name)
 
             since = (start_offset or {}).get("cursor") or EPOCH_ISO
-            if since >= self._init_time:
+            if self._parse_iso(since) >= self._parse_iso(self._init_time):
                 return iter([]), start_offset or {"cursor": self._init_time}
 
             kind_query = self._resolve_kind_query(table_name, table_options)
@@ -1313,18 +1325,46 @@ def register_lakeflow_source(spark):
         def _post_with_retry(
             self, url: str, body: dict[str, Any]
         ) -> requests.Response:
-            """POST with exponential backoff and one auth-refresh retry on 401."""
+            """POST with retry on transient failures.
+
+            Budget per logical request:
+            - Up to one budget-isolated auth-refresh retry on 401 (does not
+              consume the MAX_RETRIES slots).
+            - Up to MAX_RETRIES retries on retriable 5xx/429 with exponential
+              backoff honouring ``Retry-After``.
+            - Up to MAX_RETRIES retries on transient network errors
+              (ConnectionError / Timeout / SSLError), sharing the same budget.
+
+            Worst-case round-trip count is therefore ``MAX_RETRIES + 1`` POSTs
+            (initial attempt plus one 401-refresh follow-up, both then subject
+            to the retriable-failure budget).
+            """
             backoff = INITIAL_BACKOFF
             auth_retried = False
             attempts = 0
             resp: requests.Response | None = None
+            last_exc: Exception | None = None
             while attempts < MAX_RETRIES:
-                resp = self._session.post(
-                    url,
-                    headers=self._common_headers(),
-                    data=json.dumps(body),
-                    timeout=60,
-                )
+                try:
+                    resp = self._session.post(
+                        url,
+                        headers=self._common_headers(),
+                        data=json.dumps(body),
+                        timeout=60,
+                    )
+                except (
+                    requests.ConnectionError,
+                    requests.Timeout,
+                    requests.exceptions.SSLError,
+                ) as exc:
+                    last_exc = exc
+                    attempts += 1
+                    if attempts >= MAX_RETRIES:
+                        raise
+                    time.sleep(backoff)
+                    backoff *= 2
+                    continue
+
                 if resp.status_code == 401 and not auth_retried:
                     self._token_provider.invalidate()
                     auth_retried = True
@@ -1342,6 +1382,8 @@ def register_lakeflow_source(spark):
                     time.sleep(wait)
                     backoff *= 2
 
+            if resp is None and last_exc is not None:
+                raise last_exc
             return resp  # type: ignore[return-value]
 
         def _search_paginated(
