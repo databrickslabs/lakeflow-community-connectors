@@ -50,9 +50,9 @@ jobs:
       #
       # We do this as an explicit failing shell step rather than a job-
       # level `if:` so the workflow conclusion is `failure` (not
-      # `skipped`) when unauthorized — branch protection and the
-      # Required CI Gate both treat `failure` unambiguously, whereas
-      # `skipped` has historically been treated as `success`.
+      # `skipped`) when unauthorized — branch protection treats `failure`
+      # unambiguously, whereas `skipped` has historically been treated as
+      # `success`.
       - name: Authorize
         env:
           EVENT_NAME: ${{ github.event_name }}
