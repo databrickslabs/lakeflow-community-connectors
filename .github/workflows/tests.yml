@@ -140,10 +140,17 @@ jobs:
           fi
 
           # Detect per-source connector changes
-          # Triggers when source code, test code, or libs/utils.py changes
-          UTILS_CHANGED=false
-          if echo "$CHANGED_FILES" | grep -qE '^src/databricks/labs/community_connector/libs/utils\.py$'; then
-            UTILS_CHANGED=true
+          # Triggers when source code, test code, or shared infra (utils.py,
+          # the LakeflowConnect interface, or the shared test harness) changes.
+          # Without the test-harness trigger, a PR adding a new check in
+          # test_suite.py is only validated against the example connector
+          # (per the `example` trigger above), leaving other connectors
+          # untested until someone happens to modify their source — which
+          # silently allowed corpus drift on 6 connectors to be merged
+          # before PR #205 surfaced it by changing every source pyproject.
+          SHARED_INFRA_CHANGED=false
+          if echo "$CHANGED_FILES" | grep -qE '^(src/databricks/labs/community_connector/(libs/utils\.py|interface/)|tests/unit/sources/(test_suite\.py|test_partition_suite\.py|test_utils\.py|lakeflow_connect_test_utils\.py))$'; then
+            SHARED_INFRA_CHANGED=true
           fi
 
           # Read exclude list into a temp file (skip comments and blank lines)
@@ -163,9 +170,9 @@ jobs:
               continue
             fi
 
-            # Check if this source's code, tests, or utils.py changed
+            # Check if this source's code, tests, or shared infra changed
             SOURCE_TRIGGERED=false
-            if [ "$UTILS_CHANGED" = "true" ]; then
+            if [ "$SHARED_INFRA_CHANGED" = "true" ]; then
               SOURCE_TRIGGERED=true
             elif echo "$CHANGED_FILES" | grep -qE "^src/databricks/labs/community_connector/sources/${source_name}/"; then
               SOURCE_TRIGGERED=true
