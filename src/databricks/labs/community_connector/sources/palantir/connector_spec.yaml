@@ -16,7 +16,9 @@ connection:
       required: true
       description: >
         Palantir Foundry hostname (e.g., yourcompany.palantirfoundry.com).
-        Do not include https:// prefix.
+        The bare form is preferred but full URLs like
+        https://yourcompany.palantirfoundry.com/ are also accepted —
+        the connector normalises both.
 
     - name: ontology_api_name
       type: string

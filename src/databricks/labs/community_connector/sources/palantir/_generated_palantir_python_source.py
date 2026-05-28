@@ -50,6 +50,7 @@ from pyspark.sql.types import (
 )
 import base64
 import logging
+import random
 import requests
 
 
@@ -623,7 +624,9 @@ def register_lakeflow_source(spark):
             Args:
                 options: Connection parameters including:
                     - token: Bearer token for API authentication (required)
-                    - hostname: Palantir Foundry hostname without https:// (required)
+                    - hostname: Palantir Foundry hostname (required). Bare form
+                      (yourcompany.palantirfoundry.com) is preferred; full URLs
+                      with https:// are also accepted — the connector normalises both.
                     - ontology_api_name: Target ontology API identifier (required)
 
             Raises:
@@ -635,7 +638,7 @@ def register_lakeflow_source(spark):
             if not self.token:
                 raise ValueError("Missing required parameter 'token'")
 
-            self.hostname = options.get("hostname")
+            self.hostname = (options.get("hostname") or "").strip()
             if not self.hostname:
                 raise ValueError("Missing required parameter 'hostname'")
 
@@ -643,8 +646,17 @@ def register_lakeflow_source(spark):
             if not self.ontology_api_name:
                 raise ValueError("Missing required parameter 'ontology_api_name'")
 
-            # Build base URL
-            self.base_url = f"https://{self.hostname}"
+            # Normalize hostname into a base URL. Accepts either a bare
+            # hostname (the documented form) or a full URL with scheme —
+            # mirrors the pattern in sources/osipi/osipi_http.py:64-86 so
+            # the user's "I'll just paste my browser URL" mental model
+            # doesn't fail silently with double-scheme strings like
+            # ``https://https://yourcompany.palantirfoundry.com``.
+            # Preserves a user-supplied scheme; otherwise prepends https://.
+            if self.hostname.startswith(("http://", "https://")):
+                self.base_url = self.hostname.rstrip("/")
+            else:
+                self.base_url = f"https://{self.hostname}".rstrip("/")
 
             # Configure authenticated session
             self._session = requests.Session()
@@ -666,6 +678,19 @@ def register_lakeflow_source(spark):
             self._schema_cache: Dict[str, StructType] = {}
             self._metadata_cache: Dict[str, dict] = {}
             self._object_types_cache: Optional[Dict[str, dict]] = None
+
+        def close(self) -> None:
+            """Release the underlying ``requests.Session`` connection pool.
+
+            Spark's data-source lifecycle can construct many connector
+            instances per query; each holds an open keep-alive pool that
+            leaks sockets on long-running pipelines. Callers should
+            invoke ``close()`` when done. Idempotent.
+            """
+            session = getattr(self, "_session", None)
+            if session is not None:
+                session.close()
+                self._session = None
 
         def _ensure_object_types_cached(self) -> None:
             """
@@ -947,16 +972,16 @@ def register_lakeflow_source(spark):
             """
             object_set = self._build_object_set(table_name, where_clause)
             page_token = None
-            emitted = 0
+            # emitted = 0
             while True:
                 records, next_page_token = self._fetch_page(
                     object_set, page_token, page_size, order_by_field
                 )
-                for record in records:
-                    if max_records and emitted >= max_records:
-                        return
+                for record in records:  # pylint: disable=use-yield-from
+                    # if max_records and emitted >= max_records:
+                    #     return
                     yield record
-                    emitted += 1
+                    # emitted += 1
 
                 if not next_page_token:
                     break
@@ -970,7 +995,13 @@ def register_lakeflow_source(spark):
 
             Yields records page by page to avoid loading the entire dataset
             into memory. Only one page (~10K records) is held at a time.
-            Respects ``max_records_per_batch`` for admission control.
+            Streams every record from the source on a single
+            framework-driven pass (``apply_changes_from_snapshot``) —
+            ``max_records_per_batch`` is intentionally not honoured here
+            because snapshot mode has no resume mechanism (offset is
+            always ``{}``); a cap would silently drop records past it.
+            That option remains effective in incremental mode where the
+            ``last_emitted_cursor`` offset enables resume.
 
             Args:
                 table_name: Object type API name
@@ -981,11 +1012,13 @@ def register_lakeflow_source(spark):
                 Tuple of (generator of all records, end offset dict)
             """
             page_size = int(table_options.get("page_size", "1000"))
-            max_records = int(
-                table_options.get(
-                    "max_records_per_batch", self._default_max_records_per_batch
-                )
-            )
+
+            # ``max_records_per_batch`` applies to incremental mode only,
+            # where the next call can resume via ``where: gt
+            # last_emitted_cursor``. Snapshot mode runs in a single
+            # framework-driven pass (``apply_changes_from_snapshot``) with
+            # no mid-snapshot checkpoint, so capping here would silently
+            # drop records past the cap — a data-loss bug.
 
             # if start_offset:
             #     next_offset = start_offset
@@ -993,7 +1026,7 @@ def register_lakeflow_source(spark):
             #     next_offset = {"done": "true"}
 
             return self._generate_all_pages(
-                table_name, page_size, max_records=max_records
+                table_name, page_size,
             ), {}
 
         @staticmethod
@@ -1024,6 +1057,26 @@ def register_lakeflow_source(spark):
             if parsed.tzinfo is None:
                 parsed = parsed.replace(tzinfo=timezone.utc)
             return parsed.astimezone(timezone.utc)
+
+        @staticmethod
+        def _parse_retry_after(header_value: Optional[str]) -> Optional[float]:
+            """Parse the ``Retry-After`` HTTP header into seconds.
+
+            Only handles the integer-seconds form (RFC 7231) — the
+            HTTP-date form is rare in API responses and would add date
+            parsing for negligible benefit. Returns ``None`` for a
+            missing, empty, or unparseable value so the caller falls
+            back to exponential backoff.
+            """
+            if not header_value:
+                return None
+            try:
+                seconds = float(header_value.strip())
+            except (TypeError, ValueError):
+                return None
+            if seconds < 0:
+                return None
+            return seconds
 
         def _cursor_strictly_greater(
             self, new_value: Any, prev_value: Any
@@ -1319,7 +1372,12 @@ def register_lakeflow_source(spark):
                     response = self._session.post(url, json=body, timeout=120)
                 except (requests.ConnectionError, requests.Timeout) as e:
                     if attempt < max_retries - 1:
-                        time.sleep(2 ** attempt)
+                        # Jittered backoff — uniform random multiplier in
+                        # [0.5, 1.5) keeps the mean at 2**attempt but
+                        # decorrelates concurrent Spark tasks so a 429
+                        # storm doesn't have every task retry in lockstep
+                        # against Palantir's per-user rate cap.
+                        time.sleep((2 ** attempt) * (0.5 + random.random()))
                         continue
                     raise RuntimeError(
                         f"Failed to fetch data after {max_retries} retries "
@@ -1329,7 +1387,18 @@ def register_lakeflow_source(spark):
                 last_status = response.status_code
                 if response.status_code in (429, 503):
                     if attempt < max_retries - 1:
-                        time.sleep(2 ** attempt)
+                        # Honour ``Retry-After`` when the server sets it;
+                        # otherwise fall back to exponential backoff. In
+                        # both cases the jitter multiplier is applied so
+                        # concurrent tasks don't unblock in lockstep.
+                        retry_after = self._parse_retry_after(
+                            response.headers.get("Retry-After")
+                        )
+                        base_wait = (
+                            retry_after if retry_after is not None
+                            else (2 ** attempt)
+                        )
+                        time.sleep(base_wait * (0.5 + random.random()))
                         continue
                     raise RuntimeError(
                         f"Failed to fetch data after {max_retries} retries: "
@@ -1344,10 +1413,10 @@ def register_lakeflow_source(spark):
                 next_page_token = data.get("nextPageToken")
                 return records, next_page_token
 
-            raise RuntimeError(
-                f"Failed to fetch data after {max_retries} retries: "
-                f"last status {last_status}"
-            )
+            # raise RuntimeError(
+            #     f"Failed to fetch data after {max_retries} retries: "
+            #     f"last status {last_status}"
+            # )
 
 
     ########################################################

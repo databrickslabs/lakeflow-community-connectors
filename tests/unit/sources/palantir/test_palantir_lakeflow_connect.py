@@ -468,6 +468,186 @@ class TestPalantirCursorTypes:
         assert offset == {"max_cursor_value": "2026-04-02T00:00:00Z"}
 
 
+class TestPalantirSessionCleanup:
+    """``requests.Session`` holds a keep-alive connection pool;
+    Spark's data-source lifecycle constructs many connector instances
+    per query so each leaked pool costs sockets on long-running
+    pipelines. ``close()`` releases the pool.
+    """
+
+    @staticmethod
+    def _connector() -> PalantirLakeflowConnect:
+        return PalantirLakeflowConnect({
+            "token": "fake",
+            "hostname": "fake.palantirfoundry.com",
+            "ontology_api_name": "ontology-fake",
+        })
+
+    def test_close_releases_session(self):
+        c = self._connector()
+        session = c._session
+        with patch.object(session, "close") as session_close:
+            c.close()
+        session_close.assert_called_once()
+        assert c._session is None, (
+            "close() must null out _session so accidental post-close "
+            "API calls fail loudly instead of using a closed pool."
+        )
+
+    def test_close_is_idempotent(self):
+        c = self._connector()
+        c.close()
+        c.close()  # second call must not raise
+
+
+class TestPalantirSnapshotRead:
+    """Snapshot mode (no ``cursor_field`` in table_options) exercises
+    the ``_read_snapshot`` path. The shared-suite parameterised tests
+    (``test_read_table``, ``test_read_terminates``,
+    ``test_every_column_populated_by_at_least_one_record``) run against
+    ``dev_table_config.json``'s FlightsFinal entry, which is CDC-mode
+    (cursor_field=arrivalTimestamp). Without these unit tests, the
+    snapshot path would not be covered by CI at all.
+
+    Three behaviors verified:
+      1. Records returned by ``_fetch_page`` flow through unchanged.
+      2. Offset is ``{}`` — the M1 invariant that lets the framework's
+         equality-based termination kick in after the first call.
+      3. The objectSet passed to ``_fetch_page`` is the base shape
+         (no ``where`` filter), distinguishing snapshot from CDC's
+         ``where: gt`` path.
+    """
+
+    @staticmethod
+    def _connector() -> PalantirLakeflowConnect:
+        c = PalantirLakeflowConnect({
+            "token": "fake",
+            "hostname": "fake.palantirfoundry.com",
+            "ontology_api_name": "ontology-fake",
+        })
+        # Pre-seed the object-type cache so read_table doesn't try to
+        # hit the (unreachable) live API to discover the schema.
+        c._object_types_cache = {
+            "FlightsFinal": {
+                "primaryKey": "flightId",
+                "properties": {
+                    "flightId": {"dataType": {"type": "string"}},
+                    "carrierCode": {"dataType": {"type": "string"}},
+                },
+            }
+        }
+        return c
+
+    def test_snapshot_emits_records(self):
+        c = self._connector()
+        records = [
+            {"flightId": "a", "carrierCode": "AA"},
+            {"flightId": "b", "carrierCode": "BB"},
+        ]
+        with patch.object(c, "_fetch_page", return_value=(records, None)):
+            emitted_iter, _ = c.read_table("FlightsFinal", None, {})
+            emitted = list(emitted_iter)
+        assert [r["flightId"] for r in emitted] == ["a", "b"]
+
+    def test_snapshot_returns_empty_offset_for_one_call_termination(self):
+        """Snapshot mode must return ``{}`` so the framework's
+        equality-based termination fires after one call — no full
+        re-pagination per trigger (the M1 fix)."""
+        c = self._connector()
+        with patch.object(c, "_fetch_page", return_value=([], None)):
+            _, offset = c.read_table("FlightsFinal", None, {})
+        assert offset == {}, (
+            "Snapshot must return {} so framework terminates after one "
+            "call. Returning anything else (e.g. {'done':'true'}) "
+            "triggers a full re-pagination per trigger."
+        )
+
+    def test_snapshot_emits_all_records_ignoring_max_records_per_batch(self):
+        """Snapshot mode must emit every record from the source even
+        when ``max_records_per_batch`` is set small. Snapshot reads
+        run in a single framework-driven pass with no mid-snapshot
+        checkpoint, so capping would silently drop records past the
+        cap — a data-loss bug. ``max_records_per_batch`` applies only
+        to incremental mode where the ``last_emitted_cursor`` offset
+        enables resume on the next microbatch."""
+        c = self._connector()
+        records = [{"flightId": f"r{i}", "carrierCode": "AA"} for i in range(10)]
+        with patch.object(c, "_fetch_page", return_value=(records, None)):
+            emitted_iter, _ = c.read_table(
+                "FlightsFinal", None,
+                {"page_size": "100", "max_records_per_batch": "3"},
+            )
+            emitted = list(emitted_iter)
+        assert len(emitted) == 10, (
+            f"Snapshot truncated by max_records_per_batch: emitted "
+            f"{len(emitted)} of 10. Snapshot mode must stream all "
+            f"records — the cap option applies to incremental only."
+        )
+
+    def test_snapshot_uses_base_object_set_no_filter(self):
+        """Snapshot mode passes a base objectSet (no ``where`` filter)
+        to ``_fetch_page`` — distinct from CDC's filtered ``where: gt``
+        path. Catches accidental filter leakage from the incremental
+        code path."""
+        c = self._connector()
+        with patch.object(c, "_fetch_page", return_value=([], None)) as fetch_spy:
+            list(c.read_table("FlightsFinal", None, {})[0])
+        first_call = fetch_spy.call_args_list[0]
+        object_set = first_call.args[0]
+        assert object_set == {"type": "base", "objectType": "FlightsFinal"}, (
+            f"Expected base objectSet, got: {object_set}"
+        )
+
+
+class TestPalantirHostnameNormalization:
+    """``hostname`` option must accept either the documented bare form
+    (``yourcompany.palantirfoundry.com``) or a full URL pasted from the
+    browser (``https://yourcompany.palantirfoundry.com/``) — silently
+    normalising both into a clean ``self.base_url``. Mirrors the
+    framework convention used in sources/osipi/osipi_http.py.
+    """
+
+    @staticmethod
+    def _make(hostname: str) -> PalantirLakeflowConnect:
+        return PalantirLakeflowConnect({
+            "token": "fake",
+            "hostname": hostname,
+            "ontology_api_name": "ontology-fake",
+        })
+
+    def test_bare_hostname_gets_https_scheme(self):
+        c = self._make("yourcompany.palantirfoundry.com")
+        assert c.base_url == "https://yourcompany.palantirfoundry.com"
+
+    def test_https_scheme_preserved_no_double_prefix(self):
+        # The motivating case from the review nit — must NOT become
+        # ``https://https://...``.
+        c = self._make("https://yourcompany.palantirfoundry.com")
+        assert c.base_url == "https://yourcompany.palantirfoundry.com"
+
+    def test_http_scheme_preserved(self):
+        # Matches the OSIPI convention: a user-supplied scheme is
+        # preserved verbatim rather than silently upgraded.
+        c = self._make("http://yourcompany.palantirfoundry.com")
+        assert c.base_url == "http://yourcompany.palantirfoundry.com"
+
+    def test_trailing_slash_stripped(self):
+        c = self._make("https://yourcompany.palantirfoundry.com/")
+        assert c.base_url == "https://yourcompany.palantirfoundry.com"
+
+    def test_whitespace_stripped(self):
+        c = self._make("  yourcompany.palantirfoundry.com  ")
+        assert c.base_url == "https://yourcompany.palantirfoundry.com"
+
+    def test_empty_hostname_raises(self):
+        with pytest.raises(ValueError, match="hostname"):
+            self._make("")
+
+    def test_whitespace_only_hostname_raises(self):
+        with pytest.raises(ValueError, match="hostname"):
+            self._make("   ")
+
+
 class TestPalantirDecimalMapping:
     """``decimal`` properties must preserve precision/scale via Spark's
     DecimalType rather than coerce to DoubleType (silent precision
@@ -509,10 +689,14 @@ class TestPalantirDecimalMapping:
         assert spark_type == DecimalType(38, 10)
 
 
-def _mock_response(status: int, json_payload: dict = None):
+def _mock_response(status: int, json_payload: dict = None, headers: dict = None):
     """Build a ``requests.Response``-like mock for ``_fetch_page``."""
     r = MagicMock()
     r.status_code = status
+    # Default to an empty dict so ``response.headers.get("...")`` returns
+    # ``None`` (the MagicMock auto-attribute would otherwise return a
+    # nested MagicMock, breaking Retry-After parsing in tests).
+    r.headers = headers or {}
     r.json.return_value = json_payload or {}
     if status >= 400:
         r.raise_for_status.side_effect = requests.HTTPError(
@@ -646,3 +830,100 @@ class TestPalantirFetchPageRetry:
                 c._fetch_page({"type": "base", "objectType": "T"})
         assert post_spy.call_count == 5
         assert isinstance(exc.value.__cause__, requests.ConnectionError)
+
+    def test_retry_backoff_uses_random_jitter(self):
+        """Each retry sleep must include ``random.random()`` jitter so
+        concurrent Spark tasks don't unblock in lockstep against
+        Palantir's per-user rate cap.
+        """
+        c = self._connector()
+        with patch.object(
+            c._session, "post", side_effect=[
+                _mock_response(429),
+                _mock_response(200, {"data": [], "nextPageToken": None}),
+            ]
+        ), patch.object(time, "sleep"), patch(
+            "databricks.labs.community_connector.sources.palantir.palantir.random.random",
+            return_value=0.5,
+        ) as rng:
+            c._fetch_page({"type": "base", "objectType": "T"})
+        assert rng.called, (
+            "Retry backoff must call random.random() for jitter."
+        )
+
+    def test_429_honours_retry_after_seconds_header(self):
+        """When the server returns ``Retry-After: <seconds>``, the
+        connector honours it as the base wait instead of falling back
+        to exponential backoff. Jitter is still applied on top.
+        """
+        c = self._connector()
+        retry_response = _mock_response(429, headers={"Retry-After": "7"})
+        success_response = _mock_response(
+            200, {"data": [], "nextPageToken": None}
+        )
+        sleeps: list = []
+        with patch.object(
+            c._session, "post",
+            side_effect=[retry_response, success_response],
+        ), patch.object(time, "sleep", side_effect=lambda s: sleeps.append(s)):
+            c._fetch_page({"type": "base", "objectType": "T"})
+        assert len(sleeps) == 1
+        # Retry-After=7 with jitter [0.5, 1.5) → sleep in [3.5, 10.5).
+        # Default exponential would have been 2**0 = 1s ± jitter → up
+        # to 1.5s, so any value >= 3.5 proves the header was honoured.
+        assert 3.5 <= sleeps[0] < 10.5, (
+            f"Expected Retry-After=7 honoured with jitter; got {sleeps[0]}"
+        )
+
+    def test_503_honours_retry_after_seconds_header(self):
+        """Same Retry-After contract for 503 as for 429."""
+        c = self._connector()
+        retry_response = _mock_response(503, headers={"Retry-After": "10"})
+        success_response = _mock_response(
+            200, {"data": [], "nextPageToken": None}
+        )
+        sleeps: list = []
+        with patch.object(
+            c._session, "post",
+            side_effect=[retry_response, success_response],
+        ), patch.object(time, "sleep", side_effect=lambda s: sleeps.append(s)):
+            c._fetch_page({"type": "base", "objectType": "T"})
+        assert 5.0 <= sleeps[0] < 15.0
+
+    def test_retry_falls_back_to_exp_backoff_without_retry_after(self):
+        """No ``Retry-After`` header → exponential backoff path
+        (with jitter) — the default behavior."""
+        c = self._connector()
+        sleeps: list = []
+        with patch.object(
+            c._session, "post", side_effect=[
+                _mock_response(429),  # no headers → no Retry-After
+                _mock_response(200, {"data": [], "nextPageToken": None}),
+            ]
+        ), patch.object(time, "sleep", side_effect=lambda s: sleeps.append(s)):
+            c._fetch_page({"type": "base", "objectType": "T"})
+        assert len(sleeps) == 1
+        # attempt=0 → base 2**0 = 1s, jittered to [0.5, 1.5).
+        assert 0.5 <= sleeps[0] < 1.5, (
+            f"Expected exp backoff at attempt=0 with jitter; got {sleeps[0]}"
+        )
+
+    def test_unparseable_retry_after_falls_back_to_exp_backoff(self):
+        """Malformed ``Retry-After`` (e.g. HTTP-date form we don't
+        parse, or garbage) must not crash — fall back to exponential
+        backoff."""
+        c = self._connector()
+        retry_response = _mock_response(
+            429, headers={"Retry-After": "Wed, 21 Oct 2015 07:28:00 GMT"}
+        )
+        success_response = _mock_response(
+            200, {"data": [], "nextPageToken": None}
+        )
+        sleeps: list = []
+        with patch.object(
+            c._session, "post",
+            side_effect=[retry_response, success_response],
+        ), patch.object(time, "sleep", side_effect=lambda s: sleeps.append(s)):
+            c._fetch_page({"type": "base", "objectType": "T"})
+        # Should fall back to attempt=0 exp backoff: [0.5, 1.5).
+        assert 0.5 <= sleeps[0] < 1.5

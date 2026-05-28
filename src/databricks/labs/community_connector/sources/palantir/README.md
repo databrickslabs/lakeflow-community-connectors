@@ -26,7 +26,7 @@ The Lakeflow Palantir Foundry Connector allows you to extract data from Palantir
 | Parameter | Type | Required | Description | Example |
 |-----------|------|----------|-------------|---------|
 | `token` | string | Yes | Bearer token for Palantir API authentication | `eyJwbG50ciI6...` |
-| `hostname` | string | Yes | Palantir Foundry hostname (without https://) | `yourcompany.palantirfoundry.com` |
+| `hostname` | string | Yes | Palantir Foundry hostname. Bare form (`yourcompany.palantirfoundry.com`) is preferred; full URLs like `https://yourcompany.palantirfoundry.com/` are also accepted — the connector normalises both. | `yourcompany.palantirfoundry.com` |
 | `ontology_api_name` | string | Yes | API name of the target ontology | `ontology-282f1207-a9f0-...` |
 
 ### How to Obtain Parameters
@@ -105,7 +105,7 @@ The connector supports the following table-specific options via `table_configura
 |--------|------|-------------|---------|
 | `cursor_field` | string | Property name for incremental sync tracking. Omit for snapshot mode. | `"arrivalTimestamp"` |
 | `page_size` | string | Number of records per API request (default 1000, max 10000) | `"10000"` |
-| `max_records_per_batch` | string | Admission cap per microbatch. Default 100000. Smaller values reduce driver memory; larger values reduce the number of microbatches needed to drain a backlog. | `"50000"` |
+| `max_records_per_batch` | string | Admission cap per microbatch — **incremental mode only** (snapshot mode streams all records in one framework-driven pass with no resume mechanism, so a cap there would silently drop data). Default 100000. Smaller values reduce driver memory; larger values reduce the number of microbatches needed to drain a backlog. | `"50000"` |
 
 ## Supported Objects
 
@@ -224,7 +224,7 @@ Palantir Foundry Ontology
 PalantirLakeflowConnect (palantir.py)
     |
     | Generator yields records page by page (memory-efficient)
-    | Retry with exponential backoff on 429/503
+    | Jittered exp backoff on 429/503/network errors; honours Retry-After
     v
 Lakeflow Framework (Spark PDS + SDP)
     |
@@ -260,7 +260,7 @@ Databricks Delta Table (Unity Catalog)
 
 ### 4. Monitor API Usage
 - Palantir rate limits: 5,000 requests/minute for individual users
-- The connector retries with exponential backoff on `429` / `503` and on connection / timeout errors; non-transient 4xx/5xx responses fail fast so misconfiguration surfaces immediately
+- The connector retries on `429` / `503` and on connection / timeout errors with **jittered exponential backoff** (base `2^attempt` × uniform `[0.5, 1.5)`) so concurrent Spark tasks don't unblock in lockstep. When the server sets a `Retry-After` header on 429/503, the connector honours it as the base wait (with jitter on top). Non-transient 4xx/5xx responses (401, 404, etc.) propagate on the first attempt so misconfiguration surfaces immediately
 - For large datasets, consider scheduling during off-peak hours
 - Use a service user token for higher rate limits
 

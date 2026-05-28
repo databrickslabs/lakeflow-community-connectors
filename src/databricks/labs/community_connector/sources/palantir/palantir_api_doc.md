@@ -23,7 +23,7 @@ curl -X GET \
 Notes:
 - All requests must use HTTPS.
 - Rate limiting for individual users: **5,000 requests/minute** with **30 simultaneous** connections. Service users have no request limit but are capped at **800 simultaneous** connections.
-- Exceeding rate limits returns `429` or `503`. The connector retries those statuses (and `ConnectionError` / `Timeout`) with exponential backoff up to 5 attempts. Non-transient 4xx/5xx responses (e.g. `401` expired token, `404` wrong ontology) propagate on the first attempt so misconfiguration fails fast.
+- Exceeding rate limits returns `429` or `503`. The connector retries those statuses (and `ConnectionError` / `Timeout`) with **jittered exponential backoff** (base `2^attempt` seconds × uniform `[0.5, 1.5)`) up to 5 attempts. When the server sets a `Retry-After` header on 429/503, it is honoured as the base wait (with jitter still applied) — only the integer-seconds form (RFC 7231) is parsed; the HTTP-date form falls back to exponential backoff. Non-transient 4xx/5xx responses (e.g. `401` expired token, `404` wrong ontology) propagate on the first attempt so misconfiguration fails fast.
 
 
 ## **Object List**
@@ -43,7 +43,7 @@ For this connector, Palantir ontology object types are treated as **tables**. Th
 - Data is fetched via `loadObjectSet` with `snapshot=true` for consistent pagination across large datasets.
 - CDC incremental runs use server-side `where: gt` filtering via objectSet composition.
 - Max cursor lookup uses the search endpoint with `orderBy desc, pageSize=1`.
-- Transient errors (429, 503) are retried with exponential backoff (up to 5 attempts).
+- Transient errors (429, 503, `ConnectionError`, `Timeout`) are retried with jittered exponential backoff up to 5 attempts; ``Retry-After`` is honoured on 429/503 when present.
 - Link types, action types, and query types are **not** supported.
 
 
@@ -272,7 +272,7 @@ curl -X POST \
 - Uses a generator to yield records page by page, keeping only one page (~10K records) in memory at a time. Avoids OOM on large datasets.
 - In snapshot mode: base objectSet, pages through all objects.
 - In CDC mode: filtered objectSet with `where: gt` on cursor field. On incremental runs, the API only returns records newer than the checkpoint — no full scan needed.
-- Retries transient errors (429, 503, `ConnectionError`, `Timeout`) with exponential backoff up to 5 attempts. Non-transient 4xx/5xx propagate immediately so misconfiguration (e.g. 401 expired token, 404 wrong ontology) surfaces without burning retry budget.
+- Retries transient errors (429, 503, `ConnectionError`, `Timeout`) with jittered exponential backoff up to 5 attempts. On 429/503, honours the `Retry-After` header as the base wait when present (integer-seconds form). Non-transient 4xx/5xx propagate immediately so misconfiguration (e.g. 401 expired token, 404 wrong ontology) surfaces without burning retry budget.
 - `pageSize` is capped at 10,000.
 
 
@@ -422,9 +422,9 @@ All Palantir API errors follow a consistent JSON structure:
 | 401 | Authentication failure (invalid/expired token) | Raise exception |
 | 403 | Insufficient permissions | Raise exception |
 | 404 | Object type or ontology not found | Raise exception |
-| 429 | Rate limit exceeded | Retry with exponential backoff (up to 5 attempts) |
+| 429 | Rate limit exceeded | Retry with jittered exponential backoff, honouring `Retry-After` header when present (up to 5 attempts) |
 | 500 | Server error | Raise exception |
-| 503 | Service unavailable | Retry with exponential backoff (up to 5 attempts) |
+| 503 | Service unavailable | Retry with jittered exponential backoff, honouring `Retry-After` header when present (up to 5 attempts) |
 
 ### Relevant Error Codes
 
@@ -449,7 +449,7 @@ All Palantir API errors follow a consistent JSON structure:
 | End-of-data signal | `nextPageToken` is `null` or absent |
 | Cross-page limit | None (unlike GET list endpoint which caps at 10K) |
 | Memory efficiency | Generator-based — only one page in memory at a time |
-| Error handling | Exponential backoff retry on 429/503 (up to 5 attempts) |
+| Error handling | Jittered exponential backoff retry on 429/503/network errors (up to 5 attempts); honours `Retry-After` on 429/503 |
 
 
 ## **Rate Limits Summary**
@@ -459,7 +459,7 @@ All Palantir API errors follow a consistent JSON structure:
 | Individual users | 5,000 requests/min | 30 simultaneous |
 | Service users | No request limit | 800 simultaneous |
 
-The connector retries 429/503 errors and `ConnectionError`/`Timeout` with exponential backoff (up to 5 attempts: 1s, 2s, 4s, 8s, 16s). Non-transient 4xx/5xx (e.g. 401, 404) propagate on the first attempt. For production use with large datasets, consider using a service user token for higher concurrency limits.
+The connector retries 429/503 errors and `ConnectionError`/`Timeout` with jittered exponential backoff up to 5 attempts. Base waits are `2^attempt` seconds (1, 2, 4, 8, 16) with a uniform `[0.5, 1.5)` jitter multiplier applied to each — so the actual sleeps fall in `[0.5, 1.5)`, `[1, 3)`, `[2, 6)`, `[4, 12)`, `[8, 24)` seconds. Jitter decorrelates concurrent Spark tasks so a rate-limit storm doesn't have every task retry in lockstep. On 429/503 the `Retry-After` header (integer-seconds form per RFC 7231) is honoured as the base wait when present, with jitter still applied; the HTTP-date form is not parsed and falls back to exponential backoff. Non-transient 4xx/5xx (e.g. 401, 404) propagate on the first attempt. For production use with large datasets, consider using a service user token for higher concurrency limits.
 
 
 ## **References**
