@@ -91,11 +91,10 @@ def query_with_cursor(
     )
 
     payload: dict[str, Any] = {
-        "totalCount": len(filtered),
+        "cursor": next_cursor,
         "results": page,
+        "totalCount": len(filtered),
     }
-    if next_cursor:
-        payload["cursor"] = next_cursor
     return _build_response(prep, status=200, payload=payload)
 
 
