@@ -2,12 +2,13 @@ name: Tests
 
 # Triggers: see pull_request_target rationale in .github/workflows/pylint.yml.
 #
-# The `paths:` filter is an outer gate — if none of these patterns match,
-# the workflow doesn't fire at all (no run record, gate sees not-applicable).
-# Inside the workflow, the `changes` job does *granular* sub-test selection
-# based on which specific files were touched. Both layers coexist: paths
-# filter is the "should this workflow exist for this PR?" check; the
-# `changes` job is the "of the sub-tests, which ones need to run?" check.
+# This workflow fires on every PR (no workflow-level paths filter) so the
+# `summary` job's check_run is always reported on the PR head — branch
+# protection requires `Tests / summary` and would block any PR that
+# silently skipped the workflow. The `changes` job below does *granular*
+# sub-test selection: downstream test-* jobs are conditional and skip
+# when no relevant files changed, while `summary` still runs and
+# aggregates (skipped is treated as success).
 on:
   push:
     branches: [master]
@@ -21,11 +22,6 @@ on:
     # Default types (opened, synchronize, reopened) plus `labeled` so a
     # maintainer's `safe-to-test` add fires CI on the exact labeled SHA.
     types: [opened, synchronize, reopened, labeled]
-    paths:
-      - '**/*.py'
-      - '**/pyproject.toml'
-      - 'requirements/**'
-      - '.github/workflows/tests.yml'
 
 permissions:
   contents: read
@@ -54,9 +50,9 @@ jobs:
       #
       # We do this as an explicit failing shell step rather than a job-
       # level `if:` so the workflow conclusion is `failure` (not
-      # `skipped`) when unauthorized — branch protection and the
-      # Required CI Gate both treat `failure` unambiguously, whereas
-      # `skipped` has historically been treated as `success`.
+      # `skipped`) when unauthorized — branch protection treats `failure`
+      # unambiguously, whereas `skipped` has historically been treated as
+      # `success`.
       - name: Authorize
         env:
           EVENT_NAME: ${{ github.event_name }}
@@ -393,3 +389,42 @@ jobs:
           fi
           echo "Ignore flags: $IGNORE_FLAGS"
           pytest "tests/unit/sources/${SOURCE}/" $IGNORE_FLAGS -v
+
+  # Required merge gate. Branch protection requires `Tests / summary`.
+  # `if: always()` so this fires even when upstream jobs are skipped
+  # (no relevant files changed) or fail. We treat `skipped` as a pass
+  # because matching-paths logic in `changes` legitimately skips entire
+  # sub-suites on PRs that don't touch their files. Anything else
+  # (failure, cancelled) is a hard fail.
+  summary:
+    if: always()
+    needs:
+      - changes
+      - test-libs
+      - test-pipeline
+      - test-example
+      - test-community-connector
+      - test-source
+    runs-on:
+      group: databrickslabs-protected-runner-group
+      labels: linux-ubuntu-latest
+    steps:
+      - name: Aggregate job results
+        env:
+          RESULTS: ${{ toJSON(needs) }}
+        run: |
+          set -euo pipefail
+          echo "Per-job results:"
+          echo "$RESULTS" | jq -r 'to_entries[] | "  \(.key): \(.value.result)"'
+          echo
+          FAILED=$(echo "$RESULTS" | jq -r '
+            to_entries
+            | map(select(.value.result != "success" and .value.result != "skipped"))
+            | .[].key
+          ')
+          if [ -n "$FAILED" ]; then
+            echo "::error::Required jobs did not pass:"
+            echo "$FAILED"
+            exit 1
+          fi
+          echo "All Tests jobs passed or were skipped."

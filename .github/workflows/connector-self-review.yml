@@ -30,8 +30,12 @@ on:
   pull_request:
     branches: [master]
     types: [opened, reopened, ready_for_review, synchronize, labeled]
-    paths:
-      - 'src/databricks/labs/community_connector/sources/**'
+    # No workflow-level `paths:` filter: branch protection requires
+    # `Connector Self-Review / check-self-review-label`, so the workflow
+    # must fire on every PR. `detect-significance` returns false for
+    # PRs that don't touch `sources/**` (no new connectors, ≤100 lines
+    # changed under sources), `check-self-review-label` then skips, and
+    # branch protection treats skipped as success.
 
 permissions:
   contents: read

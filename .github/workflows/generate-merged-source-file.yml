@@ -3,12 +3,11 @@ name: Generate Merged Source File
 
 on:
   pull_request:
-    paths:
-      - 'src/databricks/labs/community_connector/sources/**/*.py'
-      - 'src/databricks/labs/community_connector/libs/utils.py'
-      - 'src/databricks/labs/community_connector/interface/lakeflow_connect.py'
-      - 'src/databricks/labs/community_connector/sparkpds/lakeflow_datasource.py'
-      - '!src/databricks/labs/community_connector/sources/**/test/**'
+    # No workflow-level `paths:` filter on PR events: branch protection
+    # requires `Generate Merged Source File / generate-merged-sources`,
+    # so the workflow must fire on every PR. The `changed-files` step
+    # below short-circuits when no source/interface files changed; the
+    # job then reports success with no work done.
   push:
     branches:
       - master
