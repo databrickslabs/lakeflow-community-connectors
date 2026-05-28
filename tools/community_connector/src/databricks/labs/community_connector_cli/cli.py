@@ -838,8 +838,11 @@ def _check_build_module_available() -> None:
     )
     if result.returncode != 0:
         raise click.ClickException(
-            "The `build` package is required to build connector wheels. "
-            f"Install it with: {sys.executable} -m pip install build"
+            "`build` is not installed in this environment, but is required "
+            "to build connector wheels.\n\n"
+            "Install it with:\n"
+            "    pip install build\n\n"
+            "Then re-run the upload command."
         )
 
 
