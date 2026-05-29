@@ -476,7 +476,13 @@ class IngestionAgentDispatcher:
         connector: Optional[LakeflowConnect],
         init_error: Optional[BaseException] = None,
     ) -> None:
-        self.options = dict(options)
+        # ``CaseInsensitiveDict`` is a dict subclass — ``dict(cid)`` would
+        # materialise a plain dict copy and silently lose the case-
+        # insensitive behaviour that ``LakeflowSource.__init__`` set up.
+        # Idempotent re-wrap keeps lookups working under both Spark
+        # delivery paths.
+        from databricks.labs.community_connector.libs.utils import CaseInsensitiveDict
+        self.options = options if isinstance(options, CaseInsensitiveDict) else CaseInsensitiveDict(options)
         self.connector = connector
         self.init_error = init_error
         self.operation_name = self.options.get(OPERATION)
@@ -541,7 +547,9 @@ class IngestionAgentReader(DataSourceReader):
         connector: Optional[LakeflowConnect],
         init_error: Optional[BaseException],
     ) -> None:
-        self.options = dict(options)
+        # See note in IngestionAgentDispatcher.__init__ — don't unwrap.
+        from databricks.labs.community_connector.libs.utils import CaseInsensitiveDict
+        self.options = options if isinstance(options, CaseInsensitiveDict) else CaseInsensitiveDict(options)
         self.schema = schema
         self.operation = operation
         self.operation_name = operation_name
