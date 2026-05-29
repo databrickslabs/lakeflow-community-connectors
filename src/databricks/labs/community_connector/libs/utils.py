@@ -5,6 +5,62 @@ from decimal import Decimal
 from datetime import datetime
 from typing import Any
 
+
+class CaseInsensitiveDict(dict):
+    """A ``dict`` where string-key lookups (``[]``, ``get``, ``in``) are
+    case-insensitive.
+
+    Some delivery paths for Spark options (notably notebook reads with
+    ``databricks.connection`` going through UC injection) lowercase the
+    option keys before they reach Python — so ``options["tableName"]``
+    raises ``KeyError`` even though the caller wrote
+    ``.option("tableName", ...)``. Other paths preserve case. Wrapping the
+    options dict here lets framework constants like ``TABLE_NAME``
+    and connector lookups like ``options.get("surveyId")`` keep working
+    regardless of which case the underlying dict actually contains.
+
+    Design notes:
+    - **No private instance state.** Cloudpickle reconstructs dict
+      subclasses via ``__new__`` + ``__setitem__`` calls, *bypassing*
+      ``__init__``. Any instance attribute set up in ``__init__`` (e.g. an
+      ``_index``) would be unset at that point and crash with
+      ``AttributeError`` on the executor. We avoid that by scanning the
+      underlying dict's keys on each lookup — fine for the small option
+      dicts Spark delivers.
+    - Iteration / ``items()`` return keys as stored (typically whatever
+      Spark delivered) so connector code that introspects the dict sees
+      the real keys.
+    """
+
+    def __getitem__(self, key):
+        return super().__getitem__(self._resolve(key))
+
+    def __contains__(self, key) -> bool:
+        if isinstance(key, str):
+            return self._find(key) is not None
+        return super().__contains__(key)
+
+    def get(self, key, default=None):
+        if isinstance(key, str):
+            actual = self._find(key)
+            return super().__getitem__(actual) if actual is not None else default
+        return super().get(key, default)
+
+    def _find(self, key: str):
+        lowered = key.lower()
+        for existing in super().keys():
+            if isinstance(existing, str) and existing.lower() == lowered:
+                return existing
+        return None
+
+    def _resolve(self, key):
+        if isinstance(key, str):
+            actual = self._find(key)
+            if actual is None:
+                raise KeyError(key)
+            return actual
+        return key
+
 from pyspark.sql import Row
 from pyspark.sql.types import (
     DataType,

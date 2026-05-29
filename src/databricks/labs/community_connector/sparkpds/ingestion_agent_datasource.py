@@ -93,6 +93,10 @@ def _requires_connector(op: AgentOperation) -> bool:
 _AGENT_RESERVED_KEYS = frozenset(
     {OPERATION, SEARCH, PATH, NAME, METADATA_KEY}
 )
+# Pre-lowercased — some Spark/UC delivery paths lowercase option keys, so
+# membership checks against ``_AGENT_RESERVED_KEYS`` (which contains
+# ``metadataKey`` camelCase) wouldn't match an incoming ``metadatakey``.
+_AGENT_RESERVED_KEYS_LOWER = frozenset(k.lower() for k in _AGENT_RESERVED_KEYS)
 
 
 def _agent_options(options: Mapping[str, str]) -> dict:
@@ -108,9 +112,12 @@ def _connector_options(options: Mapping[str, str]) -> dict:
     (``read_table``, ``get_table_schema``, ``read_table_metadata``).
 
     Strips ``operation`` plus the agent-reserved keys so the connector sees
-    only its own option namespace.
+    only its own option namespace.  Comparison is case-insensitive because
+    some Spark/UC paths lowercase option keys.
     """
-    return {k: v for k, v in options.items() if k not in _AGENT_RESERVED_KEYS}
+    return {
+        k: v for k, v in options.items() if k.lower() not in _AGENT_RESERVED_KEYS_LOWER
+    }
 
 
 # ---------------------------------------------------------------------------
