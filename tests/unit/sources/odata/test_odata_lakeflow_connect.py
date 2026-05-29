@@ -235,9 +235,84 @@ def test_incremental_skips_call_when_caught_up_to_init_ts():
 
 
 @responses.activate
-def test_incremental_max_records_caps_batch():
+def test_incremental_trims_cursor_collision_at_batch_boundary():
+    """When the batch cap lands inside a run of records sharing one cursor
+    value, the trailing same-cursor records must be dropped so the next
+    call's `cursor gt <last>` filter doesn't skip their siblings."""
     _mock_metadata()
-    # 3 rows in one page; cap at 2 → second row's cursor becomes end offset.
+    responses.add(responses.GET, f"{SERVICE_URL}Customers", json={
+        "value": [
+            {"Id": 1, "ModifiedAt": "2024-05-01T00:00:00Z"},
+            {"Id": 2, "ModifiedAt": "2024-05-02T00:00:00Z"},
+            {"Id": 3, "ModifiedAt": "2024-05-03T00:00:00Z"},
+            {"Id": 4, "ModifiedAt": "2024-05-03T00:00:00Z"},  # collision
+            {"Id": 5, "ModifiedAt": "2024-05-03T00:00:00Z"},  # collision (cap)
+        ]
+    }, match_querystring=False)
+
+    c = _make()
+    records, offset = c.read_table(
+        "Customers", None,
+        {"cursor_field": "ModifiedAt", "max_records_per_batch": "5"},
+    )
+    rows = list(records)
+    # Trailing collision group (Id 3,4,5 all at 2024-05-03) must be trimmed
+    # so the next call resumes from 2024-05-02 and re-fetches the whole group.
+    assert [r["Id"] for r in rows] == [1, 2]
+    assert offset == {"cursor": "2024-05-02T00:00:00Z"}
+
+
+@responses.activate
+def test_incremental_all_same_cursor_raises():
+    """If max_records_per_batch is smaller than the largest same-cursor cohort,
+    we cannot make progress without skipping data — surface that loudly."""
+    _mock_metadata()
+    responses.add(responses.GET, f"{SERVICE_URL}Customers", json={
+        "value": [
+            {"Id": 1, "ModifiedAt": "2024-05-01T00:00:00Z"},
+            {"Id": 2, "ModifiedAt": "2024-05-01T00:00:00Z"},
+            {"Id": 3, "ModifiedAt": "2024-05-01T00:00:00Z"},
+        ]
+    }, match_querystring=False)
+
+    c = _make()
+    with pytest.raises(RuntimeError, match="max_records_per_batch"):
+        records, _ = c.read_table(
+            "Customers", None,
+            {"cursor_field": "ModifiedAt", "max_records_per_batch": "3"},
+        )
+        list(records)  # force iteration
+
+
+@responses.activate
+def test_incremental_no_trim_when_below_cap():
+    """Natural exhaustion (len(records) < max) shouldn't trigger boundary
+    trimming — even if the tail records share a cursor."""
+    _mock_metadata()
+    responses.add(responses.GET, f"{SERVICE_URL}Customers", json={
+        "value": [
+            {"Id": 1, "ModifiedAt": "2024-05-01T00:00:00Z"},
+            {"Id": 2, "ModifiedAt": "2024-05-02T00:00:00Z"},
+            {"Id": 3, "ModifiedAt": "2024-05-02T00:00:00Z"},  # ok, not trimmed
+        ]
+    }, match_querystring=False)
+
+    c = _make()
+    records, offset = c.read_table(
+        "Customers", None,
+        {"cursor_field": "ModifiedAt", "max_records_per_batch": "100"},
+    )
+    rows = list(records)
+    assert [r["Id"] for r in rows] == [1, 2, 3]
+    assert offset == {"cursor": "2024-05-02T00:00:00Z"}
+
+
+@responses.activate
+def test_incremental_max_records_caps_batch_with_boundary_drop():
+    """When truncated, the trailing same-cursor group (here just one
+    record at the boundary value) is always dropped. The next call will
+    re-fetch it via `cursor gt <prev_distinct>`."""
+    _mock_metadata()
     responses.add(responses.GET, f"{SERVICE_URL}Customers", json={
         "value": [
             {"Id": 1, "ModifiedAt": "2024-04-01T00:00:00Z"},
@@ -252,8 +327,10 @@ def test_incremental_max_records_caps_batch():
         {"cursor_field": "ModifiedAt", "max_records_per_batch": "2"},
     )
     rows = list(records)
-    assert len(rows) == 2
-    assert offset == {"cursor": "2024-04-02T00:00:00Z"}
+    # max=2 hit, last record (Id 2 at T2) is dropped — its cursor cohort
+    # might have unseen siblings on the next page.
+    assert [r["Id"] for r in rows] == [1]
+    assert offset == {"cursor": "2024-04-01T00:00:00Z"}
 
 
 # ---------------------------------------------------------------------------
