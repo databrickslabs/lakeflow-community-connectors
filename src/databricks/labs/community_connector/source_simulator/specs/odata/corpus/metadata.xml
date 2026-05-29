@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="utf-8"?>
+<edmx:Edmx Version="4.0" xmlns:edmx="http://docs.oasis-open.org/odata/ns/edmx">
+  <edmx:DataServices>
+    <Schema Namespace="NorthwindModel" xmlns="http://docs.oasis-open.org/odata/ns/edm">
+      <EntityType Name="Customer">
+        <Key>
+          <PropertyRef Name="CustomerID"/>
+        </Key>
+        <Property Name="CustomerID" Type="Edm.String" Nullable="false" MaxLength="5"/>
+        <Property Name="CompanyName" Type="Edm.String" Nullable="false" MaxLength="40"/>
+        <Property Name="ContactName" Type="Edm.String"/>
+        <Property Name="ContactTitle" Type="Edm.String"/>
+        <Property Name="Address" Type="Edm.String"/>
+        <Property Name="City" Type="Edm.String"/>
+        <Property Name="Region" Type="Edm.String"/>
+        <Property Name="PostalCode" Type="Edm.String"/>
+        <Property Name="Country" Type="Edm.String"/>
+        <Property Name="Phone" Type="Edm.String"/>
+        <Property Name="Fax" Type="Edm.String"/>
+      </EntityType>
+      <EntityType Name="Order">
+        <Key>
+          <PropertyRef Name="OrderID"/>
+        </Key>
+        <Property Name="OrderID" Type="Edm.Int32" Nullable="false"/>
+        <Property Name="CustomerID" Type="Edm.String" MaxLength="5"/>
+        <Property Name="EmployeeID" Type="Edm.Int32"/>
+        <Property Name="OrderDate" Type="Edm.DateTimeOffset"/>
+        <Property Name="RequiredDate" Type="Edm.DateTimeOffset"/>
+        <Property Name="ShippedDate" Type="Edm.DateTimeOffset"/>
+        <Property Name="ShipVia" Type="Edm.Int32"/>
+        <Property Name="Freight" Type="Edm.Decimal" Precision="19" Scale="4"/>
+        <Property Name="ShipName" Type="Edm.String"/>
+        <Property Name="ShipAddress" Type="Edm.String"/>
+        <Property Name="ShipCity" Type="Edm.String"/>
+        <Property Name="ShipRegion" Type="Edm.String"/>
+        <Property Name="ShipPostalCode" Type="Edm.String"/>
+        <Property Name="ShipCountry" Type="Edm.String"/>
+      </EntityType>
+      <EntityContainer Name="NorthwindEntities">
+        <EntitySet Name="Customers" EntityType="NorthwindModel.Customer"/>
+        <EntitySet Name="Orders" EntityType="NorthwindModel.Order"/>
+      </EntityContainer>
+    </Schema>
+  </edmx:DataServices>
+</edmx:Edmx>

@@ -16,25 +16,83 @@ automatically from the service's `$metadata` endpoint.
 
 ## Setting up the connection (UC)
 
+The connection must be of type `COMMUNITY` and carry `sourceName: odata`
+in its options so the Lakeflow Connect UI lists it under the OData
+connector tile.
+
+### Option A — CLI (recommended)
+
+The `community-connector` CLI builds the right payload from the connector
+spec and sets the auth-method fields correctly. Authenticate with the
+Databricks CLI first.
+
+```bash
+pip install -e tools/community_connector
+export DATABRICKS_CONFIG_PROFILE=<your-profile>
+
+community-connector create_connection odata odata_connection \
+  -o '{
+        "service_url": "https://services.odata.org/V4/Northwind/Northwind.svc/",
+        "token": "<bearer-token>"
+      }' \
+  --spec ./src/databricks/labs/community_connector/sources/odata/connector_spec.yaml
+```
+
+For other auth methods, swap `token` for the relevant fields:
+
+| Auth method | Required option keys |
+|---|---|
+| `bearer` | `token` |
+| `basic` | `username`, `password` |
+| `api_key` | `api_key` (optionally `api_key_header`) |
+| `oauth2` | `oauth2_token_url`, `oauth2_client_id`, `oauth2_client_secret` (optionally `oauth2_scope`) |
+
+### Option B — Python SDK
+
+The `ConnectionType` enum in `databricks-sdk` doesn't yet include
+`COMMUNITY`, so call the REST endpoint directly via `api_client.do(...)`.
+
 ```python
 from databricks.sdk import WorkspaceClient
-from databricks.sdk.service.catalog import ConnectionType, CreateConnection
 
 w = WorkspaceClient()
-w.connections.create(
-    CreateConnection(
-        name="northwind_odata",
-        connection_type=ConnectionType.LAKEFLOW_COMMUNITY,
-        options={
-            "connector": "odata",
-            "service_url": "https://services.odata.org/V4/Northwind/Northwind.svc/",
-            "auth_method": "bearer",
-            "token": "<token>",
-            "externalOptionsAllowList": "cursor_field,select,filter,page_size,max_records_per_batch",
+
+service_url = "https://services.odata.org/V4/Northwind/Northwind.svc/"
+
+w.api_client.do(
+    "POST",
+    "/api/2.1/unity-catalog/connections",
+    body={
+        "name": "odata_connection",
+        "connection_type": "COMMUNITY",
+        "comment": f"service_url={service_url}",
+        "options": {
+            "sourceName": "odata",
+            "service_url": service_url,
+            "token": "<bearer-token>",
+            "externalOptionsAllowList": (
+                "namespace,cursor_field,select,filter,page_size,max_records_per_batch"
+            ),
         },
-    )
+    },
 )
 ```
+
+The connector reads its auth credentials directly from these option
+keys; no `auth_method` / `auth_type` discriminator is needed when only
+one set of credentials is present (the runtime infers `bearer` from the
+presence of `token`, `basic` from `username`+`password`, `api_key` from
+`api_key`, `oauth2` from `oauth2_client_id`+`oauth2_client_secret`).
+
+### Verifying the connection
+
+```bash
+databricks --profile <your-profile> connections get odata_connection
+```
+
+The response must show `connection_type: COMMUNITY` and `options.sourceName: odata`.
+If either is missing, the UI won't list the connection under the OData tile —
+delete it and re-create.
 
 ## Pipeline (ingest.py)
 
@@ -46,15 +104,18 @@ build_pipeline(
     connector_cls=ODataLakeflowConnect,
     tables=[
         {
-            "name": "Customers",
-            "options": {},  # snapshot
+            "table": {
+                "source_table": "Customers",
+            }
         },
         {
-            "name": "Orders",
-            "options": {
-                "cursor_field": "OrderDate",
-                "max_records_per_batch": "5000",
-            },
+            "table": {
+                "source_table": "Orders",
+                "table_configuration": {
+                    "cursor_field": "OrderDate",
+                    "max_records_per_batch": "5000",
+                },
+            }
         },
     ],
 )

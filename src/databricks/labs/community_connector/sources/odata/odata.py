@@ -25,20 +25,19 @@ import base64
 from datetime import date, datetime, timezone
 from decimal import Decimal
 from typing import Any, Iterator
+from urllib.parse import urljoin
 from xml.etree import ElementTree as ET
 
 import requests
 from pyspark.sql.types import (
     BinaryType,
     BooleanType,
-    ByteType,
     DateType,
     DecimalType,
     DoubleType,
     FloatType,
     IntegerType,
     LongType,
-    ShortType,
     StringType,
     StructField,
     StructType,
@@ -58,9 +57,13 @@ from databricks.labs.community_connector.interface.supports_namespaces import (
 _EDM_TO_SPARK = {
     "Edm.String": StringType(),
     "Edm.Boolean": BooleanType(),
-    "Edm.Byte": ByteType(),
-    "Edm.SByte": ByteType(),
-    "Edm.Int16": ShortType(),
+    # Widen integers up to Int32 to IntegerType (the framework's
+    # parse_value doesn't support ShortType or ByteType, so the narrow
+    # EDM widths can't map to their natural Spark types). Int64 needs
+    # the full 64-bit range, so it stays as LongType.
+    "Edm.Byte": IntegerType(),
+    "Edm.SByte": IntegerType(),
+    "Edm.Int16": IntegerType(),
     "Edm.Int32": IntegerType(),
     "Edm.Int64": LongType(),
     "Edm.Single": FloatType(),
@@ -198,17 +201,31 @@ class ODataLakeflowConnect(LakeflowConnect, SupportsNamespaces):
             return iter([]), start_offset
 
         extra_filter = self._cursor_filter(cursor_field, since)
+        # Append primary-key columns as $orderby tie-breakers. Without a
+        # fully unique sort, OData servers that paginate internally (via
+        # `@odata.nextLink` with a value-based skiptoken) can split a
+        # same-cursor cohort across pages: the skiptoken's strict-`>` on
+        # the cursor value drops the unread tail. A unique total ordering
+        # forces the skiptoken to use the key as well, so no rows are lost.
+        namespace = (table_options or {}).get("namespace")
+        order_terms = [f"{cursor_field} asc"]
+        for pk in self._primary_keys_for(table_name, namespace):
+            if pk != cursor_field:
+                order_terms.append(f"{pk} asc")
         url = self._build_url(
             table_name,
             table_options,
             extra_filter=extra_filter,
-            order_by=f"{cursor_field} asc",
+            order_by=",".join(order_terms),
         )
         max_records = int(table_options.get("max_records_per_batch", "5000"))
 
         records: list[dict] = []
         truncated = False
         for row in self._fetch_pages(url):
+            rec_cursor = row.get(cursor_field)
+            if since is not None and rec_cursor is not None and rec_cursor <= since:
+                continue
             records.append(row)
             if len(records) >= max_records:
                 truncated = True
@@ -217,15 +234,32 @@ class ODataLakeflowConnect(LakeflowConnect, SupportsNamespaces):
         if not records:
             return iter([]), start_offset or {}
 
-        # Cursor boundary safety: when we hit the batch cap mid-stream, the
-        # next call resumes with `cursor gt <last_cursor>`. If the trailing
-        # records share that cursor with unseen records on the next page, the
-        # `gt` filter would silently drop them. Trim back to the last distinct
-        # cursor so the boundary is clean.
-        if truncated:
-            records = _trim_to_distinct_cursor_boundary(
-                records, cursor_field, table_name, max_records
-            )
+        # Cursor boundary safety: the next call resumes with
+        # `cursor gt <last_cursor>`, so if the trailing records share that
+        # cursor with unseen records on the next page — OR with concurrently
+        # inserted siblings that arrive before the next call — the `gt`
+        # filter would silently drop them. Trim back to the last distinct
+        # cursor on every batch (not just truncated ones), so a stop/restart
+        # or natural completion can't lose same-cursor inserts at the boundary.
+        # Re-fetched rows on the next call are deduped at the destination
+        # via apply_changes' MERGE on the primary key.
+        trimmed = _trim_to_distinct_cursor_boundary(records, cursor_field)
+        if not trimmed:
+            # Every record in this batch shares one cursor value.
+            if truncated:
+                raise RuntimeError(
+                    f"max_records_per_batch ({max_records}) is too small for "
+                    f"{table_name!r}: every record in the batch shares cursor "
+                    f"value {records[-1].get(cursor_field)!r}. Increase "
+                    f"max_records_per_batch above the largest same-cursor "
+                    f"cohort, or choose a higher-cardinality cursor field."
+                )
+            # Natural exhaustion of a single-cursor cohort. Emit as-is —
+            # trimming would lose data with no way to re-fetch. There's a
+            # residual race for same-cursor rows added between now and any
+            # future call, which is unavoidable without finer cursor resolution.
+        else:
+            records = trimmed
 
         # OData responses ordered by the cursor — last record carries the max.
         last_cursor = records[-1].get(cursor_field)
@@ -266,7 +300,15 @@ class ODataLakeflowConnect(LakeflowConnect, SupportsNamespaces):
         return f"{base}?{'&'.join(params)}"
 
     def _fetch_pages(self, url: str) -> Iterator[dict]:
-        """Walk @odata.nextLink, yielding raw JSON dicts (no coercion)."""
+        """Walk @odata.nextLink, yielding raw JSON dicts (no coercion).
+
+        The OData v4 spec allows @odata.nextLink to be either an absolute
+        URL or a relative one (resolved against the request URL). Some
+        services (e.g. SAP NetWeaver Gateway, certain self-hosted Olingo
+        deployments) return just ``Customers?$skiptoken=...`` and rely on
+        the client to prepend the service root. urljoin handles both
+        cases — absolutes pass through unchanged.
+        """
         session = self._get_session()
         next_url: str | None = url
         while next_url:
@@ -276,7 +318,8 @@ class ODataLakeflowConnect(LakeflowConnect, SupportsNamespaces):
             for item in payload.get("value", []):
                 # Strip OData control properties that aren't real fields.
                 yield {k: v for k, v in item.items() if not k.startswith("@odata.")}
-            next_url = payload.get("@odata.nextLink")
+            raw_next = payload.get("@odata.nextLink")
+            next_url = urljoin(resp.url, raw_next) if raw_next else None
 
     # ------------------------------------------------------------------
     # Auth session
@@ -376,9 +419,7 @@ class ODataLakeflowConnect(LakeflowConnect, SupportsNamespaces):
                     out.append((ns, es.get("Name")))
         return out
 
-    def _entity_type_for(
-        self, table_name: str, namespace: str | None = None
-    ) -> ET.Element:
+    def _entity_type_for(self, table_name: str, namespace: str | None = None) -> ET.Element:
         """Find the EntityType element backing ``table_name``.
 
         When ``namespace`` is None and the same name is declared in more
@@ -433,9 +474,7 @@ class ODataLakeflowConnect(LakeflowConnect, SupportsNamespaces):
             f"{table_name!r} in schema {schema_ns!r}) not found in $metadata."
         )
 
-    def _fields_for(
-        self, table_name: str, namespace: str | None = None
-    ) -> list[StructField]:
+    def _fields_for(self, table_name: str, namespace: str | None = None) -> list[StructField]:
         et = self._entity_type_for(table_name, namespace)
         fields: list[StructField] = []
         for prop in et.findall(f"{_NS_EDM}Property"):
@@ -446,9 +485,7 @@ class ODataLakeflowConnect(LakeflowConnect, SupportsNamespaces):
             fields.append(StructField(name, spark_type, nullable))
         return fields
 
-    def _primary_keys_for(
-        self, table_name: str, namespace: str | None = None
-    ) -> list[str]:
+    def _primary_keys_for(self, table_name: str, namespace: str | None = None) -> list[str]:
         et = self._entity_type_for(table_name, namespace)
         key = et.find(f"{_NS_EDM}Key")
         if key is None:
@@ -474,35 +511,24 @@ class ODataLakeflowConnect(LakeflowConnect, SupportsNamespaces):
 def _trim_to_distinct_cursor_boundary(
     records: list[dict],
     cursor_field: str,
-    table_name: str,
-    max_records: int,
 ) -> list[dict]:
     """Drop trailing records that share the boundary cursor value.
 
-    Called only when ``records`` was truncated at ``max_records``. Walks back
-    from the tail until the cursor value changes, leaving a clean boundary
-    that the next call's ``cursor gt <last>`` filter will pick up cleanly.
+    Walks back from the tail until the cursor value changes, leaving a clean
+    boundary that the next call's ``cursor gt <last>`` filter will pick up
+    cleanly. Drops the boundary record itself — we can't tell whether the
+    next page (or a concurrent insert before the next call) holds more
+    records sharing that cursor value, so we surrender the whole group and
+    let `cursor gt <prev_distinct>` re-fetch them.
 
-    Raises if every record in the batch shares the same cursor value — we
-    can't make progress in that case without skipping data.
+    Returns an empty list when every record shares one cursor value; the
+    caller decides whether that's recoverable (natural exhaustion) or a hard
+    failure (truncated batch with too-small cap).
     """
     boundary = records[-1].get(cursor_field)
-    # Drop every trailing record at the boundary cursor — including
-    # records[-1] itself. We can't tell from inside this batch whether the
-    # next page holds more records sharing this cursor value, so we surrender
-    # the whole group and let the next call's `cursor gt <prev_distinct>`
-    # re-fetch them cleanly.
     trim_idx = len(records)
     while trim_idx > 0 and records[trim_idx - 1].get(cursor_field) == boundary:
         trim_idx -= 1
-    if trim_idx == 0:
-        raise RuntimeError(
-            f"max_records_per_batch ({max_records}) is too small for "
-            f"{table_name!r}: every record in the batch shares cursor "
-            f"value {boundary!r}. Increase max_records_per_batch above the "
-            f"largest same-cursor cohort, or choose a higher-cardinality "
-            f"cursor field."
-        )
     return records[:trim_idx]
 
 
