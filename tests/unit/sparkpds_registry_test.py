@@ -15,6 +15,10 @@ class DummyLakeflowConnect(LakeflowConnect):
 
 class DummyDataSource(LakeflowSource):
     _lakeflow_connect_cls = DummyLakeflowConnect
+
+
+class DummyOverrideFormat(LakeflowSource):
+    _lakeflow_connect_cls = DummyLakeflowConnect
     _format_name = "dummy"
 
 
@@ -80,14 +84,20 @@ def test_invalid_source_raises_type_error():
         registry.register(mock_spark, 42)
 
 
-def test_format_name_comes_from_class_attribute():
-    assert DummyDataSource.name() == "dummy"
+def test_default_format_name_is_lakeflow_connect():
+    """The base class supplies the format name UC injection requires."""
+    assert DummyDataSource.name() == "lakeflow_connect"
+    assert LakeflowSource._format_name == "lakeflow_connect"
 
 
-def test_gmail_keeps_legacy_format_name():
-    """Gmail intentionally uses ``lakeflow_connect`` (not ``gmail``) so its
-    wheel-installed registration matches the merged-file deployment.
-    """
+def test_format_name_can_be_overridden():
+    """A subclass may still override _format_name when it doesn't rely on UC."""
+    assert DummyOverrideFormat.name() == "dummy"
+
+
+def test_gmail_uses_default_format_name():
+    """Gmail inherits the default ``lakeflow_connect`` format so its wheel
+    registration matches the merged-file deployment and UC injection."""
     from databricks.labs.community_connector.sources.gmail import GmailDataSource
 
     assert GmailDataSource.name() == "lakeflow_connect"
@@ -100,9 +110,6 @@ def test_base_lakeflow_source_rejects_direct_instantiation():
 
 def test_find_data_source_returns_class_for_gmail():
     # End-to-end: the gmail package exposes GmailDataSource as documented.
-    # Gmail keeps the legacy ``lakeflow_connect`` format name so notebooks
-    # and pipelines that hardcode it (matching the merged-file deployment)
-    # work unchanged.
     ds_cls = registry.find_data_source("gmail")
     assert issubclass(ds_cls, LakeflowSource)
     assert ds_cls.name() == "lakeflow_connect"
@@ -155,10 +162,9 @@ def _all_source_names() -> list[str]:
 def test_find_data_source_conformance(source_name):
     """Every non-grandfathered source must expose a `<Source>DataSource`.
 
-    The Spark format name (``_format_name``) is the source author's choice —
-    new sources typically use the source name, but a source may pick
-    ``"lakeflow_connect"`` to stay compatible with code that hardcodes the
-    legacy format. We only require that one is set.
+    The Spark format name defaults to ``"lakeflow_connect"`` because UC
+    connection injection looks for that exact string; we assert it here so
+    a future refactor doesn't quietly drop UC compatibility.
     """
     if source_name in _PENDING_MIGRATION:
         pytest.skip(f"{source_name} pre-dates the <Source>DataSource contract")
@@ -167,8 +173,9 @@ def test_find_data_source_conformance(source_name):
     assert ds_cls._lakeflow_connect_cls is not None, (
         f"{ds_cls.__name__} must set _lakeflow_connect_cls"
     )
-    assert ds_cls._format_name, (
-        f"{ds_cls.__name__} must set a non-empty _format_name"
+    assert ds_cls.name() == "lakeflow_connect", (
+        f"{ds_cls.__name__}.name() must be 'lakeflow_connect' so Unity "
+        f"Catalog connection-option injection works; got {ds_cls.name()!r}"
     )
 
 

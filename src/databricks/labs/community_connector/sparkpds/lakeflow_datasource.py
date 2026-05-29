@@ -302,36 +302,38 @@ class LakeflowSource(DataSource):
     """
     PySpark DataSource base for Lakeflow Connect.
 
-    Subclass per source, set the connector class and the Spark format name,
-    then register with Spark::
+    Subclass per source and bind the connector implementation::
 
         from databricks.labs.community_connector.sparkpds import LakeflowSource
         from .gmail import GmailLakeflowConnect
 
         class GmailDataSource(LakeflowSource):
             _lakeflow_connect_cls = GmailLakeflowConnect
-            _format_name = "gmail"
 
         spark.dataSource.register(GmailDataSource)
-        spark.read.format("gmail").option(...).load()
+        spark.read.format("lakeflow_connect").option(...).load()
+
+    The Spark format name defaults to ``"lakeflow_connect"`` because Unity
+    Catalog connection-option injection looks for that exact string; a
+    source may override :attr:`_format_name` only if it doesn't rely on UC
+    injection.
     """
 
-    # Subclasses MUST set both. Left as ``None`` here so a missing override
-    # fails loudly at instantiation rather than silently going through with
-    # the abstract ``LakeflowConnect`` base.
+    # Subclasses MUST set the connector class. Left as ``None`` here so a
+    # missing override fails loudly at instantiation. ``_format_name``
+    # defaults to ``"lakeflow_connect"`` — the format string UC connection
+    # injection expects — so per-source subclasses normally don't override it.
     _lakeflow_connect_cls: type[LakeflowConnect] | None = None
-    _format_name: str | None = None
+    _format_name: str = "lakeflow_connect"
 
     def __init__(self, options):
         cls = type(self)
-        if cls._lakeflow_connect_cls is None or cls._format_name is None:
+        if cls._lakeflow_connect_cls is None:
             raise TypeError(
-                f"{cls.__name__} must set '_lakeflow_connect_cls' and "
-                f"'_format_name' class attributes. Subclass LakeflowSource "
-                f"per source, e.g.:\n\n"
+                f"{cls.__name__} must set '_lakeflow_connect_cls'. "
+                f"Subclass LakeflowSource per source, e.g.:\n\n"
                 f"    class GmailDataSource(LakeflowSource):\n"
                 f"        _lakeflow_connect_cls = GmailLakeflowConnect\n"
-                f"        _format_name = \"gmail\"\n"
             )
         self.options = options
         self._agent_dispatcher: IngestionAgentDispatcher | None = None

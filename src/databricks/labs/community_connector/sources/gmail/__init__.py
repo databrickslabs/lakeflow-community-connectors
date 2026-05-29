@@ -19,11 +19,6 @@ from databricks.labs.community_connector.sparkpds import LakeflowSource
 
 class GmailDataSource(LakeflowSource):
     _lakeflow_connect_cls = GmailLakeflowConnect
-    # Keep the legacy format name so notebooks/pipelines that hardcode
-    # ``spark.read.format("lakeflow_connect")`` (matching the merged-file
-    # deployment from ``_generated_gmail_python_source.py``) continue to
-    # work when the gmail wheel is installed directly.
-    _format_name = "lakeflow_connect"
 
 
 __all__ = ["GmailLakeflowConnect", "GmailDataSource"]

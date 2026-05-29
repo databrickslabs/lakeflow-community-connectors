@@ -6,7 +6,6 @@ from databricks.labs.community_connector.sparkpds import LakeflowSource
 
 class ExampleDataSource(LakeflowSource):
     _lakeflow_connect_cls = ExampleLakeflowConnect
-    _format_name = "example"
 
 
 __all__ = ["ExampleLakeflowConnect", "ExampleDataSource"]
