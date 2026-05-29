@@ -1,3 +1,5 @@
+from pathlib import Path
+
 import pytest
 from unittest.mock import patch, MagicMock
 
@@ -92,3 +94,72 @@ def test_find_data_source_returns_class_for_gmail():
     ds_cls = registry.find_data_source("gmail")
     assert issubclass(ds_cls, LakeflowSource)
     assert ds_cls.name() == "gmail"
+
+
+# ---------------------------------------------------------------------------
+# Per-source conformance: every NEW source must expose a `<Source>DataSource`
+# that find_data_source() can locate. Sources that pre-date this contract are
+# listed in _PENDING_MIGRATION and skip the check.  The set is intentionally
+# frozen — a new source that hasn't migrated will fail the test, forcing the
+# author to either add a DataSource subclass to their package's __init__.py
+# (preferred) or explicitly opt out by editing this list.
+# ---------------------------------------------------------------------------
+
+_SOURCES_DIR = Path(__file__).resolve().parents[2] / "src" / "databricks" / "labs" / "community_connector" / "sources"
+
+_PENDING_MIGRATION = frozenset({
+    "actitime",
+    "adme",
+    "appsflyer",
+    "azure_devops",
+    "dicomweb",
+    "fhir",
+    "github",
+    "google_analytics_aggregated",
+    "google_sheets_docs",
+    "hubspot",
+    "microsoft_teams",
+    "mixpanel",
+    "osipi",
+    "qualtrics",
+    "sap_successfactors",
+    "shopify",
+    "surveymonkey",
+    "zendesk",
+    "zoho_crm",
+})
+
+
+def _all_source_names() -> list[str]:
+    """All source-package names that have a primary connector module."""
+    return sorted(
+        d.name
+        for d in _SOURCES_DIR.iterdir()
+        if d.is_dir() and (d / f"{d.name}.py").exists()
+    )
+
+
+@pytest.mark.parametrize("source_name", _all_source_names())
+def test_find_data_source_conformance(source_name):
+    """Every non-grandfathered source must expose a `<Source>DataSource`."""
+    if source_name in _PENDING_MIGRATION:
+        pytest.skip(f"{source_name} pre-dates the <Source>DataSource contract")
+    ds_cls = registry.find_data_source(source_name)
+    assert issubclass(ds_cls, LakeflowSource)
+    assert ds_cls.name() == source_name, (
+        f"{ds_cls.__name__}._format_name must equal the package name "
+        f"{source_name!r}, got {ds_cls.name()!r}"
+    )
+    assert ds_cls._lakeflow_connect_cls is not None, (
+        f"{ds_cls.__name__} must set _lakeflow_connect_cls"
+    )
+
+
+def test_pending_migration_list_has_no_strays():
+    """A source that has migrated should be removed from the exempt list."""
+    sources_on_disk = set(_all_source_names())
+    stale = _PENDING_MIGRATION - sources_on_disk
+    assert not stale, (
+        f"Pending-migration list references sources that no longer exist: {stale}. "
+        f"Remove them from _PENDING_MIGRATION."
+    )
