@@ -23,11 +23,10 @@ on:
     # Default types (opened, synchronize, reopened) plus `labeled` so a
     # maintainer's `safe-to-test` add fires CI on the exact labeled SHA.
     types: [opened, synchronize, reopened, labeled]
-    paths:
-      - '**/*.py'
-      - 'pyproject.toml'
-      - 'requirements/**'
-      - '.github/workflows/pylint.yml'
+    # No workflow-level `paths:` filter on PR events: branch protection
+    # requires `Pylint / build (3.10)`, so the workflow must fire on
+    # every PR. Lint runs against the full source tree; PRs that touch
+    # nothing lint-relevant still get a clean pass.
 
 permissions:
   contents: read
@@ -47,8 +46,8 @@ jobs:
     # label, and only on the exact event (`action == 'labeled' &&
     # label.name == 'safe-to-test'`) — a synchronize after labeling
     # does NOT pass. Explicit failure (rather than a job-level `if:`
-    # skip) ensures the Required CI Gate sees `failure`, not the
-    # ambiguous `skipped`. See CONTRIBUTING.md.
+    # skip) ensures branch protection sees `failure`, not the ambiguous
+    # `skipped`. See CONTRIBUTING.md.
     - name: Authorize
       env:
         EVENT_NAME: ${{ github.event_name }}
