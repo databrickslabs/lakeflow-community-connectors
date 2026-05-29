@@ -93,9 +93,6 @@ def _requires_connector(op: AgentOperation) -> bool:
 _AGENT_RESERVED_KEYS = frozenset(
     {OPERATION, SEARCH, PATH, NAME, METADATA_KEY}
 )
-# Pre-lowercased for case-insensitive membership checks against options
-# keys delivered by Spark's CaseInsensitiveStringMap.
-_AGENT_RESERVED_KEYS_LOWER = frozenset(k.lower() for k in _AGENT_RESERVED_KEYS)
 
 
 def _agent_options(options: Mapping[str, str]) -> dict:
@@ -111,12 +108,9 @@ def _connector_options(options: Mapping[str, str]) -> dict:
     (``read_table``, ``get_table_schema``, ``read_table_metadata``).
 
     Strips ``operation`` plus the agent-reserved keys so the connector sees
-    only its own option namespace.  Comparison is case-insensitive because
-    Spark lowercases option keys when serialising to Python.
+    only its own option namespace.
     """
-    return {
-        k: v for k, v in options.items() if k.lower() not in _AGENT_RESERVED_KEYS_LOWER
-    }
+    return {k: v for k, v in options.items() if k not in _AGENT_RESERVED_KEYS}
 
 
 # ---------------------------------------------------------------------------
@@ -475,9 +469,7 @@ class IngestionAgentDispatcher:
         connector: Optional[LakeflowConnect],
         init_error: Optional[BaseException] = None,
     ) -> None:
-        # Idempotent — already case-insensitive if LakeflowSource wrapped it.
-        from databricks.labs.community_connector.libs.utils import CaseInsensitiveDict
-        self.options = options if isinstance(options, CaseInsensitiveDict) else CaseInsensitiveDict(options)
+        self.options = dict(options)
         self.connector = connector
         self.init_error = init_error
         self.operation_name = self.options.get(OPERATION)
@@ -542,8 +534,7 @@ class IngestionAgentReader(DataSourceReader):
         connector: Optional[LakeflowConnect],
         init_error: Optional[BaseException],
     ) -> None:
-        from databricks.labs.community_connector.libs.utils import CaseInsensitiveDict
-        self.options = options if isinstance(options, CaseInsensitiveDict) else CaseInsensitiveDict(options)
+        self.options = dict(options)
         self.schema = schema
         self.operation = operation
         self.operation_name = operation_name

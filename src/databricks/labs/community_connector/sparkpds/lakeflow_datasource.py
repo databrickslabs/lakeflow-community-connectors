@@ -18,7 +18,7 @@ from databricks.labs.community_connector.interface import (
     SupportsPartition,
     SupportsPartitionedStream,
 )
-from databricks.labs.community_connector.libs.utils import CaseInsensitiveDict, parse_value
+from databricks.labs.community_connector.libs.utils import parse_value
 from databricks.labs.community_connector.sparkpds.ingestion_agent_datasource import (
     IngestionAgentDispatcher,
     OPERATION,
@@ -335,13 +335,7 @@ class LakeflowSource(DataSource):
                 f"    class GmailDataSource(LakeflowSource):\n"
                 f"        _lakeflow_connect_cls = GmailLakeflowConnect\n"
             )
-        # Spark's Python DataSource API delivers options through
-        # CaseInsensitiveStringMap, whose serialised form has lowercased keys.
-        # Wrap so framework constants like ``TABLE_NAME = "tableName"`` and
-        # ``SCHEMA_NAME = "schemaName"`` keep working regardless of the
-        # casing Spark hands us, and pass the wrapped view downstream.
-        self.options = CaseInsensitiveDict(options)
-        options = self.options
+        self.options = options
         self._agent_dispatcher: IngestionAgentDispatcher | None = None
         connect_cls = cls._lakeflow_connect_cls
         # Agent-operation mode: ``operation`` option routes through the
