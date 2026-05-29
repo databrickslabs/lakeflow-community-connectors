@@ -1,0 +1,46 @@
+# Alchemy Community Connector Spec
+# This file defines the specification for the connector including
+# connection parameters and allowlist options.
+
+# ============================================================================
+# Connection Parameters
+# These are provided when creating the Unity Catalog connection.
+# ============================================================================
+display_name: Alchemy
+connection:
+  parameters:
+    - name: api_key
+      type: string
+      required: true
+      secret: true
+      description: >
+        Alchemy API key for authenticating requests to the Alchemy APIs.
+        Obtain this from the Alchemy Dashboard (https://dashboard.alchemy.com).
+        WARNING: This key appears in URL paths; use the Alchemy Dashboard
+        to set per-key IP allowlists and other restrictions to limit access.
+
+    - name: network
+      type: string
+      required: false
+      description: >
+        Network applied to every table on this connection. Databricks
+        does not permit overriding connection-level options at the
+        table level, so per-table network selection is not supported —
+        create a separate UC connection per chain if you need to
+        ingest from multiple networks.
+        Defaults to "eth-mainnet" if not specified.
+        Common values: eth-mainnet, sepolia-testnet, base-mainnet,
+        base-sepolia, polygon-mainnet, polygon-mumbai, arbitrum-mainnet,
+        arbitrum-sepolia, optimism-mainnet, optimism-sepolia.
+
+# ============================================================================
+# External Options Allowlist
+# These table-specific options must be included in the externalOptionsAllowList
+# parameter of the UC connection to allow them to be passed through.
+# Use a comma-separated string of option names.
+#
+# ``network`` is intentionally NOT in this list: it's a connection-level
+# parameter (above), and Databricks rejects table-level overrides of
+# connection options (INVALID_DATASOURCE_OPTION_OVERRIDE_ATTEMPT).
+# ============================================================================
+external_options_allowlist: "wallet_address,contract_address,token_id,symbols,addresses,start_time,end_time,interval,with_market_data,max_records_per_batch,symbol,partition_days,limit,page_size,token_type,collection_slug"
