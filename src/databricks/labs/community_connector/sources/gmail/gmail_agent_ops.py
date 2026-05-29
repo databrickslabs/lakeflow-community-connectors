@@ -191,14 +191,18 @@ def _compose_query(options: Mapping[str, str]) -> Optional[str]:
 
 def _table_options_with_query(
     options: Mapping[str, str], table_name: str
-) -> dict:
+) -> "CaseInsensitiveDict":
     """Return connector-side options with the composed ``q`` injected.
 
     Stripped of the typed filter keys (consumed here) and the agent-reserved
     keys; the connector sees only its own option namespace plus the merged
-    ``q``.
+    ``q``. Keeps the ``CaseInsensitiveDict`` wrapper so the connector's
+    camelCase option lookups (``maxResults``, ``labelIds``,
+    ``includeSpamTrash``) keep working when Spark delivered the keys
+    lowercased.
     """
-    base = dict(_connector_options(options))
+    from databricks.labs.community_connector.libs.utils import CaseInsensitiveDict
+    base = CaseInsensitiveDict(_connector_options(options))
     typed_keys = {name for name, _ in _FILTER_RENDERERS}
     for key in typed_keys:
         base.pop(key, None)

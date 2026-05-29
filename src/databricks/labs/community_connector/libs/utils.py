@@ -46,6 +46,19 @@ class CaseInsensitiveDict(dict):
             return super().__getitem__(actual) if actual is not None else default
         return super().get(key, default)
 
+    def pop(self, key, *args):
+        if isinstance(key, str):
+            actual = self._find(key)
+            if actual is not None:
+                return super().pop(actual)
+            if args:
+                return args[0]
+            raise KeyError(key)
+        return super().pop(key, *args)
+
+    def __delitem__(self, key):
+        super().__delitem__(self._resolve(key))
+
     def _find(self, key: str):
         lowered = key.lower()
         for existing in super().keys():
