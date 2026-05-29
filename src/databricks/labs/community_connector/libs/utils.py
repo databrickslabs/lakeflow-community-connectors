@@ -3,7 +3,65 @@
 import base64
 from decimal import Decimal
 from datetime import datetime
-from typing import Any
+from typing import Any, Mapping
+
+
+class CaseInsensitiveDict(dict):
+    """A ``dict`` where string-key lookups (``[]``, ``get``, ``in``) are
+    case-insensitive.
+
+    Spark's Python DataSource delivers options wrapped in a
+    ``CaseInsensitiveStringMap`` that lowercases keys before they reach
+    Python — so ``options["tableName"]`` raises ``KeyError`` even though
+    the caller wrote ``.option("tableName", ...)``. Wrapping the dict
+    here lets the framework keep its camelCase constants (``TABLE_NAME``,
+    ``SCHEMA_NAME``, …) while still finding the values Spark stored
+    under their lowercased form.
+
+    Iteration and ``items()`` return the keys as stored (typically
+    lowercased) so connector code that introspects the dict sees what
+    Spark actually delivered.
+    """
+
+    def __init__(self, data: Mapping[str, Any] | None = None) -> None:
+        super().__init__()
+        self._index: dict[str, str] = {}
+        if data:
+            for key, value in dict(data).items():
+                self[key] = value
+
+    def __setitem__(self, key, value) -> None:
+        super().__setitem__(key, value)
+        if isinstance(key, str):
+            self._index[key.lower()] = key
+
+    def __delitem__(self, key) -> None:
+        actual = self._resolve(key)
+        super().__delitem__(actual)
+        if isinstance(actual, str):
+            self._index.pop(actual.lower(), None)
+
+    def __getitem__(self, key):
+        return super().__getitem__(self._resolve(key))
+
+    def __contains__(self, key) -> bool:
+        if isinstance(key, str):
+            return key.lower() in self._index
+        return super().__contains__(key)
+
+    def get(self, key, default=None):
+        if isinstance(key, str):
+            actual = self._index.get(key.lower())
+            return super().__getitem__(actual) if actual is not None else default
+        return super().get(key, default)
+
+    def _resolve(self, key):
+        if isinstance(key, str):
+            actual = self._index.get(key.lower())
+            if actual is None:
+                raise KeyError(key)
+            return actual
+        return key
 
 from pyspark.sql import Row
 from pyspark.sql.types import (
