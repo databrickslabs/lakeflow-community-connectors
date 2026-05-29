@@ -3,7 +3,7 @@
 import base64
 from decimal import Decimal
 from datetime import datetime
-from typing import Any
+from typing import Any, Mapping
 
 
 class CaseInsensitiveDict(dict):
@@ -18,37 +18,46 @@ class CaseInsensitiveDict(dict):
     ``SCHEMA_NAME``, …) while still finding the values Spark stored
     under their lowercased form.
 
-    No private instance state — pickling/cloudpickle round-trips work
-    through the underlying dict alone. Lookups scan the (typically small)
-    options dict; this is fine for Spark's option set and keeps the class
-    safe under cloudpickle, which reconstructs dict subclasses via
-    ``__new__`` + repeated ``__setitem__`` calls (bypassing ``__init__``).
+    Iteration and ``items()`` return the keys as stored (typically
+    lowercased) so connector code that introspects the dict sees what
+    Spark actually delivered.
     """
+
+    def __init__(self, data: Mapping[str, Any] | None = None) -> None:
+        super().__init__()
+        self._index: dict[str, str] = {}
+        if data:
+            for key, value in dict(data).items():
+                self[key] = value
+
+    def __setitem__(self, key, value) -> None:
+        super().__setitem__(key, value)
+        if isinstance(key, str):
+            self._index[key.lower()] = key
+
+    def __delitem__(self, key) -> None:
+        actual = self._resolve(key)
+        super().__delitem__(actual)
+        if isinstance(actual, str):
+            self._index.pop(actual.lower(), None)
 
     def __getitem__(self, key):
         return super().__getitem__(self._resolve(key))
 
     def __contains__(self, key) -> bool:
         if isinstance(key, str):
-            return self._find(key) is not None
+            return key.lower() in self._index
         return super().__contains__(key)
 
     def get(self, key, default=None):
         if isinstance(key, str):
-            actual = self._find(key)
+            actual = self._index.get(key.lower())
             return super().__getitem__(actual) if actual is not None else default
         return super().get(key, default)
 
-    def _find(self, key: str):
-        lowered = key.lower()
-        for existing in super().keys():
-            if isinstance(existing, str) and existing.lower() == lowered:
-                return existing
-        return None
-
     def _resolve(self, key):
         if isinstance(key, str):
-            actual = self._find(key)
+            actual = self._index.get(key.lower())
             if actual is None:
                 raise KeyError(key)
             return actual
