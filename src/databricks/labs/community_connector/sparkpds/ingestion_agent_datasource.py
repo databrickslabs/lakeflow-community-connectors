@@ -697,9 +697,15 @@ def _validate_required_parameters(
     """
     for param in getattr(op, "parameters", ()):
         if param.required and not options.get(param.name):
+            # Include the actual option keys present — Spark's option
+            # delivery has been the source of subtle bugs (lower-casing,
+            # allow-list filtering by UC, etc.).  Surfacing the keys here
+            # turns "missing tableName" into something diagnosable.
+            present = sorted(options.keys())
             raise AgentError(
                 ErrorCode.BAD_REQUEST,
-                f"Operation '{op.name}' requires option '{param.name}'.",
+                f"Operation '{op.name}' requires option '{param.name}'. "
+                f"Options received: {present}",
             )
 
 
