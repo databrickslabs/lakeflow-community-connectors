@@ -74,7 +74,7 @@ connection:
 # through to the connector at query time. Combined for read-side
 # table_configuration options + agent-operation parameters.
 # ============================================================================
-external_options_allowlist: "q,labelIds,maxResults,includeSpamTrash,format,max_records_per_batch,after_date,before_date,newer_than,subject,from_address,to_address,label,has_attachment,is_unread,query,message_id,attachment_id,drive_file_id,volume_path,export_mime_type"
+external_options_allowlist: "tableName,tableNameList,tableConfigs,operation,q,labelIds,maxResults,includeSpamTrash,format,max_records_per_batch,after_date,before_date,newer_than,subject,from_address,to_address,label,has_attachment,is_unread,query,message_id,attachment_id,drive_file_id,volume_path,export_mime_type"
 
 # ============================================================================
 # Supported Tables (10 — 100% Gmail API coverage)
