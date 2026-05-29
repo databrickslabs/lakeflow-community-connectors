@@ -84,6 +84,15 @@ def test_format_name_comes_from_class_attribute():
     assert DummyDataSource.name() == "dummy"
 
 
+def test_gmail_keeps_legacy_format_name():
+    """Gmail intentionally uses ``lakeflow_connect`` (not ``gmail``) so its
+    wheel-installed registration matches the merged-file deployment.
+    """
+    from databricks.labs.community_connector.sources.gmail import GmailDataSource
+
+    assert GmailDataSource.name() == "lakeflow_connect"
+
+
 def test_base_lakeflow_source_rejects_direct_instantiation():
     with pytest.raises(TypeError, match="_lakeflow_connect_cls"):
         LakeflowSource({})
@@ -91,9 +100,12 @@ def test_base_lakeflow_source_rejects_direct_instantiation():
 
 def test_find_data_source_returns_class_for_gmail():
     # End-to-end: the gmail package exposes GmailDataSource as documented.
+    # Gmail keeps the legacy ``lakeflow_connect`` format name so notebooks
+    # and pipelines that hardcode it (matching the merged-file deployment)
+    # work unchanged.
     ds_cls = registry.find_data_source("gmail")
     assert issubclass(ds_cls, LakeflowSource)
-    assert ds_cls.name() == "gmail"
+    assert ds_cls.name() == "lakeflow_connect"
 
 
 # ---------------------------------------------------------------------------
@@ -141,17 +153,22 @@ def _all_source_names() -> list[str]:
 
 @pytest.mark.parametrize("source_name", _all_source_names())
 def test_find_data_source_conformance(source_name):
-    """Every non-grandfathered source must expose a `<Source>DataSource`."""
+    """Every non-grandfathered source must expose a `<Source>DataSource`.
+
+    The Spark format name (``_format_name``) is the source author's choice —
+    new sources typically use the source name, but a source may pick
+    ``"lakeflow_connect"`` to stay compatible with code that hardcodes the
+    legacy format. We only require that one is set.
+    """
     if source_name in _PENDING_MIGRATION:
         pytest.skip(f"{source_name} pre-dates the <Source>DataSource contract")
     ds_cls = registry.find_data_source(source_name)
     assert issubclass(ds_cls, LakeflowSource)
-    assert ds_cls.name() == source_name, (
-        f"{ds_cls.__name__}._format_name must equal the package name "
-        f"{source_name!r}, got {ds_cls.name()!r}"
-    )
     assert ds_cls._lakeflow_connect_cls is not None, (
         f"{ds_cls.__name__} must set _lakeflow_connect_cls"
+    )
+    assert ds_cls._format_name, (
+        f"{ds_cls.__name__} must set a non-empty _format_name"
     )
 
 
