@@ -1,7 +1,101 @@
 [
-  {"resourceType": "Patient", "id": "p1", "meta": {"lastUpdated": "2024-01-01T00:00:00+00:00"}, "gender": "female", "birthDate": "1985-03-12"},
-  {"resourceType": "Patient", "id": "p2", "meta": {"lastUpdated": "2024-01-02T00:00:00+00:00"}, "gender": "male", "birthDate": "1990-06-15"},
-  {"resourceType": "Patient", "id": "p3", "meta": {"lastUpdated": "2024-01-03T00:00:00+00:00"}, "gender": "female", "birthDate": "1978-11-30"},
-  {"resourceType": "Patient", "id": "p4", "meta": {"lastUpdated": "2024-01-04T00:00:00+00:00"}, "gender": "male", "birthDate": "2001-04-22"},
-  {"resourceType": "Patient", "id": "p5", "meta": {"lastUpdated": "2024-01-05T00:00:00+00:00"}, "gender": "female", "birthDate": "1965-09-10"}
+  {
+    "resourceType": "Patient",
+    "id": "p1",
+    "meta": {"lastUpdated": "2024-01-01T00:00:00+00:00"},
+    "identifier": [
+      {"system": "https://fhir.nhs.uk/Id/nhs-number", "value": "9000000009", "use": "official"}
+    ],
+    "active": true,
+    "gender": "female",
+    "birthDate": "1985-03-12",
+    "maritalStatus": {
+      "coding": [
+        {"system": "http://terminology.hl7.org/CodeSystem/v3-MaritalStatus", "code": "M", "display": "Married"}
+      ],
+      "text": "Married"
+    },
+    "managingOrganization": {"reference": "Organization/org-1", "display": "Example NHS Trust"},
+    "extension": [
+      {
+        "url": "https://fhir.hl7.org.uk/StructureDefinition/Extension-UKCore-EthnicCategory",
+        "valueCodeableConcept": {
+          "coding": [
+            {"system": "https://fhir.hl7.org.uk/CodeSystem/UKCore-EthnicCategory", "code": "A", "display": "British, Mixed British"}
+          ]
+        }
+      },
+      {
+        "url": "https://fhir.hl7.org.uk/StructureDefinition/Extension-UKCore-BirthSex",
+        "valueCodeableConcept": {
+          "coding": [
+            {"system": "http://hl7.org/fhir/administrative-gender", "code": "female", "display": "Female"}
+          ]
+        }
+      },
+      {
+        "url": "http://hl7.org/fhir/StructureDefinition/patient-interpreterRequired",
+        "valueBoolean": false
+      },
+      {
+        "url": "https://fhir.hl7.org.uk/StructureDefinition/Extension-UKCore-ResidentialStatus",
+        "valueCodeableConcept": {
+          "coding": [
+            {"system": "https://fhir.hl7.org.uk/CodeSystem/UKCore-ResidentialStatus", "code": "H", "display": "UK Resident"}
+          ]
+        }
+      }
+    ]
+  },
+  {
+    "resourceType": "Patient",
+    "id": "p2",
+    "meta": {"lastUpdated": "2024-01-02T00:00:00+00:00"},
+    "active": true,
+    "gender": "male",
+    "birthDate": "1990-06-15",
+    "deceasedBoolean": false,
+    "extension": [
+      {
+        "url": "https://fhir.hl7.org.uk/StructureDefinition/Extension-UKCore-DeathNotificationStatus",
+        "extension": [
+          {
+            "url": "deathNotificationStatus",
+            "valueCodeableConcept": {
+              "coding": [
+                {"system": "https://fhir.hl7.org.uk/CodeSystem/UKCore-DeathNotificationStatus", "code": "1", "display": "Informal - death notice received via an update from a relative"}
+              ]
+            }
+          }
+        ]
+      },
+      {
+        "url": "http://hl7.org/fhir/StructureDefinition/patient-interpreterRequired",
+        "valueBoolean": true
+      }
+    ]
+  },
+  {
+    "resourceType": "Patient",
+    "id": "p3",
+    "meta": {"lastUpdated": "2024-01-03T00:00:00+00:00"},
+    "active": false,
+    "gender": "female",
+    "birthDate": "1978-11-30",
+    "deceasedDateTime": "2023-08-14T10:30:00+00:00"
+  },
+  {
+    "resourceType": "Patient",
+    "id": "p4",
+    "meta": {"lastUpdated": "2024-01-04T00:00:00+00:00"},
+    "gender": "male",
+    "birthDate": "2001-04-22"
+  },
+  {
+    "resourceType": "Patient",
+    "id": "p5",
+    "meta": {"lastUpdated": "2024-01-05T00:00:00+00:00"},
+    "gender": "female",
+    "birthDate": "1965-09-10"
+  }
 ]

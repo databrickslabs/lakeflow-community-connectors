@@ -57,9 +57,13 @@ tests/unit/sources/*/configs/dev_config.json
 tests/unit/sources/*/configs/replay_config.json
 
 # Source-simulator artifacts written by live runs (cassette, coverage report,
-# spec-validation report). Regenerated each time and not part of the source
-# of truth — the corpus under source_simulator/specs/<source>/ is.
-tests/unit/sources/*/cassettes/
+# spec-validation report). Raw cassettes are regenerated each time and not
+# part of the source of truth — the corpus under source_simulator/specs/<source>/ is.
+# However, validation and coverage reports ARE committed as record-mode evidence
+# for self-review checks B11/B12.
+tests/unit/sources/*/cassettes/*.json
+!tests/unit/sources/*/cassettes/*.json.validation.json
+!tests/unit/sources/*/cassettes/*.json.coverage.json
 
 # Self-review reports (output of the self-review-connector skill). Local
 # checkpoint for a developer; not committed by default.

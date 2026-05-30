@@ -59,7 +59,7 @@
     "updated_at": "2024-02-10T15:30:00-08:00",
     "published_at": "2024-02-01T08:00:00-08:00",
     "handle": "ski-wax",
-    "template_suffix": null,
+    "template_suffix": "product.featured",
     "published_scope": "web",
     "tags": "winter, accessories",
     "status": "active",
@@ -67,7 +67,16 @@
     "variants": [],
     "options": [],
     "images": [],
-    "image": null
+    "image": {
+      "id": 32000000000001,
+      "admin_graphql_api_id": "gid://shopify/ProductImage/32000000000001",
+      "product_id": 9581311033495,
+      "position": 1,
+      "created_at": "2024-02-01T08:00:00-08:00",
+      "updated_at": "2024-02-10T15:30:00-08:00",
+      "alt": "Ski wax tin",
+      "width": 800
+    }
   },
   {
     "id": 9581311099031,

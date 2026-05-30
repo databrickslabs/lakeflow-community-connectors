@@ -186,7 +186,7 @@ that weren't hit (`coverage.endpoints_in_spec − coverage.endpoints_hit`).
 
 ---
 
-### Section C — Artifacts (9 checks)
+### Section C — Artifacts (10 checks)
 
 | # | Severity | Artifact | Path | Validation |
 |---|---|---|---|---|
@@ -199,6 +199,7 @@ that weren't hit (`coverage.endpoints_in_spec − coverage.endpoints_hit`).
 | C7 | BLOCKER | Simulator spec | `src/.../source_simulator/specs/{{source_name}}/endpoints.yaml` | YAML parses; loadable via `endpoint_spec.load_specs` |
 | C8 | BLOCKER | Simulator corpus | `src/.../source_simulator/specs/{{source_name}}/corpus/*.json` | every file is valid JSON |
 | C9 | BLOCKER | Test class | `tests/unit/sources/{{source_name}}/test_{{source_name}}_lakeflow_connect.py` | (covered by B1) |
+| C10 | BLOCKER | No runtime `pyspark` declaration | `src/.../sources/{{source_name}}/pyproject.toml` | parse TOML; `project.dependencies` must NOT contain any entry whose package name is `pyspark`. PySpark is provided by the Databricks runtime; declaring it at runtime causes pip-install conflicts on clusters (e.g. wheel pins `pyspark>=4.2.0.dev0` but cluster ships `pyspark==4.1.0`). Keep `pyspark` in `[project.optional-dependencies].dev` only. Fail with the exact remediation: "Move `pyspark` line from `[project.dependencies]` to `[project.optional-dependencies].dev` in `<path>`." |
 
 ---
 
