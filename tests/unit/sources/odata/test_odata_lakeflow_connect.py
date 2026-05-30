@@ -1,8 +1,17 @@
-"""Unit tests for the OData LakeflowConnect connector.
+"""Tests for the OData LakeflowConnect connector.
 
-Uses `responses` to mock HTTP. Drop this file under
-tests/unit/ in the lakeflow-community-connectors repo to run it
-inside the standard test harness.
+Two layers:
+
+* The class-based ``TestODataConnector`` runs the shared
+  ``LakeflowConnectTests`` contract suite against the simulator at
+  ``source_simulator/specs/odata/`` (Northwind-shaped Customers + Orders).
+  This is what CI runs.
+
+* The module-level ``@responses.activate`` tests below exercise narrow
+  invariants of the connector that the contract suite doesn't cover:
+  literal escaping, ``@odata.nextLink`` resolution edge cases, boundary
+  trim shapes, auth wiring, and multi-schema disambiguation. They mock
+  HTTP with ``responses`` and run independently of the simulator.
 """
 
 import pytest
@@ -11,6 +20,37 @@ import responses
 from databricks.labs.community_connector.sources.odata import ODataLakeflowConnect
 from databricks.labs.community_connector.sources.odata.odata import _odata_literal
 from pyspark.sql.types import IntegerType, StringType, TimestampType
+from tests.unit.sources.test_suite import LakeflowConnectTests
+
+
+class TestODataConnector(LakeflowConnectTests):
+    """Contract test suite for the OData connector against the simulator.
+
+    The simulator stands up a Northwind-shaped service at
+    ``/odata/`` with a fixed ``$metadata`` document and Customers /
+    Orders entity sets seeded from the JSON corpus. Connector reads
+    flow through the simulator's custom OData handler (entity_set.py)
+    which implements just enough ``$top``/``$skip``/``$filter``/
+    ``$orderby``/``@odata.nextLink`` semantics to drive the suite.
+    """
+
+    connector_class = ODataLakeflowConnect
+    simulator_source = "odata"
+    sample_records = 50
+    # The simulator never validates these — they only need to satisfy
+    # ``__init__`` so a session is built. The actual HTTP traffic is
+    # intercepted before it leaves the connector.
+    replay_config = {
+        "service_url": "https://example.com/odata/",
+        "auth_type": "bearer",
+        "token": "simulator-fake-token",
+    }
+    # Orders is the only CDC-shaped table in the corpus. The cursor
+    # field has duplicate values (multiple OrderIDs per OrderDate), so
+    # this configuration also exercises the boundary trim.
+    table_configs = {
+        "Orders": {"cursor_field": "OrderDate"},
+    }
 
 
 SERVICE_URL = "https://example.com/odata/"

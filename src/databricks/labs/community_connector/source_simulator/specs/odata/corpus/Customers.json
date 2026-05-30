@@ -1,0 +1,9 @@
+[
+  {"CustomerID": "ALFKI", "CompanyName": "Alfreds Futterkiste", "ContactName": "Maria Anders", "Country": "Germany"},
+  {"CustomerID": "ANATR", "CompanyName": "Ana Trujillo Emparedados", "ContactName": "Ana Trujillo", "Country": "Mexico"},
+  {"CustomerID": "ANTON", "CompanyName": "Antonio Moreno Taqueria", "ContactName": "Antonio Moreno", "Country": "Mexico"},
+  {"CustomerID": "AROUT", "CompanyName": "Around the Horn", "ContactName": "Thomas Hardy", "Country": "UK"},
+  {"CustomerID": "BERGS", "CompanyName": "Berglunds snabbkop", "ContactName": "Christina Berglund", "Country": "Sweden"},
+  {"CustomerID": "BLAUS", "CompanyName": "Blauer See Delikatessen", "ContactName": "Hanna Moos", "Country": "Germany"},
+  {"CustomerID": "BLONP", "CompanyName": "Blondel pere et fils", "ContactName": "Frederique Citeaux", "Country": "France"}
+]
