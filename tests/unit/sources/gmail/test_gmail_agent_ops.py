@@ -637,3 +637,74 @@ def test_download_attachment_drive_403_yields_permission_denied(
         drive_file_id="1AbCdEf_GhIjKlMnOpQrStUvWxYz12345",
     )
     assert rows[0]["_meta"]["code"] == ErrorCode.PERMISSION_DENIED
+
+
+# ---------------------------------------------------------------------------
+# read_table default row cap
+# ---------------------------------------------------------------------------
+
+def _install_paginated_messages_api(monkeypatch, total_available: int):
+    """Stub the Gmail API to act like a mailbox with ``total_available`` messages
+    served via pagination. Tracks how many list+detail calls were issued."""
+    counters = {"list_calls": 0, "detail_calls": 0}
+
+    def fake_make_request(self, method, path, params=None, **kwargs):
+        if path.endswith("/profile"):
+            return {"historyId": "1"}
+        if path.endswith("/messages") and (params or {}).get("pageToken") is None:
+            counters["list_calls"] += 1
+            page_size = int((params or {}).get("maxResults", 100))
+            start = 0
+            end = min(page_size, total_available)
+            msgs = [{"id": f"m{i}"} for i in range(start, end)]
+            next_token = "T1" if end < total_available else None
+            return {"messages": msgs, "nextPageToken": next_token} if next_token else {"messages": msgs}
+        if path.endswith("/messages") and (params or {}).get("pageToken"):
+            counters["list_calls"] += 1
+            token = params["pageToken"]
+            prev_end = int(token[1:]) * int((params or {}).get("maxResults", 100))
+            page_size = int((params or {}).get("maxResults", 100))
+            start = prev_end
+            end = min(prev_end + page_size, total_available)
+            msgs = [{"id": f"m{i}"} for i in range(start, end)]
+            next_idx = int(token[1:]) + 1
+            next_token = f"T{next_idx}" if end < total_available else None
+            return {"messages": msgs, "nextPageToken": next_token} if next_token else {"messages": msgs}
+        if "/messages/" in path:
+            counters["detail_calls"] += 1
+            mid = path.rsplit("/", 1)[-1]
+            return {"id": mid, "historyId": "1"}
+        return {}
+
+    monkeypatch.setattr(
+        "databricks.labs.community_connector.sources.gmail.gmail_utils."
+        "GmailApiClient.make_request",
+        fake_make_request,
+    )
+    return counters
+
+
+def test_read_table_default_cap_is_50(monkeypatch):
+    """No maxResults → agent read_table returns 50 messages by default."""
+    counters = _install_paginated_messages_api(monkeypatch, total_available=200)
+    connector = GmailLakeflowConnect({"access_token": "x"})
+    rows = _dispatch("read_table", connector, tableName="messages")
+    assert len(rows) == 50, f"expected 50, got {len(rows)}"
+    # Pagination must stop early; never fetch all 200 details.
+    assert counters["detail_calls"] == 50
+
+
+def test_read_table_max_results_minus_one_returns_all(monkeypatch):
+    counters = _install_paginated_messages_api(monkeypatch, total_available=120)
+    connector = GmailLakeflowConnect({"access_token": "x"})
+    rows = _dispatch("read_table", connector, tableName="messages", maxResults="-1")
+    assert len(rows) == 120
+    assert counters["detail_calls"] == 120
+
+
+def test_read_table_respects_explicit_max_results(monkeypatch):
+    counters = _install_paginated_messages_api(monkeypatch, total_available=500)
+    connector = GmailLakeflowConnect({"access_token": "x"})
+    rows = _dispatch("read_table", connector, tableName="messages", maxResults="10")
+    assert len(rows) == 10
+    assert counters["detail_calls"] == 10

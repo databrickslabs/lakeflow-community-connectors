@@ -293,21 +293,36 @@ class GmailReadTableOp(ReadTableOp):
 
     For ``messages`` and ``threads``, the typed parameters below are joined
     via AND and become the ``q`` option the connector sends to Gmail. For
-    every other table, behaviour matches the framework default. There is
-    no row cap — callers chain ``.limit(N)`` on the resulting DataFrame.
+    every other table, behaviour matches the framework default.
+
+    Default row cap is **50** so notebook ``display(df)`` calls return
+    quickly against busy mailboxes. Pass ``maxResults=N`` to raise the cap,
+    or ``maxResults=-1`` for unlimited (the full table is streamed). The
+    cap is enforced inside the connector's pagination loop, so we don't
+    fetch pages we'll throw away.
     """
+
+    _DEFAULT_MAX_RESULTS = "50"
 
     description = (
         "Read a tabular object. For messages/threads, accepts typed "
         "filters (after_date, before_date, newer_than, subject, "
         "from_address, to_address, label, has_attachment, is_unread, "
-        "query) that compose into Gmail search syntax."
+        "query) that compose into Gmail search syntax. "
+        "Default cap is 50 rows; set maxResults=N to change, or "
+        "maxResults=-1 for unlimited."
     )
     parameters = ReadTableOp.parameters + _FILTER_PARAMETERS
 
     def pull(self, connector, options):
         table_name = options["tableName"]
         gmail_options = _table_options_with_query(options, table_name)
+        # Inject the default cap if the caller didn't specify one.
+        # ``in`` is case-insensitive on the CaseInsensitiveDict that
+        # ``_table_options_with_query`` returns, so any casing of
+        # ``maxResults`` the caller passed will be detected.
+        if "maxResults" not in gmail_options:
+            gmail_options["maxResults"] = self._DEFAULT_MAX_RESULTS
         records, _offset = connector.read_table(table_name, None, gmail_options)
         return records
 
