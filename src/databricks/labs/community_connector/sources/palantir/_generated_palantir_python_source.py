@@ -956,7 +956,6 @@ def register_lakeflow_source(spark):
         def _generate_all_pages(
             self, table_name: str, page_size: int,
             where_clause: dict = None,
-            max_records: int = 0,
             order_by_field: str = None,
         ) -> Iterator[dict]:
             """
@@ -964,7 +963,6 @@ def register_lakeflow_source(spark):
             in memory at a time. This avoids OOM when reading large datasets.
 
             Args:
-                max_records: Cap on total records yielded (0 = unlimited).
                 order_by_field: Optional field to sort records by (ascending).
                     Required for Strategy B incremental reads so the
                     connector can advance the offset to the last-emitted
@@ -972,16 +970,11 @@ def register_lakeflow_source(spark):
             """
             object_set = self._build_object_set(table_name, where_clause)
             page_token = None
-            # emitted = 0
             while True:
                 records, next_page_token = self._fetch_page(
                     object_set, page_token, page_size, order_by_field
                 )
-                for record in records:  # pylint: disable=use-yield-from
-                    # if max_records and emitted >= max_records:
-                    #     return
-                    yield record
-                    # emitted += 1
+                yield from records
 
                 if not next_page_token:
                     break
@@ -1019,12 +1012,6 @@ def register_lakeflow_source(spark):
             # framework-driven pass (``apply_changes_from_snapshot``) with
             # no mid-snapshot checkpoint, so capping here would silently
             # drop records past the cap — a data-loss bug.
-
-            # if start_offset:
-            #     next_offset = start_offset
-            # else:
-            #     next_offset = {"done": "true"}
-
             return self._generate_all_pages(
                 table_name, page_size,
             ), {}
@@ -1366,7 +1353,6 @@ def register_lakeflow_source(spark):
             # sleep and 5 wasted load-balancer hits before the user sees
             # the actual error.
             max_retries = 5
-            last_status: int = -1
             for attempt in range(max_retries):
                 try:
                     response = self._session.post(url, json=body, timeout=120)
@@ -1384,7 +1370,6 @@ def register_lakeflow_source(spark):
                         f"(network error): {e}"
                     ) from e
 
-                last_status = response.status_code
                 if response.status_code in (429, 503):
                     if attempt < max_retries - 1:
                         # Honour ``Retry-After`` when the server sets it;
@@ -1412,11 +1397,6 @@ def register_lakeflow_source(spark):
                 records = data.get("data", [])
                 next_page_token = data.get("nextPageToken")
                 return records, next_page_token
-
-            # raise RuntimeError(
-            #     f"Failed to fetch data after {max_retries} retries: "
-            #     f"last status {last_status}"
-            # )
 
 
     ########################################################
