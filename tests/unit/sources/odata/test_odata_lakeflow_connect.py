@@ -331,6 +331,39 @@ def test_incremental_emits_full_batch_advances_to_last_cursor():
 
 
 @responses.activate
+def test_incremental_orderby_appends_primary_key_tiebreaker():
+    """`$orderby` must be a total order, not just by cursor.
+
+    OData servers that paginate via `@odata.nextLink` typically derive
+    the skiptoken from the order-by columns. When the cursor (here
+    ModifiedAt) has duplicates and `$orderby` is cursor-only, the
+    skiptoken's strict `>` on the cursor drops the unread tail of a
+    same-cursor cohort that straddles a page boundary. Appending the
+    primary key forces a unique total order so the skiptoken is stable.
+    """
+    _mock_metadata()
+    captured = {}
+
+    def _callback(request):
+        captured["url"] = request.url
+        return (200, {}, '{"value": []}')
+
+    responses.add_callback(responses.GET, f"{SERVICE_URL}Customers", callback=_callback)
+
+    c = _make()
+    c.read_table("Customers", None, {"cursor_field": "ModifiedAt"})
+    # `Id` is Customers' Key in METADATA_XML.
+    url = captured["url"]
+    assert "ModifiedAt" in url and "asc" in url
+    assert "Id" in url
+    # Both terms must appear consecutively in the orderby clause. The
+    # comma between them may be raw `,` or `%2C`; the space may be raw
+    # ` ` or `%20`. Use a normalised check.
+    normalised = url.replace("%20", " ").replace("%2C", ",")
+    assert "$orderby=ModifiedAt asc,Id asc" in normalised
+
+
+@responses.activate
 def test_incremental_client_strict_gt_drops_boundary_row():
     """A defensive client-side strict-`>` filter guards against any
     server returning a record equal to `since`. The previous batch's

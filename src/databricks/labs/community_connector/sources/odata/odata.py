@@ -199,11 +199,22 @@ class ODataLakeflowConnect(LakeflowConnect, SupportsNamespaces):
             return iter([]), start_offset
 
         extra_filter = self._cursor_filter(cursor_field, since)
+        # Append primary-key columns as $orderby tie-breakers. Without a
+        # fully unique sort, OData servers that paginate internally (via
+        # `@odata.nextLink` with a value-based skiptoken) can split a
+        # same-cursor cohort across pages: the skiptoken's strict-`>` on
+        # the cursor value drops the unread tail. A unique total ordering
+        # forces the skiptoken to use the key as well, so no rows are lost.
+        namespace = (table_options or {}).get("namespace")
+        order_terms = [f"{cursor_field} asc"]
+        for pk in self._primary_keys_for(table_name, namespace):
+            if pk != cursor_field:
+                order_terms.append(f"{pk} asc")
         url = self._build_url(
             table_name,
             table_options,
             extra_filter=extra_filter,
-            order_by=f"{cursor_field} asc",
+            order_by=",".join(order_terms),
         )
         max_records = int(table_options.get("max_records_per_batch", "5000"))
 
