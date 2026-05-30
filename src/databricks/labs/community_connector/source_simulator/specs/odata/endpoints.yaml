@@ -11,20 +11,20 @@
 # ``handlers/entity_set.py`` for the implementation.
 #
 # Service URL the tests use:
-#   https://example.com/odata/
+#   https://example.com/V4/Northwind/Northwind.svc/
 # All paths below sit under that root.
 
 endpoints:
-  - path: "/odata/$metadata"
+  - path: "/V4/Northwind/Northwind.svc/$metadata"
     method: GET
     handler: databricks.labs.community_connector.source_simulator.specs.odata.handlers.metadata:serve_metadata
 
-  - path: "/odata/Customers"
+  - path: "/V4/Northwind/Northwind.svc/Customers"
     method: GET
     corpus: Customers
     handler: databricks.labs.community_connector.source_simulator.specs.odata.handlers.entity_set:serve_entity_set
 
-  - path: "/odata/Orders"
+  - path: "/V4/Northwind/Northwind.svc/Orders"
     method: GET
     corpus: Orders
     handler: databricks.labs.community_connector.source_simulator.specs.odata.handlers.entity_set:serve_entity_set

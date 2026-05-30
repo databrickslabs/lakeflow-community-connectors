@@ -19,7 +19,7 @@ import responses
 
 from databricks.labs.community_connector.sources.odata import ODataLakeflowConnect
 from databricks.labs.community_connector.sources.odata.odata import _odata_literal
-from pyspark.sql.types import IntegerType, StringType, TimestampType
+from pyspark.sql.types import LongType, StringType, TimestampType
 from tests.unit.sources.test_suite import LakeflowConnectTests
 
 
@@ -41,7 +41,7 @@ class TestODataConnector(LakeflowConnectTests):
     # ``__init__`` so a session is built. The actual HTTP traffic is
     # intercepted before it leaves the connector.
     replay_config = {
-        "service_url": "https://example.com/odata/",
+        "service_url": "https://services.odata.org/V4/Northwind/Northwind.svc/",
         "auth_type": "bearer",
         "token": "simulator-fake-token",
     }
@@ -126,7 +126,7 @@ def test_get_table_schema_maps_edm_types():
     names = [f.name for f in schema.fields]
     types = [type(f.dataType).__name__ for f in schema.fields]
     assert names == ["Id", "Name", "ModifiedAt"]
-    assert types == ["IntegerType", "StringType", "TimestampType"]
+    assert types == ["LongType", "StringType", "TimestampType"]
     assert schema.fields[0].nullable is False
 
 

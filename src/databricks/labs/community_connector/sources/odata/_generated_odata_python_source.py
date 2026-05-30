@@ -24,7 +24,6 @@ from pyspark.sql.types import (
     ArrayType,
     BinaryType,
     BooleanType,
-    ByteType,
     DataType,
     DateType,
     DecimalType,
@@ -33,7 +32,6 @@ from pyspark.sql.types import (
     IntegerType,
     LongType,
     MapType,
-    ShortType,
     StringType,
     StructField,
     StructType,
@@ -599,10 +597,15 @@ def register_lakeflow_source(spark):
     _EDM_TO_SPARK = {
         "Edm.String": StringType(),
         "Edm.Boolean": BooleanType(),
-        "Edm.Byte": ByteType(),
-        "Edm.SByte": ByteType(),
-        "Edm.Int16": ShortType(),
-        "Edm.Int32": IntegerType(),
+        # Map every integer width to LongType. The Lakeflow framework's
+        # parse_value supports IntegerType and LongType but not ShortType /
+        # ByteType, and self-review's A8 prefers LongType for headroom — a
+        # source-side `Edm.Int16` widening to `Int32` later would otherwise
+        # be a schema-breaking change.
+        "Edm.Byte": LongType(),
+        "Edm.SByte": LongType(),
+        "Edm.Int16": LongType(),
+        "Edm.Int32": LongType(),
         "Edm.Int64": LongType(),
         "Edm.Single": FloatType(),
         "Edm.Double": DoubleType(),

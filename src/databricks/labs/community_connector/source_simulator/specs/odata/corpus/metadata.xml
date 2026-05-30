@@ -9,7 +9,14 @@
         <Property Name="CustomerID" Type="Edm.String" Nullable="false" MaxLength="5"/>
         <Property Name="CompanyName" Type="Edm.String" Nullable="false" MaxLength="40"/>
         <Property Name="ContactName" Type="Edm.String"/>
+        <Property Name="ContactTitle" Type="Edm.String"/>
+        <Property Name="Address" Type="Edm.String"/>
+        <Property Name="City" Type="Edm.String"/>
+        <Property Name="Region" Type="Edm.String"/>
+        <Property Name="PostalCode" Type="Edm.String"/>
         <Property Name="Country" Type="Edm.String"/>
+        <Property Name="Phone" Type="Edm.String"/>
+        <Property Name="Fax" Type="Edm.String"/>
       </EntityType>
       <EntityType Name="Order">
         <Key>
@@ -19,8 +26,15 @@
         <Property Name="CustomerID" Type="Edm.String" MaxLength="5"/>
         <Property Name="EmployeeID" Type="Edm.Int32"/>
         <Property Name="OrderDate" Type="Edm.DateTimeOffset"/>
+        <Property Name="RequiredDate" Type="Edm.DateTimeOffset"/>
         <Property Name="ShippedDate" Type="Edm.DateTimeOffset"/>
+        <Property Name="ShipVia" Type="Edm.Int32"/>
         <Property Name="Freight" Type="Edm.Decimal" Precision="19" Scale="4"/>
+        <Property Name="ShipName" Type="Edm.String"/>
+        <Property Name="ShipAddress" Type="Edm.String"/>
+        <Property Name="ShipCity" Type="Edm.String"/>
+        <Property Name="ShipRegion" Type="Edm.String"/>
+        <Property Name="ShipPostalCode" Type="Edm.String"/>
         <Property Name="ShipCountry" Type="Edm.String"/>
       </EntityType>
       <EntityContainer Name="NorthwindEntities">

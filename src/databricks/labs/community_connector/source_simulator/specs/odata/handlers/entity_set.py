@@ -53,6 +53,13 @@ from databricks.labs.community_connector.source_simulator.interceptor import (
 )
 
 
+# Mirror Northwind's server-side response cap. Real OData servers (per
+# the v4 spec) are free to ignore the client's ``$top`` and impose
+# their own page size; staying aligned keeps the live-vs-spec validator
+# clean across pagination boundaries.
+_SERVER_PAGE_CAP = 20
+
+
 _FILTER_CLAUSE_RE = re.compile(
     r"\s*\(?\s*(?P<field>[A-Za-z_][A-Za-z0-9_]*)\s+"
     r"(?P<op>gt|ge|lt|le|eq|ne)\s+"
@@ -81,13 +88,28 @@ def serve_entity_set(prep: PreparedRequest, spec: Any, corpus: Any) -> Response:
         records = _apply_orderby(records, orderby)
 
     skip = _parse_int(query.get("$skip"), default=0, minimum=0)
-    top = _parse_int(query.get("$top"), default=len(records), minimum=0)
+    requested_top = _parse_int(query.get("$top"), default=_SERVER_PAGE_CAP, minimum=0)
+    # Mimic real OData servers that cap response size below the client's
+    # `$top`: Northwind serves at most 20 per page. Honouring an arbitrary
+    # large `$top` here would diverge the live-vs-spec validator on every
+    # call.
+    top = min(requested_top, _SERVER_PAGE_CAP)
 
     total = len(records)
     page = records[skip : skip + top]
+    # Inject ``@odata.etag`` per record so the per-field diff in the
+    # validator matches live (Northwind emits one on every entity).
+    # The connector strips all ``@odata.*`` keys before yielding, so
+    # this has no effect on observed records.
+    page = [{"@odata.etag": 'W/"sim"', **r} for r in page]
     next_offset = skip + len(page)
 
-    payload: Dict[str, Any] = {"value": page}
+    # ``@odata.context`` is a real OData v4 server's metadata pointer.
+    # The connector strips ``@odata.*`` top-level keys, so its presence
+    # doesn't affect connector behaviour — but matching the live shape
+    # keeps the live-vs-spec validator clean.
+    context_url = _build_context_url(prep.url or "", corpus_name)
+    payload: Dict[str, Any] = {"@odata.context": context_url, "value": page}
     if next_offset < total and len(page) > 0:
         next_link = _build_next_link(prep.url or "", next_offset, top)
         payload["@odata.nextLink"] = next_link
@@ -258,6 +280,18 @@ def _sort_key(value: Any) -> Tuple[int, Any]:
 # ---------------------------------------------------------------------------
 # Pagination
 # ---------------------------------------------------------------------------
+
+
+def _build_context_url(current_url: str, entity_set: str) -> str:
+    """Construct ``@odata.context`` pointing at ``$metadata#<EntitySet>``."""
+    parts = urlsplit(current_url)
+    # Strip the entity-set segment from the path to find the service root.
+    path = parts.path
+    if path.endswith("/" + entity_set):
+        path = path[: -len(entity_set)]
+    elif path.endswith(entity_set):
+        path = path[: -len(entity_set)]
+    return f"{parts.scheme}://{parts.netloc}{path}$metadata#{entity_set}"
 
 
 def _build_next_link(current_url: str, next_offset: int, top: int) -> str:
