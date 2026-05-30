@@ -56,16 +56,19 @@ The `ConnectionType` enum in `databricks-sdk` doesn't yet include
 from databricks.sdk import WorkspaceClient
 
 w = WorkspaceClient()
+
+service_url = "https://services.odata.org/V4/Northwind/Northwind.svc/"
+
 w.api_client.do(
     "POST",
     "/api/2.1/unity-catalog/connections",
     body={
         "name": "odata_connection",
         "connection_type": "COMMUNITY",
-        "comment": "OData v4 community connector",
+        "comment": f"service_url={service_url}",
         "options": {
             "sourceName": "odata",
-            "service_url": "https://services.odata.org/V4/Northwind/Northwind.svc/",
+            "service_url": service_url,
             "token": "<bearer-token>",
             "externalOptionsAllowList": (
                 "namespace,cursor_field,select,filter,page_size,max_records_per_batch"
