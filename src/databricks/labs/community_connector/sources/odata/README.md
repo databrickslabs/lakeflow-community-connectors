@@ -109,6 +109,7 @@ build_pipeline(
             "table": {
                 "source_table": "Orders",
                 "table_configuration": {
+                    "primary_keys": ["OrderID"],
                     "cursor_field": "OrderDate",
                     "max_records_per_batch": "5000",
                 },
