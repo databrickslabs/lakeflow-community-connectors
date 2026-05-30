@@ -19,7 +19,7 @@ import responses
 
 from databricks.labs.community_connector.sources.odata import ODataLakeflowConnect
 from databricks.labs.community_connector.sources.odata.odata import _odata_literal
-from pyspark.sql.types import LongType, StringType, TimestampType
+from pyspark.sql.types import IntegerType, StringType, TimestampType
 from tests.unit.sources.test_suite import LakeflowConnectTests
 
 
@@ -126,7 +126,7 @@ def test_get_table_schema_maps_edm_types():
     names = [f.name for f in schema.fields]
     types = [type(f.dataType).__name__ for f in schema.fields]
     assert names == ["Id", "Name", "ModifiedAt"]
-    assert types == ["LongType", "StringType", "TimestampType"]
+    assert types == ["IntegerType", "StringType", "TimestampType"]
     assert schema.fields[0].nullable is False
 
 

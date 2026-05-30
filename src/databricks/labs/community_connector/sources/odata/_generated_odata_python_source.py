@@ -597,15 +597,14 @@ def register_lakeflow_source(spark):
     _EDM_TO_SPARK = {
         "Edm.String": StringType(),
         "Edm.Boolean": BooleanType(),
-        # Map every integer width to LongType. The Lakeflow framework's
-        # parse_value supports IntegerType and LongType but not ShortType /
-        # ByteType, and self-review's A8 prefers LongType for headroom — a
-        # source-side `Edm.Int16` widening to `Int32` later would otherwise
-        # be a schema-breaking change.
-        "Edm.Byte": LongType(),
-        "Edm.SByte": LongType(),
-        "Edm.Int16": LongType(),
-        "Edm.Int32": LongType(),
+        # Widen integers up to Int32 to IntegerType (the framework's
+        # parse_value doesn't support ShortType or ByteType, so the narrow
+        # EDM widths can't map to their natural Spark types). Int64 needs
+        # the full 64-bit range, so it stays as LongType.
+        "Edm.Byte": IntegerType(),
+        "Edm.SByte": IntegerType(),
+        "Edm.Int16": IntegerType(),
+        "Edm.Int32": IntegerType(),
         "Edm.Int64": LongType(),
         "Edm.Single": FloatType(),
         "Edm.Double": DoubleType(),
