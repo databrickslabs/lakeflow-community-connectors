@@ -139,7 +139,7 @@ These are passed to the connector via the pipeline's `table_configuration` block
 | `select` | all properties | Comma-separated `$select` projection. Both the on-wire OData query and the derived Spark schema are filtered to these columns. |
 | `filter` | — | Additional OData `$filter` expression, AND-ed with any cursor filter the connector generates. |
 | `page_size` | `1000` | Value of `$top` sent on each HTTP request. Sets the maximum rows per OData page. Some servers cap this server-side (see *Known limits*). |
-| `max_records_per_batch` | `50000` | Client-side cap on records returned per `read_table` call. The connector truncates and returns control to the framework once this limit is hit. Independent of `page_size`. |
+| `max_records_per_batch` | `100000` | Client-side cap on records returned per `read_table` call. The connector truncates and returns control to the framework once this limit is hit. Independent of `page_size`. |
 
 `namespace` is consumed by the connector before the request is built; the other five all influence the URL or the per-batch loop.
 
@@ -282,7 +282,7 @@ build_pipeline(
                 "primary_keys": ["OrderID"],
                 "table_configuration": {
                     "cursor_field": "OrderDate",
-                    "max_records_per_batch": "50000",
+                    "max_records_per_batch": "100000",
                     "page_size": "500",
                 },
             }
@@ -300,15 +300,15 @@ build_pipeline(
    .../Orders?$top=500
             &$orderby=OrderDate asc, OrderID asc
    ```
-   No cursor `$filter` on the first call — the connector pulls from the natural start of the table and lets `max_records_per_batch` (50000) cap the call.
-4. Rows stream in via `@odata.nextLink` pagination. The connector accumulates up to 50000 rows.
+   No cursor `$filter` on the first call — the connector pulls from the natural start of the table and lets `max_records_per_batch` (100000) cap the call.
+4. Rows stream in via `@odata.nextLink` pagination. The connector accumulates up to 100000 rows.
 5. The boundary trim runs. Many Northwind orders share an `OrderDate` (date-precision), so the trailing same-day cohort is dropped. The end offset is the last *distinct* `OrderDate` seen.
 6. Next call resumes with `OrderDate gt <prev_distinct>`. The previously-dropped same-day cohort is re-fetched. `apply_changes` MERGEs them by `OrderID`, so the destination has each order exactly once.
 7. Continuous mode: when the source grows under the running stream, subsequent calls keep advancing `<prev_distinct>` past the new rows. No timestamp ceiling has to expire for that to happen.
 
 ### Why `OrderDate` works as a cursor even though many rows share each date
 
-Northwind `OrderDate` is a date-precision field — dozens of orders can share the same date. Without the boundary trim, a `gt` filter on the next call would skip every order sharing the boundary date. With the trim, the cohort is re-read every batch and MERGE-deduped at the destination. The only sizing requirement is that `max_records_per_batch` (50000 above) exceeds the largest single-day order count — easily true for Northwind.
+Northwind `OrderDate` is a date-precision field — dozens of orders can share the same date. Without the boundary trim, a `gt` filter on the next call would skip every order sharing the boundary date. With the trim, the cohort is re-read every batch and MERGE-deduped at the destination. The only sizing requirement is that `max_records_per_batch` (100000 above) exceeds the largest single-day order count — easily true for Northwind.
 
 If `max_records_per_batch` were set to, say, `10`, the connector would raise `RuntimeError` the first time a single `OrderDate` exceeded 10 orders, with a message instructing the operator to either raise the cap or pick a higher-cardinality cursor.
 

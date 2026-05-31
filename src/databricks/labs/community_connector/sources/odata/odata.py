@@ -18,7 +18,7 @@ Per-table options (allowlisted via externalOptionsAllowList):
     select                comma-separated $select projection
     filter                additional $filter expression
     page_size             $top per request (default 1000)
-    max_records_per_batch cap rows returned per read_table call (default 50000)
+    max_records_per_batch cap rows returned per read_table call (default 100000)
 """
 
 import base64
@@ -231,7 +231,7 @@ class ODataLakeflowConnect(LakeflowConnect, SupportsNamespaces):
             extra_filter=extra_filter,
             order_by=",".join(order_terms),
         )
-        max_records = int(table_options.get("max_records_per_batch", "50000"))
+        max_records = int(table_options.get("max_records_per_batch", "100000"))
 
         records: list[dict] = []
         truncated = False

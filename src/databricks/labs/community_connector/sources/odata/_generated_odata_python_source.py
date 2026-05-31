@@ -771,7 +771,7 @@ def register_lakeflow_source(spark):
                 extra_filter=extra_filter,
                 order_by=",".join(order_terms),
             )
-            max_records = int(table_options.get("max_records_per_batch", "50000"))
+            max_records = int(table_options.get("max_records_per_batch", "100000"))
 
             records: list[dict] = []
             truncated = False
