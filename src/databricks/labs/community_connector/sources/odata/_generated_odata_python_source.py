@@ -1357,24 +1357,26 @@ def register_lakeflow_source(spark):
                 next_url = urljoin(resp.url, raw_next) if raw_next else None
 
         def _http_get(self, session: requests.Session, url: str, **kwargs: Any) -> requests.Response:
-            """GET that keeps the OAuth2 access token alive across the call.
+            """GET with auth-aware 401/403 handling.
 
-            Two-layer refresh:
+            Three layers, escalating in cost:
 
-            1. **Pre-emptive** — when the token endpoint provided an
-               ``expires_in`` and we're now past the recorded deadline
-               (with a 60 s safety buffer), swap the header before sending
-               the request. Avoids paying a wasted round-trip on the
-               common case of a long-running paginated read straddling an
-               expiry boundary.
-            2. **Reactive (fallback)** — some providers return 403 instead
-               of 401, clocks drift, or tokens can be revoked server-side
-               outside of any expiry window. Catch a 401 from the source
-               and retry once with a fresh token.
-
-            Both paths require a refresh path to be available — either
-            ``oauth2_refresh_token`` (user flow) or ``client_credentials``
-            with id/secret on hand. Other auth modes pass through unchanged.
+            1. **Pre-emptive refresh** — when the token endpoint gave us
+               ``expires_in`` and we're past the recorded deadline (with a
+               60 s safety buffer), swap the bearer header *before* sending
+               the request. Avoids a wasted round-trip on long-running
+               paginated reads that straddle an expiry boundary.
+            2. **Reactive refresh** — caught 401 from the source, OAuth
+               refresh path is available → mint a fresh token and retry
+               once. A second 401 here means the access token is fine but
+               the principal lacks read access (different error path).
+            3. **Actionable no-refresh-path failure** — 401 or 403 from
+               the source and no automatic refresh is configured (bearer,
+               basic, api_key, or OAuth without a refresh-issuing token
+               endpoint). Raise a :class:`PermissionError` whose message
+               names the specific connection options the operator should
+               check for the configured auth mode. ``requests.HTTPError``
+               with no context is too opaque to triage from a pipeline log.
             """
             if self._should_preemptively_refresh():
                 session.headers["Authorization"] = f"Bearer {self._oauth2_token()}"
@@ -1400,7 +1402,82 @@ def register_lakeflow_source(spark):
                         f"'extra_headers' matches the credentials. Server "
                         f"response: {_truncate(resp.text, 300)}"
                     )
+                return resp
+            if resp.status_code in (401, 403):
+                raise PermissionError(self._no_refresh_auth_error(resp, url))
             return resp
+
+        def _no_refresh_auth_error(self, resp: requests.Response, url: str) -> str:
+            """Construct an actionable auth-failure message for the no-refresh path.
+
+            Different auth modes have very different failure modes — bearer
+            tokens expire, OAuth scopes can be too narrow, basic creds rot —
+            and bundling them all into one generic "401 Unauthorized" makes
+            triage from a pipeline log nearly impossible. This method picks
+            the relevant remediation hints based on which auth mode is
+            active on the connection.
+            """
+            status = resp.status_code
+            body = _truncate(resp.text, 300) or "(empty body)"
+            auth = (self.options.get("auth_type") or "").lower().strip()
+            if not auth and self.options.get("token"):
+                auth = "bearer"
+            prefix = (
+                f"OData service returned {status} for {url!r} and no "
+                f"automatic token-refresh path is configured. "
+            )
+            if auth == "bearer":
+                return (
+                    f"{prefix}"
+                    f"With auth_type=bearer the pre-acquired access token cannot "
+                    f"be refreshed by the connector — either it has expired "
+                    f"(typical lifetime ~1 h), or the principal that issued it "
+                    f"lacks read access to this entity set. Fixes: replace "
+                    f"'token' on the connection with a fresh one; or switch to "
+                    f"auth_type=oauth2 with 'oauth2_client_id' + "
+                    f"'oauth2_client_secret' so the connector mints and "
+                    f"refreshes tokens automatically. For Microsoft Graph "
+                    f"high-privilege endpoints (identityProviders, auditLogs, "
+                    f"etc.), ensure the token carries the required scope and "
+                    f"admin consent. Server response: {body}"
+                )
+            if auth == "basic":
+                return (
+                    f"{prefix}"
+                    f"With auth_type=basic the credentials are sent on every "
+                    f"request unchanged. Check 'username' and 'password' on "
+                    f"the connection — the password may have expired or been "
+                    f"rotated — and confirm the user has read access to this "
+                    f"entity set at the source. Server response: {body}"
+                )
+            if auth == "api_key":
+                return (
+                    f"{prefix}"
+                    f"With auth_type=api_key the key is sent on every request "
+                    f"unchanged. Check 'api_key' (may have been rotated or "
+                    f"revoked) and 'api_key_header' (some services expect a "
+                    f"non-default header name). Confirm the key's scope "
+                    f"includes this entity set. Server response: {body}"
+                )
+            if auth == "oauth2":
+                return (
+                    f"{prefix}"
+                    f"With auth_type=oauth2 but no refresh path available "
+                    f"(missing 'oauth2_client_id' / 'oauth2_client_secret' "
+                    f"for client-credentials, and no 'oauth2_refresh_token' "
+                    f"for user-flow refresh), the connector can't mint a "
+                    f"fresh access token. Provide one of those pairs, or "
+                    f"replace 'oauth2_access_token' with a fresh value. "
+                    f"Also confirm 'oauth2_scope' grants read on this entity "
+                    f"set. Server response: {body}"
+                )
+            return (
+                f"{prefix}"
+                f"No authentication is configured on this connection but the "
+                f"OData service requires it. Set 'auth_type' to one of: "
+                f"bearer, basic, api_key, oauth2 (with the matching parameter "
+                f"set). Server response: {body}"
+            )
 
         def _should_preemptively_refresh(self) -> bool:
             """True iff a known-expiry token has hit its 60 s safety window."""
