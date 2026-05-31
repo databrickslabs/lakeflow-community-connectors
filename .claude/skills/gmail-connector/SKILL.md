@@ -1,10 +1,7 @@
 ---
 name: gmail-connector
-description: Tool layer for ad-hoc Gmail reads against the project's `lakeflow_connect` table surface. Runs read queries on a user-supplied Databricks cluster via the Command Execution REST API; scheduled-ingestion requests hand off to `deploy-connector`. Use whenever the user asks the agent to read something from their mailbox.
+description: Tool layer for ad-hoc Gmail reads against the project's `lakeflow_connect` table surface. Runs read queries on a fixed Databricks cluster via the Command Execution REST API; scheduled-ingestion requests hand off to `deploy-connector`. Use whenever the user asks the agent to read something from their mailbox.
 args:
-  - name: cluster_id
-    description: All-purpose cluster the agent runs Gmail reads on (required — must be supplied by the user, never invented).
-    required: true
   - name: connection_name
     description: Name of the UC COMMUNITY connection holding the Gmail OAuth grant. Create one (see "Connection prerequisite") if absent.
     required: false
@@ -15,6 +12,18 @@ args:
 This skill turns the project's Gmail tables into a tool surface the agent can call. You — the agent — translate the user's request into table reads with optional filter options, run them on a Databricks cluster via the Command Execution REST API, and return the answer.
 
 You **never** invent table names, option keys, or REST paths. The connector README is the source of truth for the tables; the path table below is the source of truth for the cluster API.
+
+---
+
+## Cluster
+
+This skill runs every Gmail snippet on the fixed cluster:
+
+```
+0528-081139-nh2l2jnu
+```
+
+Use that id verbatim in every Command Execution request. **Do not ask the user for a cluster id** and do not substitute a different one — the connector wheel + Python environment this skill assumes are only known to be present on that cluster. If a request to it fails with a state other than `RUNNING`, ask the user before starting it; do not fall back to another cluster.
 
 ---
 
@@ -65,7 +74,7 @@ If the user asks for something the table surface can't do (write actions, byte-l
 
 ## How you call into the connector
 
-Every read is a Python snippet executed in a long-lived context on the user's cluster:
+Every read is a Python snippet executed in a long-lived context on the fixed cluster (`0528-081139-nh2l2jnu`):
 
 ```python
 df = (spark.read.format("lakeflow_connect")
@@ -82,14 +91,14 @@ print(json.dumps([r.asDict(recursive=True) for r in df.collect()], default=str))
 1. **Confirm the cluster** is `RUNNING`:
    ```bash
    databricks api get /api/2.1/clusters/get \
-     --json "{\"cluster_id\":\"{{cluster_id}}\"}" -o json | jq '{state, spark_version}'
+     --json "{\"cluster_id\":\"0528-081139-nh2l2jnu\"}" -o json | jq '{state, spark_version}'
    ```
    If terminated, ask the user before starting it.
 
 2. **Open a Python context.** Path: `/api/1.2/contexts/create` (not `/api/1.2/commands/contexts/create` — see the path table above):
    ```bash
    databricks api post /api/1.2/contexts/create \
-     --json '{"clusterId":"{{cluster_id}}","language":"python"}' -o json
+     --json '{"clusterId":"0528-081139-nh2l2jnu","language":"python"}' -o json
    ```
    Returns `{"id": "<CONTEXT_ID>"}`. Remember it for the rest of the session.
 
@@ -108,14 +117,14 @@ print(json.dumps([r.asDict(recursive=True) for r in df.collect()], default=str))
 2. **Submit** (path: `/api/1.2/commands/execute`):
    ```bash
    databricks api post /api/1.2/commands/execute \
-     --json '{"clusterId":"{{cluster_id}}","contextId":"<CTX>","language":"python","command":"<SNIPPET>"}' \
+     --json '{"clusterId":"0528-081139-nh2l2jnu","contextId":"<CTX>","language":"python","command":"<SNIPPET>"}' \
      -o json
    ```
 
 3. **Poll** until terminal (path: `/api/1.2/commands/status`):
    ```bash
    databricks api get /api/1.2/commands/status \
-     --json "{\"clusterId\":\"{{cluster_id}}\",\"contextId\":\"<CTX>\",\"commandId\":\"<CMD>\"}" -o json
+     --json "{\"clusterId\":\"0528-081139-nh2l2jnu\",\"contextId\":\"<CTX>\",\"commandId\":\"<CMD>\"}" -o json
    ```
    `status` walks `Queued → Running → Finished | Error | Cancelled`.
 
@@ -133,7 +142,7 @@ Free the context when you're done. Path: `/api/1.2/contexts/destroy`:
 
 ```bash
 databricks api post /api/1.2/contexts/destroy \
-  --json '{"clusterId":"{{cluster_id}}","contextId":"<CTX>"}'
+  --json '{"clusterId":"0528-081139-nh2l2jnu","contextId":"<CTX>"}'
 ```
 
 Contexts are a cluster resource — don't leak them across sessions.
@@ -193,7 +202,7 @@ The deployed connector surfaces failures as Spark exceptions (the agent-dispatch
 
 ## Rules
 
-- The `cluster_id` always comes from the user. Don't reuse a stale one across sessions.
+- The `cluster_id` is **hard-coded** to `0528-081139-nh2l2jnu`. Never ask the user for it and never substitute another id.
 - The **path table** at the top is the source of truth for REST endpoints. Never invent a path. Never paste `/api/2.0/commands/...` or `/api/1.2/commands/contexts/...`.
 - The **README** is the source of truth for the table surface — table names and `table_configuration` keys. Never invent either; don't claim ops (`search_messages`, `download_attachment`, etc.) work today.
 - Register the data source on the first command in every fresh context, never on later commands in the same context.
