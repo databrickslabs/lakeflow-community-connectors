@@ -312,7 +312,7 @@ class ODataLakeflowConnect(LakeflowConnect, SupportsNamespaces):
         session = self._get_session()
         next_url: str | None = url
         while next_url:
-            resp = session.get(next_url, timeout=self.timeout)
+            resp = self._http_get(session, next_url)
             resp.raise_for_status()
             payload = resp.json()
             for item in payload.get("value", []):
@@ -320,6 +320,21 @@ class ODataLakeflowConnect(LakeflowConnect, SupportsNamespaces):
                 yield {k: v for k, v in item.items() if not k.startswith("@odata.")}
             raw_next = payload.get("@odata.nextLink")
             next_url = urljoin(resp.url, raw_next) if raw_next else None
+
+    def _http_get(self, session: requests.Session, url: str, **kwargs: Any) -> requests.Response:
+        """GET that refreshes the OAuth2 access token once on 401.
+
+        When the connection is configured with a refresh token (the
+        user-flow auth path), an expired access token surfaces as a 401
+        mid-ingest. Catch that, mint a fresh token via the refresh
+        endpoint, swap the ``Authorization`` header on the session, and
+        retry the request once. Other auth modes pass through unchanged.
+        """
+        resp = session.get(url, timeout=self.timeout, **kwargs)
+        if resp.status_code == 401 and self.options.get("oauth2_refresh_token"):
+            session.headers["Authorization"] = f"Bearer {self._oauth2_token()}"
+            resp = session.get(url, timeout=self.timeout, **kwargs)
+        return resp
 
     # ------------------------------------------------------------------
     # Auth session
@@ -361,7 +376,18 @@ class ODataLakeflowConnect(LakeflowConnect, SupportsNamespaces):
             header = self.options.get("api_key_header", "x-api-key")
             session.headers[header] = _require(self.options, "api_key")
         elif auth_type == "oauth2":
-            session.headers["Authorization"] = f"Bearer {self._oauth2_token()}"
+            # Two sub-modes share this branch:
+            #  * **User flow** — `oauth2_refresh_token` is set. A
+            #    pre-supplied `oauth2_access_token` is used as-is if
+            #    present (avoids an unnecessary round-trip); otherwise
+            #    `_oauth2_token()` runs the refresh-token grant to
+            #    mint one. Expired tokens mid-run are caught in
+            #    `_http_get` and refreshed once.
+            #  * **Client-credentials flow** — no refresh token; the
+            #    connector mints a fresh access token via
+            #    `client_credentials` at session start.
+            initial_token = self.options.get("oauth2_access_token") or self._oauth2_token()
+            session.headers["Authorization"] = f"Bearer {initial_token}"
         elif auth_type:
             raise ValueError(
                 f"Unknown auth_type {auth_type!r}. "
@@ -372,11 +398,32 @@ class ODataLakeflowConnect(LakeflowConnect, SupportsNamespaces):
         return session
 
     def _oauth2_token(self) -> str:
-        data = {
-            "grant_type": "client_credentials",
-            "client_id": _require(self.options, "oauth2_client_id"),
-            "client_secret": _require(self.options, "oauth2_client_secret"),
-        }
+        """Mint an OAuth2 access token.
+
+        Picks the grant type from what's available in `self.options`:
+          * `oauth2_refresh_token` present -> `refresh_token` grant
+            (user-flow refresh). Client id/secret are required so the
+            token endpoint can authenticate the client.
+          * Otherwise -> `client_credentials` grant (server-to-server).
+
+        Some providers issue a rotated refresh token in the response;
+        when that happens, the new value is written back into
+        `self.options` so the next refresh uses it.
+        """
+        refresh_token = self.options.get("oauth2_refresh_token")
+        if refresh_token:
+            data = {
+                "grant_type": "refresh_token",
+                "refresh_token": refresh_token,
+                "client_id": _require(self.options, "oauth2_client_id"),
+                "client_secret": _require(self.options, "oauth2_client_secret"),
+            }
+        else:
+            data = {
+                "grant_type": "client_credentials",
+                "client_id": _require(self.options, "oauth2_client_id"),
+                "client_secret": _require(self.options, "oauth2_client_secret"),
+            }
         scope = self.options.get("oauth2_scope")
         if scope:
             data["scope"] = scope
@@ -386,9 +433,13 @@ class ODataLakeflowConnect(LakeflowConnect, SupportsNamespaces):
             timeout=self.timeout,
         )
         resp.raise_for_status()
-        token = resp.json().get("access_token")
+        payload = resp.json()
+        token = payload.get("access_token")
         if not token:
             raise RuntimeError("OAuth2 token endpoint did not return access_token.")
+        rotated_refresh = payload.get("refresh_token")
+        if rotated_refresh:
+            self.options["oauth2_refresh_token"] = rotated_refresh
         return token
 
     # ------------------------------------------------------------------
@@ -399,11 +450,7 @@ class ODataLakeflowConnect(LakeflowConnect, SupportsNamespaces):
         if self._metadata_xml is None:
             session = self._get_session()
             url = _join_url(self.service_url, "$metadata")
-            resp = session.get(
-                url,
-                timeout=self.timeout,
-                headers={"Accept": "application/xml"},
-            )
+            resp = self._http_get(session, url, headers={"Accept": "application/xml"})
             resp.raise_for_status()
             self._metadata_xml = resp.text
         return ET.fromstring(self._metadata_xml)

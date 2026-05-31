@@ -40,12 +40,13 @@ community-connector create_connection odata odata_connection \
 
 For other auth methods, swap `token` for the relevant fields:
 
-| Auth method | Required option keys |
-|---|---|
-| `bearer` | `token` |
-| `basic` | `username`, `password` |
-| `api_key` | `api_key` (optionally `api_key_header`) |
-| `oauth2` | `oauth2_token_url`, `oauth2_client_id`, `oauth2_client_secret` (optionally `oauth2_scope`) |
+| Auth method | Required option keys | Notes |
+|---|---|---|
+| `bearer` | `token` | |
+| `basic` | `username`, `password` | |
+| `api_key` | `api_key` (optionally `api_key_header`) | |
+| `oauth2` (client credentials) | `oauth2_token_url`, `oauth2_client_id`, `oauth2_client_secret` (optionally `oauth2_scope`) | Server-to-server. Mints a fresh access token at every session start. |
+| `oauth2` (authorization code) | Same as above **plus** `oauth2_refresh_token` (and optionally `oauth2_access_token`) | User-delegated. The pre-issued access token is used until the source returns 401, then refreshed via `grant_type=refresh_token`. |
 
 ### Option B — Python SDK
 

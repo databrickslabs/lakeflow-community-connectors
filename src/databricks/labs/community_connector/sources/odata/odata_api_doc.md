@@ -91,14 +91,16 @@ Authentication is configured on the Unity Catalog connection. The connector pick
 | Bearer token | `bearer` | `token` | — |
 | HTTP Basic | `basic` | `username`, `password` | — |
 | API key in custom header | `api_key` | `api_key` | `api_key_header` (default `x-api-key`) |
-| OAuth 2.0 client-credentials | `oauth2` | `oauth2_token_url`, `oauth2_client_id`, `oauth2_client_secret` | `oauth2_scope` |
+| OAuth 2.0 client credentials | `oauth2` | `oauth2_token_url`, `oauth2_client_id`, `oauth2_client_secret` | `oauth2_scope` |
+| OAuth 2.0 authorization code | `oauth2` | Same plus `oauth2_refresh_token` | `oauth2_access_token`, `oauth2_scope` |
 
 Notes:
 
 - **Bearer.** Sent as `Authorization: Bearer <token>`. Works for most modern OData APIs (Microsoft Graph, Dynamics 365, SAP S/4HANA Cloud).
 - **Basic.** Sent as `Authorization: Basic <base64(user:pass)>` via `requests.auth.HTTPBasicAuth`. Common for on-prem SAP NetWeaver / Gateway.
 - **API key.** Sent as `<header-name>: <key>`. The header name defaults to `x-api-key` and is configurable per service via `api_key_header`.
-- **OAuth2.** A token is fetched at session-construction time with `grant_type=client_credentials` against `oauth2_token_url`. The resulting access token is cached on the session for the lifetime of the connector instance and resent as `Authorization: Bearer <token>`. No refresh is performed; a fresh instance is constructed on every trigger.
+- **OAuth2 (client credentials).** At session-construction time the connector POSTs `grant_type=client_credentials` to `oauth2_token_url` and caches the access token on the session for the run.
+- **OAuth2 (authorization code / user-delegated).** The user runs the authorization-code flow once (externally — e.g. via the SDK's OAuth helpers) and supplies the resulting `oauth2_access_token` and `oauth2_refresh_token` on the connection. The connector uses the pre-supplied access token directly; on HTTP 401 from the source it POSTs `grant_type=refresh_token` to `oauth2_token_url` (with `client_id` + `client_secret` for client authentication) and retries the request once. Providers that rotate refresh tokens have the new value tracked in-process for the rest of the run.
 
 Tokens, passwords, API keys, and OAuth client secrets are all declared `secret: true` in `connector_spec.yaml` and are masked by the Unity Catalog connection store.
 

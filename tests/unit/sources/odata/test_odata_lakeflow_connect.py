@@ -605,6 +605,142 @@ def test_oauth2_fetches_token():
     assert c._get_session().headers["Authorization"] == "Bearer minted"
 
 
+@responses.activate
+def test_oauth2_client_credentials_uses_client_credentials_grant():
+    """No refresh_token on the connection → client_credentials grant."""
+    captured = {}
+
+    def _token_callback(request):
+        captured["body"] = request.body
+        return (200, {}, '{"access_token": "cc-minted", "token_type": "Bearer"}')
+
+    responses.add_callback(
+        responses.POST, "https://idp.example.com/token", callback=_token_callback
+    )
+    _mock_metadata()
+    c = _make(
+        {
+            "auth_type": "oauth2",
+            "oauth2_token_url": "https://idp.example.com/token",
+            "oauth2_client_id": "id",
+            "oauth2_client_secret": "secret",
+        }
+    )
+    c.list_tables()
+    assert "grant_type=client_credentials" in captured["body"]
+    assert c._get_session().headers["Authorization"] == "Bearer cc-minted"
+
+
+@responses.activate
+def test_oauth2_user_flow_uses_pre_supplied_access_token():
+    """When `oauth2_access_token` is provided, the connector uses it
+    directly and does NOT hit the token endpoint at startup."""
+    # Register the token URL but don't expect it to be called.
+    responses.post(
+        "https://idp.example.com/token",
+        json={"access_token": "should-not-be-used", "token_type": "Bearer"},
+    )
+    _mock_metadata()
+    c = _make(
+        {
+            "auth_type": "oauth2",
+            "oauth2_token_url": "https://idp.example.com/token",
+            "oauth2_client_id": "id",
+            "oauth2_client_secret": "secret",
+            "oauth2_access_token": "user-flow-access",
+            "oauth2_refresh_token": "user-flow-refresh",
+        }
+    )
+    c.list_tables()
+    assert c._get_session().headers["Authorization"] == "Bearer user-flow-access"
+    # The token endpoint must not have been called during list_tables.
+    token_calls = [c for c in responses.calls if c.request.url == "https://idp.example.com/token"]
+    assert token_calls == []
+
+
+@responses.activate
+def test_oauth2_user_flow_refreshes_on_401_and_retries():
+    """An expired access token surfaces as 401. The connector refreshes
+    via `grant_type=refresh_token`, swaps the header, and retries the
+    request once before raising."""
+    _mock_metadata()
+    captured_token_bodies = []
+
+    def _token_callback(request):
+        captured_token_bodies.append(request.body)
+        return (200, {}, '{"access_token": "refreshed-access", "token_type": "Bearer"}')
+
+    responses.add_callback(
+        responses.POST, "https://idp.example.com/token", callback=_token_callback
+    )
+
+    call_count = {"n": 0}
+
+    def _customers_callback(request):
+        call_count["n"] += 1
+        auth = request.headers.get("Authorization", "")
+        if call_count["n"] == 1:
+            # First call: stale token → 401.
+            assert auth == "Bearer stale-access"
+            return (401, {}, '{"error": "expired"}')
+        # Second call: must carry the refreshed token.
+        assert auth == "Bearer refreshed-access"
+        return (
+            200,
+            {},
+            '{"value": [{"Id": 1, "Name": "A", "ModifiedAt": "2024-01-01T00:00:00Z"}]}',
+        )
+
+    responses.add_callback(responses.GET, f"{SERVICE_URL}Customers", callback=_customers_callback)
+
+    c = _make(
+        {
+            "auth_type": "oauth2",
+            "oauth2_token_url": "https://idp.example.com/token",
+            "oauth2_client_id": "id",
+            "oauth2_client_secret": "secret",
+            "oauth2_access_token": "stale-access",
+            "oauth2_refresh_token": "user-flow-refresh",
+        }
+    )
+    rows, _ = c.read_table("Customers", None, {})
+    assert [r["Id"] for r in rows] == [1]
+    assert call_count["n"] == 2
+    assert len(captured_token_bodies) == 1
+    body = captured_token_bodies[0]
+    assert "grant_type=refresh_token" in body
+    assert "refresh_token=user-flow-refresh" in body
+    # Session's Authorization header must now carry the refreshed token.
+    assert c._get_session().headers["Authorization"] == "Bearer refreshed-access"
+
+
+@responses.activate
+def test_oauth2_user_flow_tracks_rotated_refresh_token():
+    """Some providers rotate the refresh token on every refresh. The
+    new value must be picked up so the next refresh doesn't use the
+    already-invalidated one."""
+    _mock_metadata()
+    responses.post(
+        "https://idp.example.com/token",
+        json={
+            "access_token": "rotated-access",
+            "refresh_token": "rotated-refresh",
+            "token_type": "Bearer",
+        },
+    )
+    c = _make(
+        {
+            "auth_type": "oauth2",
+            "oauth2_token_url": "https://idp.example.com/token",
+            "oauth2_client_id": "id",
+            "oauth2_client_secret": "secret",
+            "oauth2_refresh_token": "initial-refresh",
+        }
+    )
+    c.list_tables()
+    assert c.options["oauth2_refresh_token"] == "rotated-refresh"
+
+
 def test_missing_service_url_raises():
     with pytest.raises(ValueError, match="service_url"):
         ODataLakeflowConnect({})
