@@ -125,7 +125,7 @@ build_pipeline(
                 "source_table": "Orders",
                 "table_configuration": {
                     "cursor_field": "OrderDate",
-                    "max_records_per_batch": "5000",
+                    "max_records_per_batch": "100000",
                 },
             }
         },
@@ -142,7 +142,7 @@ build_pipeline(
 | `select`                | all     | Comma-separated `$select` projection. |
 | `filter`                |         | Extra OData `$filter` expression. |
 | `page_size`             | 1000    | `$top` per HTTP request. |
-| `max_records_per_batch` | 5000    | Cap on rows per `read_table` call. |
+| `max_records_per_batch` | 100000  | Per-call upper bound on rows returned. The connector has **no wall-clock ceiling** — `max_records_per_batch` is the only cap on a single batch. Each batch fetches `cursor gt <last>` and pulls up to this many rows, then commits the offset. Smaller values give continuous-mode pipelines lower latency per micro-batch at the cost of more round trips; larger values amortize HTTP overhead. The default of 100000 fits roughly 100 `$top=1000` pages per batch and prioritises throughput; lower it (e.g. to 5000) if you want tighter per-batch latency in a continuous pipeline. |
 
 ## Multi-tenant / multi-schema services
 

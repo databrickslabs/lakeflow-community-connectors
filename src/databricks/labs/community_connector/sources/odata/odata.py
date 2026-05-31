@@ -18,7 +18,7 @@ Per-table options (allowlisted via externalOptionsAllowList):
     select                comma-separated $select projection
     filter                additional $filter expression
     page_size             $top per request (default 1000)
-    max_records_per_batch cap rows returned per read_table call (default 5000)
+    max_records_per_batch cap rows returned per read_table call (default 100000)
 """
 
 import base64
@@ -102,9 +102,6 @@ class ODataLakeflowConnect(LakeflowConnect, SupportsNamespaces):
         self.timeout = int(options.get("timeout_seconds", "60"))
         self._session: requests.Session | None = None
         self._metadata_xml: str | None = None
-        # Init-time ceiling so a single trigger never chases new data — a fresh
-        # instance is constructed on every trigger anyway.
-        self._init_ts = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
         # Monotonic deadline (seconds) for the current OAuth access token.
         # Set when the token endpoint returns ``expires_in``; `None` means we
         # don't know the expiry (user-supplied access token without metadata)
@@ -201,11 +198,21 @@ class ODataLakeflowConnect(LakeflowConnect, SupportsNamespaces):
         table_options: dict[str, str],
         cursor_field: str,
     ) -> tuple[Iterator[dict], dict]:
+        # No wall-clock upper bound on the cursor — `max_records_per_batch`
+        # is the only per-call cap. Each call fetches `cursor gt since`
+        # (no `le` clause), advances the offset, and Spark drives the
+        # call loop. Two consequences worth knowing:
+        #   * Continuous SDP pipelines pick up new rows as they arrive,
+        #     because we never freeze a "snapshot at startup" timestamp.
+        #     The connector instance can live for the whole stream and
+        #     each batch still sees fresh source state.
+        #   * Cursor type doesn't matter for the filter. Timestamps,
+        #     monotonic integer IDs, GUIDs — anything the server can
+        #     order in `$orderby` and compare in `$filter` works the
+        #     same way. There is no type mismatch between the cursor
+        #     literal and the server's column type because we don't
+        #     manufacture a timestamp ceiling out of wall-clock time.
         since = start_offset.get("cursor") if start_offset else None
-        # Already caught up to this trigger's init time — skip the API call.
-        if since and since >= self._init_ts:
-            return iter([]), start_offset
-
         extra_filter = self._cursor_filter(cursor_field, since)
         # Append primary-key columns as $orderby tie-breakers. Without a
         # fully unique sort, OData servers that paginate internally (via
@@ -224,7 +231,7 @@ class ODataLakeflowConnect(LakeflowConnect, SupportsNamespaces):
             extra_filter=extra_filter,
             order_by=",".join(order_terms),
         )
-        max_records = int(table_options.get("max_records_per_batch", "5000"))
+        max_records = int(table_options.get("max_records_per_batch", "100000"))
 
         records: list[dict] = []
         truncated = False
@@ -635,11 +642,19 @@ class ODataLakeflowConnect(LakeflowConnect, SupportsNamespaces):
     # Cursor filter formatting
     # ------------------------------------------------------------------
 
-    def _cursor_filter(self, cursor_field: str, since: Any) -> str:
-        end_lit = _odata_literal(self._init_ts)
+    def _cursor_filter(self, cursor_field: str, since: Any) -> str | None:
+        """Build the `$filter` clause for an incremental fetch.
+
+        Strict `cursor gt since` once the offset has advanced; `None` on
+        the very first call so the server returns the natural start of
+        the table. `max_records_per_batch` is the per-call cap — there
+        is no wall-clock ceiling, which is what makes continuous polling
+        work and what keeps the connector type-agnostic over the cursor
+        column.
+        """
         if since is None:
-            return f"{cursor_field} le {end_lit}"
-        return f"{cursor_field} gt {_odata_literal(since)} and {cursor_field} le {end_lit}"
+            return None
+        return f"{cursor_field} gt {_odata_literal(since)}"
 
 
 # ---------------------------------------------------------------------------

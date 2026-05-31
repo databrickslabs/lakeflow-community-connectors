@@ -273,7 +273,12 @@ def test_snapshot_path_absolute_nextlink_resolves_against_host():
 
 
 @responses.activate
-def test_incremental_first_call_uses_le_init_filter():
+def test_incremental_first_call_has_no_cursor_filter():
+    """No wall-clock ceiling means the first call (`since=None`) sends
+    no `$filter` clause derived from the cursor. The server returns rows
+    from the natural start of the table; `max_records_per_batch` is the
+    per-call cap. This is what makes the connector usable for both
+    continuous polling and non-timestamp cursor types."""
     _mock_metadata()
     captured = {}
 
@@ -292,9 +297,36 @@ def test_incremental_first_call_uses_le_init_filter():
     rows = list(records)
     assert rows == [{"Id": 1, "ModifiedAt": "2024-03-01T00:00:00Z"}]
     assert offset == {"cursor": "2024-03-01T00:00:00Z"}
-    # First call should filter cursor <= init_ts (no `gt` clause).
-    assert "%20le%20" in captured["url"] or " le " in captured["url"]
-    assert "%20gt%20" not in captured["url"]
+    # Neither `le` nor `gt` should appear in the URL — no cursor filter
+    # at all on the first call.
+    normalised = captured["url"].replace("%20", " ")
+    assert " le " not in normalised
+    assert " gt " not in normalised
+
+
+@responses.activate
+def test_incremental_supports_integer_cursor():
+    """Cursor type is opaque to the filter logic — monotonic IDs work
+    just like timestamps. Verifies the resume URL carries an `OrderID gt
+    N` clause with an unquoted integer literal."""
+    _mock_metadata()
+    captured_urls = []
+
+    def _callback(request):
+        captured_urls.append(request.url)
+        return (200, {}, '{"value": []}')
+
+    responses.add_callback(responses.GET, f"{SERVICE_URL}Orders", callback=_callback)
+
+    c = _make()
+    start = {"cursor": 10248}
+    records, offset = c.read_table("Orders", start, {"cursor_field": "OrderId"})
+    assert list(records) == []
+    assert offset == start
+    normalised = captured_urls[0].replace("%20", " ")
+    assert "OrderId gt 10248" in normalised
+    # The literal is unquoted (matches Edm.Int32 syntax, not Edm.String).
+    assert "'10248'" not in normalised
 
 
 @responses.activate
@@ -324,15 +356,59 @@ def test_incremental_resume_uses_gt_filter_and_terminates():
 
 
 @responses.activate
-def test_incremental_skips_call_when_caught_up_to_init_ts():
+def test_incremental_continuous_polling_picks_up_new_rows():
+    """A connector instance reused across multiple `read_table` calls
+    sees fresh source state on each call. Mirrors what a continuous
+    SDP pipeline does: one connector, many micro-batches, source
+    growing under us. Each subsequent call should advance through the
+    new rows."""
     _mock_metadata()
-    # Don't register Customers URL — if a request is made we'll fail.
+    call_count = {"n": 0}
+
+    def _callback(request):
+        call_count["n"] += 1
+        if call_count["n"] == 1:
+            # Initial drain — two records already in the source.
+            return (
+                200,
+                {},
+                '{"value": ['
+                '{"Id": 1, "ModifiedAt": "2024-03-01T00:00:00Z"},'
+                '{"Id": 2, "ModifiedAt": "2024-03-02T00:00:00Z"}]}',
+            )
+        if call_count["n"] == 2:
+            # No data since the offset; mirrors the "caught up" state
+            # between bursts.
+            return (200, {}, '{"value": []}')
+        # New row arrived while the stream was idle.
+        return (
+            200,
+            {},
+            '{"value": [{"Id": 3, "ModifiedAt": "2024-03-05T00:00:00Z"}]}',
+        )
+
+    responses.add_callback(responses.GET, f"{SERVICE_URL}Customers", callback=_callback)
+
     c = _make()
-    # Far-future cursor > init_ts → short-circuit.
-    start = {"cursor": "9999-01-01T00:00:00Z"}
-    records, offset = c.read_table("Customers", start, {"cursor_field": "ModifiedAt"})
-    assert list(records) == []
-    assert offset == start
+    # Batch 1: no offset, two rows drain. Trim of trailing single-cohort
+    # leaves [Id=1]; offset = 2024-03-01.
+    rows1, offset1 = c.read_table("Customers", None, {"cursor_field": "ModifiedAt"})
+    assert [r["Id"] for r in rows1] == [1]
+    assert offset1 == {"cursor": "2024-03-01T00:00:00Z"}
+
+    # Batch 2: feeding offset1 back. Source returned empty — stable
+    # offset signals "no more data" to Spark; the same connector
+    # instance handled the call without any cap-driven short-circuit.
+    rows2, offset2 = c.read_table("Customers", offset1, {"cursor_field": "ModifiedAt"})
+    assert list(rows2) == []
+    assert offset2 == offset1
+
+    # Batch 3: new row appeared in the source. The continuous-polling
+    # connector picks it up using only the `gt` filter — no frozen
+    # snapshot ceiling getting in the way.
+    rows3, offset3 = c.read_table("Customers", offset2, {"cursor_field": "ModifiedAt"})
+    assert [r["Id"] for r in rows3] == [3]
+    assert offset3 == {"cursor": "2024-03-05T00:00:00Z"}
 
 
 @responses.activate
