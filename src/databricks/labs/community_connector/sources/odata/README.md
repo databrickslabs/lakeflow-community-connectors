@@ -12,7 +12,8 @@ automatically from the service's `$metadata` endpoint.
 - Snapshot ingest when no cursor is configured.
 - Incremental CDC ingest when a per-table `cursor_field` is set
   (`field gt <last> and field le <now>`).
-- Four auth methods: bearer, basic, api_key, oauth2 (client credentials).
+- Four auth methods: bearer, basic, api_key, oauth2 (client credentials
+  *and* authorization-code / user flow with refresh-token rotation).
 
 ## Setting up the connection (UC)
 
@@ -45,8 +46,18 @@ For other auth methods, swap `token` for the relevant fields:
 | `bearer` | `token` | |
 | `basic` | `username`, `password` | |
 | `api_key` | `api_key` (optionally `api_key_header`) | |
-| `oauth2` (client credentials) | `oauth2_token_url`, `oauth2_client_id`, `oauth2_client_secret` (optionally `oauth2_scope`) | Server-to-server. Mints a fresh access token at every session start. |
-| `oauth2` (authorization code) | Same as above **plus** `oauth2_refresh_token` (and optionally `oauth2_access_token`) | User-delegated. The pre-issued access token is used until the source returns 401, then refreshed via `grant_type=refresh_token`. |
+| `oauth2` (client credentials) | `oauth2_token_url`, `oauth2_client_id`, `oauth2_client_secret` (optionally `oauth2_scope`) | Server-to-server. Mints a fresh access token at session start; re-mints pre-emptively when `expires_in` is exhausted (60 s safety buffer). |
+| `oauth2` (authorization code) | Same as above **plus** `oauth2_refresh_token` (and optionally `oauth2_access_token`) | User-delegated. The pre-issued access token is used directly, then refreshed via `grant_type=refresh_token` either pre-emptively when the deadline approaches or reactively on a 401 from the source. Rotated refresh tokens are tracked automatically. |
+
+OAuth error handling:
+
+- Token-endpoint 4xx during the refresh-token grant raises a `ValueError`
+  naming `oauth2_refresh_token` + `oauth2_client_id` as the fields to check,
+  with the OAuth `error` + `error_description` echoed from the server.
+- Source 401 *after* a successful refresh raises a `PermissionError` —
+  the access token isn't the problem; check `oauth2_scope`, principal
+  permissions, and any tenant/instance identifier in `service_url` or
+  `extra_headers`.
 
 ### Option B — Python SDK
 
