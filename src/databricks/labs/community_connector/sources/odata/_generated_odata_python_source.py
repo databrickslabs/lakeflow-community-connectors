@@ -1625,40 +1625,126 @@ def register_lakeflow_source(spark):
                 )
 
             schema_ns, type_ref = matches[0]
-            if "." in type_ref:
-                type_ns, type_name = type_ref.rsplit(".", 1)
-            else:
-                type_ns, type_name = None, type_ref
+            et = self._resolve_type_ref(type_ref)
+            if et is None:
+                raise ValueError(
+                    f"EntityType {type_ref!r} (referenced by entity set "
+                    f"{table_name!r} in schema {schema_ns!r}) not found in $metadata."
+                )
+            return et
 
+        def _schema_alias_map(self) -> dict[str, str]:
+            """Build {namespace_or_alias → actual_schema_namespace}.
+
+            CSDL allows each ``<Schema>`` to declare both a ``Namespace`` and
+            a shorter ``Alias``; downstream type references can use either.
+            Microsoft Graph for instance declares
+            ``Namespace="microsoft.graph" Alias="graph"`` and then writes
+            ``BaseType="graph.directoryObject"``. We can't resolve those
+            references without honoring the alias.
+            """
+            root = self._metadata_root()
+            out: dict[str, str] = {}
             for schema in root.iter(f"{_NS_EDM}Schema"):
-                if type_ns is not None and schema.get("Namespace") != type_ns:
+                ns = schema.get("Namespace") or ""
+                if ns:
+                    out[ns] = ns
+                alias = schema.get("Alias")
+                if alias:
+                    out[alias] = ns
+            return out
+
+        def _resolve_type_ref(self, type_ref: str) -> ET.Element | None:
+            """Find the ``<EntityType>`` element for a qualified type reference.
+
+            Accepts both fully-qualified namespace references
+            (``microsoft.graph.user``) and alias-based references
+            (``graph.user``). Returns ``None`` if no matching declaration
+            exists — callers decide whether that's a hard error or worth
+            falling back to a shallower lookup.
+            """
+            if "." not in type_ref:
+                return None
+            prefix, type_name = type_ref.rsplit(".", 1)
+            aliases = self._schema_alias_map()
+            target_ns = aliases.get(prefix)
+            if target_ns is None:
+                return None
+            root = self._metadata_root()
+            for schema in root.iter(f"{_NS_EDM}Schema"):
+                if schema.get("Namespace") != target_ns:
                     continue
                 for et in schema.findall(f"{_NS_EDM}EntityType"):
                     if et.get("Name") == type_name:
                         return et
+            return None
 
-            raise ValueError(
-                f"EntityType {type_ref!r} (referenced by entity set "
-                f"{table_name!r} in schema {schema_ns!r}) not found in $metadata."
-            )
+        def _resolve_base_chain(self, et: ET.Element) -> list[ET.Element]:
+            """Walk the ``BaseType`` chain starting at ``et``.
+
+            Returns ``[et, parent, grandparent, …]`` until ``BaseType`` is
+            absent or unresolvable. OData v4 §8.4: derived entity types
+            inherit Keys and Properties from their base. Real-world
+            services (Microsoft Graph, Microsoft Dataverse, most SAP
+            deployments) lean on this heavily — Graph's ``user`` extends
+            ``directoryObject`` extends ``entity``, and ``entity`` is the
+            type that actually declares ``<Key>id</Key>``.
+
+            Cycles are guarded against (cyclic CSDL is malformed but won't
+            crash the connector).
+            """
+            chain = [et]
+            current = et
+            seen: set[str] = set()
+            while True:
+                base_ref = current.get("BaseType")
+                if not base_ref or base_ref in seen:
+                    break
+                seen.add(base_ref)
+                parent = self._resolve_type_ref(base_ref)
+                if parent is None:
+                    break
+                chain.append(parent)
+                current = parent
+            return chain
 
         def _fields_for(self, table_name: str, namespace: str | None = None) -> list[StructField]:
             et = self._entity_type_for(table_name, namespace)
+            # Aggregate properties across the inheritance chain. Walk from
+            # the root base type down to the leaf so inherited fields
+            # (typically ``id`` and any timestamp fields on
+            # ``graph.directoryObject``) appear before the leaf's own
+            # additions — matches the order a developer reading the CSDL
+            # would expect. Derived types can ADD properties; spec forbids
+            # them from REDEFINING base properties, so we de-dupe by name
+            # and let the closest-to-root declaration win.
             fields: list[StructField] = []
-            for prop in et.findall(f"{_NS_EDM}Property"):
-                name = prop.get("Name")
-                edm_type = prop.get("Type", "Edm.String")
-                nullable = prop.get("Nullable", "true").lower() != "false"
-                spark_type = _EDM_TO_SPARK.get(edm_type, StringType())
-                fields.append(StructField(name, spark_type, nullable))
+            seen_names: set[str] = set()
+            for type_el in reversed(self._resolve_base_chain(et)):
+                for prop in type_el.findall(f"{_NS_EDM}Property"):
+                    name = prop.get("Name")
+                    if name in seen_names:
+                        continue
+                    seen_names.add(name)
+                    edm_type = prop.get("Type", "Edm.String")
+                    nullable = prop.get("Nullable", "true").lower() != "false"
+                    spark_type = _EDM_TO_SPARK.get(edm_type, StringType())
+                    fields.append(StructField(name, spark_type, nullable))
             return fields
 
         def _primary_keys_for(self, table_name: str, namespace: str | None = None) -> list[str]:
             et = self._entity_type_for(table_name, namespace)
-            key = et.find(f"{_NS_EDM}Key")
-            if key is None:
-                return []
-            return [ref.get("Name") for ref in key.findall(f"{_NS_EDM}PropertyRef")]
+            # OData v4 §8.4: derived types inherit Keys from their base.
+            # First Key found while walking from this type up to its root
+            # ancestor wins — that's the spec's overriding-derived-wins
+            # semantics for the rare case where multiple layers in the
+            # chain redeclare Key (technically forbidden but services do
+            # ship malformed CSDL).
+            for type_el in self._resolve_base_chain(et):
+                key = type_el.find(f"{_NS_EDM}Key")
+                if key is not None:
+                    return [ref.get("Name") for ref in key.findall(f"{_NS_EDM}PropertyRef")]
+            return []
 
         # ------------------------------------------------------------------
         # Cursor filter formatting

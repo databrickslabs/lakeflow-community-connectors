@@ -1144,6 +1144,165 @@ def test_unique_name_does_not_require_namespace():
 
 
 # ---------------------------------------------------------------------------
+# CSDL BaseType inheritance (OData v4 §8.4)
+# ---------------------------------------------------------------------------
+
+# Microsoft Graph and most real OData v4 services declare keys and
+# properties on abstract base types and inherit them through a chain of
+# derived types. The connector must walk that chain on metadata lookups
+# or it returns empty PKs and incomplete schemas.
+
+INHERITED_METADATA_XML = """<?xml version="1.0" encoding="utf-8"?>
+<edmx:Edmx Version="4.0" xmlns:edmx="http://docs.oasis-open.org/odata/ns/edmx">
+  <edmx:DataServices>
+    <Schema Namespace="microsoft.graph" Alias="graph" xmlns="http://docs.oasis-open.org/odata/ns/edm">
+      <!-- Abstract root: declares the Key + id property everything inherits. -->
+      <EntityType Name="entity" Abstract="true">
+        <Key><PropertyRef Name="id"/></Key>
+        <Property Name="id" Type="Edm.String" Nullable="false"/>
+      </EntityType>
+      <!-- Mid-level: adds deletedDateTime; alias-qualified BaseType. -->
+      <EntityType Name="directoryObject" BaseType="graph.entity">
+        <Property Name="deletedDateTime" Type="Edm.DateTimeOffset"/>
+      </EntityType>
+      <!-- Leaf: adds user-specific fields, FQN BaseType. -->
+      <EntityType Name="user" BaseType="microsoft.graph.directoryObject">
+        <Property Name="displayName" Type="Edm.String"/>
+        <Property Name="mail" Type="Edm.String"/>
+      </EntityType>
+      <EntityContainer Name="GraphService">
+        <EntitySet Name="users" EntityType="microsoft.graph.user"/>
+      </EntityContainer>
+    </Schema>
+  </edmx:DataServices>
+</edmx:Edmx>
+"""
+
+
+def _mock_inherited_metadata():
+    responses.get(f"{SERVICE_URL}$metadata", body=INHERITED_METADATA_XML, status=200)
+
+
+@responses.activate
+def test_inheritance_primary_key_walks_base_chain():
+    """``user`` has no <Key> of its own — Key is on ``entity`` two
+    levels up. Without chain walking the connector returns no PK; with
+    it, MERGE-on-PK at the destination works correctly."""
+    _mock_inherited_metadata()
+    c = _make()
+    meta = c.read_table_metadata("users", {})
+    assert meta["primary_keys"] == ["id"]
+
+
+@responses.activate
+def test_inheritance_schema_aggregates_properties_root_to_leaf():
+    """Inherited properties (``id``, ``deletedDateTime``) appear before
+    the leaf's own additions. Reflects the order a developer reading
+    the CSDL would expect: base type first, derived overlays after."""
+    _mock_inherited_metadata()
+    c = _make()
+    schema = c.get_table_schema("users", {})
+    names = [f.name for f in schema.fields]
+    assert names == ["id", "deletedDateTime", "displayName", "mail"]
+
+
+@responses.activate
+def test_inheritance_alias_resolution():
+    """A BaseType referenced via the schema's ``Alias`` (e.g.
+    ``graph.entity`` when the schema declares ``Alias="graph"``) must
+    resolve to the same EntityType as the full namespace
+    (``microsoft.graph.entity``). Graph relies on this for every
+    derived type."""
+    _mock_inherited_metadata()
+    c = _make()
+    # directoryObject's BaseType uses the alias; user's uses the full
+    # namespace. If alias resolution were broken, one would resolve and
+    # the other wouldn't.
+    et = c._entity_type_for("users")
+    chain = c._resolve_base_chain(et)
+    type_names = [t.get("Name") for t in chain]
+    assert type_names == ["user", "directoryObject", "entity"]
+
+
+@responses.activate
+def test_inheritance_id_in_schema_when_only_declared_on_base():
+    """Concrete regression for the Graph-compatibility bug: ``id`` is
+    only declared on ``graph.entity``, but every Graph entity set needs
+    it as a column."""
+    _mock_inherited_metadata()
+    c = _make()
+    schema = c.get_table_schema("users", {})
+    id_field = next(f for f in schema.fields if f.name == "id")
+    assert type(id_field.dataType).__name__ == "StringType"
+    assert id_field.nullable is False
+
+
+CYCLE_METADATA_XML = """<?xml version="1.0" encoding="utf-8"?>
+<edmx:Edmx Version="4.0" xmlns:edmx="http://docs.oasis-open.org/odata/ns/edmx">
+  <edmx:DataServices>
+    <Schema Namespace="bad" xmlns="http://docs.oasis-open.org/odata/ns/edm">
+      <EntityType Name="A" BaseType="bad.B">
+        <Property Name="a_field" Type="Edm.String"/>
+      </EntityType>
+      <EntityType Name="B" BaseType="bad.A">
+        <Key><PropertyRef Name="b_field"/></Key>
+        <Property Name="b_field" Type="Edm.String"/>
+      </EntityType>
+      <EntityContainer Name="C">
+        <EntitySet Name="things" EntityType="bad.A"/>
+      </EntityContainer>
+    </Schema>
+  </edmx:DataServices>
+</edmx:Edmx>
+"""
+
+
+@responses.activate
+def test_inheritance_cycle_guard_terminates():
+    """Malformed CSDL with a BaseType cycle must not loop. The walker
+    halts at the first repeat, returning whatever Key/Properties it
+    found along the way."""
+    responses.get(f"{SERVICE_URL}$metadata", body=CYCLE_METADATA_XML, status=200)
+    c = _make()
+    # Should terminate (no infinite loop) and surface SOME schema /
+    # PK info from whatever chain was walked before the cycle.
+    schema = c.get_table_schema("things", {})
+    pks = c.read_table_metadata("things", {})["primary_keys"]
+    assert {f.name for f in schema.fields} == {"a_field", "b_field"}
+    assert pks == ["b_field"]
+
+
+@responses.activate
+def test_inheritance_unresolvable_base_returns_what_can_be_resolved():
+    """BaseType references that point at a non-existent type
+    (e.g. an external schema we didn't fetch) just truncate the
+    chain — they're not a hard error."""
+    xml = """<?xml version="1.0" encoding="utf-8"?>
+<edmx:Edmx Version="4.0" xmlns:edmx="http://docs.oasis-open.org/odata/ns/edmx">
+  <edmx:DataServices>
+    <Schema Namespace="x" xmlns="http://docs.oasis-open.org/odata/ns/edm">
+      <EntityType Name="Item" BaseType="external.Missing">
+        <Key><PropertyRef Name="Id"/></Key>
+        <Property Name="Id" Type="Edm.Int32" Nullable="false"/>
+      </EntityType>
+      <EntityContainer Name="Container">
+        <EntitySet Name="Items" EntityType="x.Item"/>
+      </EntityContainer>
+    </Schema>
+  </edmx:DataServices>
+</edmx:Edmx>
+"""
+    responses.get(f"{SERVICE_URL}$metadata", body=xml, status=200)
+    c = _make()
+    # External BaseType reference can't be resolved — connector still
+    # produces the local Key + Property data.
+    meta = c.read_table_metadata("Items", {})
+    schema = c.get_table_schema("Items", {})
+    assert meta["primary_keys"] == ["Id"]
+    assert [f.name for f in schema.fields] == ["Id"]
+
+
+# ---------------------------------------------------------------------------
 # Delta tracking (Prefer: odata.track-changes)
 # ---------------------------------------------------------------------------
 
