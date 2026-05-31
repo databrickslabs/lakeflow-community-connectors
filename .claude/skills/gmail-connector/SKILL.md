@@ -1,9 +1,9 @@
 ---
 name: gmail-connector
-description: Tool layer for Gmail tasks. Loads the connector's operation catalogue dynamically from a Databricks cluster via the Command Execution REST API and composes those operations to satisfy the user's intent. The tool surface is whatever `list_operations` returns; scheduled-ingestion requests hand off to `deploy-connector`. Use whenever the user asks the agent to do something with their mailbox.
+description: Tool layer for ad-hoc Gmail reads against the project's `lakeflow_connect` table surface. Runs read queries on a user-supplied Databricks cluster via the Command Execution REST API; scheduled-ingestion requests hand off to `deploy-connector`. Use whenever the user asks the agent to read something from their mailbox.
 args:
   - name: cluster_id
-    description: All-purpose cluster the agent runs Gmail operations on (required — must be supplied by the user, never invented).
+    description: All-purpose cluster the agent runs Gmail reads on (required — must be supplied by the user, never invented).
     required: true
   - name: connection_name
     description: Name of the UC COMMUNITY connection holding the Gmail OAuth grant. Create one (see "Connection prerequisite") if absent.
@@ -12,122 +12,154 @@ args:
 
 # Gmail Connector
 
-This skill turns the project's Gmail Spark APIs into a tool surface the agent can call. You — the agent — translate the user's natural request into a sequence of connector operations, run them on a Databricks cluster, and return the answer.
+This skill turns the project's Gmail tables into a tool surface the agent can call. You — the agent — translate the user's request into table reads with optional filter options, run them on a Databricks cluster via the Command Execution REST API, and return the answer.
 
-You **never** invent operations or parameter names, and you don't infer the surface from this file. The cluster is the source of truth: load the catalogue once with `list_operations`, then drive everything from what it reports.
+You **never** invent table names, option keys, or REST paths. The connector README is the source of truth for the tables; the path table below is the source of truth for the cluster API.
+
+---
+
+## Critical: Command Execution REST paths
+
+This is the single most common cause of `Bad Target` / 404 in this skill. Two URL trees, both under `/api/1.2/`, and they are *not* nested — `contexts` and `commands` are siblings, not parent/child.
+
+| Action | Method | Path |
+|---|---|---|
+| Open a Python context | `POST` | `/api/1.2/contexts/create` |
+| Check context status | `GET`  | `/api/1.2/contexts/status` |
+| Tear context down | `POST` | `/api/1.2/contexts/destroy` |
+| Submit a command | `POST` | `/api/1.2/commands/execute` |
+| Poll command status | `GET`  | `/api/1.2/commands/status` |
+| Cancel a command | `POST` | `/api/1.2/commands/cancel` |
+
+Paths that **look** right but return errors:
+
+| Wrong path | What happens | What to use instead |
+|---|---|---|
+| `/api/1.2/commands/contexts/create` | `{"error":"Bad Target: /api/1.2/commands/contexts/create"}` | `/api/1.2/contexts/create` |
+| `/api/1.2/commands/contexts/destroy` | Same `Bad Target` | `/api/1.2/contexts/destroy` |
+| `/api/2.0/commands/...` (any) | 404 on most workspaces | The corresponding `/api/1.2/...` path |
+
+The Databricks Go SDK and the docs.databricks.com pages reference a `2.0` alias for Command Execution. It isn't live on the workspaces we run against — don't trust it. The clusters API is a separate, unrelated surface at `/api/2.1/clusters/...`; the version number there is correct.
 
 ---
 
 ## What this skill is for
 
-This skill is the **tool layer** for Gmail. Your tool surface is exactly what `list_operations` returns when called against the user's connection — nothing more, nothing less. Each catalogue entry carries a `description` and `parameters_json` written for exactly this purpose: read them to decide whether a request is satisfiable and how to call it. If the catalogue doesn't expose what the user is asking for, say so plainly — don't fake it with an op that isn't a fit.
+The Gmail connector exposes Gmail as **Spark tables** — one table per Gmail object (`messages`, `threads`, `labels`, `drafts`, `profile`, `settings`, `filters`, `forwarding_addresses`, `send_as`, `delegates`). Each accepts a small set of filter options (`q`, `labelIds`, `maxResults`, `includeSpamTrash`, `format`). Your tool surface is exactly those tables and options — nothing more.
 
-There is one explicit carve-out, because it's owned by a sibling skill rather than the read-side tool surface:
+Read the connector README before planning a request; it is the authoritative manifest:
 
-- **Standing up a scheduled / continuous ingestion pipeline** (e.g. "ingest my labels table into UC every hour", "land my inbox in `main.gmail.messages` daily") — hand off to the `deploy-connector` skill with `source_name=gmail`. That skill provisions an SDP pipeline via the `community-connector` CLI, which is the right vehicle for ongoing sync. Do not loop the read envelope in this skill to fake periodic ingestion.
+- `src/databricks/labs/community_connector/sources/gmail/README.md`
 
-For everything else — including whether write actions, push notifications, multi-mailbox routing, etc. are supported — let `list_operations` answer. The catalogue is the truth; this file is not.
+It enumerates each table, its primary key, ingestion type, schema highlights, and the keys accepted under `table_configuration`.
+
+The one explicit carve-out, owned by a sibling skill:
+
+- **Scheduled / continuous ingestion** ("land my inbox in UC hourly") → hand off to the `deploy-connector` skill with `source_name=gmail`. That skill provisions an SDP pipeline via the `community-connector` CLI. Don't loop the read envelope here to fake it.
+
+> **Today's limit.** The connector source contains an agent-dispatcher with richer ops (`list_operations`, `search_messages`, `list_attachments`, `download_attachment`, …), but that surface is **not yet on the Spark format dispatch path** in the deployed builds — i.e. setting `option("operation", ...)` does nothing. Until that wiring ships, ignore those ops; the table read path is the only surface you can call. **Attachment-byte downloads in particular are out of reach via this skill today** — the table surface returns attachment *metadata* on `messages.payload`, not bytes.
+
+If the user asks for something the table surface can't do (write actions, byte-level attachment fetch, push notifications), say so plainly.
 
 ---
 
-## How you actually call into the connector
+## How you call into the connector
 
-Every call has the same envelope — a Python snippet executed in a long-lived context on the user's cluster:
+Every read is a Python snippet executed in a long-lived context on the user's cluster:
 
 ```python
 df = (spark.read.format("lakeflow_connect")
-        .option("connection_name", "{{connection_name}}")
-        .option("operation", "<OP_NAME>")
-        .option("<param>", "<value>")        # 0+ params from list_operations
-        .load())
+        .option("connection_name", "<CONN>")
+        .option("tableName", "<TABLE_NAME>")
+        .option("<filter_key>", "<value>")    # 0+ from README's table_configuration
+        .load()
+        .limit(<N>))                          # always cap rows you don't need
+print(json.dumps([r.asDict(recursive=True) for r in df.collect()], default=str))
 ```
-
-Composing a snippet, shipping it to the cluster, and parsing the result is one helper, not a per-task ritual — see *Execution envelope* below.
 
 ### Bootstrap (do once at the start of a Gmail-shaped conversation)
 
-1. **Confirm the cluster** the user gave you (`{{cluster_id}}`) is `RUNNING`:
+1. **Confirm the cluster** is `RUNNING`:
    ```bash
    databricks api get /api/2.1/clusters/get \
      --json "{\"cluster_id\":\"{{cluster_id}}\"}" -o json | jq '{state, spark_version}'
    ```
    If terminated, ask the user before starting it.
-2. **Open a Python context** on that cluster and remember the returned `id`:
+
+2. **Open a Python context.** Path: `/api/1.2/contexts/create` (not `/api/1.2/commands/contexts/create` — see the path table above):
    ```bash
-   databricks api post /api/1.2/commands/contexts/create \
+   databricks api post /api/1.2/contexts/create \
      --json '{"clusterId":"{{cluster_id}}","language":"python"}' -o json
    ```
-3. **Register the data source and load the catalogue**. The very first command you ship into a fresh context **must** include the import + `register` lines below — Spark's data-source registry is per-driver-session, so without them `format("lakeflow_connect")` resolves to nothing:
+   Returns `{"id": "<CONTEXT_ID>"}`. Remember it for the rest of the session.
+
+3. **Register the data source on the first command.** Spark's data-source registry is per-driver-session, so the *first* command you ship into a fresh context **must** lead with:
    ```python
    import json
    from databricks.labs.community_connector.sources.gmail import GmailDataSource
    spark.dataSource.register(GmailDataSource)
-   df = (spark.read.format("lakeflow_connect")
-           .option("connection_name", "{{connection_name}}")
-           .option("operation", "list_operations").load())
-   print(json.dumps([r.asDict() for r in df.collect()]))
    ```
-   The printed JSON gives you `name`, `description`, `kind`, `result_schema_json`, and `parameters_json` for **every** operation this connection exposes. Cache it for the rest of the session. If `list_operations` fails, the connector isn't installed on the cluster — surface that and stop.
+   Subsequent commands in the same context **must not** re-emit those lines — the registration is cached. Re-registering is wasted overhead, not an error. If you open a new context later (cluster restart, you destroyed the previous one), the first command in *that* context must include them again.
 
-After this first command lands `Finished`, registration is cached on the cluster for the lifetime of the context. **Do not** re-emit the `import` / `spark.dataSource.register(...)` lines on subsequent commands in the same context — they're noise and slow the snippet down. If you open a new context later (or the user explicitly restarts one), the *first* command in that context must include them again.
+### Execution envelope (every read)
 
-### Execution envelope (the universal "call any operation")
+1. **Build the snippet.** End it with `print(json.dumps([r.asDict(recursive=True) for r in df.collect()], default=str))` so the result comes back parseable.
 
-For any one operation:
-
-1. Build the snippet — pick `OP_NAME` and only the parameters that the catalogue declares for it. End the snippet with `print(json.dumps([r.asDict(recursive=True) for r in df.collect()], default=str))` so the result comes back parseable.
-2. Submit to the cluster:
+2. **Submit** (path: `/api/1.2/commands/execute`):
    ```bash
    databricks api post /api/1.2/commands/execute \
-     --json '{"clusterId":"{{cluster_id}}","contextId":"<CTX>","language":"python","command":"<SNIPPET>"}' -o json
+     --json '{"clusterId":"{{cluster_id}}","contextId":"<CTX>","language":"python","command":"<SNIPPET>"}' \
+     -o json
    ```
-3. Poll until terminal status:
+
+3. **Poll** until terminal (path: `/api/1.2/commands/status`):
    ```bash
    databricks api get /api/1.2/commands/status \
      --json "{\"clusterId\":\"{{cluster_id}}\",\"contextId\":\"<CTX>\",\"commandId\":\"<CMD>\"}" -o json
    ```
    `status` walks `Queued → Running → Finished | Error | Cancelled`.
-4. Read the result:
-   - `Finished`, `results.resultType == "text"` → `results.data` is the JSON you printed. Parse and use.
-   - `Error` → `results.summary` is the one-liner; `results.cause` is the traceback. The dispatcher writes a canonical code into `_meta.code` of the printed row when the error is connector-level (see *Error codes* below).
 
-A few details that bite if you skip them:
-- **Use `/api/1.2/commands/...`, not `/api/2.0/`.** The Command Execution API is served under 1.2. The 2.0 path 404s on the workspaces we run against — if you see `Not Found` from `/api/2.0/commands/...`, you have the wrong version, not a wrong cluster.
+4. **Read the result:**
+   - `Finished`, `results.resultType == "text"` → `results.data` is the JSON you printed. Parse and use.
+   - `Error` → `results.summary` is the one-liner; `results.cause` is the Python traceback from the cluster.
+
+Quoting notes that bite if you skip them:
 - The `command` field is a JSON string containing Python source — preserve newlines (`\n`) and quote your inner strings.
-- Spark's `CaseInsensitiveStringMap` lowercases option keys, but the connector already handles the standard parameter spellings; just match whatever `list_operations` shows.
-- `spark.dataSource.register(GmailDataSource)` runs once per context — only in the first command, never again. If you accidentally open a *new* context (cluster restart, you destroyed the previous one), the next snippet must re-import + re-register; until then, `format("lakeflow_connect")` will not resolve.
+- Spark's `CaseInsensitiveStringMap` lowercases option keys, but the connector handles the standard spellings; use the keys the README documents.
 
 ### Teardown
 
-At the end of the session, free the context:
+Free the context when you're done. Path: `/api/1.2/contexts/destroy`:
 
 ```bash
-databricks api post /api/1.2/commands/contexts/destroy \
+databricks api post /api/1.2/contexts/destroy \
   --json '{"clusterId":"{{cluster_id}}","contextId":"<CTX>"}'
 ```
 
-Contexts are a cluster resource — don't leak them.
+Contexts are a cluster resource — don't leak them across sessions.
 
 ---
 
-## Composing operations to satisfy a request
+## Composing reads to satisfy a request
 
-After bootstrap, read the catalogue's entries — their `description` and `parameters_json` fields tell you what each op does and what it needs. Plan a request as a sequence of ops the catalogue actually exposes; an op you don't see is one you can't call.
+Plan a request as one or more table reads with `table_configuration` filters from the README. Examples for orientation only — the README is authoritative for what each table accepts:
 
-A request often decomposes across multiple ops, each one a normal execution-envelope call. For example, "download the latest attachment from Alice" typically becomes: find the candidate messages, pick the right one, enumerate its attachments, fetch the bytes — each step a separate op chosen from the catalogue.
+- **"Find emails from Alice last week"** → read `messages` with `q="from:alice@example.com newer_than:7d"`; cap with `.limit(N)`.
+- **"What labels do I have?"** → read `labels`, no filters.
+- **"50 unread inbox messages, headers only"** → read `messages` with `q="is:unread"`, `labelIds="INBOX"`, `format="metadata"`, `.limit(50)`. Gmail charges ~4× more per message for `format="full"`.
+- **"Show my profile"** → read `profile`, no filters.
+- **"Find the latest invoice from Vendor"** → read `messages` with `q="from:vendor@example.com subject:invoice"`, `.limit(5)`, let the user pick by id, then a tighter follow-up read if needed.
 
-Two general practices help regardless of which ops the catalogue exposes:
-
-- **Prefer lightweight discovery before heavy fetches.** If the catalogue offers a triage-style op (header-only listing) alongside a full-fetch op, run the triage one first to narrow the set, then fetch full bodies only for what you actually need. Gmail charges roughly 4× more per message for full-format reads than for metadata-only.
-- **Cap rows you don't need.** Some ops accept a `limit` parameter; for ones that don't, chain `.limit(N)` inside the snippet before `.collect()`.
-
-When the request is about *ongoing or scheduled* ingestion rather than an ad-hoc read, stop here and hand off to the `deploy-connector` skill — see the carve-out in the previous section.
+Practical:
+- Always cap rows by chaining `.limit(N)` on the DataFrame; the read path itself enforces no row cap.
+- Prefer `format="metadata"` on the `messages` table when the user only needs headers.
+- The connector internally translates `q` to Gmail's search syntax — pass it through verbatim (e.g. `is:unread`, `has:attachment`, `newer_than:7d`).
 
 ---
 
 ## Connection prerequisite
 
-If `{{connection_name}}` is provided, trust it and try `validate_connection` early; surface `_meta` errors verbatim.
+If `{{connection_name}}` is provided, trust it and run a small read early to validate (e.g. `tableName=labels`, `.limit(1)`); surface any error verbatim.
 
 If it isn't, the connection must be created on the **user's laptop** because the OAuth U2M flow opens their browser:
 
@@ -139,30 +171,33 @@ community-connector create_connection gmail <CONN_NAME> \
 
 Google's `authorization_endpoint`, `token_endpoint`, and scopes are baked into `connector_spec.yaml`; the user only supplies their OAuth Web Application's `client_id` + `client_secret`. Choose `u2m_per_user` instead when each end user should re-consent independently.
 
-You can't shortcut this — UC mints and refreshes the `access_token`, and the connector treats it as opaque. If `validate_connection` returns `auth_failed` mid-session, send the user back here to re-consent.
+You can't shortcut this — UC mints and refreshes the `access_token`, and the connector treats it as opaque.
 
 ---
 
-## Error codes (canonical `_meta.code` values)
+## Error handling
 
-The dispatcher normalises connector failures. When you see one, decide whether to retry, recompose, or surface to the user:
+The deployed connector surfaces failures as Spark exceptions (the agent-dispatcher's normalised `_meta.code` envelope is not on the dispatch path yet). When `results.resultType == "error"`, parse `results.summary` + `results.cause` and act on the underlying cause:
 
-| Code | Meaning | What you should do |
+| Symptom | Likely cause | What to do |
 |---|---|---|
-| `auth_failed` | OAuth token expired or revoked. | Stop; ask the user to re-run the `create_connection` flow. |
-| `permission_denied` | Usually missing `drive.readonly` on a Drive-hosted attachment. | Tell the user; offer to retry once they re-consent with both scopes. |
-| `not_found` | Bad `message_id` / `attachment_id` / `drive_file_id`. | Recheck the id you computed — typically a stale search result. |
-| `rate_limited` | Gmail 429. | Back off (a few seconds), retry once. Don't hammer. |
-| `bad_request` | Missing/malformed option. | Re-read the parameter list from `list_operations`; you probably picked a wrong key. |
-| `connection_failed` | The UC connection itself is broken. | Run `validate_connection`, surface the message, stop. |
+| `Bad Target: /api/...` from `databricks api` | REST path wrong (most often `commands/contexts/...`) | Re-check the path table at the top of this file. |
+| Gmail HTTP 401 in the traceback | OAuth token expired / revoked | Stop; ask the user to re-run `create_connection`. |
+| Gmail HTTP 403 | Missing scope or Workspace admin restriction | Surface the message; if Drive-related, the connector still works for Gmail-only reads. |
+| Gmail HTTP 404 on the history endpoint | `historyId` expired (~30 days) | The connector falls back to a full scan on retry; warn the user the next read may be slow. |
+| Gmail HTTP 429 | Rate limit | Back off a few seconds and retry once. Don't hammer. |
+| `Connection not found` | `connection_name` is wrong or missing | Re-confirm with the user; offer to create via the prerequisite step. |
+| Module import error on `GmailDataSource` | Connector wheel not installed on the cluster | Stop and surface — this skill can't fix cluster libraries. |
 
 ---
 
 ## Rules
 
 - The `cluster_id` always comes from the user. Don't reuse a stale one across sessions.
-- `list_operations` is the source of truth for what's callable — load it at bootstrap, and re-load whenever the connector might have changed (e.g. after the user redeploys).
-- Always print results as JSON inside the snippet so the cluster response is machine-parseable; never rely on the Spark text-table output.
-- Stay inside the catalogue. If the user wants a write action or anything outside it, say so plainly — don't try to fake it through a read op.
+- The **path table** at the top is the source of truth for REST endpoints. Never invent a path. Never paste `/api/2.0/commands/...` or `/api/1.2/commands/contexts/...`.
+- The **README** is the source of truth for the table surface — table names and `table_configuration` keys. Never invent either; don't claim ops (`search_messages`, `download_attachment`, etc.) work today.
+- Register the data source on the first command in every fresh context, never on later commands in the same context.
+- Always print results as JSON inside the snippet so the cluster response is machine-parseable; don't rely on Spark's text-table output.
+- Stay inside the table surface. If the user wants something it can't do, say so plainly — don't fake it through an unrelated read.
 - Tear down the execution context when the conversation's Gmail work is finished, including on error.
 - For sustained ingestion, hand off to `deploy-connector` rather than looping the execution envelope yourself.
