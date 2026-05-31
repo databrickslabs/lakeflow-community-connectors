@@ -14,6 +14,8 @@ Two layers:
   HTTP with ``responses`` and run independently of the simulator.
 """
 
+import time
+
 import pytest
 import responses
 
@@ -739,6 +741,198 @@ def test_oauth2_user_flow_tracks_rotated_refresh_token():
     )
     c.list_tables()
     assert c.options["oauth2_refresh_token"] == "rotated-refresh"
+
+
+@responses.activate
+def test_oauth2_captures_expires_in_from_token_response():
+    """`expires_in` from the token endpoint is stored as a monotonic
+    deadline so the next request can pre-emptively refresh."""
+    _mock_metadata()
+    responses.post(
+        "https://idp.example.com/token",
+        json={"access_token": "minted", "expires_in": 3600, "token_type": "Bearer"},
+    )
+    c = _make(
+        {
+            "auth_type": "oauth2",
+            "oauth2_token_url": "https://idp.example.com/token",
+            "oauth2_client_id": "id",
+            "oauth2_client_secret": "secret",
+        }
+    )
+    before = time.monotonic()
+    c.list_tables()  # triggers session creation which mints the token
+    after = time.monotonic()
+    # Expires_at should be ~ now + 3600 - 60s buffer, accounting for test time.
+    assert c._access_token_expires_at is not None
+    assert before + 3600 - 60 - 1 <= c._access_token_expires_at <= after + 3600 - 60
+
+
+@responses.activate
+def test_oauth2_preemptively_refreshes_when_token_near_expiry():
+    """When the recorded deadline has passed, `_http_get` mints a fresh
+    token BEFORE issuing the request — no 401 round-trip needed."""
+    _mock_metadata()
+
+    token_responses = iter(
+        [
+            '{"access_token": "first", "expires_in": 3600, "token_type": "Bearer"}',
+            '{"access_token": "second", "expires_in": 3600, "token_type": "Bearer"}',
+        ]
+    )
+
+    def _token_callback(request):
+        return (200, {}, next(token_responses))
+
+    responses.add_callback(
+        responses.POST, "https://idp.example.com/token", callback=_token_callback
+    )
+
+    request_auths = []
+
+    def _customers_callback(request):
+        request_auths.append(request.headers.get("Authorization"))
+        return (200, {}, '{"value": []}')
+
+    responses.add_callback(responses.GET, f"{SERVICE_URL}Customers", callback=_customers_callback)
+
+    c = _make(
+        {
+            "auth_type": "oauth2",
+            "oauth2_token_url": "https://idp.example.com/token",
+            "oauth2_client_id": "id",
+            "oauth2_client_secret": "secret",
+        }
+    )
+    # Force session creation (mints the first token), then yank the deadline
+    # into the past to simulate post-expiry on the next request.
+    session = c._get_session()
+    assert session.headers["Authorization"] == "Bearer first"
+    c._access_token_expires_at = time.monotonic() - 1.0
+
+    list(c.read_table("Customers", None, {})[0])
+    # No 401 in this scenario — pre-emptive refresh happened before send,
+    # so the single Customers request carries the refreshed token.
+    assert request_auths == ["Bearer second"]
+
+
+@responses.activate
+def test_oauth2_handles_token_endpoint_without_expires_in():
+    """Some token endpoints omit `expires_in`. Treat that as 'unknown
+    expiry' and fall back to the 401-retry path — no exception, just no
+    pre-emptive refresh."""
+    _mock_metadata()
+    responses.post(
+        "https://idp.example.com/token",
+        json={"access_token": "minted", "token_type": "Bearer"},  # no expires_in
+    )
+    c = _make(
+        {
+            "auth_type": "oauth2",
+            "oauth2_token_url": "https://idp.example.com/token",
+            "oauth2_client_id": "id",
+            "oauth2_client_secret": "secret",
+        }
+    )
+    c.list_tables()
+    assert c._access_token_expires_at is None
+
+
+@responses.activate
+def test_oauth2_refresh_failure_raises_actionable_error():
+    """A 401 from the token endpoint during a refresh-token grant
+    surfaces the OAuth2 error code + description, and names the
+    `oauth2_refresh_token` / `oauth2_client_id` fields the user
+    should check."""
+    _mock_metadata()
+    responses.post(
+        "https://idp.example.com/token",
+        json={"error": "invalid_grant", "error_description": "refresh_token expired"},
+        status=401,
+    )
+    c = _make(
+        {
+            "auth_type": "oauth2",
+            "oauth2_token_url": "https://idp.example.com/token",
+            "oauth2_client_id": "id",
+            "oauth2_client_secret": "secret",
+            "oauth2_refresh_token": "stale",
+        }
+    )
+    with pytest.raises(ValueError) as ei:
+        c.list_tables()
+    msg = str(ei.value)
+    assert "refreshing the access token" in msg
+    assert "oauth2_refresh_token" in msg
+    assert "oauth2_client_id" in msg
+    assert "invalid_grant" in msg
+    assert "refresh_token expired" in msg
+
+
+@responses.activate
+def test_oauth2_client_credentials_failure_raises_actionable_error():
+    """A 401 from the token endpoint during client_credentials names
+    the client_id / client_secret / token_url / scope fields."""
+    _mock_metadata()
+    responses.post(
+        "https://idp.example.com/token",
+        json={"error": "invalid_client"},
+        status=401,
+    )
+    c = _make(
+        {
+            "auth_type": "oauth2",
+            "oauth2_token_url": "https://idp.example.com/token",
+            "oauth2_client_id": "id",
+            "oauth2_client_secret": "wrong-secret",
+        }
+    )
+    with pytest.raises(ValueError) as ei:
+        c.list_tables()
+    msg = str(ei.value)
+    assert "client_credentials grant" in msg
+    assert "oauth2_client_secret" in msg
+    assert "invalid_client" in msg
+
+
+@responses.activate
+def test_oauth2_persistent_401_after_refresh_raises_permission_error():
+    """If the source keeps returning 401 even after a fresh token
+    arrives, the access token isn't the problem. Surface a
+    PermissionError that points at scope / principal / tenant rather
+    than the token itself."""
+    _mock_metadata()
+    responses.post(
+        "https://idp.example.com/token",
+        json={"access_token": "fresh", "token_type": "Bearer"},
+    )
+    responses.add(
+        responses.GET,
+        f"{SERVICE_URL}Customers",
+        status=401,
+        json={"error": "AccessDenied", "message": "principal lacks read on Customers"},
+    )
+    responses.add(
+        responses.GET,
+        f"{SERVICE_URL}Customers",
+        status=401,
+        json={"error": "AccessDenied", "message": "principal lacks read on Customers"},
+    )
+    c = _make(
+        {
+            "auth_type": "oauth2",
+            "oauth2_token_url": "https://idp.example.com/token",
+            "oauth2_client_id": "id",
+            "oauth2_client_secret": "secret",
+            "oauth2_refresh_token": "valid",
+        }
+    )
+    with pytest.raises(PermissionError) as ei:
+        list(c.read_table("Customers", None, {})[0])
+    msg = str(ei.value)
+    assert "even after refreshing" in msg
+    assert "oauth2_scope" in msg
+    assert "service_url" in msg
 
 
 def test_missing_service_url_raises():
