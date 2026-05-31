@@ -8,10 +8,53 @@ from pyspark.sql.datasource import (
     SimpleDataSourceStreamReader,
     DataSourceReader,
 )
-from pyspark.sql.streaming.datasource import (
-    ReadAllAvailable,
-    SupportsTriggerAvailableNow,
-)
+
+# The Trigger.AvailableNow admission-control API (``pyspark.sql.streaming.
+# datasource``) only exists on newer PySpark/DBR runtimes. The agent-
+# operation and batch read paths never need it — only the streaming
+# readers do. Import it optionally so the package still loads on older
+# runtimes where someone uses the connector purely through the agent
+# surface (``spark.read.format(...).option("operation", ...)``).
+#
+# This is the standard Python idiom for an optional dependency: ``import``
+# is a statement that runs at module load, so to make it conditional you
+# attempt it and substitute a fallback when it's absent. ``SupportsTrigger
+# AvailableNow`` is a base class (needed at class-definition time), so the
+# fallback is a trivial stand-in; streaming readers built on it still
+# *define* fine and only fail if a streaming query is actually started on
+# a runtime that lacks the real API — which is exactly when you'd want a
+# clear error anyway.
+try:
+    from pyspark.sql.streaming.datasource import (
+        ReadAllAvailable,
+        SupportsTriggerAvailableNow,
+    )
+
+    _TRIGGER_AVAILABLE_NOW_SUPPORTED = True
+except ImportError:
+    _TRIGGER_AVAILABLE_NOW_SUPPORTED = False
+
+    class SupportsTriggerAvailableNow:  # minimal stand-in base class
+        """Fallback for runtimes without the Trigger.AvailableNow API.
+
+        Lets the streaming reader classes be *defined* so the module
+        imports; any attempt to actually run a stream on such a runtime
+        raises a clear error from ``_require_trigger_available_now``.
+        """
+
+    ReadAllAvailable = None
+
+
+def _require_trigger_available_now() -> None:
+    """Guard the streaming path on runtimes lacking the AvailableNow API."""
+    if not _TRIGGER_AVAILABLE_NOW_SUPPORTED:
+        raise RuntimeError(
+            "Streaming reads require the Trigger.AvailableNow admission-"
+            "control API (pyspark.sql.streaming.datasource), which this "
+            "PySpark/DBR runtime does not provide. Use a newer runtime for "
+            "streaming, or read through the batch / agent-operation surface "
+            "(spark.read.format(...).option('operation', ...))."
+        )
 from databricks.labs.community_connector.interface import (
     LakeflowConnect,
     SupportsNamespaces,
@@ -417,6 +460,7 @@ class LakeflowSource(DataSource):
         # implements SupportsPartitionedStream and the table opts in.
         # Otherwise, delegate to super() which raises PySparkNotImplementedError,
         # causing Spark to fall back to simpleStreamReader().
+        _require_trigger_available_now()
         if isinstance(self.lakeflow_connect, SupportsPartitionedStream):
             table = self.options[TABLE_NAME]
             if self.lakeflow_connect.is_partitioned(table):
@@ -424,4 +468,5 @@ class LakeflowSource(DataSource):
         return super().streamReader(schema)
 
     def simpleStreamReader(self, schema: StructType):
+        _require_trigger_available_now()
         return LakeflowStreamReader(self.options, schema, self.lakeflow_connect)
