@@ -1,6 +1,6 @@
 ---
 name: gmail-connector
-description: Tool layer for Gmail tasks. Loads the connector's operation catalogue from a Databricks cluster via the Command Execution REST API and composes operations (search, fetch, attachments) to satisfy the user's intent. Use whenever the user asks the agent to do something with their mailbox.
+description: Tool layer for Gmail tasks. Loads the connector's operation catalogue dynamically from a Databricks cluster via the Command Execution REST API and composes those operations to satisfy the user's intent. The tool surface is whatever `list_operations` returns; scheduled-ingestion requests hand off to `deploy-connector`. Use whenever the user asks the agent to do something with their mailbox.
 args:
   - name: cluster_id
     description: All-purpose cluster the agent runs Gmail operations on (required — must be supplied by the user, never invented).
@@ -12,31 +12,21 @@ args:
 
 # Gmail Connector
 
-This skill turns the project's Gmail Spark APIs into an MCP-style tool surface. You — the agent — translate the user's natural request into a sequence of connector operations, run them on a Databricks cluster, and return the answer.
+This skill turns the project's Gmail Spark APIs into a tool surface the agent can call. You — the agent — translate the user's natural request into a sequence of connector operations, run them on a Databricks cluster, and return the answer.
 
-You **never** invent operations or parameter names. The cluster is the source of truth: load the catalogue once with `list_operations`, then drive everything else from it.
+You **never** invent operations or parameter names, and you don't infer the surface from this file. The cluster is the source of truth: load the catalogue once with `list_operations`, then drive everything from what it reports.
 
 ---
 
-## What the user can ask for
+## What this skill is for
 
-The connector is **read-side only**. Anything in this list is in scope:
+This skill is the **tool layer** for Gmail. Your tool surface is exactly what `list_operations` returns when called against the user's connection — nothing more, nothing less. Each catalogue entry carries a `description` and `parameters_json` written for exactly this purpose: read them to decide whether a request is satisfiable and how to call it. If the catalogue doesn't expose what the user is asking for, say so plainly — don't fake it with an op that isn't a fit.
 
-- "Search / find / show me emails matching X" — typed filters on sender, subject, date window, label, attachments, unread, plus free-form Gmail query syntax.
-- "Open / show / summarise this specific email" — by id, with decoded plain-text and HTML body.
-- "What's attached to this email?" / "Download the attachment / file" — Gmail-native parts and Drive-hosted links, written to a UC Volume.
-- "List my Gmail labels / drafts / filters / forwarding addresses / send-as aliases / delegates / account info."
-- "Ingest my Gmail tables into Unity Catalog on a schedule" — hand off to the `deploy-connector` skill with `source_name=gmail`; do not loop the read path.
+There is one explicit carve-out, because it's owned by a sibling skill rather than the read-side tool surface:
 
-## What the user **cannot** ask for through this skill
+- **Standing up a scheduled / continuous ingestion pipeline** (e.g. "ingest my labels table into UC every hour", "land my inbox in `main.gmail.messages` daily") — hand off to the `deploy-connector` skill with `source_name=gmail`. That skill provisions an SDP pipeline via the `community-connector` CLI, which is the right vehicle for ongoing sync. Do not loop the read envelope in this skill to fake periodic ingestion.
 
-If the user asks for any of the following, stop, explain it isn't supported by this connector, and offer the closest in-scope alternative:
-
-- **Anything that writes to Gmail** — send, reply, draft, archive, delete, mark read, modify labels, create/edit filters or signatures. The connector ships read-only OAuth scopes (`gmail.readonly` + `drive.readonly`).
-- **Mailboxes other than the connection's** — there's no per-call account switching beyond the OAuth subject the connection was created for.
-- **Real-time push / webhooks** — the connector polls; it doesn't receive Gmail push notifications.
-
-If the user asks for something Gmail-shaped but not in the loaded catalogue (e.g. a calendar event, a Drive folder listing), check `list_operations` first; if it isn't there, say so plainly rather than guessing.
+For everything else — including whether write actions, push notifications, multi-mailbox routing, etc. are supported — let `list_operations` answer. The catalogue is the truth; this file is not.
 
 ---
 
@@ -121,28 +111,16 @@ Contexts are a cluster resource — don't leak them.
 
 ## Composing operations to satisfy a request
 
-Walk the catalogue first, then plan. Patterns that tend to work:
+After bootstrap, read the catalogue's entries — their `description` and `parameters_json` fields tell you what each op does and what it needs. Plan a request as a sequence of ops the catalogue actually exposes; an op you don't see is one you can't call.
 
-- **"Find emails from Alice last week"** → `search_messages` with `from_address=alice@…` and `newer_than=7d` (and `limit` if the user wants a small sample). Returns header-only rows — cheap, no bodies fetched.
-- **"Open the latest invoice from Vendor"** → first `search_messages` (`from_address=vendor@…`, `subject=invoice`, `limit=5`) to choose the message id, then `get_message` for full body + attachments + Drive file ids.
-- **"Download the PDF attached to that mail"** → `list_attachments` to read `attachment_id` / `drive_file_id` and the right `kind`, then `download_attachment` with `volume_path` under `/Volumes/<cat>/<schema>/<vol>/<filename>`. For Gmail-native parts pass `message_id` + `attachment_id`; for Drive parts pass `drive_file_id` (optionally `export_mime_type` for Google-native docs).
-- **"Is the connection alive?"** → `validate_connection`. One row, check `_meta.status == "ok"`.
-- **"What can you do?"** → answer from the loaded catalogue, not from this file. Each entry has a `description` written for exactly this.
+A request often decomposes across multiple ops, each one a normal execution-envelope call. For example, "download the latest attachment from Alice" typically becomes: find the candidate messages, pick the right one, enumerate its attachments, fetch the bytes — each step a separate op chosen from the catalogue.
 
-When a request mixes capabilities (e.g. "download the latest attachment from Alice"), you compose: `search_messages` → pick id → `list_attachments` → `download_attachment`. Each is a normal execution-envelope call.
+Two general practices help regardless of which ops the catalogue exposes:
 
-Always cap rows you don't need: `search_messages` honours `limit` (default 50, max 500); `read_table` honours nothing, so chain `.limit(N)` inside the snippet.
+- **Prefer lightweight discovery before heavy fetches.** If the catalogue offers a triage-style op (header-only listing) alongside a full-fetch op, run the triage one first to narrow the set, then fetch full bodies only for what you actually need. Gmail charges roughly 4× more per message for full-format reads than for metadata-only.
+- **Cap rows you don't need.** Some ops accept a `limit` parameter; for ones that don't, chain `.limit(N)` inside the snippet before `.collect()`.
 
----
-
-## Picking the right read path
-
-The catalogue exposes two read shapes; choose by intent:
-
-- `search_messages` — header-only triage. Cheap (Gmail charges ~5 quota units per message vs ~20 for full). Use any time the user wants to *find* messages.
-- `read_table` — full table scan with the table's natural schema. Use when the user wants raw `messages`, `threads`, `labels`, `drafts`, `profile`, `settings`, `filters`, `forwarding_addresses`, `send_as`, or `delegates`. For `messages`/`threads` it accepts the same typed filters as `search_messages` (composed into Gmail's `q` syntax).
-
-When the user wants periodic / scheduled ingestion of full tables into UC, **stop driving the read path** and route to the `deploy-connector` skill with `source_name=gmail`. That spins up an SDP pipeline backed by the same connector, which is the right vehicle for ongoing sync.
+When the request is about *ongoing or scheduled* ingestion rather than an ad-hoc read, stop here and hand off to the `deploy-connector` skill — see the carve-out in the previous section.
 
 ---
 
