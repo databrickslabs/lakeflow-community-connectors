@@ -143,6 +143,84 @@ build_pipeline(
 | `filter`                |         | Extra OData `$filter` expression. |
 | `page_size`             | 1000    | `$top` per HTTP request. |
 | `max_records_per_batch` | 100000  | Per-call upper bound on rows returned. The connector has **no wall-clock ceiling** — `max_records_per_batch` is the only cap on a single batch. Each batch fetches `cursor gt <last>` and pulls up to this many rows, then commits the offset. Smaller values give continuous-mode pipelines lower latency per micro-batch at the cost of more round trips; larger values amortize HTTP overhead. The default of 100000 fits roughly 100 `$top=1000` pages per batch and prioritises throughput; lower it (e.g. to 5000) if you want tighter per-batch latency in a continuous pipeline. |
+| `delta_tracking`        | disabled | Opt-in OData v4 delta queries. Values: `disabled` (default — no behavior change), `auto` (probe once, fall back to cursor/snapshot if the server doesn't acknowledge), `enabled` (require support; error if the server doesn't acknowledge). See [Delta tracking](#delta-tracking) below. |
+
+## Delta tracking
+
+OData v4 §11.3 defines an optional change-tracking protocol: clients
+send `Prefer: odata.track-changes` on the initial request; supporting
+servers reply with `Preference-Applied: odata.track-changes`, a full
+snapshot, and an `@odata.deltaLink` URL. Subsequent calls to the delta
+link return only entities that changed since the link was minted —
+including deletions, signalled by an `@removed` block.
+
+When `delta_tracking` is active the connector:
+
+- Reads via the delta link instead of `cursor_field` filtering. HTTP
+  cost drops from "full snapshot per trigger" to "changes only per
+  trigger".
+- Emits two synthetic columns into the destination schema:
+  - `_deleted` (boolean) — `True` for tombstone rows from `@removed`
+    entries, `False` for adds and changes. Downstream consumers filter
+    on this to materialise active rows.
+  - `_lc_sequence` (string) — strictly monotonic per emitted record,
+    used as `apply_changes` sequence_by so the destination MERGE picks
+    deterministic winners when the same primary key appears multiple
+    times in one batch.
+- Surfaces `ingestion_type=cdc` (in-band tombstones via the `_deleted`
+  flag, not the framework's `cdc_with_deletes` split). This matches
+  the pattern established by `microsoft_teams`.
+- Falls back automatically on `delta_tracking=auto` when the server
+  doesn't acknowledge the prefer header. `enabled` mode treats the
+  same condition as a hard failure with an actionable error.
+
+Known-supporting services (`delta_tracking=enabled` should work):
+
+- Microsoft Graph (`/v1.0/users/delta`, `/v1.0/groups/delta`, …)
+- Microsoft Dataverse / Power Platform OData endpoints
+- SAP S/4HANA Cloud OData services that have change-tracking
+  enabled per entity set
+
+Other services (e.g. Northwind, generic SAP NetWeaver Gateway
+deployments) typically ignore the prefer header — `delta_tracking=auto`
+detects this and falls back to whatever cursor/snapshot config is set.
+
+### Limitations
+
+- **Sparse property updates are rejected.** OData v4 §11.4 lets the
+  server return only the *changed* properties on an update. Applying
+  that as-is would write NULLs over good values at the destination, so
+  the connector raises `RuntimeError` if a non-tombstone delta entry is
+  missing any property the schema declares. Workaround: restrict the
+  schema via `$select` to fields the server always returns, or fall
+  back with `delta_tracking=disabled`.
+- **Token expiry triggers a full re-bootstrap.** When the server
+  returns HTTP 410 on a stored delta link, the connector silently
+  re-reads the entire entity set via a fresh `Prefer` GET. Re-fetched
+  rows MERGE cleanly by primary key at the destination, so no data
+  is lost — but HTTP cost spikes for that one batch.
+- **`cursor_field` and `delta_tracking=enabled` are mutually
+  exclusive.** Delta tracking is the source of truth for change
+  ordering; layering a client-side cursor on top over-constrains the
+  read.
+- **The `_deleted` and `_lc_sequence` columns are synthetic.** They're
+  produced by the connector, not the source, and don't exist on the
+  origin entity. The destination Delta table carries them; downstream
+  transforms should filter on `_deleted=False` when materialising
+  active rows.
+
+### Configuration example
+
+```python
+{
+    "table": {
+        "source_table": "users",
+        "table_configuration": {
+            "delta_tracking": "enabled",
+        },
+    }
+}
+```
 
 ## Multi-tenant / multi-schema services
 
@@ -160,8 +238,10 @@ entity set name appears in two schemas, set the `namespace` table option:
 
 - Single-partition pagination via `@odata.nextLink`. Skiptokens are opaque,
   so we can't safely parallelize. Throughput is bounded by the source.
-- Delete tombstones aren't synthesized — `ingestion_type` is never
-  `cdc_with_deletes`. OData services don't expose deletions uniformly.
-- Cursor field is assumed to be monotonically non-decreasing and naturally
-  orderable by `$orderby`. Timestamps and monotonic IDs work; arbitrary
-  fields don't.
+- Delete tombstones are synthesized only when `delta_tracking` is active.
+  In snapshot and cursor-based modes, the connector never returns
+  `cdc_with_deletes`. OData services without delta-query support don't
+  expose deletions uniformly.
+- Cursor field (when used) is assumed to be monotonically non-decreasing
+  and naturally orderable by `$orderby`. Timestamps and monotonic IDs
+  work; arbitrary fields don't.

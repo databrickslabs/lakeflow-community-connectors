@@ -14,6 +14,7 @@ Two layers:
   HTTP with ``responses`` and run independently of the simulator.
 """
 
+import json
 import time
 
 import pytest
@@ -1140,3 +1141,512 @@ def test_unique_name_does_not_require_namespace():
     c = _make()
     schema = c.get_table_schema("Orders", {})  # only in Sales
     assert [f.name for f in schema.fields] == ["OrderId"]
+
+
+# ---------------------------------------------------------------------------
+# Delta tracking (Prefer: odata.track-changes)
+# ---------------------------------------------------------------------------
+
+
+# Realistic delta link shape — server-minted opaque token. The connector
+# treats this URL as the offset payload to resume from.
+DELTA_LINK_V1 = f"{SERVICE_URL}Customers?$deltatoken=tok-1"
+DELTA_LINK_V2 = f"{SERVICE_URL}Customers?$deltatoken=tok-2"
+
+
+def _delta_bootstrap_body(value, delta_link=DELTA_LINK_V1, next_link=None):
+    """Construct a delta-bootstrap response body. Defaults match the
+    OData v4 spec: full snapshot + terminal ``@odata.deltaLink``."""
+    body = {"@odata.context": f"{SERVICE_URL}$metadata#Customers", "value": value}
+    if delta_link is not None:
+        body["@odata.deltaLink"] = delta_link
+    if next_link is not None:
+        body["@odata.nextLink"] = next_link
+    return body
+
+
+@responses.activate
+def test_delta_metadata_returns_cdc_with_synthetic_sequence_cursor():
+    """When delta is active for a table, the connector advertises
+    ``ingestion_type=cdc`` with the synthetic ``_lc_sequence`` cursor.
+    Primary keys still come from the entity type's CSDL ``<Key>`` —
+    apply_changes uses them as the MERGE key at the destination."""
+    _mock_metadata()
+    c = _make()
+    meta = c.read_table_metadata("Customers", {"delta_tracking": "enabled"})
+    assert meta == {
+        "primary_keys": ["Id"],
+        "cursor_field": "_lc_sequence",
+        "ingestion_type": "cdc",
+    }
+
+
+@responses.activate
+def test_delta_schema_appends_deleted_and_sequence_columns():
+    """The destination needs the synthetic columns in the Spark schema
+    so Delta accepts the emitted records. ``_deleted`` carries the
+    in-band tombstone signal; ``_lc_sequence`` is apply_changes'
+    sequence_by column."""
+    _mock_metadata()
+    c = _make()
+    schema = c.get_table_schema("Customers", {"delta_tracking": "enabled"})
+    names = [f.name for f in schema.fields]
+    assert names == ["Id", "Name", "ModifiedAt", "_deleted", "_lc_sequence"]
+    deleted_field = schema.fields[3]
+    sequence_field = schema.fields[4]
+    assert type(deleted_field.dataType).__name__ == "BooleanType"
+    assert type(sequence_field.dataType).__name__ == "StringType"
+    assert deleted_field.nullable is False
+    assert sequence_field.nullable is False
+
+
+@responses.activate
+def test_delta_enabled_with_cursor_field_raises():
+    """``delta_tracking=enabled`` and ``cursor_field`` are mutually
+    exclusive — the server-driven delta stream provides its own
+    sequencing, layering cursor filtering on top would over-constrain
+    the read."""
+    _mock_metadata()
+    c = _make()
+    with pytest.raises(ValueError, match="mutually exclusive"):
+        c.read_table_metadata(
+            "Customers",
+            {"delta_tracking": "enabled", "cursor_field": "ModifiedAt"},
+        )
+
+
+@responses.activate
+def test_delta_invalid_setting_raises():
+    _mock_metadata()
+    c = _make()
+    with pytest.raises(ValueError, match="auto, enabled, disabled"):
+        c.read_table_metadata("Customers", {"delta_tracking": "sometimes"})
+
+
+@responses.activate
+def test_delta_disabled_default_sends_no_prefer_header():
+    """Default ``delta_tracking=disabled`` means existing snapshot /
+    cursor pipelines see zero behavior change and zero extra HTTP cost.
+    No ``Prefer`` header is sent on any request."""
+    _mock_metadata()
+    captured_headers = []
+
+    def _callback(request):
+        captured_headers.append(dict(request.headers))
+        return (200, {}, '{"value": []}')
+
+    responses.add_callback(responses.GET, f"{SERVICE_URL}Customers", callback=_callback)
+    c = _make()
+    c.read_table("Customers", None, {})
+    assert all("Prefer" not in h for h in captured_headers)
+
+
+@responses.activate
+def test_delta_auto_probe_positive_routes_through_delta_path():
+    """``delta_tracking=auto`` probes once. If the server returns
+    ``Preference-Applied: odata.track-changes``, the connector marks
+    the table delta-capable and reads via the delta path."""
+    _mock_metadata()
+    call_count = {"n": 0}
+
+    def _callback(request):
+        call_count["n"] += 1
+        # Probe call ($top=1) — return Preference-Applied to acknowledge.
+        if call_count["n"] == 1:
+            assert request.headers.get("Prefer") == "odata.track-changes"
+            return (
+                200,
+                {"Preference-Applied": "odata.track-changes"},
+                json.dumps(_delta_bootstrap_body([])),
+            )
+        # Bootstrap call (after probe) — same header, but tests above
+        # only care that the read path was reached.
+        return (
+            200,
+            {"Preference-Applied": "odata.track-changes"},
+            json.dumps(
+                _delta_bootstrap_body(
+                    [{"Id": 1, "Name": "A", "ModifiedAt": "2024-01-01T00:00:00Z"}]
+                )
+            ),
+        )
+
+    responses.add_callback(responses.GET, f"{SERVICE_URL}Customers", callback=_callback)
+
+    c = _make()
+    records, offset = c.read_table("Customers", None, {"delta_tracking": "auto"})
+    rows = list(records)
+    # Bootstrap row plus synthetic columns.
+    assert len(rows) == 1
+    assert rows[0]["Id"] == 1
+    assert rows[0]["_deleted"] is False
+    assert "_lc_sequence" in rows[0]
+    assert offset == {"delta_link": DELTA_LINK_V1}
+
+
+@responses.activate
+def test_delta_auto_probe_silent_ignore_falls_back():
+    """Some servers accept the ``Prefer`` request, return data, but
+    don't echo ``Preference-Applied``. The connector treats that as
+    "not supported" and falls back to snapshot — silently, so the
+    auto path stays usable without extra config."""
+    _mock_metadata()
+    call_count = {"n": 0}
+
+    def _callback(request):
+        call_count["n"] += 1
+        # Probe: no Preference-Applied → probe says "not supported".
+        # Snapshot follow-up: returns regular data.
+        return (200, {}, '{"value": [{"Id": 1, "Name": "A", "ModifiedAt": "x"}]}')
+
+    responses.add_callback(responses.GET, f"{SERVICE_URL}Customers", callback=_callback)
+    c = _make()
+    records, offset = c.read_table("Customers", None, {"delta_tracking": "auto"})
+    rows = list(records)
+    assert rows == [{"Id": 1, "Name": "A", "ModifiedAt": "x"}]
+    # Empty offset = snapshot mode. No delta_link in there.
+    assert offset == {}
+
+
+@responses.activate
+def test_delta_auto_probe_400_falls_back():
+    """Servers can outright reject the ``Prefer`` header with 4xx. The
+    probe surfaces False and the connector falls back to snapshot."""
+    _mock_metadata()
+    call_count = {"n": 0}
+
+    def _callback(request):
+        call_count["n"] += 1
+        if call_count["n"] == 1:
+            # Probe rejected.
+            return (400, {}, '{"error": "Bad prefer"}')
+        return (200, {}, '{"value": [{"Id": 7, "Name": "G", "ModifiedAt": "x"}]}')
+
+    responses.add_callback(responses.GET, f"{SERVICE_URL}Customers", callback=_callback)
+    c = _make()
+    records, _ = c.read_table("Customers", None, {"delta_tracking": "auto"})
+    assert [r["Id"] for r in list(records)] == [7]
+
+
+@responses.activate
+def test_delta_enabled_without_preference_applied_raises():
+    """``delta_tracking=enabled`` is the user's positive assertion that
+    the server supports it. If the bootstrap response is missing the
+    ``Preference-Applied`` header, surface a clear error pointing at
+    ``delta_tracking=disabled``."""
+    _mock_metadata()
+    # No Preference-Applied in the response → connector raises.
+    responses.add(
+        responses.GET,
+        f"{SERVICE_URL}Customers",
+        json=_delta_bootstrap_body([]),
+        status=200,
+    )
+    c = _make()
+    with pytest.raises(RuntimeError, match="Preference-Applied"):
+        records, _ = c.read_table("Customers", None, {"delta_tracking": "enabled"})
+        list(records)
+
+
+@responses.activate
+def test_delta_bootstrap_emits_full_snapshot_with_deleted_false():
+    """Initial bootstrap call emits all current rows with
+    ``_deleted=False`` and a monotonic ``_lc_sequence``. Offset is the
+    server's first delta link."""
+    _mock_metadata()
+    responses.add(
+        responses.GET,
+        f"{SERVICE_URL}Customers",
+        json=_delta_bootstrap_body(
+            [
+                {"Id": 1, "Name": "A", "ModifiedAt": "2024-01-01T00:00:00Z"},
+                {"Id": 2, "Name": "B", "ModifiedAt": "2024-02-01T00:00:00Z"},
+            ]
+        ),
+        headers={"Preference-Applied": "odata.track-changes"},
+    )
+    c = _make()
+    records, offset = c.read_table("Customers", None, {"delta_tracking": "enabled"})
+    rows = list(records)
+    assert [r["Id"] for r in rows] == [1, 2]
+    assert all(r["_deleted"] is False for r in rows)
+    # Sequences are strictly increasing per emit.
+    seqs = [r["_lc_sequence"] for r in rows]
+    assert seqs == sorted(seqs)
+    assert len(set(seqs)) == 2
+    assert offset == {"delta_link": DELTA_LINK_V1}
+
+
+@responses.activate
+def test_delta_resume_emits_changes_and_removes_via_in_band_deleted_flag():
+    """Resume call (offset has ``delta_link``) walks that URL. Regular
+    entries become ``_deleted=False`` records, ``@removed`` entries
+    become ``_deleted=True`` records carrying only the primary key."""
+    _mock_metadata()
+    responses.add(
+        responses.GET,
+        DELTA_LINK_V1,
+        json={
+            "@odata.context": f"{SERVICE_URL}$metadata#Customers/$delta",
+            "value": [
+                {"Id": 5, "Name": "E", "ModifiedAt": "2024-05-01T00:00:00Z"},
+                {"@removed": {"reason": "deleted"}, "Id": 2},
+            ],
+            "@odata.deltaLink": DELTA_LINK_V2,
+        },
+    )
+    c = _make()
+    records, offset = c.read_table(
+        "Customers",
+        {"delta_link": DELTA_LINK_V1},
+        {"delta_tracking": "enabled"},
+    )
+    rows = list(records)
+    assert len(rows) == 2
+    change, tombstone = rows
+    assert change["Id"] == 5
+    assert change["Name"] == "E"
+    assert change["_deleted"] is False
+    assert tombstone == {"Id": 2, "_deleted": True, "_lc_sequence": tombstone["_lc_sequence"]}
+    assert offset == {"delta_link": DELTA_LINK_V2}
+
+
+@responses.activate
+def test_delta_resume_walks_nextlink_chain_to_captured_deltalink():
+    """The delta response itself can paginate via ``@odata.nextLink``.
+    The terminal page carries the new ``@odata.deltaLink`` — the
+    connector follows the chain to completion before returning."""
+    _mock_metadata()
+    next_link = f"{SERVICE_URL}Customers?$deltatoken=tok-1&$skiptoken=page2"
+    responses.add(
+        responses.GET,
+        DELTA_LINK_V1,
+        json={
+            "value": [{"Id": 10, "Name": "Ten", "ModifiedAt": "x"}],
+            "@odata.nextLink": next_link,
+        },
+    )
+    responses.add(
+        responses.GET,
+        next_link,
+        json={
+            "value": [{"Id": 11, "Name": "Eleven", "ModifiedAt": "y"}],
+            "@odata.deltaLink": DELTA_LINK_V2,
+        },
+    )
+    c = _make()
+    records, offset = c.read_table(
+        "Customers",
+        {"delta_link": DELTA_LINK_V1},
+        {"delta_tracking": "enabled"},
+    )
+    rows = list(records)
+    assert [r["Id"] for r in rows] == [10, 11]
+    assert offset == {"delta_link": DELTA_LINK_V2}
+
+
+@responses.activate
+def test_delta_no_op_response_preserves_prior_delta_link():
+    """Graph-rotation guard: even when the server mints a fresh
+    deltaLink on every response, an empty change set means "no
+    progress" — the connector hands the prior link back so the
+    framework sees ``end_offset == start_offset`` and AvailableNow can
+    terminate."""
+    _mock_metadata()
+    # Server returns no records AND a rotated deltaLink. Without the
+    # rotation guard the offset would advance and the framework would
+    # commit forever.
+    responses.add(
+        responses.GET,
+        DELTA_LINK_V1,
+        json={
+            "value": [],
+            "@odata.deltaLink": DELTA_LINK_V2,
+        },
+    )
+    c = _make()
+    records, offset = c.read_table(
+        "Customers",
+        {"delta_link": DELTA_LINK_V1},
+        {"delta_tracking": "enabled"},
+    )
+    assert list(records) == []
+    assert offset == {"delta_link": DELTA_LINK_V1}
+
+
+@responses.activate
+def test_delta_410_triggers_full_rebootstrap():
+    """The server can expire a delta token (410 Gone). The connector
+    re-bootstraps automatically: emits the fresh snapshot as
+    ``_deleted=False`` rows and returns a brand-new delta link."""
+    _mock_metadata()
+    # First call: 410 on the stored delta link.
+    responses.add(responses.GET, DELTA_LINK_V1, status=410)
+    # Re-bootstrap: fresh snapshot via Prefer.
+    responses.add(
+        responses.GET,
+        f"{SERVICE_URL}Customers",
+        json=_delta_bootstrap_body(
+            [{"Id": 99, "Name": "Reborn", "ModifiedAt": "x"}],
+            delta_link=DELTA_LINK_V2,
+        ),
+        headers={"Preference-Applied": "odata.track-changes"},
+    )
+    c = _make()
+    records, offset = c.read_table(
+        "Customers",
+        {"delta_link": DELTA_LINK_V1},
+        {"delta_tracking": "enabled"},
+    )
+    rows = list(records)
+    assert [r["Id"] for r in rows] == [99]
+    assert all(r["_deleted"] is False for r in rows)
+    assert offset == {"delta_link": DELTA_LINK_V2}
+
+
+@responses.activate
+def test_delta_sparse_entity_raises_runtimeerror():
+    """OData v4 §11.4 lets the server return only the changed
+    properties on an update. Applying that as-is would write NULLs over
+    good values at the destination — silent corruption. The connector
+    refuses sparse responses with an actionable error."""
+    _mock_metadata()
+    responses.add(
+        responses.GET,
+        DELTA_LINK_V1,
+        json={
+            "value": [
+                # Missing "Name" and "ModifiedAt" — schema declares them.
+                {"Id": 5},
+            ],
+            "@odata.deltaLink": DELTA_LINK_V2,
+        },
+    )
+    c = _make()
+    with pytest.raises(RuntimeError, match="sparse entity"):
+        records, _ = c.read_table(
+            "Customers",
+            {"delta_link": DELTA_LINK_V1},
+            {"delta_tracking": "enabled"},
+        )
+        list(records)
+
+
+@responses.activate
+def test_delta_sparse_check_honors_select():
+    """When the user restricts the projection via ``$select``, only the
+    selected fields are expected in every delta entry. Returning only
+    those (and nothing else) is no longer "sparse"."""
+    _mock_metadata()
+    responses.add(
+        responses.GET,
+        DELTA_LINK_V1,
+        json={
+            "value": [
+                # Only Id + Name, matching the select clause exactly.
+                {"Id": 5, "Name": "E"},
+            ],
+            "@odata.deltaLink": DELTA_LINK_V2,
+        },
+    )
+    c = _make()
+    records, _ = c.read_table(
+        "Customers",
+        {"delta_link": DELTA_LINK_V1},
+        {"delta_tracking": "enabled", "select": "Id,Name"},
+    )
+    rows = list(records)
+    assert [r["Id"] for r in rows] == [5]
+    # No exception — schema only requires Id + Name (+ synthetic columns).
+
+
+@responses.activate
+def test_delta_max_records_caps_and_stashes_next_link():
+    """A long catch-up after a paused pipeline can return more rows than
+    ``max_records_per_batch``. The connector caps mid-pagination and
+    stashes the unfollowed ``@odata.nextLink`` as the resume point."""
+    _mock_metadata()
+    next_link = f"{SERVICE_URL}Customers?$deltatoken=tok-1&$skiptoken=page2"
+    responses.add(
+        responses.GET,
+        DELTA_LINK_V1,
+        json={
+            "value": [
+                {"Id": 1, "Name": "A", "ModifiedAt": "x"},
+                {"Id": 2, "Name": "B", "ModifiedAt": "x"},
+                {"Id": 3, "Name": "C", "ModifiedAt": "x"},
+            ],
+            "@odata.nextLink": next_link,
+        },
+    )
+    c = _make()
+    records, offset = c.read_table(
+        "Customers",
+        {"delta_link": DELTA_LINK_V1},
+        {"delta_tracking": "enabled", "max_records_per_batch": "2"},
+    )
+    rows = list(records)
+    assert [r["Id"] for r in rows] == [1, 2]
+    # Offset carries both prior delta_link (fallback) AND next_link
+    # (preferred resume point).
+    assert offset == {"delta_link": DELTA_LINK_V1, "next_link": next_link}
+
+
+@responses.activate
+def test_delta_resume_via_next_link_continues_pagination():
+    """After a cap-hit batch the next call's offset has ``next_link``.
+    The connector resumes from that URL directly, no fresh ``Prefer``
+    header, no probe."""
+    _mock_metadata()
+    next_link = f"{SERVICE_URL}Customers?$deltatoken=tok-1&$skiptoken=page2"
+    captured_headers = []
+
+    def _callback(request):
+        captured_headers.append(dict(request.headers))
+        return (
+            200,
+            {},
+            json.dumps(
+                {
+                    "value": [{"Id": 3, "Name": "C", "ModifiedAt": "x"}],
+                    "@odata.deltaLink": DELTA_LINK_V2,
+                }
+            ),
+        )
+
+    responses.add_callback(responses.GET, next_link, callback=_callback)
+    c = _make()
+    records, offset = c.read_table(
+        "Customers",
+        {"next_link": next_link, "delta_link": DELTA_LINK_V1},
+        {"delta_tracking": "enabled"},
+    )
+    rows = list(records)
+    assert [r["Id"] for r in rows] == [3]
+    assert offset == {"delta_link": DELTA_LINK_V2}
+    # Resume must not re-send the bootstrap-only Prefer header.
+    assert all("Prefer" not in h for h in captured_headers)
+
+
+@responses.activate
+def test_delta_dispatch_recognizes_delta_link_offset_without_enabled_flag():
+    """A pipeline started with ``delta_tracking=enabled`` checkpoints a
+    delta-shaped offset; if the next run loses that table option (config
+    drift, partial rollout) the dispatch must still take the delta path
+    based on the offset shape alone — losing the offset shape and
+    treating it as a fresh snapshot would re-fetch the whole table."""
+    _mock_metadata()
+    responses.add(
+        responses.GET,
+        DELTA_LINK_V1,
+        json={
+            "value": [],
+            "@odata.deltaLink": DELTA_LINK_V2,
+        },
+    )
+    c = _make()
+    # No delta_tracking option set, but the offset carries a delta_link.
+    records, offset = c.read_table("Customers", {"delta_link": DELTA_LINK_V1}, {})
+    assert list(records) == []
+    # Rotation guard: prior link preserved on no-op.
+    assert offset == {"delta_link": DELTA_LINK_V1}

@@ -140,8 +140,9 @@ These are passed to the connector via the pipeline's `table_configuration` block
 | `filter` | — | Additional OData `$filter` expression, AND-ed with any cursor filter the connector generates. |
 | `page_size` | `1000` | Value of `$top` sent on each HTTP request. Sets the maximum rows per OData page. Some servers cap this server-side (see *Known limits*). |
 | `max_records_per_batch` | `100000` | Client-side cap on records returned per `read_table` call. The connector truncates and returns control to the framework once this limit is hit. Independent of `page_size`. |
+| `delta_tracking` | `disabled` | Opt-in OData v4 delta queries. `disabled` keeps the existing snapshot / cursor behavior; `auto` probes the server's `Prefer: odata.track-changes` support once per table and falls back if missing; `enabled` requires support and errors on the first read if the server doesn't acknowledge. See [Delta tracking](#delta-tracking-contract). |
 
-`namespace` is consumed by the connector before the request is built; the other five all influence the URL or the per-batch loop.
+`namespace` is consumed by the connector before the request is built; the other six all influence the URL, the per-batch loop, or the request semantics.
 
 ---
 
@@ -208,6 +209,133 @@ The OData v4 spec allows `@odata.nextLink` to be either an absolute URL or a rel
 ### OData control properties
 
 Every row returned to the framework has had OData control properties stripped: keys prefixed with `@odata.` (e.g. `@odata.etag`, `@odata.id`, `@odata.editLink`) are not yielded.
+
+---
+
+## Delta tracking contract
+
+OData v4 §11.3 ("Requesting Changes") defines a server-driven change-tracking protocol. When opted into via `delta_tracking ∈ {auto, enabled}` and supported by the server, the connector takes this path instead of cursor-based filtering.
+
+### Capability detection
+
+`delta_tracking=auto` performs a one-time probe per `(namespace, table)` pair. The probe sends an entity-set GET with `$top=1` and the header `Prefer: odata.track-changes`. The connector inspects the response:
+
+- 200 + `Preference-Applied: odata.track-changes` header → delta supported. Cached.
+- 200 + missing `Preference-Applied` header → server silently ignored the prefer. Falls back to whatever cursor/snapshot config is set. Cached.
+- non-200 status (400/405 commonly) → server rejected the prefer. Falls back. Cached.
+- Network error / non-JSON body → falls back. Cached `False`.
+
+`delta_tracking=enabled` skips the probe entirely. If the actual bootstrap response is missing `Preference-Applied`, the connector raises a `RuntimeError` pointing the operator at `delta_tracking=disabled` as the fallback.
+
+`delta_tracking=disabled` (the default) never sends the prefer header. Zero behavior change versus pre-delta versions of the connector.
+
+### Offset shape
+
+Three offsets coexist with the existing `{}` (snapshot) and `{"cursor": ...}` (cursor-based) shapes:
+
+- `{"delta_link": "<url>"}` — ready to resume from the server's last-minted delta link.
+- `{"next_link": "<url>", "delta_link": "<url>"}` — mid-pagination after a `max_records_per_batch` cap hit. `next_link` is the preferred resume; `delta_link` is the fallback if `next_link` expires.
+- `{}` — start a fresh bootstrap (initial run or post-410 reset).
+
+The dispatch in `read_table` recognises any of these and routes through the delta path even if `delta_tracking` is no longer set in `table_options` — checkpointed offsets carry the mode forward across config changes.
+
+### Request shape
+
+Bootstrap (first call, no checkpointed delta state):
+
+```
+GET <service_url><entity_set>?$top=<page_size>
+Prefer: odata.track-changes
+```
+
+Resume (`delta_link` or `next_link` in offset):
+
+```
+GET <stored_link>
+```
+
+The delta / next links are server-minted opaque URLs; the connector follows them verbatim without re-applying `$filter` / `$orderby` / `$top` from `table_options`.
+
+### Response handling
+
+Each page in the response's `value` array is one of:
+
+- A regular entity → emitted with all `@odata.*` keys stripped, `_deleted=False`, and a fresh `_lc_sequence`.
+- An `@removed` entry (shape: `{"@removed": {"reason": "deleted"}, "<key>": <id>}`) → emitted with only the primary-key fields populated, `_deleted=True`, and a fresh `_lc_sequence`. Following the `microsoft_teams` precedent, deletions are surfaced in-band rather than via `cdc_with_deletes` + `read_table_deletes`.
+
+The terminal page carries `@odata.deltaLink` (the next resume point). Intermediate pages carry `@odata.nextLink`.
+
+### Synthetic columns
+
+Two columns are appended to the declared schema for delta-active tables:
+
+| Column | Type | Purpose |
+| --- | --- | --- |
+| `_deleted` | `BooleanType` (non-null) | In-band tombstone flag. `True` only for `@removed` entries; `False` for adds and changes. |
+| `_lc_sequence` | `StringType` (non-null) | `read_table_metadata` reports this as `cursor_field`. Format: `<iso_8601_with_microseconds>_<12-digit_counter>`. Strictly monotonic per emit per process, so `apply_changes` MERGE-by-PK picks deterministic winners when the same primary key appears multiple times in one batch. |
+
+### Graph deltaLink-rotation guard
+
+Some servers (notably Microsoft Graph) mint a fresh `@odata.deltaLink` on every response, even when the change set is empty. Without compensation, every trigger would advance the offset and the framework would emit empty Delta commits in perpetuity.
+
+The connector detects this case: if a resume call started with `prev_delta_link != None` and produced zero records, it returns the prior link unchanged so `end_offset == start_offset`. The framework treats that as "no progress this trigger" and `Trigger.AvailableNow` terminates cleanly.
+
+### Token expiry (HTTP 410)
+
+When the server returns 410 Gone on a stored `delta_link` or `next_link`, the connector silently re-bootstraps: a fresh `Prefer: odata.track-changes` GET against the entity set, emit the full snapshot as `_deleted=False` upserts, return a brand-new `delta_link`. MERGE-by-PK at the destination reconciles re-fetched rows with what's already there.
+
+### Sparse-update rejection
+
+OData v4 §11.4 allows delta payloads to return only the *modified* properties on an updated entity. Applying that as-is would write NULLs over good destination values — silent corruption. The connector refuses such payloads.
+
+Detection runs once per call against the first non-tombstone entry. Expected key set:
+
+- The full declared schema, minus the synthetic `_deleted` / `_lc_sequence` columns.
+- Filtered to the `$select` projection if set.
+
+If any expected key is missing from the actual entry, the connector raises `RuntimeError` and points the operator at `delta_tracking=disabled` (or `$select` to narrow the schema).
+
+### Mutual exclusion with `cursor_field`
+
+`delta_tracking=enabled` plus `cursor_field` is a `ValueError` at first metadata-resolution call. The two are conflicting sequencing strategies. `delta_tracking=auto` plus `cursor_field` falls through to the cursor path (cursor wins, no probe).
+
+### Worked example (Microsoft Graph users/delta)
+
+Trigger 1, no offset:
+
+```
+GET https://graph.microsoft.com/v1.0/users
+Prefer: odata.track-changes
+→ 200, Preference-Applied: odata.track-changes
+  body: {"value": [...all current users...], "@odata.deltaLink": "https://...users?$deltatoken=A"}
+```
+
+Emitted: every user as `_deleted=False` with monotonic `_lc_sequence`.
+Offset: `{"delta_link": "https://...users?$deltatoken=A"}`.
+
+Trigger 2, after a user changed their `displayName` and another was deleted:
+
+```
+GET https://graph.microsoft.com/v1.0/users?$deltatoken=A
+→ 200
+  body: {"value": [
+    {"id": "u1", "displayName": "New Name", ...},
+    {"@removed": {"reason": "deleted"}, "id": "u2"}
+  ], "@odata.deltaLink": "https://...users?$deltatoken=B"}
+```
+
+Emitted: one row for `u1` with full payload (`_deleted=False`), one row for `u2` carrying only `id` (`_deleted=True`).
+Offset: `{"delta_link": "https://...users?$deltatoken=B"}`.
+
+Trigger 3, no changes since `B`:
+
+```
+GET https://graph.microsoft.com/v1.0/users?$deltatoken=B
+→ 200
+  body: {"value": [], "@odata.deltaLink": "https://...users?$deltatoken=C"}
+```
+
+Emitted: zero rows. Offset: `{"delta_link": "https://...users?$deltatoken=B"}` — prior link preserved by the rotation guard, so the framework sees no progress and the trigger terminates.
 
 ---
 

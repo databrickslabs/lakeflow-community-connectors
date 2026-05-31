@@ -3,8 +3,9 @@
 Implements the LakeflowConnect interface for any OData v4 service. The
 connector discovers tables and schemas from the service's ``$metadata``
 endpoint, supports four auth methods (bearer / basic / api_key /
-oauth2), and ingests each entity set either as a snapshot or as an
-incremental CDC stream keyed off a user-supplied cursor field.
+oauth2), and ingests each entity set either as a snapshot, an
+incremental CDC stream keyed off a user-supplied cursor field, or
+(when the service supports it) a server-driven delta query stream.
 
 Connection options (set on the UC connection):
     service_url   required   OData service root, e.g.
@@ -19,9 +20,20 @@ Per-table options (allowlisted via externalOptionsAllowList):
     filter                additional $filter expression
     page_size             $top per request (default 1000)
     max_records_per_batch cap rows returned per read_table call (default 100000)
+    delta_tracking        disabled (default) | auto | enabled. Opt-in.
+                          When the source honours ``Prefer: odata.track-changes``
+                          (MS Graph, Dataverse, SAP S/4HANA Cloud …), the
+                          connector reads via the OData delta link instead of
+                          cursor filtering, and emits removals as in-band
+                          ``_deleted=True`` rows. ``auto`` probes once per
+                          table and falls back to cursor/snapshot if the
+                          server doesn't acknowledge; ``enabled`` requires
+                          support and errors if the server doesn't acknowledge;
+                          ``disabled`` skips the probe entirely.
 """
 
 import base64
+import itertools
 import time
 from datetime import date, datetime, timezone
 from decimal import Decimal
@@ -82,6 +94,33 @@ _EDM_TO_SPARK = {
 _NS_EDMX = "{http://docs.oasis-open.org/odata/ns/edmx}"
 _NS_EDM = "{http://docs.oasis-open.org/odata/ns/edm}"
 
+# Delta tracking constants.
+#
+# Synthetic columns appended to the schema when delta is active so the
+# destination MERGE (apply_changes) has a sequence column and a tombstone
+# flag. Their names are namespaced so they can't collide with any real
+# OData property — OData property names start with a letter, never an
+# underscore.
+_DELTA_PREFER = "odata.track-changes"
+_DELETED_COL = "_deleted"
+_SEQUENCE_COL = "_lc_sequence"
+# Monotonic across the whole process — guarantees each emitted record
+# has a strictly increasing sequence value, so apply_changes can pick a
+# deterministic winner when the same primary key appears multiple times
+# in one batch (e.g. update then delete arriving back-to-back).
+_SEQUENCE_COUNTER = itertools.count()
+
+
+def _next_sequence() -> str:
+    """Strictly-increasing per-record sequence value for apply_changes.
+
+    ISO-8601 prefix keeps the value human-readable and sortable
+    lexicographically across pipeline restarts; the integer suffix
+    distinguishes records emitted in the same microsecond.
+    """
+    now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+    return f"{now}_{next(_SEQUENCE_COUNTER):012d}"
+
 
 class ODataLakeflowConnect(LakeflowConnect, SupportsNamespaces):
     """LakeflowConnect implementation for OData v4 services.
@@ -107,6 +146,12 @@ class ODataLakeflowConnect(LakeflowConnect, SupportsNamespaces):
         # don't know the expiry (user-supplied access token without metadata)
         # so we fall through to the 401-retry path only.
         self._access_token_expires_at: float | None = None
+        # Delta-tracking capability cache, keyed by (namespace_or_empty,
+        # table_name). Populated lazily by ``_probe_delta_support`` on the
+        # first metadata-resolution call for each table in ``auto`` mode.
+        # ``enabled`` mode trusts the user and skips the cache; ``disabled``
+        # mode never touches it.
+        self._delta_capable: dict[tuple[str, str], bool] = {}
 
     # ------------------------------------------------------------------
     # LakeflowConnect interface
@@ -154,31 +199,61 @@ class ODataLakeflowConnect(LakeflowConnect, SupportsNamespaces):
                 f"Could not derive a non-empty schema for entity set {table_name!r}. "
                 f"Check the 'select' option."
             )
+        # When delta tracking is active for this table the connector emits
+        # two synthetic columns alongside the entity's own properties:
+        # ``_deleted`` (in-band tombstone flag) and ``_lc_sequence`` (the
+        # cursor column apply_changes uses to order updates). Both must be
+        # in the declared schema so Spark accepts the records.
+        if self._delta_active_for(table_name, table_options):
+            fields = list(fields) + [
+                StructField(_DELETED_COL, BooleanType(), False),
+                StructField(_SEQUENCE_COL, StringType(), False),
+            ]
         return StructType(fields)
 
     def read_table_metadata(self, table_name: str, table_options: dict[str, str]) -> dict:
         namespace = (table_options or {}).get("namespace")
         primary_keys = self._primary_keys_for(table_name, namespace)
-        cursor_field = (table_options or {}).get("cursor_field")
-        ingestion_type = "cdc" if cursor_field else "snapshot"
+        user_cursor = (table_options or {}).get("cursor_field")
+        if self._delta_active_for(table_name, table_options):
+            # Delta-tracked tables: server delivers change events, the
+            # connector adds ``_deleted`` for tombstones and uses the
+            # synthetic ``_lc_sequence`` so apply_changes has a
+            # deterministic sequence column. ``cdc`` (not
+            # ``cdc_with_deletes``) — following the microsoft_teams
+            # convention of in-band deletes — keeps the framework's
+            # read_table / read_table_deletes split out of the picture.
+            return {
+                "primary_keys": primary_keys,
+                "cursor_field": _SEQUENCE_COL,
+                "ingestion_type": "cdc",
+            }
         return {
             "primary_keys": primary_keys,
-            "cursor_field": cursor_field,
-            "ingestion_type": ingestion_type,
+            "cursor_field": user_cursor,
+            "ingestion_type": "cdc" if user_cursor else "snapshot",
         }
 
     def read_table(
         self, table_name: str, start_offset: dict, table_options: dict[str, str]
     ) -> tuple[Iterator[dict], dict]:
-        meta = self.read_table_metadata(table_name, table_options)
-        if meta["ingestion_type"] == "snapshot":
-            return self._read_snapshot(table_name, table_options or {})
-        return self._read_incremental(
-            table_name,
-            start_offset or {},
-            table_options or {},
-            meta["cursor_field"],
-        )
+        opts = table_options or {}
+        offset = start_offset or {}
+        # Dispatch on (a) what the prior offset says we're mid-stream of,
+        # and (b) whether delta tracking is active for this table. The
+        # offset-shape check covers both modes resuming from a
+        # checkpointed offset and the very first call after delta got
+        # turned on (offset is empty either way until delta produces a
+        # link).
+        if (
+            "delta_link" in offset
+            or "next_link" in offset
+            or self._delta_active_for(table_name, opts)
+        ):
+            return self._read_incremental_delta(table_name, offset, opts)
+        if opts.get("cursor_field"):
+            return self._read_incremental(table_name, offset, opts, opts["cursor_field"])
+        return self._read_snapshot(table_name, opts)
 
     # ------------------------------------------------------------------
     # Snapshot + incremental read paths
@@ -280,6 +355,424 @@ class ODataLakeflowConnect(LakeflowConnect, SupportsNamespaces):
         if start_offset and start_offset == end_offset:
             return iter([]), start_offset
         return iter(records), end_offset
+
+    def _read_incremental_delta(
+        self,
+        table_name: str,
+        start_offset: dict,
+        table_options: dict[str, str],
+    ) -> tuple[Iterator[dict], dict]:
+        """Delta-tracked read via OData ``Prefer: odata.track-changes``.
+
+        Three offset shapes, three entry behaviours:
+
+        * No ``delta_link`` and no ``next_link`` — bootstrap. Send the
+          initial entity-set GET with ``Prefer: odata.track-changes``,
+          verify the server acknowledges via ``Preference-Applied``, and
+          stream the full snapshot. The terminal page carries
+          ``@odata.deltaLink``.
+        * ``next_link`` set — we hit ``max_records_per_batch`` mid-
+          pagination on a previous call. Resume by walking from that
+          link.
+        * ``delta_link`` set — server's "changes since" cursor. Walk
+          ``@odata.nextLink`` chain (if any) until the terminal page
+          delivers a fresh ``@odata.deltaLink``.
+
+        Records emitted carry two synthetic columns: ``_deleted`` (bool,
+        in-band tombstone flag — set ``True`` for ``@removed`` entries)
+        and ``_lc_sequence`` (monotonic per-record string used as
+        apply_changes' sequence column). The microsoft_teams connector
+        established this convention in this repo; we follow it so the
+        framework's standard ``cdc`` path handles tombstones without
+        needing ``cdc_with_deletes`` + ``read_table_deletes`` split.
+        """
+        prev_delta_link = (start_offset or {}).get("delta_link")
+        prev_next_link = (start_offset or {}).get("next_link")
+        is_bootstrap = prev_delta_link is None and prev_next_link is None
+        url, initial_headers = self._delta_initial_request(
+            table_name, table_options, prev_delta_link, prev_next_link
+        )
+
+        namespace = (table_options or {}).get("namespace")
+        primary_keys = self._primary_keys_for(table_name, namespace)
+        max_records = int((table_options or {}).get("max_records_per_batch", "100000"))
+
+        records, new_delta_link, carry_next_link, rebootstrap = self._delta_walk_pages(
+            url=url,
+            initial_headers=initial_headers,
+            is_bootstrap=is_bootstrap,
+            prev_delta_link=prev_delta_link,
+            prev_next_link=prev_next_link,
+            table_name=table_name,
+            table_options=table_options,
+            primary_keys=primary_keys,
+            max_records=max_records,
+        )
+        if rebootstrap:
+            # 410 Gone surfaced during pagination → re-bootstrap from
+            # scratch. ``MERGE``-on-PK + ``_lc_sequence`` ordering
+            # reconciles re-fetched rows at the destination; no data
+            # loss, only HTTP cost.
+            return self._read_incremental_delta(table_name, {}, table_options)
+
+        # Graph-rotation guard. Some servers (notably Microsoft Graph)
+        # mint a fresh ``@odata.deltaLink`` on every response, even when
+        # the change set is empty. If we already had a delta link and
+        # produced no records this call, hand back the prior link so the
+        # framework sees ``end_offset == start_offset`` and a trigger
+        # like AvailableNow can terminate. Following microsoft_teams.py.
+        if prev_delta_link is not None and not records and not carry_next_link:
+            return iter([]), {"delta_link": prev_delta_link}
+
+        if carry_next_link:
+            offset: dict = {"next_link": carry_next_link}
+            # Preserve the prior delta_link as a fallback if the
+            # next_link expires before the cap-resume call lands.
+            if prev_delta_link is not None:
+                offset["delta_link"] = prev_delta_link
+            return iter(records), offset
+
+        if new_delta_link is None:
+            # Reached end of stream without a deltaLink. Server is
+            # misbehaving (spec requires the terminal page to carry one).
+            # Resume from the prior delta_link if we have one — better
+            # than losing the offset entirely.
+            if prev_delta_link is not None:
+                return iter(records), {"delta_link": prev_delta_link}
+            raise RuntimeError(
+                f"OData delta bootstrap for {table_name!r} ended without an "
+                f"@odata.deltaLink. The server may have aborted change "
+                f"tracking. Set delta_tracking=disabled to fall back to "
+                f"snapshot or cursor-based reads."
+            )
+
+        return iter(records), {"delta_link": new_delta_link}
+
+    def _build_delta_record(self, item: dict, primary_keys: list[str]) -> dict:
+        """Translate one delta payload entry into the emitted record shape.
+
+        - ``@removed`` entries become tombstones: a record carrying the
+          primary-key fields plus ``_deleted=True``.
+        - Regular adds/changes pass through with all ``@odata.*`` control
+          properties stripped and ``_deleted=False``.
+
+        Every emitted record gets ``_lc_sequence`` — a strictly monotonic
+        string — so apply_changes has a deterministic sequence_by column.
+        """
+        if "@removed" in item:
+            record: dict = {pk: item.get(pk) for pk in primary_keys}
+            record[_DELETED_COL] = True
+        else:
+            record = {k: v for k, v in item.items() if not k.startswith("@odata.")}
+            record[_DELETED_COL] = False
+        record[_SEQUENCE_COL] = _next_sequence()
+        return record
+
+    def _delta_initial_request(
+        self,
+        table_name: str,
+        table_options: dict[str, str] | None,
+        prev_delta_link: str | None,
+        prev_next_link: str | None,
+    ) -> tuple[str, dict[str, str] | None]:
+        """Pick the first URL + headers for a delta read.
+
+        ``next_link`` wins over ``delta_link`` when both are present —
+        we were mid-pagination on a cap hit, finish that before
+        consulting the prior change cursor.
+        """
+        if prev_next_link is not None:
+            return prev_next_link, None
+        if prev_delta_link is not None:
+            return prev_delta_link, None
+        return self._build_url(table_name, table_options or {}), {"Prefer": _DELTA_PREFER}
+
+    def _delta_walk_pages(
+        self,
+        *,
+        url: str,
+        initial_headers: dict[str, str] | None,
+        is_bootstrap: bool,
+        prev_delta_link: str | None,
+        prev_next_link: str | None,
+        table_name: str,
+        table_options: dict[str, str] | None,
+        primary_keys: list[str],
+        max_records: int,
+    ) -> tuple[list[dict], str | None, str | None, bool]:
+        """Walk the ``@odata.nextLink`` chain until a deltaLink, cap, or 410.
+
+        Returns ``(records, new_delta_link, carry_next_link, rebootstrap)``:
+
+        * ``records`` — emitted records (already passed through
+          :py:meth:`_build_delta_record`).
+        * ``new_delta_link`` — the freshest ``@odata.deltaLink`` seen.
+        * ``carry_next_link`` — set when ``max_records`` capped the read
+          mid-pagination; the caller persists this in the offset.
+        * ``rebootstrap`` — True iff a 410 fired on a stored link; the
+          caller re-issues from a fresh empty offset.
+        """
+        session = self._get_session()
+        records: list[dict] = []
+        new_delta_link: str | None = None
+        carry_next_link: str | None = None
+        page_index = 0
+        bootstrap_verified = not is_bootstrap
+        sparse_checked = False
+        current_url: str | None = url
+
+        while current_url:
+            headers = initial_headers if (page_index == 0 and initial_headers) else None
+            kwargs: dict[str, Any] = {"headers": headers} if headers else {}
+            resp = self._http_get(session, current_url, **kwargs)
+            if resp.status_code == 410 and (prev_delta_link or prev_next_link):
+                return [], None, None, True
+            resp.raise_for_status()
+
+            if not bootstrap_verified:
+                self._verify_delta_bootstrap(resp, table_name)
+                bootstrap_verified = True
+
+            payload = resp.json()
+            sparse_checked = self._delta_collect_page_records(
+                payload=payload,
+                records=records,
+                primary_keys=primary_keys,
+                table_name=table_name,
+                table_options=table_options,
+                sparse_checked=sparse_checked,
+                max_records=max_records,
+            )
+            current_url, new_delta_link, carry_next_link = self._delta_advance_links(
+                payload=payload,
+                resp_url=resp.url,
+                records=records,
+                max_records=max_records,
+                new_delta_link=new_delta_link,
+                carry_next_link=carry_next_link,
+            )
+            page_index += 1
+
+        return records, new_delta_link, carry_next_link, False
+
+    def _verify_delta_bootstrap(self, resp: requests.Response, table_name: str) -> None:
+        """Confirm the server actually honored ``Prefer: odata.track-changes``."""
+        applied = resp.headers.get("Preference-Applied", "")
+        if _DELTA_PREFER not in applied.lower():
+            raise RuntimeError(
+                f"OData server did not honor 'Prefer: odata.track-changes' "
+                f"for {table_name!r} (response missing 'Preference-Applied' "
+                f"header). The probe in delta_tracking=auto should have "
+                f"caught this — your service may have inconsistent support. "
+                f"Set delta_tracking=disabled and use cursor-based "
+                f"incremental instead."
+            )
+
+    def _delta_collect_page_records(
+        self,
+        *,
+        payload: dict,
+        records: list[dict],
+        primary_keys: list[str],
+        table_name: str,
+        table_options: dict[str, str] | None,
+        sparse_checked: bool,
+        max_records: int,
+    ) -> bool:
+        """Append delta records from ``payload`` until cap or page exhaustion.
+
+        Returns the updated ``sparse_checked`` flag so the caller can
+        continue to skip the check on later pages once it's already
+        passed for this call.
+        """
+        for item in payload.get("value", []):
+            if not sparse_checked and "@removed" not in item:
+                self._check_no_sparse_entity(item, table_name, table_options)
+                sparse_checked = True
+            records.append(self._build_delta_record(item, primary_keys))
+            if len(records) >= max_records:
+                break
+        return sparse_checked
+
+    def _delta_advance_links(
+        self,
+        *,
+        payload: dict,
+        resp_url: str,
+        records: list[dict],
+        max_records: int,
+        new_delta_link: str | None,
+        carry_next_link: str | None,
+    ) -> tuple[str | None, str | None, str | None]:
+        """Resolve the next URL + offset bookkeeping after one page.
+
+        Returns ``(next_url, new_delta_link, carry_next_link)``.
+        ``next_url`` is ``None`` when pagination should stop (either we
+        hit the cap, saw a terminal deltaLink, or the server omitted
+        both pagination links).
+        """
+        raw_delta = payload.get("@odata.deltaLink")
+        raw_next = payload.get("@odata.nextLink")
+        cap_hit = len(records) >= max_records
+
+        if cap_hit:
+            if raw_next:
+                carry_next_link = urljoin(resp_url, raw_next)
+            # Capture the deltaLink even on a cap-hit page — when the
+            # cap lines up exactly with the terminal page we still want
+            # the next-batch resume to follow ``delta_link`` rather
+            # than re-walk the whole bootstrap.
+            if raw_delta and new_delta_link is None:
+                new_delta_link = urljoin(resp_url, raw_delta)
+            return None, new_delta_link, carry_next_link
+
+        if raw_delta:
+            new_delta_link = urljoin(resp_url, raw_delta)
+            return None, new_delta_link, carry_next_link
+        if raw_next:
+            return urljoin(resp_url, raw_next), new_delta_link, carry_next_link
+        return None, new_delta_link, carry_next_link
+
+    def _check_no_sparse_entity(
+        self,
+        item: dict,
+        table_name: str,
+        table_options: dict[str, str] | None,
+    ) -> None:
+        """Refuse silently-corrupting sparse delta responses.
+
+        OData v4 §11.4 lets a delta payload return only the *changed*
+        properties on an updated entity. That sounds harmless until you
+        realize the connector emits the dict as-is to Spark, which
+        treats absent fields as NULL — overwriting good destination
+        values with nulls on every partial update. The damage is silent
+        and not recoverable from the destination table alone.
+
+        We can't safely apply partial updates in v1, so refuse them up
+        front with an actionable error. Run only on the first
+        non-tombstone entry per call.
+
+        The expected key set is the declared schema for the table, less
+        any selection imposed by ``$select`` and less the synthetic
+        ``_deleted`` / ``_lc_sequence`` columns we add ourselves.
+        """
+        select = (table_options or {}).get("select")
+        if select:
+            expected = {c.strip() for c in select.split(",") if c.strip()}
+        else:
+            namespace = (table_options or {}).get("namespace")
+            expected = {f.name for f in self._fields_for(table_name, namespace)}
+        expected -= {_DELETED_COL, _SEQUENCE_COL}
+        actual = {k for k in item.keys() if not k.startswith("@odata.")}
+        missing = expected - actual
+        if missing:
+            raise RuntimeError(
+                f"OData delta response for {table_name!r} returned a sparse "
+                f"entity: missing properties {sorted(missing)}. The connector "
+                f"cannot safely apply partial updates — every missing field "
+                f"would write NULL at the destination, silently corrupting "
+                f"data. Set delta_tracking=disabled to use cursor-based "
+                f"incremental, or restrict the schema with $select to only "
+                f"the fields the server always returns in delta payloads."
+            )
+
+    # ------------------------------------------------------------------
+    # Delta tracking capability
+    # ------------------------------------------------------------------
+
+    def _delta_setting(self, table_options: dict[str, str] | None) -> str:
+        """Resolve the delta_tracking option, normalised to lower case.
+
+        Defaults to ``disabled``. Delta tracking is opt-in because most
+        OData services don't honor ``Prefer: odata.track-changes``, and
+        a default-``auto`` would burn one wasted HTTP probe per table
+        per pipeline trigger on the common case where the user doesn't
+        want this feature anyway.
+        """
+        raw = ((table_options or {}).get("delta_tracking") or "disabled").strip().lower()
+        if raw not in {"auto", "enabled", "disabled"}:
+            raise ValueError(
+                f"Invalid delta_tracking={raw!r}. Expected one of: auto, enabled, disabled."
+            )
+        return raw
+
+    def _delta_cache_key(
+        self, table_name: str, table_options: dict[str, str] | None
+    ) -> tuple[str, str]:
+        """Cache key for :py:attr:`_delta_capable` keyed on (namespace, table).
+
+        Namespace defaults to the empty string when omitted so multi-schema
+        services with a single un-namespaced declaration also key cleanly.
+        """
+        namespace = (table_options or {}).get("namespace") or ""
+        return (namespace, table_name)
+
+    def _delta_active_for(self, table_name: str, table_options: dict[str, str] | None) -> bool:
+        """Whether delta tracking is the read mode for this table.
+
+        Resolution order:
+          1. ``delta_tracking=disabled`` → never.
+          2. ``cursor_field`` set + ``delta_tracking=enabled`` → ValueError
+             (the two are mutually exclusive — delta tracking provides
+             its own sequencing).
+          3. ``cursor_field`` set + ``delta_tracking=auto`` → cursor wins;
+             delta is left dormant, no probe.
+          4. ``delta_tracking=enabled`` → assume support; a probe failure
+             surfaces at read time rather than here.
+          5. ``delta_tracking=auto`` → probe once, cache, decide.
+        """
+        setting = self._delta_setting(table_options)
+        if setting == "disabled":
+            return False
+        if (table_options or {}).get("cursor_field"):
+            if setting == "enabled":
+                raise ValueError(
+                    "delta_tracking=enabled is mutually exclusive with "
+                    "cursor_field; the server-driven delta stream provides "
+                    "its own sequencing. Remove cursor_field, or switch to "
+                    "delta_tracking=disabled to use cursor-based incremental."
+                )
+            return False
+        if setting == "enabled":
+            return True
+        key = self._delta_cache_key(table_name, table_options)
+        if key not in self._delta_capable:
+            self._delta_capable[key] = self._probe_delta_support(table_name, table_options)
+        return self._delta_capable[key]
+
+    def _probe_delta_support(self, table_name: str, table_options: dict[str, str] | None) -> bool:
+        """Light-touch capability probe.
+
+        Sends a small GET against the entity set with the
+        ``Prefer: odata.track-changes`` header and inspects the response
+        headers for ``Preference-Applied: odata.track-changes``. That
+        header is the spec's positive acknowledgement that the server is
+        honoring change tracking on this request.
+
+        Returns ``False`` for every failure mode (non-200, missing
+        header, malformed body, network error). The cache is populated
+        with that ``False`` so we don't retry the probe per call — the
+        connector falls back to whatever cursor/snapshot path the
+        user's options imply.
+        """
+        # Force ``$top=1`` for the probe so the response stays small even
+        # against entity sets with millions of rows. We only care about
+        # headers.
+        probe_options = {**(table_options or {}), "page_size": "1"}
+        url = self._build_url(table_name, probe_options)
+        try:
+            session = self._get_session()
+            resp = self._http_get(
+                session,
+                url,
+                headers={"Prefer": _DELTA_PREFER},
+            )
+        except (requests.RequestException, ValueError, RuntimeError, PermissionError):
+            return False
+        if resp.status_code != 200:
+            return False
+        applied = resp.headers.get("Preference-Applied", "")
+        return _DELTA_PREFER in applied.lower()
 
     # ------------------------------------------------------------------
     # URL + HTTP plumbing
