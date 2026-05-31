@@ -54,10 +54,10 @@ Composing a snippet, shipping it to the cluster, and parsing the result is one h
    If terminated, ask the user before starting it.
 2. **Open a Python context** on that cluster and remember the returned `id`:
    ```bash
-   databricks api post /api/2.0/commands/contexts/create \
+   databricks api post /api/1.2/commands/contexts/create \
      --json '{"clusterId":"{{cluster_id}}","language":"python"}' -o json
    ```
-3. **Register the data source and load the catalogue**:
+3. **Register the data source and load the catalogue**. The very first command you ship into a fresh context **must** include the import + `register` lines below — Spark's data-source registry is per-driver-session, so without them `format("lakeflow_connect")` resolves to nothing:
    ```python
    import json
    from databricks.labs.community_connector.sources.gmail import GmailDataSource
@@ -69,7 +69,7 @@ Composing a snippet, shipping it to the cluster, and parsing the result is one h
    ```
    The printed JSON gives you `name`, `description`, `kind`, `result_schema_json`, and `parameters_json` for **every** operation this connection exposes. Cache it for the rest of the session. If `list_operations` fails, the connector isn't installed on the cluster — surface that and stop.
 
-After that, individual user requests don't repeat steps 1–3. They just run more snippets against the same context.
+After this first command lands `Finished`, registration is cached on the cluster for the lifetime of the context. **Do not** re-emit the `import` / `spark.dataSource.register(...)` lines on subsequent commands in the same context — they're noise and slow the snippet down. If you open a new context later (or the user explicitly restarts one), the *first* command in that context must include them again.
 
 ### Execution envelope (the universal "call any operation")
 
@@ -78,12 +78,12 @@ For any one operation:
 1. Build the snippet — pick `OP_NAME` and only the parameters that the catalogue declares for it. End the snippet with `print(json.dumps([r.asDict(recursive=True) for r in df.collect()], default=str))` so the result comes back parseable.
 2. Submit to the cluster:
    ```bash
-   databricks api post /api/2.0/commands/execute \
+   databricks api post /api/1.2/commands/execute \
      --json '{"clusterId":"{{cluster_id}}","contextId":"<CTX>","language":"python","command":"<SNIPPET>"}' -o json
    ```
 3. Poll until terminal status:
    ```bash
-   databricks api get /api/2.0/commands/status \
+   databricks api get /api/1.2/commands/status \
      --json "{\"clusterId\":\"{{cluster_id}}\",\"contextId\":\"<CTX>\",\"commandId\":\"<CMD>\"}" -o json
    ```
    `status` walks `Queued → Running → Finished | Error | Cancelled`.
@@ -91,17 +91,18 @@ For any one operation:
    - `Finished`, `results.resultType == "text"` → `results.data` is the JSON you printed. Parse and use.
    - `Error` → `results.summary` is the one-liner; `results.cause` is the traceback. The dispatcher writes a canonical code into `_meta.code` of the printed row when the error is connector-level (see *Error codes* below).
 
-A few quoting notes that bite if you skip them:
+A few details that bite if you skip them:
+- **Use `/api/1.2/commands/...`, not `/api/2.0/`.** The Command Execution API is served under 1.2. The 2.0 path 404s on the workspaces we run against — if you see `Not Found` from `/api/2.0/commands/...`, you have the wrong version, not a wrong cluster.
 - The `command` field is a JSON string containing Python source — preserve newlines (`\n`) and quote your inner strings.
 - Spark's `CaseInsensitiveStringMap` lowercases option keys, but the connector already handles the standard parameter spellings; just match whatever `list_operations` shows.
-- `spark.dataSource.register(GmailDataSource)` is idempotent inside a context; do it once at bootstrap, not per call.
+- `spark.dataSource.register(GmailDataSource)` runs once per context — only in the first command, never again. If you accidentally open a *new* context (cluster restart, you destroyed the previous one), the next snippet must re-import + re-register; until then, `format("lakeflow_connect")` will not resolve.
 
 ### Teardown
 
 At the end of the session, free the context:
 
 ```bash
-databricks api post /api/2.0/commands/contexts/destroy \
+databricks api post /api/1.2/commands/contexts/destroy \
   --json '{"clusterId":"{{cluster_id}}","contextId":"<CTX>"}'
 ```
 
