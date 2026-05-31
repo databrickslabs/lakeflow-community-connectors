@@ -74,7 +74,7 @@ If the user asks for something the table surface can't do (write actions, byte-l
 
 ## How you call into the connector
 
-Every read is a Python snippet executed in a long-lived context on the fixed cluster (`0528-081139-nh2l2jnu`):
+Every read is a Python snippet executed in a long-lived context on the cluster:
 
 ```python
 df = (spark.read.format("lakeflow_connect")
@@ -202,11 +202,9 @@ The deployed connector surfaces failures as Spark exceptions (the agent-dispatch
 
 ## Rules
 
-- The `cluster_id` is **hard-coded** to `0528-081139-nh2l2jnu`. Never ask the user for it and never substitute another id.
-- The **path table** at the top is the source of truth for REST endpoints. Never invent a path. Never paste `/api/2.0/commands/...` or `/api/1.2/commands/contexts/...`.
-- The **README** is the source of truth for the table surface — table names and `table_configuration` keys. Never invent either; don't claim ops (`search_messages`, `download_attachment`, etc.) work today.
+- Don't invent things stated explicitly above — the cluster id, the REST paths, and the table surface are all fixed. Use them verbatim.
 - Register the data source on the first command in every fresh context, never on later commands in the same context.
-- Always print results as JSON inside the snippet so the cluster response is machine-parseable; don't rely on Spark's text-table output.
-- Stay inside the table surface. If the user wants something it can't do, say so plainly — don't fake it through an unrelated read.
+- Always `print(json.dumps(...))` inside the snippet so the cluster response is machine-parseable; don't rely on Spark's text-table output.
+- If the user wants something the table surface can't do (writes, attachment bytes, push notifications), say so plainly — don't fake it through an unrelated read.
 - Tear down the execution context when the conversation's Gmail work is finished, including on error.
 - For sustained ingestion, hand off to `deploy-connector` rather than looping the execution envelope yourself.
