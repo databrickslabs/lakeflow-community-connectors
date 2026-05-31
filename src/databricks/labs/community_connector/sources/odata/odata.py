@@ -22,6 +22,7 @@ Per-table options (allowlisted via externalOptionsAllowList):
 """
 
 import base64
+import time
 from datetime import date, datetime, timezone
 from decimal import Decimal
 from typing import Any, Iterator
@@ -104,6 +105,11 @@ class ODataLakeflowConnect(LakeflowConnect, SupportsNamespaces):
         # Init-time ceiling so a single trigger never chases new data — a fresh
         # instance is constructed on every trigger anyway.
         self._init_ts = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+        # Monotonic deadline (seconds) for the current OAuth access token.
+        # Set when the token endpoint returns ``expires_in``; `None` means we
+        # don't know the expiry (user-supplied access token without metadata)
+        # so we fall through to the 401-retry path only.
+        self._access_token_expires_at: float | None = None
 
     # ------------------------------------------------------------------
     # LakeflowConnect interface
@@ -312,7 +318,7 @@ class ODataLakeflowConnect(LakeflowConnect, SupportsNamespaces):
         session = self._get_session()
         next_url: str | None = url
         while next_url:
-            resp = session.get(next_url, timeout=self.timeout)
+            resp = self._http_get(session, next_url)
             resp.raise_for_status()
             payload = resp.json()
             for item in payload.get("value", []):
@@ -320,6 +326,71 @@ class ODataLakeflowConnect(LakeflowConnect, SupportsNamespaces):
                 yield {k: v for k, v in item.items() if not k.startswith("@odata.")}
             raw_next = payload.get("@odata.nextLink")
             next_url = urljoin(resp.url, raw_next) if raw_next else None
+
+    def _http_get(self, session: requests.Session, url: str, **kwargs: Any) -> requests.Response:
+        """GET that keeps the OAuth2 access token alive across the call.
+
+        Two-layer refresh:
+
+        1. **Pre-emptive** — when the token endpoint provided an
+           ``expires_in`` and we're now past the recorded deadline
+           (with a 60 s safety buffer), swap the header before sending
+           the request. Avoids paying a wasted round-trip on the
+           common case of a long-running paginated read straddling an
+           expiry boundary.
+        2. **Reactive (fallback)** — some providers return 403 instead
+           of 401, clocks drift, or tokens can be revoked server-side
+           outside of any expiry window. Catch a 401 from the source
+           and retry once with a fresh token.
+
+        Both paths require a refresh path to be available — either
+        ``oauth2_refresh_token`` (user flow) or ``client_credentials``
+        with id/secret on hand. Other auth modes pass through unchanged.
+        """
+        if self._should_preemptively_refresh():
+            session.headers["Authorization"] = f"Bearer {self._oauth2_token()}"
+        resp = session.get(url, timeout=self.timeout, **kwargs)
+        if resp.status_code == 401 and self._has_oauth_refresh_path():
+            session.headers["Authorization"] = f"Bearer {self._oauth2_token()}"
+            resp = session.get(url, timeout=self.timeout, **kwargs)
+            if resp.status_code == 401:
+                # We just minted a token straight from the OAuth provider
+                # and the source still rejected it — the access token isn't
+                # the problem. Most likely the principal lacks read access
+                # to this entity set, the scope is insufficient, or the
+                # tenant is mis-mapped. Surface that explicitly so the user
+                # doesn't chase a non-existent token issue.
+                raise PermissionError(
+                    f"OData service returned 401 for {url!r} even after "
+                    f"refreshing the OAuth2 access token. The new token "
+                    f"reached the server, so the access token itself is "
+                    f"not the problem. Check that the OAuth principal has "
+                    f"read access to this entity set, that 'oauth2_scope' "
+                    f"grants the right permissions, and that any "
+                    f"tenant/instance identifier in 'service_url' or "
+                    f"'extra_headers' matches the credentials. Server "
+                    f"response: {_truncate(resp.text, 300)}"
+                )
+        return resp
+
+    def _should_preemptively_refresh(self) -> bool:
+        """True iff a known-expiry token has hit its 60 s safety window."""
+        if self._access_token_expires_at is None:
+            return False
+        return time.monotonic() >= self._access_token_expires_at
+
+    def _has_oauth_refresh_path(self) -> bool:
+        """True iff `_oauth2_token()` can mint a fresh access token.
+
+        Either a refresh token is on hand (user flow) or
+        ``oauth2_client_id`` + ``oauth2_client_secret`` are present
+        for the client-credentials grant.
+        """
+        if self.options.get("oauth2_refresh_token"):
+            return True
+        return bool(
+            self.options.get("oauth2_client_id") and self.options.get("oauth2_client_secret")
+        )
 
     # ------------------------------------------------------------------
     # Auth session
@@ -361,7 +432,18 @@ class ODataLakeflowConnect(LakeflowConnect, SupportsNamespaces):
             header = self.options.get("api_key_header", "x-api-key")
             session.headers[header] = _require(self.options, "api_key")
         elif auth_type == "oauth2":
-            session.headers["Authorization"] = f"Bearer {self._oauth2_token()}"
+            # Two sub-modes share this branch:
+            #  * **User flow** — `oauth2_refresh_token` is set. A
+            #    pre-supplied `oauth2_access_token` is used as-is if
+            #    present (avoids an unnecessary round-trip); otherwise
+            #    `_oauth2_token()` runs the refresh-token grant to
+            #    mint one. Expired tokens mid-run are caught in
+            #    `_http_get` and refreshed once.
+            #  * **Client-credentials flow** — no refresh token; the
+            #    connector mints a fresh access token via
+            #    `client_credentials` at session start.
+            initial_token = self.options.get("oauth2_access_token") or self._oauth2_token()
+            session.headers["Authorization"] = f"Bearer {initial_token}"
         elif auth_type:
             raise ValueError(
                 f"Unknown auth_type {auth_type!r}. "
@@ -372,11 +454,32 @@ class ODataLakeflowConnect(LakeflowConnect, SupportsNamespaces):
         return session
 
     def _oauth2_token(self) -> str:
-        data = {
-            "grant_type": "client_credentials",
-            "client_id": _require(self.options, "oauth2_client_id"),
-            "client_secret": _require(self.options, "oauth2_client_secret"),
-        }
+        """Mint an OAuth2 access token.
+
+        Picks the grant type from what's available in `self.options`:
+          * `oauth2_refresh_token` present -> `refresh_token` grant
+            (user-flow refresh). Client id/secret are required so the
+            token endpoint can authenticate the client.
+          * Otherwise -> `client_credentials` grant (server-to-server).
+
+        Some providers issue a rotated refresh token in the response;
+        when that happens, the new value is written back into
+        `self.options` so the next refresh uses it.
+        """
+        refresh_token = self.options.get("oauth2_refresh_token")
+        if refresh_token:
+            data = {
+                "grant_type": "refresh_token",
+                "refresh_token": refresh_token,
+                "client_id": _require(self.options, "oauth2_client_id"),
+                "client_secret": _require(self.options, "oauth2_client_secret"),
+            }
+        else:
+            data = {
+                "grant_type": "client_credentials",
+                "client_id": _require(self.options, "oauth2_client_id"),
+                "client_secret": _require(self.options, "oauth2_client_secret"),
+            }
         scope = self.options.get("oauth2_scope")
         if scope:
             data["scope"] = scope
@@ -385,10 +488,50 @@ class ODataLakeflowConnect(LakeflowConnect, SupportsNamespaces):
             data=data,
             timeout=self.timeout,
         )
+        # Surface a precise, actionable error when the token endpoint
+        # itself rejects the request. raise_for_status() would otherwise
+        # produce a terse "401 Client Error: Unauthorized for url ..."
+        # that doesn't tell the user *which* credential is the problem.
+        if resp.status_code in (400, 401):
+            grant = data["grant_type"]
+            hint = _extract_oauth_error_hint(resp)
+            if grant == "refresh_token":
+                raise ValueError(
+                    f"OAuth2 token endpoint returned {resp.status_code} when "
+                    f"refreshing the access token. The refresh token may be "
+                    f"expired, revoked, or paired with a different OAuth "
+                    f"client. Check that 'oauth2_refresh_token' was issued by "
+                    f"the same 'oauth2_client_id' configured on this "
+                    f"connection, and re-run the authorization-code flow if "
+                    f"needed. Server response: {hint}"
+                ) from None
+            raise ValueError(
+                f"OAuth2 token endpoint returned {resp.status_code} for the "
+                f"client_credentials grant. Check 'oauth2_client_id', "
+                f"'oauth2_client_secret', 'oauth2_token_url', and "
+                f"'oauth2_scope' on this connection. Server response: {hint}"
+            ) from None
         resp.raise_for_status()
-        token = resp.json().get("access_token")
+        payload = resp.json()
+        token = payload.get("access_token")
         if not token:
             raise RuntimeError("OAuth2 token endpoint did not return access_token.")
+        rotated_refresh = payload.get("refresh_token")
+        if rotated_refresh:
+            self.options["oauth2_refresh_token"] = rotated_refresh
+        # Track wall-clock deadline so `_http_get` can refresh the token
+        # *before* the source returns 401. Subtract a 60 s safety margin
+        # to cover clock skew + in-flight request latency. Absent
+        # `expires_in` means the provider didn't tell us — fall back to
+        # the lazy 401-retry path.
+        expires_in = payload.get("expires_in")
+        if expires_in is not None:
+            try:
+                self._access_token_expires_at = time.monotonic() + int(expires_in) - 60
+            except (TypeError, ValueError):
+                self._access_token_expires_at = None
+        else:
+            self._access_token_expires_at = None
         return token
 
     # ------------------------------------------------------------------
@@ -399,11 +542,7 @@ class ODataLakeflowConnect(LakeflowConnect, SupportsNamespaces):
         if self._metadata_xml is None:
             session = self._get_session()
             url = _join_url(self.service_url, "$metadata")
-            resp = session.get(
-                url,
-                timeout=self.timeout,
-                headers={"Accept": "application/xml"},
-            )
+            resp = self._http_get(session, url, headers={"Accept": "application/xml"})
             resp.raise_for_status()
             self._metadata_xml = resp.text
         return ET.fromstring(self._metadata_xml)
@@ -530,6 +669,39 @@ def _trim_to_distinct_cursor_boundary(
     while trim_idx > 0 and records[trim_idx - 1].get(cursor_field) == boundary:
         trim_idx -= 1
     return records[:trim_idx]
+
+
+def _extract_oauth_error_hint(resp: requests.Response) -> str:
+    """Pull the most informative error description out of an OAuth2 response.
+
+    Token endpoints conventionally return JSON with ``error`` (machine code,
+    e.g. ``invalid_grant``) and often ``error_description`` (human-readable).
+    Fall back to the raw body when the response isn't JSON, and truncate so
+    we never dump a 50 KB error page into a user-facing message.
+    """
+    try:
+        payload = resp.json()
+    except ValueError:
+        return _truncate(resp.text, 300) or "Unauthorized"
+    if isinstance(payload, dict):
+        description = payload.get("error_description")
+        code = payload.get("error")
+        if description and code:
+            return f"{code}: {description}"
+        if description:
+            return str(description)
+        if code:
+            return str(code)
+    return _truncate(resp.text, 300) or "Unauthorized"
+
+
+def _truncate(text: str, limit: int) -> str:
+    """Cap a string at ``limit`` chars with a trailing ellipsis when clipped."""
+    if text is None:
+        return ""
+    if len(text) <= limit:
+        return text
+    return text[:limit] + "..."
 
 
 def _require(options: dict[str, str], key: str) -> str:

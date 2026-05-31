@@ -47,8 +47,22 @@ connection:
 
     - name: oauth2
       description: >
-        OAuth 2.0 client-credentials. The connector fetches a token at run
-        time from ``oauth2_token_url`` using the supplied client id/secret.
+        OAuth 2.0. Two grant flows are supported via the same parameter
+        set:
+
+          1. **Client credentials** (server-to-server). Provide
+             ``oauth2_token_url``, ``oauth2_client_id``,
+             ``oauth2_client_secret``. The connector mints a fresh
+             access token at session start.
+
+          2. **Authorization code with refresh** (user-delegated).
+             Additionally supply ``oauth2_refresh_token`` and optionally
+             ``oauth2_access_token``. The pre-supplied access token is
+             used as-is when present; when it expires (HTTP 401 from
+             the source), the connector POSTs ``grant_type=refresh_token``
+             to ``oauth2_token_url`` to mint a fresh one. Providers that
+             rotate refresh tokens have the new value tracked in-process
+             for the duration of the run.
       parameters:
         - name: oauth2_token_url
           type: string
@@ -67,6 +81,24 @@ connection:
           type: string
           required: false
           description: Optional scope string.
+        - name: oauth2_access_token
+          type: string
+          required: false
+          secret: true
+          description: >
+            Pre-issued access token from the authorization-code flow.
+            Used directly until the source returns 401, then refreshed
+            via ``oauth2_refresh_token``. Omit for the client-credentials
+            flow — the connector mints one itself.
+        - name: oauth2_refresh_token
+          type: string
+          required: false
+          secret: true
+          description: >
+            Long-lived refresh token from the authorization-code flow.
+            When set, the connector uses the ``refresh_token`` grant to
+            re-mint the access token on expiry. Required for the
+            authorization-code flow; omit for client credentials.
 
   parameters:
     - name: service_url
