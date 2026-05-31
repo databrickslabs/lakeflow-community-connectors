@@ -159,14 +159,17 @@
       "count": 12,
       "param_shapes": [
         [
-          "$filter",
           "$orderby",
+          "$top"
+        ],
+        [
+          "$orderby",
+          "$skiptoken",
           "$top"
         ],
         [
           "$filter",
           "$orderby",
-          "$skiptoken",
           "$top"
         ]
       ]
@@ -311,6 +314,16 @@
       "method": "GET",
       "url": "https://services.odata.org/V4/Northwind/Northwind.svc/Territories",
       "count": 3,
+      "param_shapes": [
+        [
+          "$top"
+        ]
+      ]
+    },
+    {
+      "method": "GET",
+      "url": "https://services.odata.org/V4/Northwind/Northwind.svc/__nonexistent_table_$$_9z9z9z__",
+      "count": 1,
       "param_shapes": [
         [
           "$top"

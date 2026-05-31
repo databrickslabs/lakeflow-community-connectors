@@ -1018,6 +1018,157 @@ def test_missing_service_url_raises():
 
 
 # ---------------------------------------------------------------------------
+# 401 / 403 UX when there's no OAuth refresh path
+# ---------------------------------------------------------------------------
+
+# When the source returns 401/403 and the connector can't auto-refresh
+# the token (bearer, basic, api_key, or OAuth without client creds /
+# refresh token), the raw HTTPError gives the operator nothing
+# actionable. The connector raises PermissionError with auth-mode-
+# specific remediation hints instead.
+
+
+@responses.activate
+def test_bearer_401_without_refresh_raises_actionable_permission_error():
+    _mock_metadata()
+    responses.add(
+        responses.GET,
+        f"{SERVICE_URL}Customers",
+        status=401,
+        json={"error": {"code": "InvalidAuthenticationToken"}},
+    )
+    c = _make({"auth_type": "bearer", "token": "stale"})
+    with pytest.raises(PermissionError) as ei:
+        list(c.read_table("Customers", None, {})[0])
+    msg = str(ei.value)
+    # Diagnostics that triage the failure for a bearer-auth operator
+    # without making them dig into the request/response cycle.
+    assert "auth_type=bearer" in msg
+    assert "expired" in msg
+    assert "auth_type=oauth2" in msg  # suggested upgrade path
+    assert "oauth2_client_id" in msg
+    assert "InvalidAuthenticationToken" in msg  # server body echoed
+
+
+@responses.activate
+def test_basic_401_without_refresh_raises_actionable_permission_error():
+    _mock_metadata()
+    responses.add(responses.GET, f"{SERVICE_URL}Customers", status=401, body="denied")
+    c = _make({"auth_type": "basic", "username": "u", "password": "p"})
+    with pytest.raises(PermissionError) as ei:
+        list(c.read_table("Customers", None, {})[0])
+    msg = str(ei.value)
+    assert "auth_type=basic" in msg
+    assert "username" in msg
+    assert "password" in msg
+
+
+@responses.activate
+def test_api_key_401_without_refresh_raises_actionable_permission_error():
+    _mock_metadata()
+    responses.add(responses.GET, f"{SERVICE_URL}Customers", status=401, body="denied")
+    c = _make({"auth_type": "api_key", "api_key": "k"})
+    with pytest.raises(PermissionError) as ei:
+        list(c.read_table("Customers", None, {})[0])
+    msg = str(ei.value)
+    assert "auth_type=api_key" in msg
+    assert "api_key" in msg
+    assert "api_key_header" in msg
+
+
+@responses.activate
+def test_oauth2_without_refresh_path_401_raises_actionable_permission_error():
+    """auth_type=oauth2 + pre-supplied access_token + no refresh_token +
+    no client_id/secret is a legitimate config — but means there's no
+    refresh path. A 401 here can't be auto-fixed; surface the auth
+    options that need attention."""
+    _mock_metadata()
+    responses.add(responses.GET, f"{SERVICE_URL}Customers", status=401, body="expired")
+    c = _make(
+        {
+            "auth_type": "oauth2",
+            "oauth2_access_token": "stale-access",
+            # No client_id / client_secret → no refresh path.
+        }
+    )
+    with pytest.raises(PermissionError) as ei:
+        list(c.read_table("Customers", None, {})[0])
+    msg = str(ei.value)
+    assert "auth_type=oauth2" in msg
+    assert "oauth2_refresh_token" in msg
+    assert "oauth2_access_token" in msg
+    assert "oauth2_scope" in msg
+
+
+@responses.activate
+def test_no_auth_configured_401_raises_actionable_permission_error():
+    """Connection without any auth fields. A 401 here means the
+    service requires auth — the connector tells the operator which
+    auth_type values are valid."""
+    _mock_metadata()
+    responses.add(responses.GET, f"{SERVICE_URL}Customers", status=401, body="anon")
+    c = _make()  # no auth options at all
+    with pytest.raises(PermissionError) as ei:
+        list(c.read_table("Customers", None, {})[0])
+    msg = str(ei.value)
+    assert "No authentication" in msg
+    assert "bearer, basic, api_key, oauth2" in msg
+
+
+@responses.activate
+def test_403_on_bearer_raises_permission_error():
+    """403 means authenticated-but-not-authorized — different from 401
+    but equally a permission issue. Same error UX."""
+    _mock_metadata()
+    responses.add(
+        responses.GET,
+        f"{SERVICE_URL}Customers",
+        status=403,
+        json={"error": {"code": "Forbidden"}},
+    )
+    c = _make({"auth_type": "bearer", "token": "valid-but-no-scope"})
+    with pytest.raises(PermissionError) as ei:
+        list(c.read_table("Customers", None, {})[0])
+    msg = str(ei.value)
+    assert "auth_type=bearer" in msg
+    assert "403" in msg
+
+
+@responses.activate
+def test_oauth2_with_refresh_path_still_uses_existing_flow():
+    """A 401 with an OAuth refresh path goes through the existing
+    refresh-and-retry logic, NOT the new no-refresh-path error. This
+    is the regression-guard for the existing OAuth UX."""
+    _mock_metadata()
+    responses.post(
+        "https://idp.example.com/token",
+        json={"access_token": "fresh", "token_type": "Bearer"},
+    )
+    call = {"n": 0}
+
+    def _customers(request):
+        call["n"] += 1
+        if call["n"] == 1:
+            return (401, {}, '{"error": "expired"}')
+        return (200, {}, '{"value": [{"Id": 1, "Name": "x", "ModifiedAt": "x"}]}')
+
+    responses.add_callback(responses.GET, f"{SERVICE_URL}Customers", callback=_customers)
+    c = _make(
+        {
+            "auth_type": "oauth2",
+            "oauth2_token_url": "https://idp.example.com/token",
+            "oauth2_client_id": "id",
+            "oauth2_client_secret": "secret",
+        }
+    )
+    # Refreshable 401 → resolves cleanly via the existing path. New
+    # PermissionError code path is bypassed.
+    rows, _ = c.read_table("Customers", None, {})
+    assert [r["Id"] for r in list(rows)] == [1]
+    assert call["n"] == 2  # 401 then 200 after refresh
+
+
+# ---------------------------------------------------------------------------
 # Multi-schema (SupportsNamespaces)
 # ---------------------------------------------------------------------------
 

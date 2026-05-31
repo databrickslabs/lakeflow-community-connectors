@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated_at": "2026-05-31T02:16:04.116272Z",
+  "generated_at": "2026-05-31T14:59:05.326250Z",
   "endpoints": [
     {
       "method": "GET",
@@ -27,7 +27,7 @@
     {
       "method": "GET",
       "spec_path": "/V4/Northwind/Northwind.svc/Orders",
-      "sample_url": "https://services.odata.org/V4/Northwind/Northwind.svc/Orders?$top=1000&$filter=(OrderDate%20le%202026-05-31T02:14:29.050967Z)&$orderby=OrderDate%20asc,OrderID%20asc",
+      "sample_url": "https://services.odata.org/V4/Northwind/Northwind.svc/Orders?$top=1000&$orderby=OrderDate%20asc,OrderID%20asc",
       "status": "validated",
       "calls": 12,
       "matched": 12,
@@ -957,12 +957,25 @@
       "issues": [
         "no matching endpoint spec"
       ]
+    },
+    {
+      "method": "GET",
+      "spec_path": null,
+      "sample_url": "https://services.odata.org/V4/Northwind/Northwind.svc/__nonexistent_table_$$_9z9z9z__?$top=1000",
+      "status": "no_spec",
+      "calls": 1,
+      "matched": 0,
+      "mismatched": 0,
+      "no_spec": 1,
+      "issues": [
+        "no matching endpoint spec"
+      ]
     }
   ],
   "summary": {
-    "endpoints_total": 74,
+    "endpoints_total": 75,
     "endpoints_validated": 3,
     "endpoints_mismatched": 0,
-    "endpoints_missing_spec": 71
+    "endpoints_missing_spec": 72
   }
 }
