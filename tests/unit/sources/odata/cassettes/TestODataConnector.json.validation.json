@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated_at": "2026-05-30T02:25:23.120567Z",
+  "generated_at": "2026-05-31T00:08:46.729232Z",
   "endpoints": [
     {
       "method": "GET",
@@ -27,7 +27,7 @@
     {
       "method": "GET",
       "spec_path": "/V4/Northwind/Northwind.svc/Orders",
-      "sample_url": "https://services.odata.org/V4/Northwind/Northwind.svc/Orders?$top=1000&$filter=(OrderDate%20le%202026-05-30T02:24:05.974922Z)&$orderby=OrderDate%20asc,OrderID%20asc",
+      "sample_url": "https://services.odata.org/V4/Northwind/Northwind.svc/Orders?$top=1000&$filter=(OrderDate%20le%202026-05-31T00:07:21.496592Z)&$orderby=OrderDate%20asc,OrderID%20asc",
       "status": "validated",
       "calls": 12,
       "matched": 12,
