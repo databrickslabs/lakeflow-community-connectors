@@ -78,13 +78,15 @@ Every read is a Python snippet executed in a long-lived context on the cluster:
 
 ```python
 df = (spark.read.format("lakeflow_connect")
-        .option("connection_name", "<CONN>")
+        .option("databricks.connection", "<CONN>")   # UC injects the OAuth access_token from this connection
         .option("tableName", "<TABLE_NAME>")
         .option("<filter_key>", "<value>")    # 0+ from README's table_configuration
         .load()
         .limit(<N>))                          # always cap rows you don't need
 print(json.dumps([r.asDict(recursive=True) for r in df.collect()], default=str))
 ```
+
+The connection option key **must** be `databricks.connection` — that exact string is what Unity Catalog watches for to inject the connection's OAuth `access_token` into the connector options at query time. Other spellings (`connection_name`, `connectionName`) are silently ignored: UC injects nothing and the read fails inside the connector with `Gmail connector requires 'access_token' in options`.
 
 ### Bootstrap (do once at the start of a Gmail-shaped conversation)
 
@@ -195,7 +197,8 @@ The deployed connector surfaces failures as Spark exceptions (the agent-dispatch
 | Gmail HTTP 403 | Missing scope or Workspace admin restriction | Surface the message; if Drive-related, the connector still works for Gmail-only reads. |
 | Gmail HTTP 404 on the history endpoint | `historyId` expired (~30 days) | The connector falls back to a full scan on retry; warn the user the next read may be slow. |
 | Gmail HTTP 429 | Rate limit | Back off a few seconds and retry once. Don't hammer. |
-| `Connection not found` | `connection_name` is wrong or missing | Re-confirm with the user; offer to create via the prerequisite step. |
+| `Connection not found` | connection name is wrong or missing | Re-confirm with the user; offer to create via the prerequisite step. |
+| `Gmail connector requires 'access_token' in options` | Read used the wrong connection option key, so UC injected no token | Use `.option("databricks.connection", "<CONN>")` — not `connection_name`/`connectionName`. |
 | Module import error on `GmailDataSource` | Connector wheel not installed on the cluster | Stop and surface — this skill can't fix cluster libraries. |
 
 ---
