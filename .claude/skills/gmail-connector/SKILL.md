@@ -89,7 +89,7 @@ The connection option key **must** be `databricks.connection` — that exact str
    ```
    If terminated, ask the user before starting it.
 
-2. **Open a Python context.** Path: `/api/1.2/contexts/create` (not `/api/1.2/commands/contexts/create` — see the path table above):
+2. **Open a Python context** (`/api/1.2/contexts/create`):
    ```bash
    databricks api post /api/1.2/contexts/create \
      --json '{"clusterId":"0528-081139-nh2l2jnu","language":"python"}' -o json
@@ -106,7 +106,7 @@ The connection option key **must** be `databricks.connection` — that exact str
 
 ### Execution envelope (every read)
 
-1. **Build the snippet.** End it with `print(json.dumps([r.asDict(recursive=True) for r in df.collect()], default=str))` so the result comes back parseable.
+1. **Build the snippet** from the template above, ending with the `print(json.dumps(...))` line so the result comes back parseable.
 
 2. **Submit** (path: `/api/1.2/commands/execute`):
    ```bash
@@ -139,7 +139,7 @@ databricks api post /api/1.2/contexts/destroy \
   --json '{"clusterId":"0528-081139-nh2l2jnu","contextId":"<CTX>"}'
 ```
 
-Contexts are a cluster resource — don't leak them across sessions.
+Contexts are a cluster resource — don't leak them across sessions; tear down even when a read errored.
 
 ---
 
@@ -162,26 +162,15 @@ Practical:
 
 ## Error handling
 
-The deployed connector surfaces failures as Spark exceptions (the agent-dispatcher's normalised `_meta.code` envelope is not on the dispatch path yet). When `results.resultType == "error"`, parse `results.summary` + `results.cause` and act on the underlying cause:
+The deployed connector surfaces failures as Spark exceptions. When `results.resultType == "error"`, parse `results.summary` + `results.cause` and act on the underlying cause:
 
 | Symptom | Likely cause | What to do |
 |---|---|---|
 | `Bad Target: /api/...` from `databricks api` | REST path wrong (most often `commands/contexts/...`) | Re-check the path table at the top of this file. |
-| Gmail HTTP 401 in the traceback | OAuth token expired / revoked | Stop; ask the user to re-run `create_connection`. |
+| Gmail HTTP 401 in the traceback | OAuth token expired / revoked | Stop; ask the user to re-authorize the connection. |
 | Gmail HTTP 403 | Missing scope or Workspace admin restriction | Surface the message; if Drive-related, the connector still works for Gmail-only reads. |
 | Gmail HTTP 404 on the history endpoint | `historyId` expired (~30 days) | The connector falls back to a full scan on retry; warn the user the next read may be slow. |
 | Gmail HTTP 429 | Rate limit | Back off a few seconds and retry once. Don't hammer. |
-| `Connection not found` | connection name is wrong or missing | Re-confirm with the user; offer to create via the prerequisite step. |
+| `Connection not found` | connection name is wrong or missing | Re-confirm the connection name with the user. |
 | `Gmail connector requires 'access_token' in options` | Read used the wrong connection option key, so UC injected no token | Use `.option("databricks.connection", "<CONN>")` — not `connection_name`/`connectionName`. |
 | Module import error on `GmailDataSource` | Connector wheel not installed on the cluster | Stop and surface — this skill can't fix cluster libraries. |
-
----
-
-## Rules
-
-- Don't invent things stated explicitly above — the cluster id, the REST paths, and the table surface are all fixed. Use them verbatim.
-- Register the data source on the first command in every fresh context, never on later commands in the same context.
-- Always `print(json.dumps(...))` inside the snippet so the cluster response is machine-parseable; don't rely on Spark's text-table output.
-- If the user wants something the table surface can't do (writes, attachment bytes, push notifications), say so plainly — don't fake it through an unrelated read.
-- Tear down the execution context when the conversation's Gmail work is finished, including on error.
-- For sustained ingestion, hand off to `deploy-connector` rather than looping the execution envelope yourself.
