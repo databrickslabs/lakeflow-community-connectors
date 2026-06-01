@@ -3,7 +3,7 @@ name: gmail-connector
 description: Tool layer for Gmail reads. Runs read queries on a fixed Databricks cluster via the Command Execution REST API; scheduled-ingestion requests hand off to `deploy-connector`. Use whenever the user asks the agent to read something from their mailbox.
 args:
   - name: connection_name
-    description: Name of the UC COMMUNITY connection holding the Gmail OAuth grant. Create one (see "Connection prerequisite") if absent.
+    description: Name of the UC COMMUNITY connection holding the Gmail OAuth grant.
     required: false
 ---
 
@@ -157,24 +157,6 @@ Practical:
 - Always cap rows by chaining `.limit(N)` on the DataFrame; the read path itself enforces no row cap.
 - Prefer `format="metadata"` on the `messages` table when the user only needs headers.
 - The connector internally translates `q` to Gmail's search syntax — pass it through verbatim (e.g. `is:unread`, `has:attachment`, `newer_than:7d`).
-
----
-
-## Connection prerequisite
-
-If `{{connection_name}}` is provided, trust it and run a small read early to validate (e.g. `tableName=labels`, `.limit(1)`); surface any error verbatim.
-
-If it isn't, the connection must be created on the **user's laptop** because the OAuth U2M flow opens their browser:
-
-```bash
-community-connector create_connection gmail <CONN_NAME> \
-  --auth-type u2m \
-  -o '{"client_id":"<CLIENT_ID>","client_secret":"<CLIENT_SECRET>"}'
-```
-
-Google's `authorization_endpoint`, `token_endpoint`, and scopes are baked into `connector_spec.yaml`; the user only supplies their OAuth Web Application's `client_id` + `client_secret`. Choose `u2m_per_user` instead when each end user should re-consent independently.
-
-You can't shortcut this — UC mints and refreshes the `access_token`, and the connector treats it as opaque.
 
 ---
 
