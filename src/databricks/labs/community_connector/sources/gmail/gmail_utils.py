@@ -178,7 +178,19 @@ class GmailApiClient:
             # Fall back to sequential requests on batch failure
             return self._fetch_sequential(endpoints, params_list)
 
-        return self._parse_batch_response(response.text, boundary)
+        parsed = self._parse_batch_response(response.text, boundary)
+
+        # A 200 is not proof the batch succeeded. Google's global batch
+        # endpoint can answer 200 with a body our multipart parser cannot
+        # read, yielding zero rows with no exception — which silently
+        # empties every batch-backed operation (search_messages, the
+        # incremental message/thread fetches). Treat an empty parse against
+        # a non-empty request as a batch failure and fall back to the
+        # per-request path the table reads already rely on.
+        if not parsed:
+            return self._fetch_sequential(endpoints, params_list)
+
+        return parsed
 
     def _parse_batch_response(self, response_text: str, boundary: str) -> List[Dict]:
         """Parse multipart batch response."""
