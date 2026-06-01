@@ -9,9 +9,9 @@ args:
 
 # Gmail Connector
 
-This skill turns the project's Gmail tables into a tool surface the agent can call. You — the agent — translate the user's request into table reads with optional filter options, run them on a Databricks cluster via the Command Execution REST API, and return the answer.
+This skill turns the Gmail connector's operations into a tool surface the agent can call. You — the agent — translate the user's request into one or more operation reads, run them on a Databricks cluster via the Command Execution REST API, and return the answer.
 
-You **never** invent table names, option keys, or REST paths. The table surface in "What this skill is for" is the source of truth for the tables and options; the path table below is the source of truth for the cluster API.
+You **never** invent operation names, parameters, or REST paths. The `list_operations` catalog (fetched at bootstrap) is the source of truth for what the connector supports and how to call it; the path table below is the source of truth for the cluster API.
 
 ---
 
@@ -54,31 +54,37 @@ The Databricks Go SDK and the docs.databricks.com pages reference a `2.0` alias 
 
 ## What this skill is for
 
-The Gmail connector exposes Gmail as **Spark tables** — one table per Gmail object (`messages`, `threads`, `labels`, `drafts`, `profile`, `settings`, `filters`, `forwarding_addresses`, `send_as`, `delegates`). Each accepts a small set of filter options (`q`, `labelIds`, `maxResults`, `includeSpamTrash`, `format`). Your tool surface is exactly those tables and options — nothing more.
+The Gmail connector exposes a set of **operations** you invoke one at a time via the `operation` option. The current catalog includes `search_messages` (typed-filter search, headers only), `get_message` (one message with decoded `body_text`/`body_html`, headers, attachment list), `list_attachments` and `download_attachment` (attachment metadata, and bytes to a Volume path), `read_table` and `list_objects` / `get_object_metadata` (read and enumerate Gmail object tables), and `validate_connection`. Each operation takes typed parameters and returns rows with a fixed schema.
+
+**`list_operations` is the authoritative, self-describing catalog — use it, not the list above, to plan reads.** Run it at bootstrap (a step below) and keep the result for the session. Each row gives an operation's `name`, `description`, `kind` (`data` / `metadata`), `parameters_json` (input schema), and `result_schema_json` (output schema). Read those to pick the operation that answers a request, see exactly which parameters it accepts, and tell the user accurately what is and isn't supported. The summary above is illustrative and may drift; the live catalog is truth.
 
 The one explicit carve-out, owned by a sibling skill:
 
 - **Scheduled / continuous ingestion** ("land my inbox in UC hourly") → hand off to the `deploy-connector` skill with `source_name=gmail`. That skill provisions an SDP pipeline via the `community-connector` CLI. Don't loop the read envelope here to fake it.
 
-If the user asks for something the table surface can't do (write actions, byte-level attachment fetch, push notifications), say so plainly.
+If the user wants something no operation in the catalog supports (sending/writing mail, push notifications), say so plainly.
 
 ---
 
 ## How you call into the connector
 
-Every read is a Python snippet executed in a long-lived context on the cluster:
+Every read invokes one operation as a Python snippet executed in a long-lived context on the cluster:
 
 ```python
 df = (spark.read.format("lakeflow_connect")
         .option("databricks.connection", "<CONN>")   # UC injects the OAuth access_token from this connection
-        .option("tableName", "<TABLE_NAME>")
-        .option("<filter_key>", "<value>")    # 0+ from the option set above
+        .option("operation", "<OP_NAME>")            # an operation from the list_operations catalog
+        .option("<param>", "<value>")     # 0+ typed params from that op's parameters_json
         .load()
-        .limit(<N>))                          # always cap rows you don't need
+        .limit(<N>))                      # always cap rows you don't need
 print(json.dumps([r.asDict(recursive=True) for r in df.collect()], default=str))
 ```
 
 The connection option key **must** be `databricks.connection` — that exact string is what Unity Catalog watches for to inject the connection's OAuth `access_token` into the connector options at query time. Other spellings (`connection_name`, `connectionName`) are silently ignored: UC injects nothing and the read fails inside the connector with `Gmail connector requires 'access_token' in options`.
+
+Each returned row carries a `_meta` field (`status` / `code` / `message`); a non-`ok` status flags a per-row failure even when no Spark exception is thrown. Operation names and parameter casing come straight from the catalog — don't guess them.
+
+> Direct table reads still work as a fallback: omit `operation` and pass `tableName=<object>` to read a Gmail object as a Spark table. Prefer operations — they give typed filters, decoded message bodies, and attachment access the raw table reads don't.
 
 ### Bootstrap (do once at the start of a Gmail-shaped conversation)
 
@@ -104,6 +110,16 @@ The connection option key **must** be `databricks.connection` — that exact str
    ```
    Subsequent commands in the same context **must not** re-emit those lines — the registration is cached. Re-registering is wasted overhead, not an error. If you open a new context later (cluster restart, you destroyed the previous one), the first command in *that* context must include them again.
 
+4. **Fetch the operation catalog.** Run `list_operations` and keep the result for the rest of the session — it's what you plan every read against. This can ride on the same first command as the registration above:
+   ```python
+   df = (spark.read.format("lakeflow_connect")
+           .option("databricks.connection", "<CONN>")
+           .option("operation", "list_operations")
+           .load())
+   print(json.dumps([r.asDict(recursive=True) for r in df.collect()], default=str))
+   ```
+   Each row's `parameters_json` and `result_schema_json` tell you how to translate the user's request into an operation + params, and let you answer "can you do X?" from the live surface rather than memory.
+
 ### Execution envelope (every read)
 
 1. **Build the snippet** from the template above, ending with the `print(json.dumps(...))` line so the result comes back parseable.
@@ -128,7 +144,7 @@ The connection option key **must** be `databricks.connection` — that exact str
 
 Quoting notes that bite if you skip them:
 - The `command` field is a JSON string containing Python source — preserve newlines (`\n`) and quote your inner strings.
-- Spark's `CaseInsensitiveStringMap` lowercases option keys, but the connector handles the standard spellings; use the option keys listed in "What this skill is for".
+- Spark's `CaseInsensitiveStringMap` lowercases option keys, but the connector handles the standard spellings; use the parameter names exactly as the operation's `parameters_json` declares them.
 
 ### Teardown
 
@@ -145,24 +161,25 @@ Contexts are a cluster resource — don't leak them across sessions; tear down e
 
 ## Composing reads to satisfy a request
 
-Plan a request as one or more table reads with the filter options listed in "What this skill is for". Examples for orientation only:
+Plan a request as one or more operations, taking parameters from each op's `parameters_json` in the catalog. Examples for orientation only — the catalog is authoritative:
 
-- **"Find emails from Alice last week"** → read `messages` with `q="from:alice@example.com newer_than:7d"`; cap with `.limit(N)`.
-- **"What labels do I have?"** → read `labels`, no filters.
-- **"50 unread inbox messages, headers only"** → read `messages` with `q="is:unread"`, `labelIds="INBOX"`, `format="metadata"`, `.limit(50)`. Gmail charges ~4× more per message for `format="full"`.
-- **"Show my profile"** → read `profile`, no filters.
-- **"Find the latest invoice from Vendor"** → read `messages` with `q="from:vendor@example.com subject:invoice"`, `.limit(5)`, let the user pick by id, then a tighter follow-up read if needed.
+- **"Find emails from Alice last week"** → `search_messages` with `from_address="alice@example.com"`, `newer_than="7d"`.
+- **"50 unread inbox messages"** → `search_messages` with `is_unread="true"`, `label="inbox"`, `limit="50"`. Headers/snippets only, no bodies.
+- **"Read the full text of message `<id>`"** → `get_message` with `message_id="<id>"` (decoded `body_text`/`body_html`, headers, attachment list).
+- **"What's attached to `<id>`, and download the PDF"** → `list_attachments` with `message_id="<id>"`, then `download_attachment` with the returned `attachment_id`+`message_id` (or `drive_file_id`) and a `volume_path`.
+- **"What objects can I read?"** → `list_objects`; describe one with `get_object_metadata`.
+- **"Find the latest invoice from Vendor"** → `search_messages` with `from_address="vendor@example.com"`, `subject="invoice"`, `limit="5"`; let the user pick an id, then `get_message`.
 
 Practical:
-- Always cap rows by chaining `.limit(N)` on the DataFrame; the read path itself enforces no row cap.
-- Prefer `format="metadata"` on the `messages` table when the user only needs headers.
-- The connector internally translates `q` to Gmail's search syntax — pass it through verbatim (e.g. `is:unread`, `has:attachment`, `newer_than:7d`).
+- Always cap rows with `.limit(N)`, and use the op's own `limit` param where it has one (`search_messages` defaults to 50, max 500).
+- `search_messages` returns metadata only — follow up with `get_message` when the user needs body content.
+- Typed filters (`from_address`, `to_address`, `subject`, `newer_than`, `after_date`, `before_date`, `is_unread`, `has_attachment`, `label`) compose via AND; pass any raw Gmail search expression through the `query` param verbatim.
 
 ---
 
 ## Error handling
 
-The deployed connector surfaces failures as Spark exceptions. When `results.resultType == "error"`, parse `results.summary` + `results.cause` and act on the underlying cause:
+The deployed connector surfaces hard failures as Spark exceptions and soft failures in each row's `_meta` envelope (`status` / `code` / `message`). When `results.resultType == "error"`, parse `results.summary` + `results.cause`; when it's `text`, also check `_meta.status` on the returned rows. Act on the underlying cause:
 
 | Symptom | Likely cause | What to do |
 |---|---|---|
