@@ -54,9 +54,9 @@ The Databricks Go SDK and the docs.databricks.com pages reference a `2.0` alias 
 
 ## What this skill is for
 
-The Gmail connector exposes a set of **operations** you invoke one at a time via the `operation` option. The current catalog includes `search_messages` (typed-filter search, headers only), `get_message` (one message with decoded `body_text`/`body_html`, headers, attachment list), `list_attachments` and `download_attachment` (attachment metadata, and bytes to a Volume path), `read_table` and `list_objects` / `get_object_metadata` (read and enumerate Gmail object tables), and `validate_connection`. Each operation takes typed parameters and returns rows with a fixed schema.
+The Gmail connector exposes a set of read **operations** — broadly: message search, single-message fetch with decoded body, attachment listing and download, generic table reads, and object/connection introspection. You invoke one at a time via the `operation` option; each takes typed parameters and returns rows with a fixed schema.
 
-**`list_operations` is the authoritative, self-describing catalog — use it, not the list above, to plan reads.** Run it at bootstrap (a step below) and keep the result for the session. Each row gives an operation's `name`, `description`, `kind` (`data` / `metadata`), `parameters_json` (input schema), and `result_schema_json` (output schema). Read those to pick the operation that answers a request, see exactly which parameters it accepts, and tell the user accurately what is and isn't supported. The summary above is illustrative and may drift; the live catalog is truth.
+**`list_operations` is the authoritative, self-describing catalog — fetch it at bootstrap (a step below) and plan every read against it.** Each row gives an operation's `name`, `description`, `kind` (`data` / `metadata`), `parameters_json` (input schema), and `result_schema_json` (output schema). Read those to pick the operation that answers a request, see exactly which parameters it accepts, and tell the user accurately what is and isn't supported.
 
 The one explicit carve-out, owned by a sibling skill:
 
