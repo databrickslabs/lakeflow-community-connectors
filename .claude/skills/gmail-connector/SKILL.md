@@ -3,7 +3,7 @@ name: gmail-connector
 description: Tool layer for Gmail reads. Runs read queries on a fixed Databricks cluster via the Command Execution REST API; scheduled-ingestion requests hand off to `deploy-connector`. Use whenever the user asks the agent to read something from their mailbox.
 args:
   - name: connection_name
-    description: Name of the UC COMMUNITY connection holding the Gmail OAuth grant.
+    description: Name of the UC COMMUNITY connection holding the Gmail OAuth grant. Must be supplied by the user; if they don't have one, see "Connection" for how to create it.
     required: false
 ---
 
@@ -63,6 +63,22 @@ The one explicit carve-out, owned by a sibling skill:
 - **Scheduled / continuous ingestion** ("land my inbox in UC hourly") → hand off to the `deploy-connector` skill with `source_name=gmail`. That skill provisions an SDP pipeline via the `community-connector` CLI. Don't loop the read envelope here to fake it.
 
 If the user wants something no operation in the catalog supports (sending/writing mail, push notifications), say so plainly.
+
+---
+
+## Connection
+
+Every read goes through a Unity Catalog **COMMUNITY** connection that holds the Gmail OAuth grant. **The connection name must come from the user — ask for it; never invent, guess, or default one.** Pass it as the `databricks.connection` option on every read.
+
+If the user doesn't have a connection yet, they create one on their **own laptop** (the OAuth U2M flow opens their browser — you can't run it for them):
+
+```bash
+community-connector create_connection gmail <CONN_NAME> \
+  --auth-type u2m \
+  -o '{"client_id":"<CLIENT_ID>","client_secret":"<CLIENT_SECRET>"}'
+```
+
+Google's authorization/token endpoints and scopes are baked into `connector_spec.yaml`; the user supplies only their OAuth Web Application's `client_id` and `client_secret`. Choose `u2m_per_user` instead when each end user should consent independently. UC then mints and refreshes the `access_token` and the connector treats it as opaque — there's no shortcut from the cluster.
 
 ---
 
@@ -188,6 +204,6 @@ The deployed connector surfaces hard failures as Spark exceptions and soft failu
 | Gmail HTTP 403 | Missing scope or Workspace admin restriction | Surface the message; if Drive-related, the connector still works for Gmail-only reads. |
 | Gmail HTTP 404 on the history endpoint | `historyId` expired (~30 days) | The connector falls back to a full scan on retry; warn the user the next read may be slow. |
 | Gmail HTTP 429 | Rate limit | Back off a few seconds and retry once. Don't hammer. |
-| `Connection not found` | connection name is wrong or missing | Re-confirm the connection name with the user. |
+| `Connection not found` | connection name is wrong or missing | Re-confirm the name with the user; if they have none, see "Connection" to create one. |
 | `Gmail connector requires 'access_token' in options` | Read used the wrong connection option key, so UC injected no token | Use `.option("databricks.connection", "<CONN>")` — not `connection_name`/`connectionName`. |
 | Module import error on `GmailDataSource` | Connector wheel not installed on the cluster | Stop and surface — this skill can't fix cluster libraries. |
