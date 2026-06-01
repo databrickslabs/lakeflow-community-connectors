@@ -1846,7 +1846,9 @@ def show_pipeline(ctx: click.Context, pipeline_name: str):
     default=None,
     help=(
         "Loopback port for the OAuth U2M redirect (only used with "
-        "--auth-type=u2m). Defaults to an OS-assigned free port."
+        "--auth-type=u2m). Defaults to 33669; if that port is occupied, "
+        "an OS-assigned free port is used instead. Pass 0 to always use "
+        "an OS-assigned free port."
     ),
 )
 @click.option(

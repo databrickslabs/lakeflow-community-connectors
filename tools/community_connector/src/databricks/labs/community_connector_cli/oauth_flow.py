@@ -98,10 +98,47 @@ class _CallbackResult:
     error: Optional[str] = None
 
 
+# Preferred loopback port for the U2M OAuth redirect. Using a stable
+# default (rather than an OS-assigned random port) lets users register a
+# single fixed redirect URI — http://127.0.0.1:33669/callback — in their
+# OAuth app, instead of a wildcard or a per-run port. We only fall back to
+# a random free port when 33669 is already taken.
+_DEFAULT_U2M_REDIRECT_PORT = 33669
+
+
 def _pick_free_port() -> int:
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
         sock.bind(("127.0.0.1", 0))
         return sock.getsockname()[1]
+
+
+def _is_port_available(port: int) -> bool:
+    """Return True if ``port`` can be bound on the IPv4 loopback."""
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        try:
+            sock.bind(("127.0.0.1", port))
+            return True
+        except OSError:
+            return False
+
+
+def _resolve_redirect_port(redirect_port: Optional[int]) -> int:
+    """Resolve the loopback redirect port for the U2M flow.
+
+    - An explicit non-zero port is honoured as-is (the caller asked for a
+      specific port; binding later will fail loudly if it's taken).
+    - ``0`` means "let the OS assign any free port".
+    - ``None`` (no ``--redirect-port`` given) prefers the stable default
+      :data:`_DEFAULT_U2M_REDIRECT_PORT`, falling back to a random free
+      port only when the default is occupied.
+    """
+    if redirect_port:
+        return redirect_port
+    if redirect_port == 0:
+        return _pick_free_port()
+    if _is_port_available(_DEFAULT_U2M_REDIRECT_PORT):
+        return _DEFAULT_U2M_REDIRECT_PORT
+    return _pick_free_port()
 
 
 def _generate_pkce() -> Tuple[str, str]:
@@ -183,8 +220,7 @@ def run_u2m_authorization_code_flow(
     Raises ``RuntimeError`` if the user does not complete the flow within
     ``timeout_seconds`` or the IdP returns an error / mismatched state.
     """
-    if redirect_port is None or redirect_port == 0:
-        redirect_port = _pick_free_port()
+    redirect_port = _resolve_redirect_port(redirect_port)
     # RFC 8252 §7.3 and Google's desktop-app docs both recommend the IPv4
     # loopback literal here, not "localhost". The server below binds to
     # 127.0.0.1 — using "localhost" in the redirect URI breaks on systems
