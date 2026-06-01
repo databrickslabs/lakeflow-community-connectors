@@ -1,6 +1,6 @@
 ---
 name: gmail-connector
-description: Tool layer for ad-hoc Gmail reads against the project's `lakeflow_connect` table surface. Runs read queries on a fixed Databricks cluster via the Command Execution REST API; scheduled-ingestion requests hand off to `deploy-connector`. Use whenever the user asks the agent to read something from their mailbox.
+description: Tool layer for Gmail reads. Runs read queries on a fixed Databricks cluster via the Command Execution REST API; scheduled-ingestion requests hand off to `deploy-connector`. Use whenever the user asks the agent to read something from their mailbox.
 args:
   - name: connection_name
     description: Name of the UC COMMUNITY connection holding the Gmail OAuth grant. Create one (see "Connection prerequisite") if absent.
@@ -11,7 +11,7 @@ args:
 
 This skill turns the project's Gmail tables into a tool surface the agent can call. You — the agent — translate the user's request into table reads with optional filter options, run them on a Databricks cluster via the Command Execution REST API, and return the answer.
 
-You **never** invent table names, option keys, or REST paths. The connector README is the source of truth for the tables; the path table below is the source of truth for the cluster API.
+You **never** invent table names, option keys, or REST paths. The table surface in "What this skill is for" is the source of truth for the tables and options; the path table below is the source of truth for the cluster API.
 
 ---
 
@@ -23,7 +23,7 @@ This skill runs every Gmail snippet on the fixed cluster:
 0528-081139-nh2l2jnu
 ```
 
-Use that id verbatim in every Command Execution request. **Do not ask the user for a cluster id** and do not substitute a different one — the connector wheel + Python environment this skill assumes are only known to be present on that cluster. If a request to it fails with a state other than `RUNNING`, ask the user before starting it; do not fall back to another cluster.
+Use that id verbatim in every Command Execution request. **Do not ask the user for a cluster id** and do not substitute a different one. If a request to it fails with a state other than `RUNNING`, report the error back to user and terminate. 
 
 ---
 
@@ -56,17 +56,9 @@ The Databricks Go SDK and the docs.databricks.com pages reference a `2.0` alias 
 
 The Gmail connector exposes Gmail as **Spark tables** — one table per Gmail object (`messages`, `threads`, `labels`, `drafts`, `profile`, `settings`, `filters`, `forwarding_addresses`, `send_as`, `delegates`). Each accepts a small set of filter options (`q`, `labelIds`, `maxResults`, `includeSpamTrash`, `format`). Your tool surface is exactly those tables and options — nothing more.
 
-Read the connector README before planning a request; it is the authoritative manifest:
-
-- `src/databricks/labs/community_connector/sources/gmail/README.md`
-
-It enumerates each table, its primary key, ingestion type, schema highlights, and the keys accepted under `table_configuration`.
-
 The one explicit carve-out, owned by a sibling skill:
 
 - **Scheduled / continuous ingestion** ("land my inbox in UC hourly") → hand off to the `deploy-connector` skill with `source_name=gmail`. That skill provisions an SDP pipeline via the `community-connector` CLI. Don't loop the read envelope here to fake it.
-
-> **Today's limit.** The connector source contains an agent-dispatcher with richer ops (`list_operations`, `search_messages`, `list_attachments`, `download_attachment`, …), but that surface is **not yet on the Spark format dispatch path** in the deployed builds — i.e. setting `option("operation", ...)` does nothing. Until that wiring ships, ignore those ops; the table read path is the only surface you can call. **Attachment-byte downloads in particular are out of reach via this skill today** — the table surface returns attachment *metadata* on `messages.payload`, not bytes.
 
 If the user asks for something the table surface can't do (write actions, byte-level attachment fetch, push notifications), say so plainly.
 
@@ -80,7 +72,7 @@ Every read is a Python snippet executed in a long-lived context on the cluster:
 df = (spark.read.format("lakeflow_connect")
         .option("databricks.connection", "<CONN>")   # UC injects the OAuth access_token from this connection
         .option("tableName", "<TABLE_NAME>")
-        .option("<filter_key>", "<value>")    # 0+ from README's table_configuration
+        .option("<filter_key>", "<value>")    # 0+ from the option set above
         .load()
         .limit(<N>))                          # always cap rows you don't need
 print(json.dumps([r.asDict(recursive=True) for r in df.collect()], default=str))
@@ -136,7 +128,7 @@ The connection option key **must** be `databricks.connection` — that exact str
 
 Quoting notes that bite if you skip them:
 - The `command` field is a JSON string containing Python source — preserve newlines (`\n`) and quote your inner strings.
-- Spark's `CaseInsensitiveStringMap` lowercases option keys, but the connector handles the standard spellings; use the keys the README documents.
+- Spark's `CaseInsensitiveStringMap` lowercases option keys, but the connector handles the standard spellings; use the option keys listed in "What this skill is for".
 
 ### Teardown
 
@@ -153,7 +145,7 @@ Contexts are a cluster resource — don't leak them across sessions.
 
 ## Composing reads to satisfy a request
 
-Plan a request as one or more table reads with `table_configuration` filters from the README. Examples for orientation only — the README is authoritative for what each table accepts:
+Plan a request as one or more table reads with the filter options listed in "What this skill is for". Examples for orientation only:
 
 - **"Find emails from Alice last week"** → read `messages` with `q="from:alice@example.com newer_than:7d"`; cap with `.limit(N)`.
 - **"What labels do I have?"** → read `labels`, no filters.
