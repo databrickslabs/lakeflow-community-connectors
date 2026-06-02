@@ -1,0 +1,25 @@
+# Linear GraphQL API simulator spec.
+#
+# Linear is a single GraphQL endpoint: every read is a POST to /graphql
+# whose JSON body carries the table selector, the updatedAt range filter
+# (gte/lte), and the Relay first/after pagination cursor. None of that
+# lives in the URL query string, so the declarative param-role machinery
+# (which only inspects query params) cannot model it.
+#
+# Instead this endpoint delegates to a custom handler that parses the
+# GraphQL body, routes to the issues/projects corpus, applies the
+# updatedAt window, sorts ascending by updatedAt, and renders Relay
+# pages. Both tables (issues, projects) flow through the one endpoint.
+#
+# Termination / cap testing: the connector caps its returned cursor at
+# its init-time snapshot (sends updatedAt.lte = init_time and advances a
+# drained window to that cap). The handler injects a few future-dated
+# clones into the served corpus, so a correctly-capped connector excludes
+# them via its body-level `until` bound and converges under
+# Trigger.AvailableNow; an uncapped connector would leak them and the
+# termination test would diverge.
+
+endpoints:
+  - path: "/graphql"
+    method: POST
+    handler: databricks.labs.community_connector.source_simulator.specs.linear.handlers.graphql:graphql_handler
