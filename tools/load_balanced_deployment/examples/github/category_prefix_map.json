@@ -1,0 +1,14 @@
+{
+  "pull": "core",
+  "issue": "core",
+  "repositories": "core",
+  "commit": "activity",
+  "review": "activity",
+  "comment": "activity",
+  "user": "metadata",
+  "organization": "metadata",
+  "team": "metadata",
+  "assignee": "metadata",
+  "collaborator": "metadata",
+  "branch": "metadata"
+}
