@@ -20,9 +20,23 @@ Streaming strategy (partitioned path)
 Offset = ``{"study_date": "YYYYMMDD"}``.  ``latest_offset`` returns
 today's date; Spark advances the start offset each micro-batch.
 
-``get_partitions`` discovers studies in the date range on the driver.
-For instances, studies are bin-packed across ``num_partitions`` executors
-by ``number_of_study_related_instances``.
+``get_partitions`` runs on the driver and decides how the work for one
+micro-batch (or batch read) is split across executors.  Granularity
+varies by table to match the QIDO-RS hierarchy:
+
+* ``studies`` — single partition.  QIDO-RS ``/studies`` is a flat,
+  paginated stream; sharding by sub-window would require a separate
+  date-range planner and is left as future work.
+* ``series``  — bin-pack studies across ``num_partitions`` bins,
+  weighted by ``number_of_study_related_series``.  Each task fetches
+  ``/studies/{uid}/series`` for its assigned studies in parallel.
+* ``instances`` — discover the full ``(study_uid, series_uid)`` set on
+  the driver, then bin-pack at the **series** level (uniform weight)
+  across ``num_partitions`` bins.  This gives finer parallelism than
+  study-level binning whenever the dataset has more series than
+  studies, which is the common case for CT/MR datasets.  Each task
+  fetches ``/studies/{uid}/series/{uid}/instances`` for its assigned
+  series and runs WADO-RS retrieval/metadata fetch inline.
 
 ``read_partition`` runs on executors and fetches data via QIDO-RS,
 optionally downloading DICOM files (WADO-RS) and metadata.
@@ -32,16 +46,51 @@ WADO-RS file retrieval (fetch_dicom_files=true)
 wado_mode=auto (default) tries the full instance endpoint first; if the
 server returns 404/406/415 it falls back to frame retrieval.
 
+``max_concurrent_downloads`` (default 8) controls a per-partition
+thread pool that parallelises WADO-RS retrieval inside a single Spark
+task.  This is on top of inter-partition parallelism from
+``num_partitions``: with N partitions and M concurrent downloads each,
+total in-flight WADO-RS requests are up to ``N × M``. Tune both
+together to respect the source server's rate limits; set to ``1`` to
+disable intra-task parallelism for rate-limited or fragile servers.
+
 DICOM metadata (fetch_metadata=true)
 --------------------------------------
 Fetches full DICOM JSON per series via WADO-RS metadata endpoint and
 stores it in the ``metadata`` column (VariantType).
+
+QIDO-RS query filters
+---------------------
+Three optional table_options accept a JSON-encoded dict whose keys/
+values are merged verbatim into the QIDO-RS query string at the
+matching hierarchy level:
+
+* ``study_qido_filters``    → ``/studies``
+* ``series_qido_filters``   → ``/studies/{uid}/series``
+* ``instance_qido_filters`` → ``/studies/{uid}/series/{uid}/instances``
+
+Anything DICOMweb / QIDO-RS accepts is passable: matching attributes
+(``ModalitiesInStudy``, ``Modality``, ``PatientID``, ``AccessionNumber``,
+``BodyPartExamined``, ...), behaviour flags (``fuzzymatching=true``),
+extra fields (``includefield=...``), or server-specific extensions.
+Multi-valued matching is supported by passing a JSON list (rendered as
+repeated query params, e.g. ``Modality=CT&Modality=MR``).
+
+Filters are independent and additive across levels — use them together
+to shrink the working set as early as possible (the driver-side
+enumeration of studies/series for the ``instances`` table benefits from
+``study_qido_filters`` and ``series_qido_filters`` as well).
+
+Reserved keys (``StudyDate``, ``limit``, ``offset``) are managed by the
+connector and rejected with a clear error if present in any filter
+dict, since overriding them would silently break the cursor or paging.
 """
 
 import json
 import logging
 import os
 import re
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import date, datetime, timedelta, timezone
 from typing import Iterator
 from urllib.error import HTTPError
@@ -73,6 +122,7 @@ DEFAULT_START_DATE = "19000101"  # Effectively "all history" on first run
 DEFAULT_PAGE_SIZE = 100
 DEFAULT_LOOKBACK_DAYS = 1
 DEFAULT_NUM_PARTITIONS = 8
+DEFAULT_MAX_CONCURRENT_DOWNLOADS = 8
 
 # WADO-RS retrieval mode
 WADO_MODE_AUTO = "auto"
@@ -80,6 +130,65 @@ WADO_MODE_FULL = "full"
 WADO_MODE_FRAMES = "frames"
 
 _DICOM_UID_RE = re.compile(r"^[0-9.]+$")
+
+# QIDO-RS query parameters managed by the connector itself; user-supplied
+# qido_filters dicts are rejected if they contain any of these keys (matched
+# case-insensitively) to prevent silent overrides of the cursor / paging glue.
+_RESERVED_QIDO_KEYS = frozenset({"studydate", "limit", "offset"})
+
+# Per-table option names that hold JSON-encoded filter dicts.
+_QIDO_FILTER_OPTIONS = (
+    "study_qido_filters",
+    "series_qido_filters",
+    "instance_qido_filters",
+)
+
+
+def _parse_qido_filters(table_options: dict[str, str], option_name: str) -> dict:
+    """Parse a JSON-encoded ``qido_filters`` option into a dict.
+
+    Returns ``{}`` when the option is absent or empty. Raises ``ValueError``
+    with an actionable message if the option is malformed JSON, the parsed
+    value is not a dict, or contains a reserved key.
+
+    Reserved keys (``StudyDate``, ``limit``, ``offset``) are managed by the
+    connector — letting the user override them would silently break the
+    streaming cursor or pagination.
+    """
+    if option_name not in _QIDO_FILTER_OPTIONS:
+        raise AssertionError(f"Unknown qido_filters option name: {option_name}")
+
+    raw = table_options.get(option_name, "").strip()
+    if not raw:
+        return {}
+
+    try:
+        parsed = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise ValueError(
+            f"table_options['{option_name}'] must be a JSON object, "
+            f"got malformed JSON: {exc.msg} (at column {exc.colno}). "
+            f"Example: '{{\"Modality\": \"CT\"}}'"
+        ) from exc
+
+    if not isinstance(parsed, dict):
+        raise ValueError(
+            f"table_options['{option_name}'] must be a JSON object "
+            f"(got {type(parsed).__name__}). "
+            f"Example: '{{\"Modality\": \"CT\"}}'"
+        )
+
+    reserved_hits = [k for k in parsed if k.lower() in _RESERVED_QIDO_KEYS]
+    if reserved_hits:
+        raise ValueError(
+            f"table_options['{option_name}'] cannot override connector-managed "
+            f"QIDO-RS parameters: {sorted(reserved_hits)}. "
+            f"Reserved keys (case-insensitive): {sorted(_RESERVED_QIDO_KEYS)}. "
+            f"StudyDate is set via 'starting_date'/'window_days'; limit/offset "
+            f"are paging cursors managed by 'page_size'."
+        )
+
+    return parsed
 
 
 def _is_valid_dicom_uid(uid: object) -> bool:
@@ -230,9 +339,7 @@ class DICOMwebLakeflowConnect(LakeflowConnect, SupportsPartitionedStream):
             # Batch mode: partition the entire table
             start_date = table_options.get("starting_date", DEFAULT_START_DATE)
             date_range = f"{start_date}-{self._init_date}"
-            if table_name == "instances":
-                return self._partition_instances(date_range, table_options)
-            return [{"date_range": date_range}]
+            return self._build_partitions(table_name, date_range, table_options)
 
         # Stream mode: derive date range from the offsets Spark passes in.
         # On the very first call start_offset is {} (from initialOffset);
@@ -248,9 +355,17 @@ class DICOMwebLakeflowConnect(LakeflowConnect, SupportsPartitionedStream):
 
         lookback_days = int(table_options.get("lookback_days", str(DEFAULT_LOOKBACK_DAYS)))
         date_range = f"{_subtract_days(start_date, lookback_days)}-{end_date}"
+        return self._build_partitions(table_name, date_range, table_options)
 
+    def _build_partitions(
+        self, table_name: str, date_range: str, table_options: dict[str, str]
+    ) -> list[dict]:
+        """Dispatch to the per-table partitioner, factoring out the offset glue."""
         if table_name == "instances":
             return self._partition_instances(date_range, table_options)
+        if table_name == "series":
+            return self._partition_series(date_range, table_options)
+        # studies: single partition — QIDO-RS pagination is single-stream.
         return [{"date_range": date_range}]
 
     def read_partition(
@@ -264,43 +379,114 @@ class DICOMwebLakeflowConnect(LakeflowConnect, SupportsPartitionedStream):
             return self._read_instances_partition(partition, table_options)
         raise ValueError(f"Unsupported table for partitioned read: {table_name}")
 
-    def _partition_instances(self, date_range: str, table_options: dict[str, str]) -> list[dict]:
-        """Query studies in the date range and distribute them into partitions.
+    def _enumerate_studies(
+        self,
+        date_range: str,
+        page_size: int,
+        extra_filters: dict | None = None,
+    ) -> Iterator[dict]:
+        """Page through QIDO-RS /studies and yield parsed study dicts."""
+        offset = 0
+        while True:
+            batch = self._client.query_studies(
+                date_range,
+                limit=page_size,
+                offset=offset,
+                extra_filters=extra_filters,
+            )
+            if not batch:
+                return
+            for raw in batch:
+                yield parse_study(raw)
+            if len(batch) < page_size:
+                return
+            offset += page_size
 
-        Each study is assigned to the lightest bin (fewest estimated instances).
+    def _partition_series(self, date_range: str, table_options: dict[str, str]) -> list[dict]:
+        """Discover studies in the date range and bin-pack them across partitions.
+
+        Each task fetches ``/studies/{uid}/series`` for its assigned studies in
+        parallel. Bins are weighted by ``number_of_study_related_series`` so a
+        study with many series doesn't get bundled with several other heavy
+        studies.
+
+        ``study_qido_filters`` narrows the set of studies discovered on the
+        driver — useful to limit ingestion scope without pulling everything.
         """
         num_partitions = int(table_options.get("num_partitions", str(DEFAULT_NUM_PARTITIONS)))
         page_size = int(table_options.get("page_size", DEFAULT_PAGE_SIZE))
+        study_filters = _parse_qido_filters(table_options, "study_qido_filters")
 
         bins: list[list[dict]] = [[] for _ in range(num_partitions)]
         bin_counts = [0] * num_partitions
-        offset = 0
-        while True:
-            batch = self._client.query_studies(date_range, limit=page_size, offset=offset)
-            if not batch:
-                break
-            for raw in batch:
-                study = parse_study(raw)
-                uid = study.get("study_instance_uid")
-                if uid:
-                    count = study.get("number_of_study_related_instances") or 1
-                    min_idx = bin_counts.index(min(bin_counts))
-                    bins[min_idx].append({"uid": uid, "study_date": study.get("study_date")})
-                    bin_counts[min_idx] += count
-            if len(batch) < page_size:
-                break
-            offset += page_size
+        for study in self._enumerate_studies(date_range, page_size, study_filters):
+            uid = study.get("study_instance_uid")
+            if not uid:
+                continue
+            count = study.get("number_of_study_related_series") or 1
+            min_idx = bin_counts.index(min(bin_counts))
+            bins[min_idx].append({"uid": uid, "study_date": study.get("study_date")})
+            bin_counts[min_idx] += count
 
         return [{"studies": b} for b in bins if b]
+
+    def _partition_instances(self, date_range: str, table_options: dict[str, str]) -> list[dict]:
+        """Discover all (study, series) pairs in the date range and bin-pack series.
+
+        Series are the unit of parallelism here (rather than studies) because
+        WADO-RS retrieval scales per-series and a real-world dataset typically
+        has many more series than studies — finer bins keep all executors busy.
+
+        Driver cost: 1 ``query_studies`` paginated walk + one
+        ``query_series_for_study`` call per study.  Acceptable for the common
+        case; for very large datasets the user can keep ``window_days`` small
+        to amortise this across micro-batches.
+
+        Both ``study_qido_filters`` and ``series_qido_filters`` are applied at
+        their respective enumeration steps to shrink the working set early.
+        """
+        num_partitions = int(table_options.get("num_partitions", str(DEFAULT_NUM_PARTITIONS)))
+        page_size = int(table_options.get("page_size", DEFAULT_PAGE_SIZE))
+        study_filters = _parse_qido_filters(table_options, "study_qido_filters")
+        series_filters = _parse_qido_filters(table_options, "series_qido_filters")
+
+        bins: list[list[dict]] = [[] for _ in range(num_partitions)]
+        bin_counts = [0] * num_partitions
+        for study in self._enumerate_studies(date_range, page_size, study_filters):
+            study_uid = study.get("study_instance_uid")
+            if not study_uid:
+                continue
+            study_date = study.get("study_date")
+            for series_raw in self._client.query_series_for_study(
+                study_uid, extra_filters=series_filters
+            ):
+                series = parse_series(series_raw)
+                series_uid = series.get("series_instance_uid")
+                if not series_uid:
+                    continue
+                min_idx = bin_counts.index(min(bin_counts))
+                bins[min_idx].append(
+                    {
+                        "study_uid": study_uid,
+                        "series_uid": series_uid,
+                        "study_date": study_date,
+                    }
+                )
+                bin_counts[min_idx] += 1
+
+        return [{"series": b} for b in bins if b]
 
     def _read_studies_partition(
         self, partition: dict, table_options: dict[str, str]
     ) -> Iterator[dict]:
         date_range = partition["date_range"]
         page_size = int(table_options.get("page_size", DEFAULT_PAGE_SIZE))
+        study_filters = _parse_qido_filters(table_options, "study_qido_filters")
         offset = 0
         while True:
-            batch = self._client.query_studies(date_range, limit=page_size, offset=offset)
+            batch = self._client.query_studies(
+                date_range, limit=page_size, offset=offset, extra_filters=study_filters
+            )
             if not batch:
                 break
             for raw in batch:
@@ -314,72 +500,176 @@ class DICOMwebLakeflowConnect(LakeflowConnect, SupportsPartitionedStream):
     def _read_series_partition(
         self, partition: dict, table_options: dict[str, str]
     ) -> Iterator[dict]:
-        date_range = partition["date_range"]
-        page_size = int(table_options.get("page_size", DEFAULT_PAGE_SIZE))
-        offset = 0
-        while True:
-            studies = self._client.query_studies(date_range, limit=page_size, offset=offset)
-            if not studies:
-                break
-            for study_raw in studies:
-                study = parse_study(study_raw)
-                study_uid = study.get("study_instance_uid")
-                if not study_uid:
-                    continue
-                for series_raw in self._client.query_series_for_study(study_uid):
-                    record = parse_series(series_raw)
-                    if not record.get("study_date"):
-                        record["study_date"] = study.get("study_date")
-                    if not record.get("study_instance_uid"):
-                        record["study_instance_uid"] = study_uid
-                    record["connection_name"] = self._connection_name
-                    yield record
-            if len(studies) < page_size:
-                break
-            offset += page_size
+        """Read series for the studies assigned to this partition."""
+        series_filters = _parse_qido_filters(table_options, "series_qido_filters")
+        for study_info in partition["studies"]:
+            study_uid = study_info["uid"]
+            study_date = study_info.get("study_date")
+            for series_raw in self._client.query_series_for_study(
+                study_uid, extra_filters=series_filters
+            ):
+                record = parse_series(series_raw)
+                if not record.get("study_date"):
+                    record["study_date"] = study_date
+                if not record.get("study_instance_uid"):
+                    record["study_instance_uid"] = study_uid
+                record["connection_name"] = self._connection_name
+                yield record
 
     def _read_instances_partition(
         self, partition: dict, table_options: dict[str, str]
     ) -> Iterator[dict]:
-        """Read instances for the studies assigned to this partition."""
+        """Read instances for the (study, series) pairs assigned to this partition.
+
+        WADO-RS file retrieval is the dominant cost when ``fetch_dicom_files=true``.
+        ``max_concurrent_downloads`` (default 8) controls a per-partition thread
+        pool that downloads multiple files in parallel; set to 1 to disable.
+        Records are yielded as their downloads complete; emission order within
+        a partition is not guaranteed, which is fine because ``apply_changes``
+        keys on ``sop_instance_uid``.
+        """
         fetch_files = table_options.get("fetch_dicom_files", "false").lower() == "true"
         volume_path = table_options.get("dicom_volume_path", "")
         fetch_metadata = table_options.get("fetch_metadata", "false").lower() == "true"
         wado_mode = table_options.get("wado_mode", WADO_MODE_AUTO).lower()
+        max_workers = max(
+            1,
+            int(table_options.get(
+                "max_concurrent_downloads", str(DEFAULT_MAX_CONCURRENT_DOWNLOADS)
+            )),
+        )
 
         if fetch_files and not volume_path:
             raise ValueError("fetch_dicom_files=true requires dicom_volume_path to be set")
 
-        for study_info in partition["studies"]:
-            study_uid = study_info["uid"]
-            study_date = study_info.get("study_date")
+        instance_filters = _parse_qido_filters(table_options, "instance_qido_filters")
 
-            for series_raw in self._client.query_series_for_study(study_uid):
-                series = parse_series(series_raw)
-                series_uid = series.get("series_instance_uid")
-                if not series_uid:
-                    continue
+        # Reuse one pool across every series in this partition so we don't pay
+        # the spawn/teardown cost per series.  Pool is only created when we
+        # actually need it — concurrent downloads imply fetch_files=true.
+        pool: ThreadPoolExecutor | None = None
+        if fetch_files and max_workers > 1:
+            pool = ThreadPoolExecutor(
+                max_workers=max_workers, thread_name_prefix="dicomweb-wado"
+            )
+            logger.info(
+                "WADO-RS thread pool enabled (max_concurrent_downloads=%d)", max_workers
+            )
 
-                instances_raw = self._client.query_instances_for_series(study_uid, series_uid)
-                sop_to_meta: dict[str, str] = {}
-                if fetch_metadata:
-                    sop_to_meta = self._build_metadata_map(study_uid, series_uid)
+        try:
+            for series_info in partition["series"]:
+                yield from self._read_series_instances(
+                    series_info,
+                    fetch_files=fetch_files,
+                    volume_path=volume_path,
+                    fetch_metadata=fetch_metadata,
+                    wado_mode=wado_mode,
+                    instance_filters=instance_filters,
+                    pool=pool,
+                )
+        finally:
+            if pool is not None:
+                pool.shutdown(wait=True)
 
-                for inst_raw in instances_raw:
-                    record = parse_instance(inst_raw)
-                    if not record.get("study_date"):
-                        record["study_date"] = study_date
-                    if not record.get("study_instance_uid"):
-                        record["study_instance_uid"] = study_uid
-                    if not record.get("series_instance_uid"):
-                        record["series_instance_uid"] = series_uid
-                    if fetch_metadata:
-                        sop_uid = record.get("sop_instance_uid")
-                        record["metadata"] = sop_to_meta.get(sop_uid) if sop_uid else None
-                    if fetch_files:
-                        record = self._attach_dicom_file(record, volume_path, wado_mode)
-                    record["connection_name"] = self._connection_name
-                    yield record
+    # pylint: disable=too-many-arguments
+    def _read_series_instances(
+        self,
+        series_info: dict,
+        *,
+        fetch_files: bool,
+        volume_path: str,
+        fetch_metadata: bool,
+        wado_mode: str,
+        instance_filters: dict,
+        pool: ThreadPoolExecutor | None,
+    ) -> Iterator[dict]:
+        """Yield instance records for one (study, series) pair."""
+        study_uid = series_info["study_uid"]
+        series_uid = series_info["series_uid"]
+        study_date = series_info.get("study_date")
+
+        instances_raw = self._client.query_instances_for_series(
+            study_uid, series_uid, extra_filters=instance_filters
+        )
+        sop_to_meta: dict[str, str] = (
+            self._build_metadata_map(study_uid, series_uid) if fetch_metadata else {}
+        )
+
+        base_records: list[dict] = []
+        for inst_raw in instances_raw:
+            record = parse_instance(inst_raw)
+            if not record.get("study_date"):
+                record["study_date"] = study_date
+            if not record.get("study_instance_uid"):
+                record["study_instance_uid"] = study_uid
+            if not record.get("series_instance_uid"):
+                record["series_instance_uid"] = series_uid
+            if fetch_metadata:
+                sop_uid = record.get("sop_instance_uid")
+                record["metadata"] = sop_to_meta.get(sop_uid) if sop_uid else None
+            base_records.append(record)
+
+        if not fetch_files:
+            for record in base_records:
+                record["connection_name"] = self._connection_name
+                yield record
+            return
+
+        if pool is None:
+            for record in base_records:
+                record = self._attach_dicom_file(record, volume_path, wado_mode)
+                record["connection_name"] = self._connection_name
+                yield record
+            return
+
+        yield from self._download_records_concurrently(
+            pool, base_records, volume_path, wado_mode
+        )
+
+    def _download_records_concurrently(
+        self,
+        pool: ThreadPoolExecutor,
+        base_records: list[dict],
+        volume_path: str,
+        wado_mode: str,
+    ) -> Iterator[dict]:
+        """Submit WADO-RS downloads to the pool and yield records as they complete.
+
+        Handles the ``wado_mode=auto`` race: the first record is downloaded
+        synchronously so ``self._wado_mode_detected`` stabilises before any
+        parallel calls observe it. Without this, two threads racing on the
+        first `auto`-detect could each issue a `full` GET and one would do
+        the 404→`frames` fallback work twice.
+        """
+        if not base_records:
+            return
+
+        remaining: list[dict] = base_records
+        if wado_mode == WADO_MODE_AUTO and self._wado_mode_detected is None:
+            first = self._attach_dicom_file(base_records[0], volume_path, wado_mode)
+            first["connection_name"] = self._connection_name
+            yield first
+            remaining = base_records[1:]
+
+        if not remaining:
+            return
+
+        futures = {
+            pool.submit(self._attach_dicom_file, rec, volume_path, wado_mode): rec
+            for rec in remaining
+        }
+        for fut in as_completed(futures):
+            try:
+                record = fut.result()
+            except Exception as exc:  # pylint: disable=broad-except
+                # _attach_dicom_file already swallows per-instance errors and
+                # returns the record with dicom_file_path=None, so this branch
+                # is defensive only (e.g. a thread-pool-level failure).
+                record = futures[fut]
+                logger.error("WADO-RS concurrent retrieval failed: %s", exc)
+                record["dicom_file_path"] = None
+            record["connection_name"] = self._connection_name
+            yield record
 
     # ------------------------------------------------------------------
     # WADO-RS helpers
