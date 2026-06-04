@@ -1,0 +1,44 @@
+{
+  "kind": "youtube#searchListResponse",
+  "etag": "sim-search-etag",
+  "items": [
+    {
+      "kind": "youtube#searchResult",
+      "etag": "sim-search-result-etag",
+      "id": {"kind": "youtube#video", "videoId": "vid_test_001"},
+      "snippet": {
+        "publishedAt": "2020-05-01T00:00:00Z",
+        "channelId": "UC_test_channel_001",
+        "title": "Simulator Search Result",
+        "description": "Test search hit",
+        "channelTitle": "Simulator Channel"
+      }
+    },
+    {
+      "kind": "youtube#searchResult",
+      "etag": "sim-search-channel-etag",
+      "id": {"kind": "youtube#channel", "channelId": "UC_test_channel_002"},
+      "snippet": {
+        "publishedAt": "2020-05-02T00:00:00Z",
+        "channelId": "UC_test_channel_002",
+        "title": "Simulator Channel Search Hit",
+        "description": "Channel result",
+        "channelTitle": "Other Channel"
+      }
+    },
+    {
+      "kind": "youtube#searchResult",
+      "etag": "sim-search-playlist-etag",
+      "id": {"kind": "youtube#playlist", "playlistId": "PL_test_playlist_002"},
+      "snippet": {
+        "publishedAt": "2020-05-03T00:00:00Z",
+        "channelId": "UC_test_channel_001",
+        "title": "Simulator Playlist Search Hit",
+        "description": "Playlist result",
+        "channelTitle": "Simulator Channel"
+      }
+    }
+  ],
+  "nextPageToken": null,
+  "pageInfo": {"totalResults": 1, "resultsPerPage": 50}
+}

@@ -1,0 +1,23 @@
+{
+  "kind": "youtube#playlistItemListResponse",
+  "etag": "sim-playlist-items-etag",
+  "items": [
+    {
+      "kind": "youtube#playlistItem",
+      "etag": "sim-playlist-item-etag",
+      "id": "PLI_test_item_001",
+      "snippet": {
+        "publishedAt": "2020-03-01T00:00:00Z",
+        "channelId": "UC_test_channel_001",
+        "title": "Simulator Playlist Item",
+        "description": "Test item",
+        "playlistId": "PL_test_playlist_001",
+        "position": 0,
+        "resourceId": {"kind": "youtube#video", "videoId": "vid_test_001"}
+      },
+      "contentDetails": {"videoId": "vid_test_001"}
+    }
+  ],
+  "nextPageToken": null,
+  "pageInfo": {"totalResults": 1, "resultsPerPage": 50}
+}

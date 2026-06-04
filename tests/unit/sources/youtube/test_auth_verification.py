@@ -62,8 +62,16 @@ def _exchange_refresh_token(client_id: str, client_secret: str, refresh_token: s
     }).encode()
     req = urllib.request.Request(TOKEN_URL, data=body, method="POST")
     req.add_header("Content-Type", "application/x-www-form-urlencoded")
-    with urllib.request.urlopen(req, timeout=30) as resp:
-        return json.loads(resp.read().decode())
+    try:
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            return json.loads(resp.read().decode())
+    except urllib.error.HTTPError as e:
+        if e.code in (400, 401):
+            pytest.skip(
+                "OAuth token exchange failed (%s). Check client_id, client_secret, "
+                "and refresh_token in dev_config.json." % e.code
+            )
+        raise
 
 
 def _call_youtube_channels_or_skip(access_token: str) -> dict:
