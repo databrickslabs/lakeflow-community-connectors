@@ -49,9 +49,9 @@ def mock_connector():
         def __init__(self):
             super().__init__(options)
 
-        def _request(self, method: str, path: str, params: dict = None):
+        def _request(self, path: str, params: dict = None):
             if path != "search" or (params or {}).get("q") != "databricks":
-                return super()._request(method, path, params)
+                return super()._request(path, params)
             page_token = (params or {}).get("pageToken")
             if page_token is None:
                 # Page 1: 50 items
@@ -105,3 +105,19 @@ def test_search_second_call_returns_empty_so_no_duplicates_across_calls(mock_con
     )
     assert len(records) == 0, "Second call should return 0 records when offset has pageToken=None"
     assert len(all_keys) == 125, "Only first call should have returned 125 records"
+
+
+def test_search_result_index_stable_across_runs(mock_connector):
+    """Re-running the same query must emit the same (search_query, result_index) PKs."""
+    table_options = {"q": "databricks", "type": "video", "max_pages": "10"}
+    keys_run1 = [
+        (r.get("search_query"), r.get("result_index"))
+        for r in mock_connector.read_table("search", {}, table_options)[0]
+    ]
+    keys_run2 = [
+        (r.get("search_query"), r.get("result_index"))
+        for r in mock_connector.read_table("search", {}, table_options)[0]
+    ]
+    assert keys_run1 == keys_run2
+    assert keys_run1[0][1] == "0"
+    assert keys_run1[-1][1] == "124"

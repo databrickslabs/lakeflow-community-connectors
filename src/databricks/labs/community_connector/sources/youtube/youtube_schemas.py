@@ -100,7 +100,7 @@ VIDEOS_SCHEMA = StructType(
 # ---------------------------------------------------------------------------
 
 # search: GET /search (returns id.videoId, id.channelId, id.playlistId + snippet)
-# search_query + result_index: unique across runs (each run emits 0,1,2,... so query disambiguates)
+# search_query + result_index: stable PK per query (result_index is 0-based position in results)
 SEARCH_SCHEMA = StructType(
     [
         StructField("search_query", StringType(), nullable=False),
@@ -215,7 +215,7 @@ TABLE_METADATA = {
     },
     "activities": {
         "primary_keys": ["id"],
-        "cursor_field": "snippet_publishedAt",
+        "cursor_field": None,
         "ingestion_type": "snapshot",
     },
     "comment_threads": {
