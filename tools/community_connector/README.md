@@ -266,6 +266,8 @@ objects:
 | `objects[].table.destination_table` | No | Target table name (defaults to source_table) |
 | `objects[].table.table_configuration.scd_type` | No | `SCD_TYPE_1`, `SCD_TYPE_2`, or `APPEND_ONLY` |
 | `objects[].table.table_configuration.primary_keys` | No | List of primary key columns |
+| `objects[].table.table_configuration.sequence_by` | No | Column used to order records for SCD Type 2 change tracking |
+| `objects[].table.table_configuration.cluster_by` | No | List of columns to cluster the destination Delta table by (Liquid Clustering) |
 
 ## Configuration
 
