@@ -99,11 +99,13 @@ def _reader(connector: LakeflowConnect, table: str, **extra_opts) -> LakeflowBat
 
 
 def _source_schema(connector: LakeflowConnect, table: str) -> StructType:
-    # Bypass LakeflowSource.__init__ — it instantiates LakeflowConnectImpl,
-    # which in the source file is the abstract LakeflowConnect base.
+    # Bypass LakeflowSource.__init__ — the base class is abstract (requires
+    # subclasses to set _lakeflow_connect_cls/_format_name); we just want to
+    # exercise schema() against the supplied connector.
     src = LakeflowSource.__new__(LakeflowSource)
     src.options = {TABLE_NAME: table}
     src.lakeflow_connect = connector
+    src._agent_dispatcher = None
     return src.schema()
 
 
@@ -314,11 +316,13 @@ def test_table_configs_wrong_type_raises():
 
 def test_unknown_community_table_raises_in_source():
     """LakeflowSource rejects typos against the reserved `_community_*` namespace."""
-    # Bypass LakeflowConnectImpl(options) (it's the abstract base) by
-    # invoking __init__ directly and only asserting the early guard fires
-    # before that line.
+
+    class _StubSource(LakeflowSource):
+        _lakeflow_connect_cls = _FlatConnector
+        _format_name = "stub"
+
     with pytest.raises(ValueError, match="unknown framework virtual table"):
-        LakeflowSource({TABLE_NAME: "_community_tabls"})
+        _StubSource({TABLE_NAME: "_community_tabls"})
 
 
 # ----- partitions fast-path skips virtual tables -----

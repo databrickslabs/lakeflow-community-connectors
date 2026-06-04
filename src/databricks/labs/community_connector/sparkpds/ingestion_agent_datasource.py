@@ -93,24 +93,40 @@ def _requires_connector(op: AgentOperation) -> bool:
 _AGENT_RESERVED_KEYS = frozenset(
     {OPERATION, SEARCH, PATH, NAME, METADATA_KEY}
 )
+# Pre-lowercased — some Spark/UC delivery paths lowercase option keys, so
+# membership checks against ``_AGENT_RESERVED_KEYS`` (which contains
+# ``metadataKey`` camelCase) wouldn't match an incoming ``metadatakey``.
+_AGENT_RESERVED_KEYS_LOWER = frozenset(k.lower() for k in _AGENT_RESERVED_KEYS)
 
 
-def _agent_options(options: Mapping[str, str]) -> dict:
+def _agent_options(options: Mapping[str, str]) -> "CaseInsensitiveDict":
     """Options visible to ``AgentOperation.pull`` / ``resolve_schema``.
 
-    Strips only the framework-owned ``operation`` key.
+    Strips only the framework-owned ``operation`` key. Returns a
+    ``CaseInsensitiveDict`` so callers' camelCase lookups still resolve
+    when Spark delivered the keys lowercased.
     """
-    return {k: v for k, v in options.items() if k != OPERATION}
+    from databricks.labs.community_connector.libs.utils import CaseInsensitiveDict
+    return CaseInsensitiveDict(
+        {k: v for k, v in options.items() if k.lower() != OPERATION}
+    )
 
 
-def _connector_options(options: Mapping[str, str]) -> dict:
+def _connector_options(options: Mapping[str, str]) -> "CaseInsensitiveDict":
     """Options passed to ``LakeflowConnect.__init__`` and to read-side calls
     (``read_table``, ``get_table_schema``, ``read_table_metadata``).
 
     Strips ``operation`` plus the agent-reserved keys so the connector sees
-    only its own option namespace.
+    only its own option namespace.  Comparison is case-insensitive because
+    some Spark/UC paths lowercase option keys, and the returned dict stays
+    case-insensitive so connector code that reads camelCase option names
+    (``options.get("surveyId")``, ``options.get("maxResults")``, …) keeps
+    working regardless of delivery casing.
     """
-    return {k: v for k, v in options.items() if k not in _AGENT_RESERVED_KEYS}
+    from databricks.labs.community_connector.libs.utils import CaseInsensitiveDict
+    return CaseInsensitiveDict(
+        {k: v for k, v in options.items() if k.lower() not in _AGENT_RESERVED_KEYS_LOWER}
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -469,7 +485,13 @@ class IngestionAgentDispatcher:
         connector: Optional[LakeflowConnect],
         init_error: Optional[BaseException] = None,
     ) -> None:
-        self.options = dict(options)
+        # ``CaseInsensitiveDict`` is a dict subclass — ``dict(cid)`` would
+        # materialise a plain dict copy and silently lose the case-
+        # insensitive behaviour that ``LakeflowSource.__init__`` set up.
+        # Idempotent re-wrap keeps lookups working under both Spark
+        # delivery paths.
+        from databricks.labs.community_connector.libs.utils import CaseInsensitiveDict
+        self.options = options if isinstance(options, CaseInsensitiveDict) else CaseInsensitiveDict(options)
         self.connector = connector
         self.init_error = init_error
         self.operation_name = self.options.get(OPERATION)
@@ -534,7 +556,9 @@ class IngestionAgentReader(DataSourceReader):
         connector: Optional[LakeflowConnect],
         init_error: Optional[BaseException],
     ) -> None:
-        self.options = dict(options)
+        # See note in IngestionAgentDispatcher.__init__ — don't unwrap.
+        from databricks.labs.community_connector.libs.utils import CaseInsensitiveDict
+        self.options = options if isinstance(options, CaseInsensitiveDict) else CaseInsensitiveDict(options)
         self.schema = schema
         self.operation = operation
         self.operation_name = operation_name
@@ -697,9 +721,15 @@ def _validate_required_parameters(
     """
     for param in getattr(op, "parameters", ()):
         if param.required and not options.get(param.name):
+            # Include the actual option keys present — Spark's option
+            # delivery has been the source of subtle bugs (lower-casing,
+            # allow-list filtering by UC, etc.).  Surfacing the keys here
+            # turns "missing tableName" into something diagnosable.
+            present = sorted(options.keys())
             raise AgentError(
                 ErrorCode.BAD_REQUEST,
-                f"Operation '{op.name}' requires option '{param.name}'.",
+                f"Operation '{op.name}' requires option '{param.name}'. "
+                f"Options received: {present}",
             )
 
 
@@ -834,7 +864,10 @@ def _default_read_records(
     table_options: Mapping[str, str],
 ) -> Iterator[Mapping[str, Any]]:
     """Pull all records from ``connector.read_table`` and yield them."""
-    records, _offset = connector.read_table(table_name, None, dict(table_options))
+    # ``table_options`` may already be a CaseInsensitiveDict — keep the
+    # wrapper so the connector's camelCase option lookups survive a
+    # lowercased Spark delivery path.
+    records, _offset = connector.read_table(table_name, None, table_options)
     return records
 
 

@@ -8,37 +8,66 @@ from pyspark.sql.datasource import (
     SimpleDataSourceStreamReader,
     DataSourceReader,
 )
-from pyspark.sql.streaming.datasource import (
-    ReadAllAvailable,
-    SupportsTriggerAvailableNow,
-)
+
+# The Trigger.AvailableNow admission-control API (``pyspark.sql.streaming.
+# datasource``) only exists on newer PySpark/DBR runtimes. The agent-
+# operation and batch read paths never need it — only the streaming
+# readers do. Import it optionally so the package still loads on older
+# runtimes where someone uses the connector purely through the agent
+# surface (``spark.read.format(...).option("operation", ...)``).
+#
+# This is the standard Python idiom for an optional dependency: ``import``
+# is a statement that runs at module load, so to make it conditional you
+# attempt it and substitute a fallback when it's absent. ``SupportsTrigger
+# AvailableNow`` is a base class (needed at class-definition time), so the
+# fallback is a trivial stand-in; streaming readers built on it still
+# *define* fine and only fail if a streaming query is actually started on
+# a runtime that lacks the real API — which is exactly when you'd want a
+# clear error anyway.
+try:
+    from pyspark.sql.streaming.datasource import (
+        ReadAllAvailable,
+        SupportsTriggerAvailableNow,
+    )
+
+    _TRIGGER_AVAILABLE_NOW_SUPPORTED = True
+except ImportError:
+    _TRIGGER_AVAILABLE_NOW_SUPPORTED = False
+
+    class SupportsTriggerAvailableNow:  # minimal stand-in base class
+        """Fallback for runtimes without the Trigger.AvailableNow API.
+
+        Lets the streaming reader classes be *defined* so the module
+        imports; any attempt to actually run a stream on such a runtime
+        raises a clear error from ``_require_trigger_available_now``.
+        """
+
+    ReadAllAvailable = None
+
+
+def _require_trigger_available_now() -> None:
+    """Guard the streaming path on runtimes lacking the AvailableNow API."""
+    if not _TRIGGER_AVAILABLE_NOW_SUPPORTED:
+        raise RuntimeError(
+            "Streaming reads require the Trigger.AvailableNow admission-"
+            "control API (pyspark.sql.streaming.datasource), which this "
+            "PySpark/DBR runtime does not provide. Use a newer runtime for "
+            "streaming, or read through the batch / agent-operation surface "
+            "(spark.read.format(...).option('operation', ...))."
+        )
 from databricks.labs.community_connector.interface import (
     LakeflowConnect,
     SupportsNamespaces,
     SupportsPartition,
     SupportsPartitionedStream,
 )
-from databricks.labs.community_connector.libs.utils import parse_value
+from databricks.labs.community_connector.libs.utils import CaseInsensitiveDict, parse_value
+from databricks.labs.community_connector.sparkpds.ingestion_agent_datasource import (
+    IngestionAgentDispatcher,
+    OPERATION,
+    _connector_options,
+)
 
-
-# =============================================================================
-# TEMPORARY WORKAROUND: Placeholder for merge script replacement
-# =============================================================================
-# Due to current Spark Declarative Pipeline (SDP) limitations, Python Data Source
-# implementations cannot use module imports. The merge script (tools/scripts/
-# merge_python_source.py) combines this file with source connector implementations
-# into a single deployable file.
-#
-# The line below is replaced during merge:
-#   - The marker `# __LAKEFLOW_CONNECT_IMPL__` is detected by the merge script
-#   - `LakeflowConnect` is replaced with the actual implementation class name
-#     (e.g., GithubLakeflowConnect, or the source's own LakeflowConnect class)
-#
-# This workaround will be removed once SDP supports proper module imports.
-# =============================================================================
-# fmt: off
-LakeflowConnectImpl = LakeflowConnect  # __LAKEFLOW_CONNECT_IMPL__
-# fmt: on
 
 # Constant option or column names
 METADATA_TABLE = "_community_table_metadata"
@@ -314,11 +343,68 @@ class LakeflowBatchReader(DataSourceReader):
 
 class LakeflowSource(DataSource):
     """
-    PySpark DataSource implementation for Lakeflow Connect.
+    PySpark DataSource base for Lakeflow Connect.
+
+    Subclass per source and bind the connector implementation::
+
+        from databricks.labs.community_connector.sparkpds import LakeflowSource
+        from .gmail import GmailLakeflowConnect
+
+        class GmailDataSource(LakeflowSource):
+            _lakeflow_connect_cls = GmailLakeflowConnect
+
+        spark.dataSource.register(GmailDataSource)
+        spark.read.format("lakeflow_connect").option(...).load()
+
+    The Spark format name defaults to ``"lakeflow_connect"`` because Unity
+    Catalog connection-option injection looks for that exact string; a
+    source may override :attr:`_format_name` only if it doesn't rely on UC
+    injection.
     """
 
+    # Subclasses MUST set the connector class. Left as ``None`` here so a
+    # missing override fails loudly at instantiation. ``_format_name``
+    # defaults to ``"lakeflow_connect"`` — the format string UC connection
+    # injection expects — so per-source subclasses normally don't override it.
+    _lakeflow_connect_cls: type[LakeflowConnect] | None = None
+    _format_name: str = "lakeflow_connect"
+
     def __init__(self, options):
-        self.options = options
+        cls = type(self)
+        if cls._lakeflow_connect_cls is None:
+            raise TypeError(
+                f"{cls.__name__} must set '_lakeflow_connect_cls'. "
+                f"Subclass LakeflowSource per source, e.g.:\n\n"
+                f"    class GmailDataSource(LakeflowSource):\n"
+                f"        _lakeflow_connect_cls = GmailLakeflowConnect\n"
+            )
+        # Spark/UC delivery paths differ on option key casing — notebook
+        # reads with ``databricks.connection`` arrive lowercased (e.g.
+        # ``tablename``) while pipeline reads arrive as-passed
+        # (``tableName``). Wrap so the framework's camelCase constants and
+        # connector lookups work against either form.
+        self.options = CaseInsensitiveDict(options)
+        options = self.options
+        self._agent_dispatcher: IngestionAgentDispatcher | None = None
+        connect_cls = cls._lakeflow_connect_cls
+        # Agent-operation mode: ``operation`` option routes through the
+        # ingestion-agent dispatcher instead of the table read path. The
+        # dispatcher owns the option vocabulary and may run even when the
+        # connector failed to init (e.g. list_operations), so we build it
+        # eagerly and capture any init error.
+        if options.get(OPERATION):
+            connector: LakeflowConnect | None = None
+            init_error: BaseException | None = None
+            try:
+                connector = connect_cls(_connector_options(options))
+            except Exception as exc:  # pylint: disable=broad-except
+                init_error = exc
+            self._agent_dispatcher = IngestionAgentDispatcher(
+                options=options, connector=connector, init_error=init_error
+            )
+            self.lakeflow_connect = connector
+            return
+
         table = options.get(TABLE_NAME)
         # Catch typos against the framework's reserved virtual-table namespace
         # early — falling through to the connector with an unknown
@@ -330,15 +416,15 @@ class LakeflowSource(DataSource):
                 f"For a regular source table, use a name that does not start "
                 f"with '_community_'."
             )
-        # TEMPORARY: LakeflowConnectImpl is replaced with the actual implementation
-        # class during merge. See the placeholder comment at the top of this file.
-        self.lakeflow_connect = LakeflowConnectImpl(options)  # pylint: disable=abstract-class-instantiated
+        self.lakeflow_connect = connect_cls(options)
 
     @classmethod
     def name(cls):
-        return "lakeflow_connect"
+        return cls._format_name
 
     def schema(self):
+        if self._agent_dispatcher is not None:
+            return self._agent_dispatcher.schema()
         table = self.options[TABLE_NAME]
         if table == METADATA_TABLE:
             return StructType(
@@ -365,6 +451,8 @@ class LakeflowSource(DataSource):
         return self.lakeflow_connect.get_table_schema(table, self.options)
 
     def reader(self, schema: StructType):
+        if self._agent_dispatcher is not None:
+            return self._agent_dispatcher.reader(schema)
         return LakeflowBatchReader(self.options, schema, self.lakeflow_connect)
 
     def streamReader(self, schema: StructType):
@@ -372,6 +460,7 @@ class LakeflowSource(DataSource):
         # implements SupportsPartitionedStream and the table opts in.
         # Otherwise, delegate to super() which raises PySparkNotImplementedError,
         # causing Spark to fall back to simpleStreamReader().
+        _require_trigger_available_now()
         if isinstance(self.lakeflow_connect, SupportsPartitionedStream):
             table = self.options[TABLE_NAME]
             if self.lakeflow_connect.is_partitioned(table):
@@ -379,4 +468,5 @@ class LakeflowSource(DataSource):
         return super().streamReader(schema)
 
     def simpleStreamReader(self, schema: StructType):
+        _require_trigger_available_now()
         return LakeflowStreamReader(self.options, schema, self.lakeflow_connect)
