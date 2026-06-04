@@ -8,13 +8,38 @@
 from abc import ABC, abstractmethod
 from datetime import datetime
 from decimal import Decimal
-from typing import Any, Iterator
+from typing import Any, Iterator, Sequence
 import json
 import time
 
 from pyspark.sql import Row
-from pyspark.sql.datasource import DataSource, DataSourceReader, SimpleDataSourceStreamReader
-from pyspark.sql.types import *
+from pyspark.sql.datasource import (
+    DataSource,
+    DataSourceReader,
+    DataSourceStreamReader,
+    InputPartition,
+    SimpleDataSourceStreamReader,
+)
+from pyspark.sql.streaming.datasource import ReadAllAvailable, SupportsTriggerAvailableNow
+from pyspark.sql.types import (
+    ArrayType,
+    BinaryType,
+    BooleanType,
+    DataType,
+    DateType,
+    DecimalType,
+    DoubleType,
+    FloatType,
+    IntegerType,
+    LongType,
+    MapType,
+    StringType,
+    StructField,
+    StructType,
+    TimestampType,
+    VariantType,
+    VariantVal,
+)
 import base64
 import requests
 import uuid
@@ -176,7 +201,7 @@ def register_lakeflow_source(spark):
     }
 
 
-    def parse_value(value: Any, field_type: DataType) -> Any:
+    def parse_value(value: Any, field_type: DataType) -> Any:  # pylint: disable=too-many-return-statements
         """
         Converts a JSON value into a PySpark-compatible data type based on the provided field type.
         """
@@ -190,6 +215,10 @@ def register_lakeflow_source(spark):
             return _parse_array(value, field_type)
         if isinstance(field_type, MapType):
             return _parse_map(value, field_type)
+
+        # Handle VariantType
+        if isinstance(field_type, VariantType):
+            return VariantVal.parseJson(value) if isinstance(value, str) else value
 
         # Handle primitive types via type-based lookup
         try:
@@ -350,6 +379,215 @@ def register_lakeflow_source(spark):
             raise NotImplementedError(
                 "read_table_deletes() must be implemented when ingestion_type is 'cdc_with_deletes'"
             )
+
+
+    ########################################################
+    # src/databricks/labs/community_connector/interface/supports_partition.py
+    ########################################################
+
+    class SupportsPartition(ABC):
+        """Mixin for connectors that support partitioned reads across Spark executors.
+
+        Must be used together with LakeflowConnect. Implement this when your
+        connector can split work into partitions that Spark distributes to workers,
+        instead of reading all data in one partition batch.
+
+        Usage::
+
+            class MyConnector(LakeflowConnect, SupportsPartition):
+                ...
+        """
+
+        @abstractmethod
+        def get_partitions(
+            self,
+            table_name: str,
+            table_options: dict[str, str],
+        ) -> Sequence[dict]:
+            """Return partition descriptors for reading data.
+
+            Each returned dict is passed to :meth:`read_partition` on an executor.
+
+            Args:
+                table_name: The name of the table.
+                table_options: A dictionary of options for accessing the table.
+            Returns:
+                A sequence of partition descriptor dicts. Each dict must be
+                JSON-serialisable (primitive types only).
+            """
+
+        @abstractmethod
+        def read_partition(
+            self, table_name: str, partition: dict, table_options: dict[str, str]
+        ) -> Iterator[dict]:
+            """Read records for a single partition.
+
+            This method runs on Spark executors and must be self-contained.
+
+            Args:
+                table_name: The name of the table.
+                partition: One of the partition dicts returned by
+                    :meth:`get_partitions`.
+                table_options: A dictionary of options for accessing the table.
+            Returns:
+                An iterator of records as JSON-compatible dicts.
+            """
+
+
+    class SupportsPartitionedStream(SupportsPartition):
+        """Mixin for connectors that support partitioned streaming reads.
+
+        Extends :class:`SupportsPartition` with offset awareness for streaming
+        micro-batches. A connector implementing this mixin automatically supports
+        both partitioned batch reads (via the inherited interface) and partitioned
+        streaming reads.
+
+        Usage::
+
+            class MyConnector(LakeflowConnect, SupportsPartitionedStream):
+                ...
+        """
+
+        def is_partitioned(self, table_name: str) -> bool:
+            """Return whether the given table supports partitioned streaming.
+
+            The default returns True. Override to return False for tables that
+            should fall back to simpleStreamReader.
+
+            Args:
+                table_name: The name of the table.
+                table_options: A dictionary of options for accessing the table.
+            """
+            return True
+
+        @abstractmethod
+        def latest_offset(
+            self,
+            table_name: str,
+            table_options: dict[str, str],
+            start_offset: dict | None = None,
+        ) -> dict:
+            """Return the most recent offset available for the table.
+
+            Called by Spark on every micro-batch to discover new data.
+
+            Micro-batch sizing (by row count, time window, etc.) is entirely the
+            connector's responsibility — use table_options (e.g. ``window_days``,
+            ``max_records_per_batch``) to control it.  The framework always
+            requests "all available" and does not pass an admission-control
+            hint here.
+
+            Args:
+                table_name: The name of the table.
+                table_options: A dictionary of options for accessing the table.
+                start_offset: The current committed offset.  ``{}`` on the very
+                    first call (from ``initialOffset``), then the last returned
+                    end_offset on each subsequent call.
+            Returns:
+                A dict whose keys and values are primitive types (str, int, bool).
+            """
+
+        @abstractmethod
+        def get_partitions(
+            self,
+            table_name: str,
+            table_options: dict[str, str],
+            start_offset: dict | None = None,
+            end_offset: dict | None = None,
+        ) -> Sequence[dict]:
+            """Return partition descriptors for reading data.
+
+            Each returned dict is passed to :meth:`read_partition` on an executor.
+
+            For batch reads, ``start_offset`` and ``end_offset`` are both None —
+            return partitions covering the entire table.
+
+            For streaming micro-batches, they delimit the offset range — return
+            partitions covering that range, or an empty sequence when
+            ``start_offset == end_offset``.
+
+            Args:
+                table_name: The name of the table.
+                table_options: A dictionary of options for accessing the table.
+                start_offset: The start offset (exclusive), or None for batch.
+                end_offset: The end offset (inclusive), or None for batch.
+            Returns:
+                A sequence of partition descriptor dicts. Each dict must be
+                JSON-serialisable (primitive types only).
+            """
+
+
+    ########################################################
+    # src/databricks/labs/community_connector/interface/supports_namespaces.py
+    ########################################################
+
+    class SupportsNamespaces(ABC):
+        """Mixin for connectors whose tables live under hierarchical namespaces.
+
+        A namespace is a path of zero or more string segments (e.g. ``["org",
+        "repo"]`` for GitHub, ``["tenant", "project"]`` for Azure DevOps).
+        Connectors with a flat catalog do not need this mixin — the framework
+        falls back to :meth:`LakeflowConnect.list_tables` and reports each table
+        with an empty namespace.
+
+        Output ordering on the ``_community_namespaces`` and ``_community_tables``
+        Spark virtual tables is normalized by the framework via ``sorted(...)``,
+        so connector implementations of :meth:`list_namespaces` and
+        :meth:`list_tables_in_namespace` are free to return their results in
+        any order (including from a :class:`set` or generator).
+
+        Must be used together with :class:`LakeflowConnect`.
+
+        Usage::
+
+            class MyConnector(LakeflowConnect, SupportsNamespaces):
+                ...
+        """
+
+        @abstractmethod
+        def list_namespaces(
+            self,
+            prefix: list[str] | None = None,
+        ) -> list[list[str]]:
+            """Return the immediate child namespaces under ``prefix``.
+
+            This method returns one level of *namespace* children only — it
+            never returns tables. A namespace can hold tables and child
+            namespaces independently; callers must always call
+            :meth:`list_tables_in_namespace` for every namespace they care
+            about, regardless of whether :meth:`list_namespaces` returned
+            children for it. An empty return value just means there are no
+            further child namespaces under ``prefix``.
+
+            Walk the full tree by recursing on each returned child.
+
+            Args:
+                prefix: A namespace path under which to list children. ``None`` or
+                    an empty list lists the root-level namespaces.
+            Returns:
+                A list of full namespace paths (each path includes the prefix).
+            """
+
+        @abstractmethod
+        def list_tables_in_namespace(
+            self,
+            namespace: list[str],
+        ) -> list[str]:
+            """Return the table names that live directly under ``namespace``.
+
+            Callers that want every table across the whole catalog walk the
+            namespace tree via :meth:`list_namespaces` and call this method
+            once per leaf — there is no "list everything" shortcut.
+
+            Args:
+                namespace: The namespace path. An empty list ``[]`` selects
+                    root-level tables (those that live outside any namespace).
+            Returns:
+                A list of table names. The full ``(namespace, table_name)``
+                row exposed on ``_community_tables`` is reconstructed by the
+                framework from the namespace the caller already supplied, so
+                the connector does not need to echo it back.
+            """
 
 
     ########################################################
@@ -1174,14 +1412,64 @@ def register_lakeflow_source(spark):
 
     LakeflowConnectImpl = YouTubeLakeflowConnect
     # Constant option or column names
-    METADATA_TABLE = "_lakeflow_metadata"
+    METADATA_TABLE = "_community_table_metadata"
+    NAMESPACES_TABLE = "_community_namespaces"
+    TABLES_TABLE = "_community_tables"
+    VIRTUAL_TABLES = (METADATA_TABLE, NAMESPACES_TABLE, TABLES_TABLE)
     TABLE_NAME = "tableName"
     TABLE_NAME_LIST = "tableNameList"
     TABLE_CONFIGS = "tableConfigs"
     IS_DELETE_FLOW = "isDeleteFlow"
+    NAMESPACE_PREFIX = "namespacePrefix"
+    NAMESPACE = "namespace"
 
 
-    class LakeflowStreamReader(SimpleDataSourceStreamReader):
+    def _decode_list_of_str_option(option_name: str, value: str | None) -> list[str] | None:
+        """Decode and validate a JSON-encoded ``list[str]`` Spark option.
+
+        Returns ``None`` if the option is absent; otherwise the parsed list.
+        Raises ``ValueError`` with the offending value if the JSON is malformed
+        or the decoded value is not a list of strings.
+        """
+        if value is None:
+            return None
+        try:
+            decoded = json.loads(value)
+        except json.JSONDecodeError as e:
+            raise ValueError(
+                f"option '{option_name}' must be a JSON-encoded list[str]; "
+                f"got non-JSON value: {value!r}"
+            ) from e
+        if not isinstance(decoded, list) or not all(isinstance(s, str) for s in decoded):
+            raise ValueError(
+                f"option '{option_name}' must be a JSON-encoded list[str]; "
+                f"got: {decoded!r}"
+            )
+        return decoded
+
+
+    def _decode_dict_option(option_name: str, value: str | None) -> dict:
+        """Decode and validate a JSON-encoded ``dict`` Spark option."""
+        if value is None:
+            return {}
+        try:
+            decoded = json.loads(value)
+        except json.JSONDecodeError as e:
+            raise ValueError(
+                f"option '{option_name}' must be a JSON-encoded dict; "
+                f"got non-JSON value: {value!r}"
+            ) from e
+        if not isinstance(decoded, dict):
+            raise ValueError(
+                f"option '{option_name}' must be a JSON-encoded dict; got: {decoded!r}"
+            )
+        return decoded
+
+
+    # PySpark's DataSource API requires camelCase method names and inherits
+    # semantics from the parent class, so per-method docstrings are redundant.
+    # pylint: disable=invalid-name,missing-function-docstring
+    class LakeflowStreamReader(SimpleDataSourceStreamReader, SupportsTriggerAvailableNow):
         """
         Implements a data source stream reader for Lakeflow Connect.
         Currently, only the simpleStreamReader is implemented, which uses a
@@ -1228,6 +1516,70 @@ def register_lakeflow_source(spark):
             # are missed in the returned records.
             return self.read(start)[0]
 
+        def prepareForTriggerAvailableNow(self) -> None:
+            # No need to do anything special here. Everything is handled in the __init__ method.
+            pass
+
+
+    class LakeflowPartitionedStreamReader(DataSourceStreamReader, SupportsTriggerAvailableNow):
+        """Proxy that bridges SupportsPartitionedStream to PySpark's DataSourceStreamReader.
+
+        Used when a connector implements the SupportsPartitionedStream mixin to
+        support partitioned streaming reads across Spark executors.
+        """
+
+        def __init__(
+            self,
+            options: dict[str, str],
+            schema: StructType,
+            lakeflow_connect: LakeflowConnect,
+        ):
+            self.options = options
+            self.schema = schema
+            self.lakeflow_connect = lakeflow_connect
+            self.table_name = options[TABLE_NAME]
+            self.table_options = {k: v for k, v in options.items() if k != IS_DELETE_FLOW}
+
+        def initialOffset(self):
+            return {}
+
+        def getDefaultReadLimit(self):
+            # Admission control is the connector's responsibility (e.g. via
+            # window_days, max_records_per_batch), not the engine's.  Always
+            # ask the engine for ReadAllAvailable.
+            return ReadAllAvailable()
+
+        def latestOffset(self, start: dict, limit) -> dict:
+            # We declared ReadAllAvailable via getDefaultReadLimit; the engine
+            # must respect it.  Anything else means admission-control expectations
+            # we do not support — fail loudly rather than silently ignore.
+            if not isinstance(limit, ReadAllAvailable):
+                raise ValueError(
+                    f"LakeflowPartitionedStreamReader only supports ReadAllAvailable; "
+                    f"got {type(limit).__name__}. Micro-batch sizing must be controlled "
+                    f"by the connector implementation (table_options), not the engine."
+                )
+            return self.lakeflow_connect.latest_offset(
+                self.table_name, self.table_options, start
+            )
+
+        def partitions(self, start: dict, end: dict):
+            partition_descs = self.lakeflow_connect.get_partitions(
+                self.table_name, self.table_options, start, end
+            )
+            return [InputPartition(json.dumps(p)) for p in partition_descs]
+
+        def read(self, partition: InputPartition):
+            partition_desc = json.loads(partition.value)
+            records = self.lakeflow_connect.read_partition(
+                self.table_name, partition_desc, self.table_options
+            )
+            return map(lambda x: parse_value(x, self.schema), records)
+
+        def prepareForTriggerAvailableNow(self) -> None:
+            # No need to do anything special here. Everything is handled in the __init__ method.
+            pass
+
 
     class LakeflowBatchReader(DataSourceReader):
         def __init__(
@@ -1240,30 +1592,95 @@ def register_lakeflow_source(spark):
             self.schema = schema
             self.lakeflow_connect = lakeflow_connect
             self.table_name = options[TABLE_NAME]
+            self._supports_partition = isinstance(lakeflow_connect, SupportsPartition)
+
+        def partitions(self):
+            if self._supports_partition and self.table_name not in VIRTUAL_TABLES:
+                try:
+                    partition_descs = self.lakeflow_connect.get_partitions(
+                        self.table_name, self.options
+                    )
+                    return [InputPartition(json.dumps(p)) for p in partition_descs]
+                except Exception:
+                    self._supports_partition = False
+            return [InputPartition(None)]
 
         def read(self, partition):
-            all_records = []
             if self.table_name == METADATA_TABLE:
-                all_records = self._read_table_metadata()
-            else:
-                all_records, _ = self.lakeflow_connect.read_table(
-                    self.table_name, None, self.options
+                records = self._read_table_metadata()
+            elif self.table_name == NAMESPACES_TABLE:
+                records = self._read_namespaces()
+            elif self.table_name == TABLES_TABLE:
+                records = self._read_tables()
+            elif self._supports_partition and partition.value is not None:
+                partition_desc = json.loads(partition.value)
+                records = self.lakeflow_connect.read_partition(
+                    self.table_name, partition_desc, self.options
                 )
-
-            rows = map(lambda x: parse_value(x, self.schema), all_records)
-            return iter(rows)
+            else:
+                records, _ = self.lakeflow_connect.read_table(self.table_name, None, self.options)
+            return map(lambda x: parse_value(x, self.schema), records)
 
         def _read_table_metadata(self):
-            table_name_list = self.options.get(TABLE_NAME_LIST, "")
-            table_names = [o.strip() for o in table_name_list.split(",") if o.strip()]
+            table_names = _decode_list_of_str_option(
+                TABLE_NAME_LIST, self.options.get(TABLE_NAME_LIST)
+            ) or []
+            table_configs = _decode_dict_option(
+                TABLE_CONFIGS, self.options.get(TABLE_CONFIGS)
+            )
             all_records = []
-            table_configs = json.loads(self.options.get(TABLE_CONFIGS, "{}"))
+            # Preserve caller-supplied table order — caller controls it.
             for table in table_names:
                 metadata = self.lakeflow_connect.read_table_metadata(
                     table, table_configs.get(table, {})
                 )
                 all_records.append({TABLE_NAME: table, **metadata})
             return all_records
+
+        def _read_namespaces(self):
+            # Connectors without SupportsNamespaces are flat — no rows.
+            if not isinstance(self.lakeflow_connect, SupportsNamespaces):
+                return []
+            prefix = _decode_list_of_str_option(
+                NAMESPACE_PREFIX, self.options.get(NAMESPACE_PREFIX)
+            )
+            namespaces = self.lakeflow_connect.list_namespaces(prefix)
+            # Sort framework-side for deterministic output regardless of
+            # connector iteration order.
+            return [{"namespace": ns} for ns in sorted(namespaces)]
+
+        def _read_tables(self):
+            namespace_supplied = NAMESPACE in self.options
+            if isinstance(self.lakeflow_connect, SupportsNamespaces):
+                if not namespace_supplied:
+                    raise ValueError(
+                        f"option '{NAMESPACE}' is required when reading "
+                        f"'{TABLES_TABLE}' against a connector that implements "
+                        f"SupportsNamespaces. Pass a JSON-encoded list[str] "
+                        f"(use '[]' for root-level tables; walk the tree via "
+                        f"'{NAMESPACES_TABLE}' to enumerate every namespace)."
+                    )
+                namespace = _decode_list_of_str_option(
+                    NAMESPACE, self.options[NAMESPACE]
+                )
+                tables = self.lakeflow_connect.list_tables_in_namespace(namespace)
+                return [
+                    {"namespace": namespace, TABLE_NAME: tn}
+                    for tn in sorted(tables)
+                ]
+            # Flat connector path. Reject a stray `namespace` option — the
+            # caller probably mistook this connector for namespace-aware and
+            # silently ignoring the option would mask the bug.
+            if namespace_supplied:
+                raise ValueError(
+                    f"option '{NAMESPACE}' was supplied but the connector does "
+                    f"not implement SupportsNamespaces. Either omit the option "
+                    f"or use a namespace-aware connector."
+                )
+            return [
+                {"namespace": [], TABLE_NAME: tn}
+                for tn in sorted(self.lakeflow_connect.list_tables())
+            ]
 
 
     class LakeflowSource(DataSource):
@@ -1273,6 +1690,17 @@ def register_lakeflow_source(spark):
 
         def __init__(self, options):
             self.options = options
+            table = options.get(TABLE_NAME)
+            # Catch typos against the framework's reserved virtual-table namespace
+            # early — falling through to the connector with an unknown
+            # `_community_*` name yields a confusing per-connector error.
+            if table and table.startswith("_community_") and table not in VIRTUAL_TABLES:
+                raise ValueError(
+                    f"unknown framework virtual table '{table}'. Valid framework "
+                    f"virtual tables are: {', '.join(VIRTUAL_TABLES)}. "
+                    f"For a regular source table, use a name that does not start "
+                    f"with '_community_'."
+                )
             # TEMPORARY: LakeflowConnectImpl is replaced with the actual implementation
             # class during merge. See the placeholder comment at the top of this file.
             self.lakeflow_connect = LakeflowConnectImpl(options)  # pylint: disable=abstract-class-instantiated
@@ -1292,11 +1720,34 @@ def register_lakeflow_source(spark):
                         StructField("ingestion_type", StringType(), True),
                     ]
                 )
-            else:
-                return self.lakeflow_connect.get_table_schema(table, self.options)
+            if table == NAMESPACES_TABLE:
+                return StructType(
+                    [
+                        StructField("namespace", ArrayType(StringType()), False),
+                    ]
+                )
+            if table == TABLES_TABLE:
+                return StructType(
+                    [
+                        StructField("namespace", ArrayType(StringType()), False),
+                        StructField(TABLE_NAME, StringType(), False),
+                    ]
+                )
+            return self.lakeflow_connect.get_table_schema(table, self.options)
 
         def reader(self, schema: StructType):
             return LakeflowBatchReader(self.options, schema, self.lakeflow_connect)
+
+        def streamReader(self, schema: StructType):
+            # Use the partitioned DataSourceStreamReader when the connector
+            # implements SupportsPartitionedStream and the table opts in.
+            # Otherwise, delegate to super() which raises PySparkNotImplementedError,
+            # causing Spark to fall back to simpleStreamReader().
+            if isinstance(self.lakeflow_connect, SupportsPartitionedStream):
+                table = self.options[TABLE_NAME]
+                if self.lakeflow_connect.is_partitioned(table):
+                    return LakeflowPartitionedStreamReader(self.options, schema, self.lakeflow_connect)
+            return super().streamReader(schema)
 
         def simpleStreamReader(self, schema: StructType):
             return LakeflowStreamReader(self.options, schema, self.lakeflow_connect)

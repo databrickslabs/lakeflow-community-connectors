@@ -1,6 +1,29 @@
 {
   "channels": {
-    "channel_ids": "UC_x5XG1OV2P6uZZ5FSM9Ttw"
+    "channel_ids": "UC_test_channel_001"
+  },
+  "playlists": {
+    "channel_id": "UC_test_channel_001"
+  },
+  "playlist_items": {
+    "playlist_id": "PL_test_playlist_001",
+    "max_pages": "1"
+  },
+  "videos": {
+    "video_ids": "vid_test_001"
+  },
+  "search": {
+    "q": "lakeflow test",
+    "max_pages": "1"
+  },
+  "activities": {
+    "channel_id": "UC_test_channel_001"
+  },
+  "comment_threads": {
+    "video_id": "vid_test_001"
+  },
+  "subscriptions": {
+    "channel_id": "UC_test_channel_001"
   },
   "video_categories": {
     "region_code": "US"
