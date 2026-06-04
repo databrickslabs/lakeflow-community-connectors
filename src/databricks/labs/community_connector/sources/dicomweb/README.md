@@ -20,15 +20,20 @@ To configure the connector, provide the following parameters when creating your 
 | Parameter | Type | Required | Description | Example |
 |-----------|------|----------|-------------|---------|
 | `base_url` | string | Yes | Base URL of the DICOMweb endpoint, including any path prefix. | `https://pacs.example.com/dicom-web` |
-| `auth_type` | string | No | Authentication method. One of: `none`, `basic`, `bearer`. Defaults to `none`. | `basic` |
-| `username` | string | Conditional | Username for HTTP Basic authentication. Required when `auth_type` is `basic`. | `svc-dicom` |
-| `password` | string | Conditional | Password for HTTP Basic authentication. Required when `auth_type` is `basic`. Store as a Databricks Secret. | `secret('scope','dicom-password')` |
-| `token` | string | Conditional | Bearer token for token-based authentication. Required when `auth_type` is `bearer`. Store as a Databricks Secret. | `secret('scope','dicom-token')` |
+| `username` | string | Conditional | Username for HTTP Basic authentication. Required when using the `basic` auth method. | `svc-dicom` |
+| `password` | string | Conditional | Password for HTTP Basic authentication. Required when using the `basic` auth method. Store as a Databricks Secret. | `secret('scope','dicom-password')` |
+| `token` | string | Conditional | Bearer token for token-based authentication. Required when using the `bearer` auth method. Store as a Databricks Secret. | `secret('scope','dicom-token')` |
 | `connection_name` | string | No | Human-readable name injected as the `connection_name` column in every row across all tables. Defaults to `base_url` when not set. Set this when ingesting from multiple DICOMweb sources into shared Delta tables to trace records back to their origin. | `orthanc-prod` |
 | `externalOptionsAllowList` | string | Yes | Comma-separated list of table-specific option names that are allowed to be passed through to the connector. This connector requires table-specific options, so this parameter must be set. | See full list below |
 
+The connector supports three authentication methods, selected implicitly by which credentials you provide:
+
+- **none** — no credentials supplied. Use for open DICOMweb endpoints (e.g. local Orthanc instances).
+- **basic** — supply `username` and `password`.
+- **bearer** — supply `token`.
+
 This connector supports the following table-specific options via `externalOptionsAllowList`:
-`starting_date,window_days,num_partitions,lookback_days,page_size,fetch_dicom_files,dicom_volume_path,fetch_metadata,wado_mode`
+`starting_date,window_days,num_partitions,lookback_days,page_size,fetch_dicom_files,dicom_volume_path,fetch_metadata,wado_mode,max_concurrent_downloads,study_qido_filters,series_qido_filters,instance_qido_filters`
 
 > **Note**: Table-specific options such as `lookback_days`, `page_size`, or `fetch_dicom_files` are **not** connection parameters. They are provided per-table via `table_configuration` in the pipeline specification. These option names must be included in `externalOptionsAllowList` for the connection to allow them at runtime.
 
@@ -37,19 +42,19 @@ This connector supports the following table-specific options via `externalOption
 **Orthanc (self-hosted):**
 1. Open the Orthanc Explorer UI (usually at `http://host:8042`).
 2. The DICOMweb base URL is typically `http://host:8042/dicom-web`.
-3. If REST API authentication is enabled, use `auth_type=basic` with the configured Orthanc credentials.
+3. If REST API authentication is enabled, use the `basic` auth method with the configured Orthanc credentials.
 
 **dcm4chee (self-hosted):**
 1. The DICOMweb base URL is typically `https://host:8443/dcm4chee-arc/aets/DCM4CHEE/rs`.
-2. dcm4chee uses Keycloak for authentication. Obtain a service account token from your Keycloak admin and use `auth_type=bearer`.
+2. dcm4chee uses Keycloak for authentication. Obtain a service account token from your Keycloak admin and use the `bearer` auth method.
 
 **Google Cloud Healthcare API:**
 1. The DICOMweb base URL follows the pattern: `https://healthcare.googleapis.com/v1/projects/{project}/locations/{location}/datasets/{dataset}/dicomStores/{store}/dicomWeb`.
-2. Use `auth_type=bearer` with a Google Cloud access token. Token refresh must be handled externally (tokens typically expire after 1 hour).
+2. Use the `bearer` auth method with a Google Cloud access token. Token refresh must be handled externally (tokens typically expire after 1 hour).
 
 **Azure Health Data Services:**
 1. The DICOMweb base URL follows the pattern: `https://{workspace}-{service}.dicom.azurehealthcareapis.com/v2`.
-2. Use `auth_type=bearer` with an Azure AD access token.
+2. Use the `bearer` auth method with an Azure AD access token.
 
 **Commercial VNA/PACS (Sectra, Agfa, Philips, etc.):**
 1. Contact your PACS administrator for the DICOMweb (QIDO-RS/WADO-RS) endpoint URL.
@@ -62,7 +67,7 @@ A Unity Catalog connection for this connector can be created in two ways via the
 
 1. Follow the **Lakeflow Community Connector** UI flow from the **Add Data** page.
 2. Select any existing Lakeflow Community Connector connection for this source or create a new one.
-3. Set `externalOptionsAllowList` to `starting_date,window_days,num_partitions,lookback_days,page_size,fetch_dicom_files,dicom_volume_path,fetch_metadata,wado_mode` (required for this connector to pass table-specific options).
+3. Set `externalOptionsAllowList` to `starting_date,window_days,num_partitions,lookback_days,page_size,fetch_dicom_files,dicom_volume_path,fetch_metadata,wado_mode,max_concurrent_downloads,study_qido_filters,series_qido_filters,instance_qido_filters` (required for this connector to pass table-specific options).
 
 The connection can also be created using the standard Unity Catalog API, for example:
 
@@ -71,17 +76,14 @@ CREATE CONNECTION `my-dicomweb-connection`
 TYPE dicomweb
 OPTIONS (
   base_url                 'https://your-pacs.example.com/dicom-web',
-  auth_type                'none',
   connection_name          'my-pacs-prod',
   sourceName               'dicomweb',
-  externalOptionsAllowList 'starting_date,window_days,num_partitions,lookback_days,page_size,fetch_dicom_files,dicom_volume_path,fetch_metadata,wado_mode'
+  externalOptionsAllowList 'starting_date,window_days,num_partitions,lookback_days,page_size,fetch_dicom_files,dicom_volume_path,fetch_metadata,wado_mode,max_concurrent_downloads,study_qido_filters,series_qido_filters,instance_qido_filters'
   -- For Basic auth, add:
-  -- auth_type 'basic',
-  -- username  'svc-dicom',
-  -- password  secret('my-scope', 'dicom-password')
+  -- username 'svc-dicom',
+  -- password secret('my-scope', 'dicom-password')
   -- For Bearer token, add:
-  -- auth_type 'bearer',
-  -- token     secret('my-scope', 'dicom-token')
+  -- token    secret('my-scope', 'dicom-token')
 );
 ```
 
@@ -157,7 +159,7 @@ The DICOMweb connector exposes a **static list** of four tables corresponding to
 
 **Special columns:**
 
-- `dicom_file_path`: Populated only when the `fetch_dicom_files` table option is set to `true`. Files are written by Spark executors (which have Unity Catalog Volume FUSE access) to `{dicom_volume_path}/{study_instance_uid}/{series_instance_uid}/{sop_instance_uid}.dcm` (or `.jpg` for frame-based retrieval). Studies are distributed across `num_partitions` executors for parallel downloads. If the download fails for a given instance, this field is set to `NULL` and the pipeline continues without interruption.
+- `dicom_file_path`: Populated only when the `fetch_dicom_files` table option is set to `true`. Files are written by Spark executors (which have Unity Catalog Volume FUSE access) to `{dicom_volume_path}/{study_instance_uid}/{series_instance_uid}/{sop_instance_uid}.dcm` (or `.jpg` for frame-based retrieval). Series are bin-packed across `num_partitions` executors for inter-task parallelism, and within each task `max_concurrent_downloads` files are fetched in parallel via a thread pool. If the download fails for a given instance, this field is set to `NULL` and the pipeline continues without interruption.
 
 - `metadata`: Populated only when the `fetch_metadata` table option is set to `true`. Contains the complete DICOM JSON tag set for the instance as a VARIANT type. You can query individual DICOM tags using Databricks' semi-structured data access syntax:
   ```sql
@@ -216,13 +218,89 @@ The following options control how the connector reads data from the DICOMweb ser
 |--------|-----------|----------|---------|-------------|
 | `starting_date` | studies, series, instances | Conditional | `19000101` | Earliest study date to scan, in `YYYYMMDD` format. On the first pipeline run this determines where the scan begins. **Required** when `window_days > 0`; the connector raises `ValueError` if missing in that mode. For large PACS systems, set this to a recent date (e.g., `20230101`) to avoid scanning the full archive on the initial load. |
 | `window_days` | studies, series, instances | No | `0` (disabled) | Size of each micro-batch date window in days. When set to a positive value, the connector advances through the date range in fixed-size windows (e.g., `30` processes 30 days per micro-batch). This is useful for controlling the amount of data processed per trigger and ensuring timely convergence. When `0` or unset, each micro-batch covers the full range from the last cursor through today. |
-| `num_partitions` | instances | No | `8` | Number of Spark executor partitions used for parallel instance reads. Studies discovered in the date window are bin-packed across this many partitions by estimated instance count, balancing work across executors. Increase for large clusters; decrease for small clusters or when individual studies are very large. |
+| `num_partitions` | series, instances | No | `8` | Number of Spark executor partitions used for parallel reads. For `series`, studies are bin-packed by `number_of_study_related_series`. For `instances`, the connector enumerates all `(study, series)` pairs in the date window and bin-packs at the **series** level (uniform weight). Increase for large clusters; decrease for small clusters. The `studies` table is single-partition by design (QIDO-RS pagination is single-stream). |
 | `page_size` | studies, series, instances | No | `100` | Number of records per QIDO-RS request. Increase for large PACS systems (e.g., `500` or `1000` if the server supports it). |
 | `lookback_days` | studies, series, instances | No | `1` | Number of days to subtract from the start of each micro-batch date window. This overlap catches late-arriving or backdated studies that might otherwise be missed. |
 | `fetch_dicom_files` | instances | No | `false` | When set to `true`, downloads each DICOM file (or image frame) via WADO-RS and writes it to the path specified by `dicom_volume_path`. Downloads are distributed across Spark executors for parallelism. |
 | `dicom_volume_path` | instances | Conditional | -- | Unity Catalog Volume path where downloaded DICOM files are stored. Required when `fetch_dicom_files` is `true`. Example: `/Volumes/catalog/schema/dicom_files`. |
 | `wado_mode` | instances | No | `auto` | Controls how DICOM files are retrieved. `auto`: tries full `.dcm` retrieval first, falls back to frame retrieval on HTTP 404/406/415. `full`: always retrieves the complete `.dcm` file. `frames`: always retrieves the first image frame as `.jpg`. Use `frames` for servers that only support frame-level retrieval (e.g., Static DICOMweb / S3 Static WADO deployments). |
 | `fetch_metadata` | instances | No | `false` | When set to `true`, fetches the full DICOM JSON metadata for each instance via the WADO-RS metadata endpoint and stores it in the `metadata` column as VARIANT. Metadata is fetched per series and distributed across Spark executors. |
+| `max_concurrent_downloads` | instances | No | `8` | Maximum number of parallel WADO-RS file downloads inside a single Spark task, via a per-partition thread pool. WADO-RS retrieval is typically the dominant cost when `fetch_dicom_files=true`. Total in-flight requests against the source server are bounded by `num_partitions × max_concurrent_downloads` (default `8 × 8 = 64`); tune both together to respect server rate limits. Set to `1` to disable intra-task parallelism. Has no effect when `fetch_dicom_files=false`. |
+| `study_qido_filters` | studies, series, instances | No | -- | JSON-encoded dict of additional QIDO-RS query parameters merged into every `/studies` request. See the [QIDO-RS query filters](#qido-rs-query-filters) section below. Reserved keys (`StudyDate`, `limit`, `offset`) are rejected. |
+| `series_qido_filters` | series, instances | No | -- | JSON-encoded dict merged into every `/studies/{uid}/series` request. Applied during driver-side enumeration for the `instances` table and during executor reads for the `series` table. |
+| `instance_qido_filters` | instances | No | -- | JSON-encoded dict merged into every `/studies/{uid}/series/{uid}/instances` request. |
+
+### QIDO-RS query filters
+
+Three optional table options let you push arbitrary QIDO-RS query parameters into each level of the DICOM hierarchy. Each option is a **JSON-encoded dict** whose keys/values are merged verbatim into the request URL.
+
+| Option | Endpoint affected |
+|---|---|
+| `study_qido_filters` | `/studies` |
+| `series_qido_filters` | `/studies/{uid}/series` |
+| `instance_qido_filters` | `/studies/{uid}/series/{uid}/instances` |
+
+**Anything DICOMweb / QIDO-RS accepts is passable**:
+
+- DICOM matching attributes — `ModalitiesInStudy`, `Modality`, `PatientID`, `AccessionNumber`, `BodyPartExamined`, `StudyDescription`, `ReferringPhysicianName`, `IssuerOfAccessionNumber`, `SOPClassUID`, ...
+- Behaviour flags — `fuzzymatching=true`
+- Field selection — `includefield=00080020,00080030`
+- Server-specific extensions
+
+**Multi-valued matching** — two forms, choose based on server behaviour:
+
+1. **Comma-separated string (recommended)** — spec-compliant per DICOM PS3.18 §10.6.2 for VR types like `CS` (Modality, ModalitiesInStudy, BodyPartExamined, ...). Most servers (including Orthanc) interpret this as OR matching:
+
+   ```json
+   { "ModalitiesInStudy": "CT,MR" }
+   ```
+   becomes `?ModalitiesInStudy=CT%2CMR` (URL-encoded comma) and returns studies whose modalities contain CT **or** MR.
+
+2. **JSON list (server-specific)** — rendered as repeated query parameters:
+
+   ```json
+   { "ModalitiesInStudy": ["CT", "MR"] }
+   ```
+   becomes `?ModalitiesInStudy=CT&ModalitiesInStudy=MR`. Behaviour varies: Google Healthcare API and Azure Health Data Services interpret this as OR; Orthanc and some others apply last-wins or AND semantics. Verify against your server before relying on it.
+
+   When in doubt, use the comma-separated string form.
+
+**Reserved keys** managed by the connector are rejected (case-insensitive) with a clear error: `StudyDate`, `limit`, `offset`. `StudyDate` is set via `starting_date`/`window_days`; `limit`/`offset` are paging cursors managed by `page_size`.
+
+**Filter scope per table**:
+
+| Table | `study_qido_filters` | `series_qido_filters` | `instance_qido_filters` |
+|---|---|---|---|
+| `studies` | yes (executor read) | -- | -- |
+| `series` | yes (driver enumeration) | yes (executor read) | -- |
+| `instances` | yes (driver enumeration) | yes (driver enumeration) | yes (executor read) |
+
+For the `instances` table, all three filters are useful: the driver shrinks the working set early by applying study- and series-level filters before bin-packing, then each executor applies the instance-level filter on the per-series QIDO-RS request.
+
+**Example — only ingest CT brain studies, with an extra metadata field**:
+
+```json
+"table_configuration": {
+  "starting_date": "20230101",
+  "window_days": "30",
+  "study_qido_filters":   "{\"ModalitiesInStudy\": \"CT\"}",
+  "series_qido_filters":  "{\"Modality\": \"CT\", \"BodyPartExamined\": \"BRAIN\"}",
+  "instance_qido_filters": "{\"includefield\": \"00080070\"}"
+}
+```
+
+**Example — fuzzy patient name matching across multiple modalities**:
+
+```json
+"table_configuration": {
+  "starting_date": "20240101",
+  "study_qido_filters": "{\"PatientName\": \"DOE^JANE\", \"fuzzymatching\": \"true\", \"ModalitiesInStudy\": \"CT,MR\"}"
+}
+```
+
+The comma-separated form above renders as `?ModalitiesInStudy=CT%2CMR` and matches studies with either modality on spec-compliant servers.
+
+> **Note**: filter support varies between DICOMweb implementations. The connector forwards your filters to the server unchanged — if the server doesn't recognise a parameter it will typically ignore it (some servers return HTTP 400 instead). Use the `diagnostics` table to confirm endpoint behaviour, and inspect the resulting tables to verify the filter narrowed the result set.
 
 ## Data Type Mapping
 
@@ -322,7 +400,7 @@ Example configuration ingesting all four tables:
 
 **Configuration notes:**
 - `source_table` must be one of: `studies`, `series`, `instances`, `diagnostics`.
-- Options such as `starting_date`, `window_days`, `num_partitions`, `lookback_days`, `page_size`, `fetch_dicom_files`, `dicom_volume_path`, `fetch_metadata`, and `wado_mode` go under `table_configuration` and must be listed in the connection's `externalOptionsAllowList`.
+- Options such as `starting_date`, `window_days`, `num_partitions`, `lookback_days`, `page_size`, `fetch_dicom_files`, `dicom_volume_path`, `fetch_metadata`, `wado_mode`, `max_concurrent_downloads`, `study_qido_filters`, `series_qido_filters`, and `instance_qido_filters` go under `table_configuration` and must be listed in the connection's `externalOptionsAllowList`.
 - All table option values are passed as strings (e.g., `"200"`, `"true"`).
 - The `diagnostics` table requires no special table configuration options.
 
@@ -333,7 +411,8 @@ Example configuration ingesting all four tables:
 - **Start small**: Begin by syncing only `studies` to verify connectivity and data volume before enabling `series` and `instances`.
 - **Set `starting_date` for the initial load**: On the first run, the connector defaults to scanning all history (from `19000101`). For large PACS systems with millions of instances, this can be very slow. Set `starting_date` to a recent date (e.g., `20230101`) to limit the initial scan window.
 - **Use `window_days` to control micro-batch size**: Setting `window_days` (e.g., `30`) divides the date range into fixed-size windows processed one per trigger. This keeps each micro-batch manageable and ensures the pipeline converges in a predictable number of iterations. Without `window_days`, each micro-batch processes the entire range from the last cursor to today, which can be very large on the first run.
-- **Tune `num_partitions` for instance workloads**: The default of `8` works well for most clusters. Increase for larger clusters (e.g., `16` or `32`) to improve parallelism. Decrease for small clusters or when individual studies contain very large numbers of instances. The connector bin-packs studies across partitions by estimated instance count.
+- **Tune `num_partitions` for `series` and `instances` workloads**: The default of `8` works well for most clusters. Increase for larger clusters (e.g., `16` or `32`) to improve parallelism. Decrease for small clusters. For `instances`, the connector bin-packs at the **series** level (not the study level), so parallelism scales with the number of series in the date window — typically much higher than the number of studies. The `studies` table is intentionally single-partition.
+- **Tune `max_concurrent_downloads` when `fetch_dicom_files=true`**: WADO-RS retrieval is the dominant cost when downloading DICOM files. The default of `8` per partition typically saturates network I/O on a single executor. Total in-flight requests against the source server are `num_partitions × max_concurrent_downloads` (default `8 × 8 = 64`) — keep this below the server's rate limit. Lower the value (e.g. `4` or `1`) for rate-limited or fragile servers; raise it (e.g. `16`–`32`) on high-throughput clusters with permissive sources.
 - **Use incremental sync**: After the initial load, the connector uses `study_date`-based cursors to fetch only new or recently modified records on each run. The `lookback_days` setting provides overlap to catch late-arriving or backdated studies.
 - **Tune `page_size`**: The default of `100` works well for most servers. For large PACS systems, increasing to `500` or `1000` can reduce the total number of API calls. Reduce `page_size` if the server times out on large result sets.
 - **Enable file retrieval selectively**: The `fetch_dicom_files` option issues one additional WADO-RS request per instance and should be enabled only when raw DICOM files are needed (e.g., for AI/ML image analysis pipelines). Each `.dcm` file can range from a few KB (text reports) to several hundred MB (CT/MR volumes). Downloads are distributed across `num_partitions` Spark executors in parallel.

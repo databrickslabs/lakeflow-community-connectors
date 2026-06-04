@@ -14,6 +14,7 @@ import pytest
 from databricks.labs.community_connector.sources.dicomweb.dicomweb import (
     DEFAULT_START_DATE,
     DICOMwebLakeflowConnect,
+    _parse_qido_filters,
     _subtract_days,
 )
 from databricks.labs.community_connector.sources.dicomweb.dicomweb_parser import (
@@ -176,6 +177,194 @@ class TestConnectorUnit:
         assert isinstance(value, str)
         parsed = json.loads(value)
         assert "00080018" in parsed
+
+
+# ---------------------------------------------------------------------------
+# QIDO-RS filter parsing & passthrough
+# ---------------------------------------------------------------------------
+
+
+class TestQidoFilterParsing:
+    """_parse_qido_filters: JSON validation, type checking, and reserved-key rejection."""
+
+    @pytest.mark.parametrize(
+        "option_name",
+        ["study_qido_filters", "series_qido_filters", "instance_qido_filters"],
+    )
+    def test_absent_or_empty_returns_empty_dict(self, option_name):
+        assert _parse_qido_filters({}, option_name) == {}
+        assert _parse_qido_filters({option_name: ""}, option_name) == {}
+        assert _parse_qido_filters({option_name: "   "}, option_name) == {}
+
+    def test_valid_json_dict_round_trips(self):
+        result = _parse_qido_filters(
+            {"study_qido_filters": '{"ModalitiesInStudy": "CT", "PatientID": "PID-1"}'},
+            "study_qido_filters",
+        )
+        assert result == {"ModalitiesInStudy": "CT", "PatientID": "PID-1"}
+
+    def test_list_value_preserved_for_multivalued_matching(self):
+        result = _parse_qido_filters(
+            {"series_qido_filters": '{"Modality": ["CT", "MR"]}'},
+            "series_qido_filters",
+        )
+        assert result == {"Modality": ["CT", "MR"]}
+
+    def test_malformed_json_raises_value_error(self):
+        with pytest.raises(ValueError, match="malformed JSON"):
+            _parse_qido_filters(
+                {"study_qido_filters": '{"Modality": '},  # truncated
+                "study_qido_filters",
+            )
+
+    def test_non_object_json_rejected(self):
+        with pytest.raises(ValueError, match="must be a JSON object"):
+            _parse_qido_filters(
+                {"study_qido_filters": '["CT", "MR"]'},  # list, not dict
+                "study_qido_filters",
+            )
+        with pytest.raises(ValueError, match="must be a JSON object"):
+            _parse_qido_filters(
+                {"study_qido_filters": '"CT"'},  # bare string
+                "study_qido_filters",
+            )
+
+    @pytest.mark.parametrize(
+        "raw, expected_match",
+        [
+            ('{"StudyDate": "20230101-20231231"}', "StudyDate"),
+            ('{"studydate": "20230101"}', "studydate"),  # case-insensitive
+            ('{"limit": 5}', "limit"),
+            ('{"OFFSET": 100}', "OFFSET"),
+        ],
+    )
+    def test_reserved_key_rejected(self, raw, expected_match):
+        with pytest.raises(ValueError, match=expected_match):
+            _parse_qido_filters({"study_qido_filters": raw}, "study_qido_filters")
+
+    def test_unknown_option_name_is_programming_error(self):
+        # Sanity guard: passing an unsupported option name surfaces as
+        # AssertionError, not a silent miss.
+        with pytest.raises(AssertionError):
+            _parse_qido_filters({}, "patient_qido_filters")
+
+
+class TestQidoFilterPassthrough:
+    """Filters are forwarded to the DICOMwebClient query methods at every level."""
+
+    @staticmethod
+    def _connector_with_mocks() -> DICOMwebLakeflowConnect:
+        connector = DICOMwebLakeflowConnect({"base_url": "https://dicomweb.example.com"})
+        connector._client.query_studies = MagicMock(return_value=[])
+        connector._client.query_series_for_study = MagicMock(return_value=[])
+        connector._client.query_instances_for_series = MagicMock(return_value=[])
+        return connector
+
+    def test_studies_read_passes_study_filters(self):
+        connector = self._connector_with_mocks()
+        list(
+            connector._read_studies_partition(
+                {"date_range": "20230101-20231231"},
+                {
+                    "page_size": "200",
+                    "study_qido_filters": '{"ModalitiesInStudy": "CT"}',
+                },
+            )
+        )
+        connector._client.query_studies.assert_called_once_with(
+            "20230101-20231231",
+            limit=200,
+            offset=0,
+            extra_filters={"ModalitiesInStudy": "CT"},
+        )
+
+    def test_series_partitioning_passes_study_filters(self):
+        connector = self._connector_with_mocks()
+        connector._partition_series(
+            "20230101-20231231",
+            {"study_qido_filters": '{"ModalitiesInStudy": "CT"}'},
+        )
+        # Driver enumeration of studies must carry the user's filter.
+        _, kwargs = connector._client.query_studies.call_args
+        assert kwargs["extra_filters"] == {"ModalitiesInStudy": "CT"}
+
+    def test_series_read_passes_series_filters(self):
+        connector = self._connector_with_mocks()
+        list(
+            connector._read_series_partition(
+                {"studies": [{"uid": "1.2.3", "study_date": "20230101"}]},
+                {"series_qido_filters": '{"Modality": "MR"}'},
+            )
+        )
+        connector._client.query_series_for_study.assert_called_once_with(
+            "1.2.3", extra_filters={"Modality": "MR"}
+        )
+
+    def test_instances_partitioning_passes_both_filters(self):
+        connector = self._connector_with_mocks()
+        # Driver enumerates one study with one series so we exercise both calls.
+        connector._client.query_studies = MagicMock(
+            return_value=[
+                {
+                    "0020000D": {"vr": "UI", "Value": ["1.2.3"]},
+                    "00080020": {"vr": "DA", "Value": ["20230101"]},
+                }
+            ]
+        )
+        connector._client.query_series_for_study = MagicMock(
+            return_value=[{"0020000E": {"vr": "UI", "Value": ["1.2.3.4"]}}]
+        )
+
+        connector._partition_instances(
+            "20230101-20231231",
+            {
+                "study_qido_filters": '{"ModalitiesInStudy": "CT"}',
+                "series_qido_filters": '{"Modality": "CT"}',
+            },
+        )
+        _, study_kwargs = connector._client.query_studies.call_args
+        _, series_kwargs = connector._client.query_series_for_study.call_args
+        assert study_kwargs["extra_filters"] == {"ModalitiesInStudy": "CT"}
+        assert series_kwargs["extra_filters"] == {"Modality": "CT"}
+
+    def test_instances_read_passes_instance_filters(self):
+        connector = self._connector_with_mocks()
+        partition = {
+            "series": [
+                {"study_uid": "1.2.3", "series_uid": "1.2.3.4", "study_date": "20230101"}
+            ]
+        }
+        list(
+            connector._read_instances_partition(
+                partition,
+                {"instance_qido_filters": '{"includefield": "00080070"}'},
+            )
+        )
+        connector._client.query_instances_for_series.assert_called_once_with(
+            "1.2.3", "1.2.3.4", extra_filters={"includefield": "00080070"}
+        )
+
+    def test_no_filter_options_passes_empty_dict(self):
+        """Backward compat: callers that omit qido_filters get extra_filters={}."""
+        connector = self._connector_with_mocks()
+        list(
+            connector._read_studies_partition(
+                {"date_range": "20230101-20231231"},
+                {"page_size": "100"},
+            )
+        )
+        _, kwargs = connector._client.query_studies.call_args
+        assert kwargs["extra_filters"] == {}
+
+    def test_invalid_filter_json_raises_at_read_time(self):
+        connector = self._connector_with_mocks()
+        with pytest.raises(ValueError, match="malformed JSON"):
+            list(
+                connector._read_studies_partition(
+                    {"date_range": "20230101-20231231"},
+                    {"study_qido_filters": "{not-json}"},
+                )
+            )
 
 
 # ---------------------------------------------------------------------------
