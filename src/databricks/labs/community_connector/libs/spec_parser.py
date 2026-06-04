@@ -18,6 +18,7 @@ from pydantic import (
 SCD_TYPE = "scd_type"
 PRIMARY_KEYS = "primary_keys"
 SEQUENCE_BY = "sequence_by"
+CLUSTER_BY = "cluster_by"
 
 # Valid SCD type values
 SCD_TYPE_1 = "SCD_TYPE_1"
@@ -203,7 +204,7 @@ class SpecParser:
         Returns:
             A dictionary containing the table configuration without special keys.
         """
-        special_keys = {SCD_TYPE, PRIMARY_KEYS, SEQUENCE_BY}
+        special_keys = {SCD_TYPE, PRIMARY_KEYS, SEQUENCE_BY, CLUSTER_BY}
         for obj in self._model.objects:
             if obj.table.source_table == table_name:
                 config = obj.table.table_configuration or {}
@@ -286,6 +287,43 @@ class SpecParser:
                 config = obj.table.table_configuration or {}
                 return config.get(SEQUENCE_BY)
         return None
+
+    def get_cluster_by(self, table_name: str) -> Optional[List[str]]:
+        """
+        Return the cluster_by columns for a specific table.
+
+        cluster_by is a destination-side Delta option that controls the
+        clustering keys of the target table; it is consumed by the pipeline
+        layer and is not forwarded to the source connector.
+
+        Args:
+            table_name: The name of the table.
+
+        Returns:
+            A list of column names, or None if not specified. Accepts a JSON
+            array string, a comma-separated string, a plain string (single
+            column), or a list in the spec.
+        """
+        value: Any = None
+        for obj in self._model.objects:
+            if obj.table.source_table == table_name:
+                value = (obj.table.table_configuration or {}).get(CLUSTER_BY)
+                break
+
+        if value is None:
+            return None
+        if isinstance(value, list):
+            return [str(v) for v in value]
+        if not isinstance(value, str):
+            return [str(value)]
+        stripped = value.strip()
+        if not stripped:
+            return None
+        if stripped.startswith("["):
+            return [str(v) for v in json.loads(stripped)]
+        if "," in stripped:
+            return [item.strip() for item in stripped.split(",") if item.strip()]
+        return [stripped]
 
     def get_full_destination_table_name(self, table_name: str) -> str:
         """
