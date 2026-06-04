@@ -9,39 +9,49 @@ display_name: YouTube
 
 # ============================================================================
 # Connection Parameters
-# Provide EITHER api_key (for public data) OR OAuth (client_id, client_secret,
-# refresh_token) for private/mine data. API key is simpler; OAuth needed for
-# mine=true, subscriptions, etc.
+# Provide ONE authentication method:
+#   - api_key: public data (channels by id, playlists, videos, search)
+#   - oauth: client_id + client_secret + refresh_token for private/mine data
 # ============================================================================
 connection:
-  parameters:
+  auth_methods:
     - name: api_key
-      type: string
-      required: false
-      secret: true
       description: >
-        YouTube Data API v3 key from Google Cloud Console. Use for public data
-        (channels by id, playlists, videos, search). OAuth required for mine=true.
+        Authenticate with a YouTube Data API v3 key from Google Cloud Console.
+        Use for public data (channels by id, playlists, videos, search).
+      parameters:
+        - name: api_key
+          type: string
+          required: true
+          secret: true
+          description: >
+            YouTube Data API v3 key from Google Cloud Console.
 
-    - name: client_id
-      type: string
-      required: false
+    - name: oauth
       description: >
-        OAuth 2.0 client ID (required if not using api_key).
+        Authenticate with OAuth 2.0 (client ID, client secret, and refresh token).
+        Required for mine=true, subscriptions, and other private data.
+      parameters:
+        - name: client_id
+          type: string
+          required: true
+          description: >
+            OAuth 2.0 client ID from Google Cloud Console.
 
-    - name: client_secret
-      type: string
-      required: false
-      secret: true
-      description: >
-        OAuth 2.0 client secret (required if not using api_key).
+        - name: client_secret
+          type: string
+          required: true
+          secret: true
+          description: >
+            OAuth 2.0 client secret from Google Cloud Console.
 
-    - name: refresh_token
-      type: string
-      required: false
-      secret: true
-      description: >
-        Long-lived refresh token with access_type=offline (required if not using api_key).
+        - name: refresh_token
+          type: string
+          required: true
+          secret: true
+          description: >
+            Long-lived refresh token with access_type=offline. Obtain via
+            authenticate.py or the OAuth consent flow below.
 
   oauth:
     authorization_url: "https://accounts.google.com/o/oauth2/v2/auth"
