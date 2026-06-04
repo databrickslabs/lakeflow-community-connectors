@@ -48,7 +48,13 @@ def connector(monkeypatch):
         "GmailApiClient.make_request",
         lambda self, method, path, **kwargs: {"historyId": "1"},
     )
-    return GmailLakeflowConnect({"access_token": "x"})
+    return GmailLakeflowConnect(
+        {
+            "client_id": "x",
+            "client_secret": "x",
+            "refresh_token": "x",
+        }
+    )
 
 
 def _dispatch(operation: str, connector, **options):
@@ -687,7 +693,9 @@ def _install_paginated_messages_api(monkeypatch, total_available: int):
 def test_read_table_default_cap_is_50(monkeypatch):
     """No maxResults → agent read_table returns 50 messages by default."""
     counters = _install_paginated_messages_api(monkeypatch, total_available=200)
-    connector = GmailLakeflowConnect({"access_token": "x"})
+    connector = GmailLakeflowConnect(
+        {"client_id": "x", "client_secret": "x", "refresh_token": "x"}
+    )
     rows = _dispatch("read_table", connector, tableName="messages")
     assert len(rows) == 50, f"expected 50, got {len(rows)}"
     # Pagination must stop early; never fetch all 200 details.
@@ -696,7 +704,9 @@ def test_read_table_default_cap_is_50(monkeypatch):
 
 def test_read_table_max_results_minus_one_returns_all(monkeypatch):
     counters = _install_paginated_messages_api(monkeypatch, total_available=120)
-    connector = GmailLakeflowConnect({"access_token": "x"})
+    connector = GmailLakeflowConnect(
+        {"client_id": "x", "client_secret": "x", "refresh_token": "x"}
+    )
     rows = _dispatch("read_table", connector, tableName="messages", maxResults="-1")
     assert len(rows) == 120
     assert counters["detail_calls"] == 120
@@ -704,7 +714,9 @@ def test_read_table_max_results_minus_one_returns_all(monkeypatch):
 
 def test_read_table_respects_explicit_max_results(monkeypatch):
     counters = _install_paginated_messages_api(monkeypatch, total_available=500)
-    connector = GmailLakeflowConnect({"access_token": "x"})
+    connector = GmailLakeflowConnect(
+        {"client_id": "x", "client_secret": "x", "refresh_token": "x"}
+    )
     rows = _dispatch("read_table", connector, tableName="messages", maxResults="10")
     assert len(rows) == 10
     assert counters["detail_calls"] == 10

@@ -10,7 +10,9 @@ class TestGmailConnector(LakeflowConnectTests):
     connector_class = GmailLakeflowConnect
     simulator_source = "gmail"
     replay_config = {
-        "access_token": "simulator-access-token",
+        "client_id": "simulator-client-id",
+        "client_secret": "simulator-client-secret",
+        "refresh_token": "simulator-refresh-token",
     }
     # Simulator corpus dates don't overlap the connector's first-call
     # window for these tables — fixture limitation, not a bug.
