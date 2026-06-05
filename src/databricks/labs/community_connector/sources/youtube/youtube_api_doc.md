@@ -101,7 +101,7 @@
 | playlists          | `id`        |
 | playlist_items     | `id`        |
 | videos             | `id`        |
-| search             | Composite: `id.kind` + `id.videoId` or `id.channelId` or `id.playlistId` (one set per result) |
+| search             | `search_query` + `result_index` (0-based position; connector PK for snapshot merge) |
 | activities         | `id`        |
 | comment_threads    | `id`        |
 | subscriptions      | `id`        |
@@ -120,7 +120,7 @@
 | playlist_items   | snapshot       | Full refresh per playlistId (or by id); order can use `snippet.position` |
 | videos           | snapshot       | Full refresh by id or chart; myRating is user-specific snapshot |
 | search           | snapshot       | Query-driven; no incremental cursor; use publishedAfter/publishedBefore for time window |
-| activities       | append / cdc   | Use `publishedAfter` as cursor; activities are append-only events |
+| activities       | snapshot       | Full refresh; optional `publishedAfter` filter (table option), not a framework cursor |
 | comment_threads  | snapshot       | Per videoId or channel; pageToken for pagination only |
 | subscriptions    | snapshot       | Full refresh by channelId, id, or mine |
 | video_categories | snapshot       | Small reference set; typically full refresh by regionCode or id |
@@ -187,7 +187,8 @@
 - **Optional filters**: `q` (query), `channelId`, `type` (video, channel, playlist; default video,channel,playlist), `order`, `publishedAfter`, `publishedBefore`, `regionCode`, `relevanceLanguage`, `safeSearch`, `videoCategoryId`, `eventType`, `location`, `locationRadius`, `topicId`, and various video filters (videoDuration, videoType, etc.).
 - **Optional**: `maxResults` (0–50, default 5), `pageToken`.
 - **Response**: `kind`, `etag`, `nextPageToken`, `prevPageToken`, `regionCode`, `pageInfo`, `items[]` → searchResult (id.kind, id.videoId/id.channelId/id.playlistId, snippet).
-- **Primary key / cursor**: Composite from `id` (kind + videoId or channelId or playlistId). Cursor: `pageToken` → `nextPageToken`. Time window: `publishedAfter` / `publishedBefore` (ISO 8601). **Quota: 100 units per request.**
+- **Connector primary key**: `(search_query, result_index)` — `result_index` is 0-based position in the result list for the query. Stable for snapshot + SCD_TYPE_1 when result order is unchanged.
+- **Pagination (connector)**: Drain-all — fetches multiple API pages in one `read_table` call; `max_pages` caps internal fetches. API: `pageToken` → `nextPageToken`. Optional time window: `publishedAfter` / `publishedBefore` (ISO 8601). **Quota: 100 units per request.**
 
 ---
 
@@ -198,7 +199,7 @@
 - **Filter (exactly one)**: `channelId`, `mine` (boolean, OAuth), or `home` (deprecated).
 - **Optional**: `maxResults` (0–50, default 5), `pageToken`, `publishedAfter`, `publishedBefore` (ISO 8601), `regionCode`.
 - **Response**: `kind`, `etag`, `nextPageToken`, `prevPageToken`, `pageInfo`, `items[]` → activity (id, snippet, contentDetails).
-- **Primary key / cursor**: `id`. Cursor: `pageToken` for pages; **`publishedAfter`** for incremental sync (store latest activity time, request activities after that time).
+- **Primary key**: `id`. **Pagination (connector)**: Page-per-call — one API page per `read_table` call; `pageToken` in offset until exhausted. Optional **`publishedAfter`** / `publishedBefore` (ISO 8601) narrow the API query; ingestion type is snapshot (not CDC).
 
 ---
 
@@ -228,7 +229,7 @@
 
 - **Endpoint**: `GET /youtube/v3/videoCategories`
 - **Required**: `part=snippet`.
-- **Filter (exactly one)**: `id` (comma-separated) or `regionCode` (ISO 3166-1 alpha-2).
+- **Filter (exactly one)**: `id` (comma-separated) or `regionCode` (ISO 3166-1 alpha-2). **Connector requires** `region_code` in table options (maps to `regionCode`).
 - **Optional**: `hl`.
 - **Response**: `kind`, `etag`, `nextPageToken`, `prevPageToken`, `pageInfo`, `items[]` → videoCategory (id, snippet).
 - **Primary key / cursor**: `id`. Cursor: `pageToken` if multiple pages (rare). No incremental cursor; small reference table.
