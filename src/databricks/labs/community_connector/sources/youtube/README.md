@@ -15,17 +15,14 @@ This documentation describes how to configure and use the **YouTube** Lakeflow c
 
 ### Required Connection Parameters
 
-Provide the following **connection-level** options when configuring the connector. You must use **either** an API key **or** OAuth credentials, not both.
+Provide **one** authentication method when configuring the connection (`connector_spec.yaml` defines two groups):
 
-| Name | Type | Required | Description | Example |
-|------|------|----------|-------------|---------|
-| `api_key` | string | No* | YouTube Data API v3 key from Google Cloud Console. Use for public data (channels by id, playlists, videos, search). | (secret) |
-| `client_id` | string | No* | OAuth 2.0 client ID. Required when not using `api_key`. | (from Google Cloud Console) |
-| `client_secret` | string | No* | OAuth 2.0 client secret. Required when not using `api_key`. | (secret) |
-| `refresh_token` | string | No* | Long-lived refresh token with `access_type=offline`. Required when not using `api_key`. Obtain via the authenticate script. | (secret) |
-| `externalOptionsAllowList` | string | Yes | Comma-separated list of table-specific option names allowed to be passed to the connector. This connector requires table-specific options, so this parameter must be set. | See below |
+| Auth method | Parameters (all required within the group) | Use for |
+|-------------|--------------------------------------------|---------|
+| **api_key** | `api_key` | Public data (channels by ID, playlists, videos, search) |
+| **oauth** | `client_id`, `client_secret`, `refresh_token` | Private / user data (`mine=true`, subscriptions, activities) |
 
-\* You must provide **either** `api_key` **or** all of `client_id`, `client_secret`, and `refresh_token`.
+Also set `externalOptionsAllowList` on the connection (comma-separated table option names). This connector requires table-specific options, so this parameter must be set. See list below.
 
 The full list of supported table-specific options for `externalOptionsAllowList` is:
 
@@ -88,13 +85,34 @@ The YouTube connector exposes **nine** tables from the YouTube Data API v3:
 | `playlists` | Playlist metadata per channel or by ID | snapshot | `id` |
 | `playlist_items` | Items in a playlist (videos) | snapshot | `id` |
 | `videos` | Video metadata by ID or chart (e.g. mostPopular) | snapshot | `id` |
-| `search` | Search results (videos, channels, playlists) | snapshot | `search_query`, `result_index` (0-based position; stable across snapshot re-runs for same query) |
+| `search` | Search results (videos, channels, playlists) | snapshot | `search_query`, `result_index` (0-based position in the result set) |
 | `activities` | Channel activities (uploads, likes, etc.) | snapshot | `id` |
 | `comment_threads` | Top-level comments on a video or channel | snapshot | `id` |
 | `subscriptions` | Channel subscriptions (who subscribes or mine) | snapshot | `id` |
 | `video_categories` | Video category list by region | snapshot | `id` |
 
-Pagination uses the API’s `pageToken` / `nextPageToken`. The connector stores the next page token as the cursor for subsequent reads. For `activities`, you can optionally use `published_after` in table options to limit results by time.
+### Pagination
+
+The YouTube API paginates with `pageToken` / `nextPageToken`. The connector uses **two patterns**, depending on the table:
+
+**Page-per-call** (`channels`, `playlists`, `activities`, `comment_threads`, `subscriptions`, `video_categories`):
+
+- Each `read_table` call fetches **one API page** (up to `max_results` items, default 50).
+- The connector returns `next_offset = {"pageToken": "<token>"}` until the last page, then `{"pageToken": None}`.
+- The Lakeflow framework passes that offset into the next call until offsets converge (no more data).
+- A final tail call with `pageToken: None` returns an empty batch (no re-fetch of page 1).
+
+**Drain-all in one call** (`search`, `playlist_items`, `videos` with `chart=mostPopular`):
+
+- The connector loops API pages **inside a single** `read_table` call until `nextPageToken` is absent or `max_pages` is reached.
+- Returns all accumulated rows once with `{"pageToken": None}`.
+- Each pipeline **snapshot** run starts fresh (full re-read of the query/playlist/chart).
+
+**Single request** (`videos` with `video_ids`): one API call, no pagination.
+
+**`published_after` (activities, search):** optional **query filter** (ISO 8601 → API `publishedAfter`), not a framework cursor. `activities` ingestion is snapshot; each run re-reads unless you narrow the window with `published_after`.
+
+**Search primary keys:** `(search_query, result_index)` uses position in the result list (`"0"`, `"1"`, …). This gives stable keys for snapshot + SCD_TYPE_1 **when YouTube returns the same result order**. If ordering changes between runs, the same index may refer to a different item.
 
 ## Table Configurations
 
@@ -131,9 +149,9 @@ Table-specific options are passed via the pipeline spec under `table_configurati
 | **activities** | **Exactly one of:** `channel_id` or `mine=true` | `channel_id`: list activities for this channel. `mine=true`: authenticated user's activities (OAuth). Optional: `published_after`. |
 | **comment_threads** | **Exactly one of:** `video_id` or `channel_id` | `video_id`: comments for this video (recommended). Use a video from your channel: open the video on YouTube, copy the ID from the URL (`?v=VIDEO_ID`). If you get 403, that video may have comments disabled—try another. `channel_id`: often returns 403; prefer `video_id`. |
 | **subscriptions** | **Exactly one of:** `channel_id` or `mine=true` | `channel_id`: list subscribers of this channel. `mine=true`: channels the authenticated user subscribes to (OAuth). |
-| **video_categories** | Optional: `region_code` | ISO 3166-1 alpha-2 region code. If omitted, categories are not filtered by region. |
+| **video_categories** | `region_code` (required) | ISO 3166-1 alpha-2 region code (e.g. `US`, `GB`). Required by the YouTube API (`regionCode` filter). |
 
-**Pagination and `max_pages`:** For **search**, **playlist_items**, and **videos** (with `chart=mostPopular`), the connector fetches **all pages in a single read** (like Zendesk/SurveyMonkey), so the pipeline gets the full result in one batch. **`max_pages`** caps how many pages are fetched (default 10 for search, 100 for playlist_items, 20 for videos chart). Set it in table’s `table_configuration` in your pipeline spec (e.g. `"max_pages": "10"` = at most 10 pages = 500 results). The pipeline will keep requesting pages until the connector returns no more cursor or the cap is reached. If your pipeline still stops at 50 results, the **pipeline runtime** (Databricks/Lakeflow) may be limiting to one batch per run; that limit is configured in the pipeline or job in Databricks, not in the pipeline_spec JSON (the spec only lists tables and their options). Optionally set **`max_results`** to control page size (1–50 for most tables, 1–100 for `comment_threads`).
+**`max_pages` (drain-all tables only):** Caps internal page fetches for **search** (default 10), **playlist_items** (default 100), and **videos** chart (default 20). Example: `"max_pages": "10"` with 50 results per page → at most 500 rows. Set in `table_configuration`. Optionally set **`max_results`** for page size (1–50 for most tables, 1–100 for `comment_threads`).
 
 ## Data Type Mapping
 
@@ -236,7 +254,7 @@ For OAuth-only tables (`mine=true`), ensure the connection uses `client_id`, `cl
 
 ### Step 3: Run and Schedule the Pipeline
 
-Run the pipeline using your usual Lakeflow or Databricks orchestration. The connector uses `pageToken` for pagination; subsequent runs continue from the last token when applicable.
+Run the pipeline using your usual Lakeflow or Databricks orchestration. Within a single ingestion, page-per-call tables advance via `pageToken` until exhausted; drain-all tables return the full batch in one call. Snapshot tables re-read from the start on each scheduled run unless you filter with options like `published_after`.
 
 #### Best Practices
 
@@ -250,9 +268,10 @@ Run the pipeline using your usual Lakeflow or Databricks orchestration. The conn
 
 - **401 / 403 with OAuth**: Verify `client_id`, `client_secret`, and `refresh_token`. Re-run the authenticate script (`authenticate.py -s youtube -m browser`) to obtain a new refresh token if it was revoked or expired.
 - **403 with API key**: Check that the API key is valid and that YouTube Data API v3 is enabled in your Google Cloud project. Restrict the key to the YouTube API if you have key restrictions.
-- **Quota exceeded**: Reduce frequency of syncs, especially for `search` (100 units per request), or request a quota increase in Google Cloud Console.
+- **Quota exceeded**: The connector raises a clear error when the API returns `quotaExceeded`. Reduce frequency of syncs, especially for `search` (100 units per request), or request a quota increase in Google Cloud Console.
 - **"Found 2 rows for key" (search `search_query` / `result_index`)**: The connector emits each `result_index` (0, 1, 2, … per query) only once per read. If the same key appears twice, the pipeline is delivering the same batch twice (e.g. duplicate task, retry, or stream replayed). **Fix**: Deduplicate the search source before merge (e.g. by `(search_query, result_index)`) in the pipeline, or ensure exactly-once processing so the same connector output is not written twice.
 - **"channels requires channel_ids, for_username, or mine=true"** (or similar): Ensure exactly one of the required table options is set for that table in `table_configuration`.
+- **"api_key ... not both"**: The connection has API key and OAuth credentials. Use one auth method only (`api_key` for public data, or OAuth for `mine=true`).
 
 ### Running Tests
 
