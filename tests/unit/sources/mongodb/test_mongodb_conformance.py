@@ -15,13 +15,14 @@ import os
 import pytest
 
 from databricks.labs.community_connector.sources.mongodb import MongodbLakeflowConnect
+from tests.unit.sources.test_partition_suite import SupportsPartitionTests
 from tests.unit.sources.test_suite import LakeflowConnectTests
 
 URI = os.environ.get("MONGODB_TEST_URI")
 
 
 @pytest.mark.skipif(not URI, reason="set MONGODB_TEST_URI (+ CONNECTOR_TEST_MODE=live)")
-class TestMongodbConformance(LakeflowConnectTests):
+class TestMongodbConformance(LakeflowConnectTests, SupportsPartitionTests):
     connector_class = MongodbLakeflowConnect
     sample_records = 50
     config = {
