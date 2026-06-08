@@ -31,7 +31,12 @@ class TestDICOMwebConnector(LakeflowConnectTests, SupportsPartitionedStreamTests
     connector_class = DICOMwebLakeflowConnect
     simulator_source = "dicomweb"
     sample_records = 10
-    replay_config = {"base_url": "https://simulator.example.com"}
+    # The simulator endpoints.yaml spec uses a two-segment ``{root_p1}/
+    # {root_p2}`` placeholder prefix so a single spec matches both this
+    # simulate-mode base URL AND live cassettes recorded against real
+    # servers like Orthanc demo (``/demo/dicom-web/...``). Any 2-segment
+    # path prefix works here.
+    replay_config = {"base_url": "https://simulator.example.com/sim/dicomweb"}
 
     @classmethod
     def setup_class(cls):
@@ -43,7 +48,12 @@ class TestDICOMwebConnector(LakeflowConnectTests, SupportsPartitionedStreamTests
 
     @classmethod
     def teardown_class(cls):
-        shutil.rmtree(cls._tmp_dir, ignore_errors=True)
+        # Tear down the LakeflowConnectTests simulator context first so the
+        # cassette / coverage / validation files are flushed in record mode.
+        try:
+            super().teardown_class()
+        finally:
+            shutil.rmtree(cls._tmp_dir, ignore_errors=True)
 
 
 # ---------------------------------------------------------------------------
@@ -93,7 +103,10 @@ class TestDICOMwebConnectorMocked(LakeflowConnectTests, SupportsPartitionedStrea
 
     @classmethod
     def teardown_class(cls):
-        shutil.rmtree(cls._tmp_dir, ignore_errors=True)
+        try:
+            super().teardown_class()
+        finally:
+            shutil.rmtree(cls._tmp_dir, ignore_errors=True)
 
     @classmethod
     def _install_mocks(cls):
@@ -113,8 +126,9 @@ class TestDICOMwebConnectorMocked(LakeflowConnectTests, SupportsPartitionedStrea
         )
 
     @classmethod
-    def _mock_query_studies(cls, date_range, limit=100, offset=0):
+    def _mock_query_studies(cls, date_range, limit=100, offset=0, extra_filters=None):
         """Return fixture studies on first page, empty on subsequent pages."""
+        del date_range, extra_filters  # mock doesn't filter; accepts any input
         if offset == 0:
             return cls._studies[:limit]
         return []

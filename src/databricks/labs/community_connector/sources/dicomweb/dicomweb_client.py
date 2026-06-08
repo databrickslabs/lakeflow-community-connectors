@@ -59,7 +59,9 @@ class DICOMwebClient:
     ):
         """Execute a GET request and return an http.client.HTTPResponse."""
         if params:
-            url = f"{url}?{urllib.parse.urlencode(params)}"
+            # doseq=True turns list values into repeated query params, which is
+            # how QIDO-RS expresses multi-valued matching (e.g. Modality=CT&Modality=MR).
+            url = f"{url}?{urllib.parse.urlencode(params, doseq=True)}"
         headers = {**self._default_headers, **(extra_headers or {})}
         req = urllib.request.Request(url, headers=headers)
         return urllib.request.urlopen(req, timeout=self.timeout)
@@ -87,54 +89,76 @@ class DICOMwebClient:
         study_date_range: str,
         limit: int = 100,
         offset: int = 0,
+        extra_filters: dict[str, Any] | None = None,
     ) -> list[dict]:
         """
-        QIDO-RS: GET /studies?StudyDate={range}&limit={n}&offset={n}
+        QIDO-RS: GET /studies?StudyDate={range}&limit={n}&offset={n}&{extra_filters}
 
         Args:
             study_date_range: DICOMweb date range string, e.g. "20231201-20231215".
             limit:            Max records per page.
             offset:           Zero-based record offset for pagination.
+            extra_filters:    Optional additional query parameters, e.g.
+                              ``{"ModalitiesInStudy": "CT", "fuzzymatching": "true"}``.
+                              Merged into the URL query string verbatim.
 
         Returns:
             List of DICOM JSON objects (dicts keyed by 8-char hex tag strings).
         """
         params: dict[str, Any] = {
+            **(extra_filters or {}),
             "StudyDate": study_date_range,
             "limit": limit,
             "offset": offset,
         }
         return self._qido_get("/studies", params)
 
-    def query_series_for_study(self, study_uid: str) -> list[dict]:
+    def query_series_for_study(
+        self,
+        study_uid: str,
+        extra_filters: dict[str, Any] | None = None,
+    ) -> list[dict]:
         """
-        QIDO-RS: GET /studies/{study_uid}/series
+        QIDO-RS: GET /studies/{study_uid}/series?{extra_filters}
 
         Hierarchical endpoint returning all series belonging to a single study.
         Required by S3 Static WADO Server and recommended by the DICOMweb standard.
 
         Args:
-            study_uid: DICOM study UID.
+            study_uid:     DICOM study UID.
+            extra_filters: Optional additional query parameters, e.g.
+                           ``{"Modality": "CT", "BodyPartExamined": "BRAIN"}``.
+                           Merged into the URL query string verbatim.
 
         Returns:
             List of DICOM JSON objects (dicts keyed by 8-char hex tag strings).
         """
-        return self._qido_get(f"/studies/{study_uid}/series", {})
+        return self._qido_get(f"/studies/{study_uid}/series", dict(extra_filters or {}))
 
-    def query_instances_for_series(self, study_uid: str, series_uid: str) -> list[dict]:
+    def query_instances_for_series(
+        self,
+        study_uid: str,
+        series_uid: str,
+        extra_filters: dict[str, Any] | None = None,
+    ) -> list[dict]:
         """
-        QIDO-RS: GET /studies/{study_uid}/series/{series_uid}/instances
+        QIDO-RS: GET /studies/{study_uid}/series/{series_uid}/instances?{extra_filters}
 
         Hierarchical endpoint returning all instances belonging to a single series.
 
         Args:
-            study_uid:  DICOM study UID.
-            series_uid: DICOM series UID.
+            study_uid:     DICOM study UID.
+            series_uid:    DICOM series UID.
+            extra_filters: Optional additional query parameters merged into the
+                           URL query string verbatim.
 
         Returns:
             List of DICOM JSON objects (dicts keyed by 8-char hex tag strings).
         """
-        return self._qido_get(f"/studies/{study_uid}/series/{series_uid}/instances", {})
+        return self._qido_get(
+            f"/studies/{study_uid}/series/{series_uid}/instances",
+            dict(extra_filters or {}),
+        )
 
     # ------------------------------------------------------------------
     # WADO-RS
