@@ -9,6 +9,7 @@ read path.
 """
 
 from databricks.labs.community_connector.sparkpds.registry import (
+    find_data_source,
     register,
 )
 from databricks.labs.community_connector.sparkpds.lakeflow_datasource import (
@@ -28,6 +29,7 @@ from databricks.labs.community_connector.sparkpds.ingestion_agent_datasource imp
 
 __all__ = [
     # Registry
+    "find_data_source",
     "register",
     # Core classes
     "LakeflowSource",
