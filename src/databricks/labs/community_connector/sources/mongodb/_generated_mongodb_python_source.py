@@ -1050,10 +1050,10 @@ def register_lakeflow_source(spark):
     ########################################################
 
     try:
-        from pyspark.sql.types import VariantType
+        from pyspark.sql.types import VariantType  # pylint: disable=ungrouped-imports
 
         HAS_VARIANT = True
-    except ImportError:  # pyspark < 4.0 / DBR < 17.1
+    except ImportError:
         HAS_VARIANT = False
 
 

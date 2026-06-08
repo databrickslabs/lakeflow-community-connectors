@@ -20,11 +20,14 @@ from databricks.labs.community_connector.sources.mongodb.mongodb_utils import (
     COL_OP,
 )
 
+# Optional import kept below the framework import so the merge tool can strip the
+# framework import from the generated single-file (it must precede non-import
+# statements). VARIANT is unavailable on pyspark < 4.0 / DBR < 17.1.
 try:
-    from pyspark.sql.types import VariantType
+    from pyspark.sql.types import VariantType  # pylint: disable=ungrouped-imports
 
     HAS_VARIANT = True
-except ImportError:  # pyspark < 4.0 / DBR < 17.1
+except ImportError:
     HAS_VARIANT = False
 
 
