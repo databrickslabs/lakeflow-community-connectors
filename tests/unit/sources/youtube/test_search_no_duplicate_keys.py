@@ -103,7 +103,7 @@ def test_search_second_call_returns_empty_so_no_duplicates_across_calls(mock_con
         f"Duplicate keys across pipeline calls: total={len(all_keys)} unique={len(unique_keys)}. "
         f"Duplicates: {[k for k in all_keys if all_keys.count(k) > 1][:10]}"
     )
-    assert len(records) == 0, "Second call should return 0 records when offset has pageToken=None"
+    assert len(records) == 0, "Second call should return 0 records when offset has done=True"
     assert len(all_keys) == 125, "Only first call should have returned 125 records"
 
 

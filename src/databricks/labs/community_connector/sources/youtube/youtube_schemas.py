@@ -185,52 +185,43 @@ TABLE_SCHEMAS = {
 }
 
 # ---------------------------------------------------------------------------
-# Table metadata (primary_keys, cursor_field, ingestion_type)
+# Table metadata (primary_keys, ingestion_type)
 # ---------------------------------------------------------------------------
 TABLE_METADATA = {
     "channels": {
         "primary_keys": ["id"],
-        "cursor_field": None,
         "ingestion_type": "snapshot",
     },
     "playlists": {
         "primary_keys": ["id"],
-        "cursor_field": None,
         "ingestion_type": "snapshot",
     },
     "playlist_items": {
         "primary_keys": ["id"],
-        "cursor_field": None,
         "ingestion_type": "snapshot",
     },
     "videos": {
         "primary_keys": ["id"],
-        "cursor_field": None,
         "ingestion_type": "snapshot",
     },
     "search": {
         "primary_keys": ["search_query", "result_index"],
-        "cursor_field": None,
         "ingestion_type": "snapshot",
     },
     "activities": {
         "primary_keys": ["id"],
-        "cursor_field": None,
         "ingestion_type": "snapshot",
     },
     "comment_threads": {
         "primary_keys": ["id"],
-        "cursor_field": None,
         "ingestion_type": "snapshot",
     },
     "subscriptions": {
         "primary_keys": ["id"],
-        "cursor_field": None,
         "ingestion_type": "snapshot",
     },
     "video_categories": {
         "primary_keys": ["id"],
-        "cursor_field": None,
         "ingestion_type": "snapshot",
     },
 }

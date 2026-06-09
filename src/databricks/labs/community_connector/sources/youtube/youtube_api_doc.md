@@ -121,7 +121,7 @@
 | videos           | snapshot       | Full refresh by id or chart; myRating is user-specific snapshot |
 | search           | snapshot       | Query-driven; no incremental cursor; use publishedAfter/publishedBefore for time window |
 | activities       | snapshot       | Full refresh; optional `publishedAfter` filter (table option), not a framework cursor |
-| comment_threads  | snapshot       | Per videoId or channel; pageToken for pagination only |
+| comment_threads  | snapshot       | Per videoId or channel; full refresh |
 | subscriptions    | snapshot       | Full refresh by channelId, id, or mine |
 | video_categories | snapshot       | Small reference set; typically full refresh by regionCode or id |
 
@@ -131,7 +131,8 @@
 
 - **Base URL**: `https://www.googleapis.com/youtube/v3`
 - **Method**: GET for all list endpoints.
-- **Pagination**: `pageToken` (request) and `nextPageToken` / `prevPageToken` (response). `maxResults` 1–50 (1–100 for commentThreads and comments). Continue until `nextPageToken` is absent or empty.
+- **Pagination (API)**: `pageToken` (request) and `nextPageToken` / `prevPageToken` (response). `maxResults` 1–50 (1–100 for commentThreads and comments). Continue until `nextPageToken` is absent or empty.
+- **Pagination (connector)**: All snapshot tables drain API pages inside one `read_table` call and return `{"done": True}` to the framework (no incremental `pageToken` offset). Use `max_pages` to cap internal fetches where supported.
 - **Quota**: Default 10,000 units/day. Each list call = 1 unit; **search.list = 100 units**. Throttle to stay under quota.
 
 ---
@@ -199,7 +200,7 @@
 - **Filter (exactly one)**: `channelId`, `mine` (boolean, OAuth), or `home` (deprecated).
 - **Optional**: `maxResults` (0–50, default 5), `pageToken`, `publishedAfter`, `publishedBefore` (ISO 8601), `regionCode`.
 - **Response**: `kind`, `etag`, `nextPageToken`, `prevPageToken`, `pageInfo`, `items[]` → activity (id, snippet, contentDetails).
-- **Primary key**: `id`. **Pagination (connector)**: Page-per-call — one API page per `read_table` call; `pageToken` in offset until exhausted. Optional **`publishedAfter`** / `publishedBefore` (ISO 8601) narrow the API query; ingestion type is snapshot (not CDC).
+- **Primary key**: `id`. **Pagination (connector)**: Drain-all snapshot — multiple API pages per `read_table`; `max_pages` caps internal fetches. Optional **`publishedAfter`** / `publishedBefore` (ISO 8601) narrow the API query; ingestion type is snapshot (not CDC).
 
 ---
 
