@@ -393,7 +393,7 @@ The connector supports two ingestion strategies based on whether a `cursor_field
 
 - **Triggered when**: No `cursor_field` specified in table options.
 - **Behavior**: Full refresh — reads all objects from the API on each sync via a memory-efficient generator.
-- **Offset tracking**: Returns a sentinel offset (`{"done": "true"}`) after consuming all pages.
+- **Offset tracking**: Returns an empty offset (`{}`) — snapshot is a single framework-driven pass with no resume point (see the README note on mid-snapshot restart cost).
 - **Metadata**: `ingestion_type: "snapshot"`
 - **Memory**: Only one page (~10K records) is held in memory at a time.
 
@@ -401,12 +401,13 @@ The connector supports two ingestion strategies based on whether a `cursor_field
 
 - **Triggered when**: `cursor_field` is specified in table options (e.g., `"updatedAt"`, `"arrivalTimestamp"`).
 - **Behavior**:
-  1. On first run (no checkpoint): fetches all records via `loadObjectSet` with the base objectSet (full load), sorted ASC by `cursor_field`.
-  2. On subsequent runs: peeks the dataset's current max cursor via the search endpoint (`orderBy desc, pageSize=1`). If the peeked max hasn't advanced past the checkpoint → returns an empty iterator with the unchanged offset (no `loadObjects` call).
-  3. Otherwise: fetches only new records via `loadObjectSet` with filtered objectSet (`where: gt` on `cursor_field`). The API performs server-side filtering — only matching records are returned.
-- **Offset tracking**: Checkpoints `{"max_cursor_value": <cursor of last emitted record>}`. On next run, this is both the comparison target for the search peek and the `where: gt` filter value. Setting the offset to the last *emitted* record (not the dataset max) keeps admission-capped batches resumable without skipping records.
+  1. On first run (no checkpoint): fetches all records via `loadObjectSet` with the base objectSet (full load), sorted ASC by `(cursor_field, tiebreaker)`.
+  2. On subsequent runs: peeks the dataset's current max cursor via the search endpoint (`orderBy desc, pageSize=1`). The early-exit short-circuits only when the peeked max is strictly *below* the checkpoint — an *equal* max may hide un-read rows sharing that cursor value, so the read proceeds.
+  3. Otherwise: fetches only new records via `loadObjectSet` with a **composite filter** — `cursor > prev` OR (`cursor == prev` AND `tiebreaker > prev_tiebreak`) — sorted ASC by `(cursor_field, tiebreaker)`. This total ordering means rows sharing a `cursor_field` value are never skipped or duplicated across a batch boundary.
+- **Tiebreaker**: a unique, server-sortable property used as the secondary sort/filter key. Resolves to the `tiebreaker_field` table option, else the object type's single-column primary key. If neither resolves (a multi-column primary key, or no primary key), incremental reads are **refused with an actionable error** (set `tiebreaker_field`, or run the table in snapshot mode).
+- **Offset tracking**: Checkpoints `{"max_cursor_value": <cursor>, "max_tiebreak_value": <tiebreaker>}` from the last *emitted* record (not the dataset max), so admission-capped batches resume exactly past the last `(cursor, tiebreaker)` tuple without skipping records. `max_tiebreak_value` is present for every incremental read (a tiebreaker always resolves, or the read is refused).
 - **Metadata**: `ingestion_type: "cdc"`
-- **Note**: Records with null cursor field values are excluded from ingestion. If the search peek fails (4xx/5xx/network), the early-exit is skipped and the connector falls through to the `where: gt` path so the read still completes.
+- **Note**: Records with a null `cursor_field` value are excluded from ingestion. A null *tiebreaker* value is rejected (a tiebreaker must be unique and non-null). If the search peek fails (4xx/5xx/network), the early-exit is skipped and the connector falls through to the composite read so it still completes.
 
 
 ## **Error Handling**

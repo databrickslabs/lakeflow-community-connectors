@@ -1,5 +1,6 @@
 import json
 import time
+from itertools import islice
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -135,6 +136,29 @@ class TestPalantirConnector(LakeflowConnectTests):
         # Returns None or a value; either is acceptable — we only care
         # that POST /objects/{table}/search was issued.
         self.connector._get_max_cursor_via_search(table, cursor_field)
+
+    def test_snapshot_read_through_simulator(self):
+        """F-TEST-3: exercise the snapshot read path end-to-end through the
+        simulator (real ``_fetch_page`` -> ``loadObjects`` -> response
+        parsing), not a mock. ``FlightsFinal`` with no ``cursor_field``
+        routes to ``_read_snapshot``. Bounded via ``islice`` so a
+        live/record run doesn't drain the full table."""
+        table = "FlightsFinal"
+        records_iter, offset = self.connector.read_table(
+            table, {}, {"page_size": "100"}
+        )
+        records = list(islice(records_iter, 50))
+        assert records, "snapshot read should yield records from the corpus"
+        assert offset == {}, "snapshot returns an empty offset (no resume)"
+        # Records parse through the real loadObjects path; declared
+        # (non-system) fields are a subset of the discovered schema.
+        schema_fields = set(
+            self.connector.get_table_schema(table, {}).fieldNames()
+        )
+        declared = {k for k in records[0] if not k.startswith("__")}
+        assert declared <= schema_fields, (
+            f"snapshot record fields not in schema: {declared - schema_fields}"
+        )
 
 
 class TestPalantirMaxCursorLookup:
@@ -1221,3 +1245,114 @@ class TestPalantirPagination:
         assert body["objectSet"] == {
             "type": "base", "objectType": "FlightsFinal"
         }
+
+
+class TestPalantirTiebreakResolution:
+    """F2: incremental reads must REFUSE (not silently fall back to a lossy
+    strict-gt cursor) when no unique single-column tiebreaker resolves —
+    i.e. a multi-column primary key or no declared primary key, with no
+    explicit ``tiebreaker_field``. Also covers ``_resolve_tiebreak_field``
+    branch selection (TEST-2 gap)."""
+
+    @staticmethod
+    def _connector(primary_key) -> PalantirLakeflowConnect:
+        c = PalantirLakeflowConnect({
+            "token": "fake",
+            "hostname": "fake.palantirfoundry.com",
+            "ontology_api_name": "ontology-fake",
+        })
+        c._object_types_cache = {"T": {"primaryKey": primary_key, "properties": {}}}
+        return c
+
+    def test_resolve_tiebreak_field_branches(self):
+        # Explicit option wins over the PK.
+        assert self._connector("pk1")._resolve_tiebreak_field(
+            "T", {"tiebreaker_field": "explicit"}
+        ) == "explicit"
+        # Single-string PK.
+        assert self._connector("pk1")._resolve_tiebreak_field("T", {}) == "pk1"
+        # Single-element list PK.
+        assert self._connector(["only"])._resolve_tiebreak_field("T", {}) == "only"
+        # Multi-column PK -> None (no single sortable tiebreaker).
+        assert self._connector(["a", "b"])._resolve_tiebreak_field("T", {}) is None
+        # No PK -> None.
+        assert self._connector(None)._resolve_tiebreak_field("T", {}) is None
+
+    def test_incremental_refuses_on_multicolumn_pk(self):
+        """Composite PK -> no single tiebreaker -> refuse rather than
+        silently strict-gt (which would drop tied-cursor rows)."""
+        c = self._connector(["a", "b"])
+        with pytest.raises(ValueError, match="tiebreaker"):
+            c.read_table("T", None, {"cursor_field": "ts"})
+
+    def test_incremental_refuses_on_no_primary_key(self):
+        c = self._connector(None)
+        with pytest.raises(ValueError, match="tiebreaker"):
+            c.read_table("T", None, {"cursor_field": "ts"})
+
+    def test_explicit_tiebreaker_field_enables_cdc_on_multicolumn_pk(self):
+        """An explicit tiebreaker_field lets a composite-PK table still do
+        CDC — the refuse only fires when nothing resolves."""
+        c = self._connector(["a", "b"])
+        recs = [{"ts": "2026-01-01T00:00:00Z", "tb": "x"}]
+        with patch.object(c, "_fetch_page", return_value=(recs, None)):
+            emitted_iter, offset = c.read_table(
+                "T", None, {"cursor_field": "ts", "tiebreaker_field": "tb"}
+            )
+            emitted = list(emitted_iter)
+        assert [r["ts"] for r in emitted] == ["2026-01-01T00:00:00Z"]
+        assert offset == {
+            "max_cursor_value": "2026-01-01T00:00:00Z",
+            "max_tiebreak_value": "x",
+        }
+
+    def test_snapshot_unaffected_by_missing_tiebreaker(self):
+        """Snapshot mode (no cursor_field) never needs a tiebreaker, so a
+        no-PK / multi-col-PK table still reads fine in snapshot."""
+        c = self._connector(["a", "b"])
+        recs = [{"ts": "2026-01-01T00:00:00Z"}]
+        with patch.object(c, "_fetch_page", return_value=(recs, None)):
+            emitted_iter, offset = c.read_table("T", None, {})
+            emitted = list(emitted_iter)
+        assert len(emitted) == 1
+        assert offset == {}
+
+    def test_incremental_sends_composite_orderby(self):
+        """F-TEST-1: an incremental resume must request server-side sort by
+        (cursor ASC, tiebreaker ASC) — the precondition that makes the
+        composite where-clause resume tie-safe. Drives the real _fetch_page
+        (mocking _session.post) so the posted orderBy body is asserted."""
+        c = self._connector("row_id")  # single-col PK → tiebreak=row_id
+        page = _mock_response(
+            200,
+            {"data": [{"arrivalTimestamp": "2026-01-02T00:00:00Z", "row_id": "z"}],
+             "nextPageToken": None},
+        )
+        resume_offset = {
+            "max_cursor_value": "2026-01-01T00:00:00Z",
+            "max_tiebreak_value": "a",
+        }
+        with patch.object(
+            c, "_get_max_cursor_value", return_value="2026-01-02T00:00:00Z"
+        ), patch.object(
+            c._session, "post", side_effect=[page]
+        ) as post_spy, patch.object(time, "sleep"):
+            emitted_iter, _ = c.read_table(
+                "T", resume_offset, {"cursor_field": "arrivalTimestamp"}
+            )
+            list(emitted_iter)
+        body = post_spy.call_args_list[0].kwargs["json"]
+        assert body["orderBy"]["fields"] == [
+            {"field": "arrivalTimestamp", "direction": "asc"},
+            {"field": "row_id", "direction": "asc"},
+        ]
+
+    def test_incremental_refuses_null_tiebreaker_value(self):
+        """F1: a resolved tiebreaker whose VALUE is null can't provide a
+        total order — refuse rather than persist max_tiebreak_value=None
+        (which would collapse the next run to lossy strict-gt)."""
+        c = self._connector("row_id")
+        recs = [{"arrivalTimestamp": "2026-01-01T00:00:00Z", "row_id": None}]
+        with patch.object(c, "_fetch_page", return_value=(recs, None)):
+            with pytest.raises(ValueError, match="[Tt]iebreaker"):
+                c.read_table("T", None, {"cursor_field": "arrivalTimestamp"})

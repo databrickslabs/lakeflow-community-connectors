@@ -683,6 +683,9 @@ def register_lakeflow_source(spark):
             self._init_dt = datetime.now(timezone.utc)
             self._init_time = self._init_dt.strftime("%Y-%m-%dT%H:%M:%SZ")
             self._default_max_records_per_batch = 100_000
+            # Max attempts for the bounded transient-retry loop, shared by
+            # the schema-discovery GET and the data-path POST.
+            self._max_retries = 5
 
             # Initialize caches for performance
             self._schema_cache: Dict[str, StructType] = {}
@@ -694,8 +697,10 @@ def register_lakeflow_source(spark):
 
             Spark's data-source lifecycle can construct many connector
             instances per query; each holds an open keep-alive pool that
-            leaks sockets on long-running pipelines. Callers should
-            invoke ``close()`` when done. Idempotent.
+            leaks sockets on long-running pipelines. Idempotent. NOTE: the
+            framework data-source lifecycle does not currently call
+            ``close()`` (it is not on the ``LakeflowConnect`` base), so this
+            is provided for explicit/manual use and future lifecycle hooks.
             """
             session = getattr(self, "_session", None)
             if session is not None:
@@ -721,30 +726,15 @@ def register_lakeflow_source(spark):
             # the whole microbatch. Apply the same bounded retry as the data
             # path (_fetch_page) — retry 429/503 + network errors, fail fast
             # on other 4xx/5xx. (F7)
-            max_retries = 5
-            response = None
-            for attempt in range(max_retries):
-                try:
-                    response = self._session.get(url, timeout=30)
-                except (requests.ConnectionError, requests.Timeout) as e:
-                    if attempt < max_retries - 1:
-                        self._sleep_before_retry(attempt)
-                        continue
-                    raise RuntimeError(
-                        f"Failed to list object types from Palantir ontology "
-                        f"'{self.ontology_api_name}' after {max_retries} "
-                        f"retries (network error): {e}"
-                    ) from e
-                if response.status_code in (429, 503):
-                    if attempt < max_retries - 1:
-                        self._sleep_before_retry(attempt, response)
-                        continue
-                    raise RuntimeError(
-                        f"Failed to list object types from Palantir ontology "
-                        f"'{self.ontology_api_name}' after {max_retries} "
-                        f"retries: last status {response.status_code}"
-                    )
-                break
+            response = self._request_with_retry(
+                "get",
+                url,
+                timeout=30,
+                error_label=(
+                    f"to list object types from Palantir ontology "
+                    f"'{self.ontology_api_name}'"
+                ),
+            )
 
             # Non-transient 4xx/5xx — surface the status + Palantir error
             # body (errorCode/errorName) so misconfiguration is actionable.
@@ -757,7 +747,9 @@ def register_lakeflow_source(spark):
 
             data = response.json()
             self._object_types_cache = {
-                obj["apiName"]: obj for obj in data.get("data", [])
+                obj["apiName"]: obj
+                for obj in data.get("data", [])
+                if obj.get("apiName")
             }
 
         def list_tables(self) -> List[str]:
@@ -1150,10 +1142,63 @@ def register_lakeflow_source(spark):
                 )
                 if retry_after is not None:
                     base_wait = retry_after
-            time.sleep(base_wait * (0.5 + random.random()))
+            wait = base_wait * (0.5 + random.random())
+            # One breadcrumb per retry (transient errors only, so low-noise)
+            # so a stalling 429/503 storm is visible in pipeline logs for
+            # triage — the data path is otherwise silent (OPS-1).
+            logger.warning(
+                "Transient Palantir error; backing off %.1fs before retry "
+                "(attempt %d).", wait, attempt + 1,
+            )
+            time.sleep(wait)
+
+        def _request_with_retry(
+            self, method: str, url: str, *, timeout: int,
+            json_body: Optional[dict] = None, error_label: str,
+        ):
+            """Issue an HTTP request under the connector's bounded
+            transient-retry policy and return the ``requests.Response``.
+
+            Retries 429/503 and network errors (``ConnectionError``/
+            ``Timeout``) with jittered backoff up to ``self._max_retries``,
+            then returns the response for the caller to handle non-transient
+            statuses and parse the body. Shared by the schema-discovery GET
+            and the data-path POST so their retry behaviour stays identical.
+            ``method`` is the ``requests.Session`` attribute name
+            ("get"/"post") so test mocks on those attributes still intercept.
+            """
+            send = getattr(self._session, method)
+            kwargs: dict = {"timeout": timeout}
+            if json_body is not None:
+                kwargs["json"] = json_body
+            for attempt in range(self._max_retries):
+                try:
+                    response = send(url, **kwargs)
+                except (requests.ConnectionError, requests.Timeout) as e:
+                    if attempt < self._max_retries - 1:
+                        self._sleep_before_retry(attempt)
+                        continue
+                    raise RuntimeError(
+                        f"Failed {error_label} after {self._max_retries} "
+                        f"retries (network error): {e}"
+                    ) from e
+                if response.status_code in (429, 503):
+                    if attempt < self._max_retries - 1:
+                        self._sleep_before_retry(attempt, response)
+                        continue
+                    raise RuntimeError(
+                        f"Failed {error_label} after {self._max_retries} "
+                        f"retries: last status {response.status_code}"
+                    )
+                return response
+            # Unreachable: the final iteration always returns or raises.
+            raise RuntimeError(  # pragma: no cover
+                f"Failed {error_label}: retry loop exited unexpectedly"
+            )
 
         def _cursor_strictly_greater(
-            self, new_value: Any, prev_value: Any
+            self, new_value: Any, prev_value: Any,
+            *, default_on_type_error: bool = True,
         ) -> bool:
             """Return ``True`` iff ``new_value > prev_value``.
 
@@ -1162,10 +1207,13 @@ def register_lakeflow_source(spark):
             every ISO 8601 form Palantir is known to return) so values
             with different tz suffixes don't compare lexicographically.
             Falls back to direct ``>`` for non-timestamp cursor types
-            (numeric IDs, UUIDs, etc.). On ``TypeError`` (e.g. comparing
-            an ``int`` to a ``str``) returns ``True`` so we default to
-            ``do the read`` — the safe choice for a quirky cursor type,
-            because skipping incorrectly would silently drop records.
+            (numeric IDs, UUIDs, etc.). On ``TypeError`` (e.g. comparing an
+            ``int`` to a ``str``) returns ``default_on_type_error`` — each
+            caller passes whichever value makes "do the read" the outcome
+            on an unorderable comparison, so an ambiguous peek never causes
+            records to be skipped. (A caller that reads when this is ``True``
+            keeps the default ``True``; the early-exit caller, which *skips*
+            when this is ``True``, passes ``False``.)
             """
             new_dt = self._to_utc_datetime(new_value)
             prev_dt = self._to_utc_datetime(prev_value)
@@ -1174,7 +1222,7 @@ def register_lakeflow_source(spark):
             try:
                 return new_value > prev_value
             except TypeError:
-                return True
+                return default_on_type_error
 
         def _get_max_cursor_value(
             self, table_name: str, cursor_field: str
@@ -1248,8 +1296,11 @@ def register_lakeflow_source(spark):
             Resolution order: an explicit ``tiebreaker_field`` option, then
             the ontology's declared primary-key property when it is a single
             real property. Returns ``None`` when no usable property exists
-            (e.g. the only key is the system ``__primaryKey``) — the caller
-            then falls back to the legacy single-cursor path.
+            (e.g. a multi-column primary key, or the only key is the system
+            ``__primaryKey``) — the incremental caller then refuses the read
+            with an actionable error rather than fall back to a lossy
+            single-cursor ``gt`` (which would drop rows sharing a cursor
+            value); the user must supply ``tiebreaker_field`` or use snapshot.
             """
             explicit = table_options.get("tiebreaker_field")
             if explicit:
@@ -1265,6 +1316,55 @@ def register_lakeflow_source(spark):
             ):
                 return primary_key[0]
             return None
+
+        def _build_incremental_where(
+            self, cursor_field: str, prev_max_cursor: Any,
+            tiebreak_field: Optional[str], prev_tiebreak: Any,
+        ) -> Optional[dict]:
+            """Build the server-side ``where`` filter for an incremental read.
+
+            - First run (``prev_max_cursor is None``): no filter → full load.
+            - Resume with a tiebreaker checkpoint: a composite filter that
+              resumes strictly after the last emitted ``(cursor, tiebreaker)``
+              tuple — ``cursor > prev`` OR (``cursor == prev`` AND
+              ``tiebreaker > prev_tiebreak``) — so rows sharing the boundary
+              cursor value are neither skipped nor duplicated.
+            - Resume without a persisted tiebreaker (e.g. an offset written by
+              an older connector version): the legacy strict ``gt`` cursor.
+            """
+            if prev_max_cursor is None:
+                return None
+            if tiebreak_field is not None and prev_tiebreak is not None:
+                return {
+                    "type": "or",
+                    "value": [
+                        {
+                            "type": "gt",
+                            "field": cursor_field,
+                            "value": prev_max_cursor,
+                        },
+                        {
+                            "type": "and",
+                            "value": [
+                                {
+                                    "type": "eq",
+                                    "field": cursor_field,
+                                    "value": prev_max_cursor,
+                                },
+                                {
+                                    "type": "gt",
+                                    "field": tiebreak_field,
+                                    "value": prev_tiebreak,
+                                },
+                            ],
+                        },
+                    ],
+                }
+            return {
+                "type": "gt",
+                "field": cursor_field,
+                "value": prev_max_cursor,
+            }
 
         def _read_incremental(
             self,
@@ -1331,9 +1431,26 @@ def register_lakeflow_source(spark):
             # non-unique cursor (e.g. a timestamp shared by many rows) needs
             # one so the composite (cursor, tiebreaker) ordering is total and
             # the offset can resume past the last emitted row without
-            # skipping rows that share the boundary cursor value. ``None``
-            # means no usable property → legacy single-cursor path.
+            # skipping rows that share the boundary cursor value.
             tiebreak_field = self._resolve_tiebreak_field(table_name, table_options)
+
+            # Fail safe: if no unique, server-sortable tiebreaker resolves
+            # (the object type declares no single-column primary key and no
+            # ``tiebreaker_field`` option was given), a strict ``gt`` cursor
+            # would silently DROP rows that share a cursor value across a
+            # ``max_records_per_batch`` boundary. Refuse the incremental read
+            # with an actionable error rather than lose data — the caller can
+            # supply ``tiebreaker_field`` or run the table in snapshot mode.
+            if tiebreak_field is None:
+                raise ValueError(
+                    f"Incremental (CDC) read of '{table_name}' needs a unique, "
+                    f"server-sortable tiebreaker so rows sharing a cursor value "
+                    f"are not silently dropped, but none could be resolved: the "
+                    f"object type declares no single-column primary key and no "
+                    f"'tiebreaker_field' table option was provided. Fix: set "
+                    f"'tiebreaker_field' to a unique sortable property, or run "
+                    f"this table in snapshot mode (omit 'cursor_field')."
+                )
 
             # Early-exit short-circuit: peek at the current dataset max
             # cursor via a single ``search orderBy desc, limit 1`` call and
@@ -1350,59 +1467,26 @@ def register_lakeflow_source(spark):
                 new_max_cursor = self._get_max_cursor_value(
                     table_name, cursor_field
                 )
-                if new_max_cursor is not None:
-                    if tiebreak_field is not None:
-                        if self._cursor_strictly_greater(
-                            prev_max_cursor, new_max_cursor
-                        ):
-                            return iter([]), start_offset
-                    elif not self._cursor_strictly_greater(
-                        new_max_cursor, prev_max_cursor
-                    ):
-                        return iter([]), start_offset
+                # Skip the (paginated) read only when the dataset's max cursor
+                # is strictly BELOW our checkpoint — definitively nothing new.
+                # An *equal* max may hide un-read rows sharing that cursor
+                # value (the composite ``where`` resolves them), so fall
+                # through and read. ``default_on_type_error=False`` makes an
+                # unorderable/type-mismatched peek fall through to the read
+                # too, rather than skip and risk dropping data (F3).
+                # (``tiebreak_field`` is always resolved here — the ``None``
+                # case is refused above — so there is no separate no-tiebreak
+                # branch.)
+                if new_max_cursor is not None and self._cursor_strictly_greater(
+                    prev_max_cursor, new_max_cursor, default_on_type_error=False
+                ):
+                    return iter([]), start_offset
 
-            # Build the server-side where clause for incremental runs.
-            # First run (prev_max_cursor is None): no filter → full load.
-            # Subsequent runs with a tiebreaker: a composite filter that
-            # resumes strictly after the last emitted (cursor, tiebreaker)
-            # tuple — ``cursor > prev`` OR (``cursor == prev`` AND
-            # ``tiebreaker > prev_tiebreak``) — so rows sharing the boundary
-            # cursor value are neither skipped nor duplicated. Without a
-            # tiebreaker we fall back to the legacy strict ``gt`` cursor.
-            where_clause = None
-            if prev_max_cursor is not None:
-                if tiebreak_field is not None and prev_tiebreak is not None:
-                    where_clause = {
-                        "type": "or",
-                        "value": [
-                            {
-                                "type": "gt",
-                                "field": cursor_field,
-                                "value": prev_max_cursor,
-                            },
-                            {
-                                "type": "and",
-                                "value": [
-                                    {
-                                        "type": "eq",
-                                        "field": cursor_field,
-                                        "value": prev_max_cursor,
-                                    },
-                                    {
-                                        "type": "gt",
-                                        "field": tiebreak_field,
-                                        "value": prev_tiebreak,
-                                    },
-                                ],
-                            },
-                        ],
-                    }
-                else:
-                    where_clause = {
-                        "type": "gt",
-                        "field": cursor_field,
-                        "value": prev_max_cursor,
-                    }
+            # Build the server-side where clause (composite (cursor,
+            # tiebreaker) resume, or legacy gt for a tiebreaker-less offset).
+            where_clause = self._build_incremental_where(
+                cursor_field, prev_max_cursor, tiebreak_field, prev_tiebreak
+            )
 
             # Eagerly materialise records up to max_records, in
             # (cursor, tiebreaker) ASC order. The composite cursor makes the
@@ -1438,10 +1522,25 @@ def register_lakeflow_source(spark):
                     and cursor_dt > init_dt
                 ):
                     break
+                # The tiebreaker must be non-null to keep the (cursor,
+                # tiebreaker) ordering total. A null value would persist
+                # ``max_tiebreak_value: None``, which the next run cannot
+                # distinguish from "no tiebreaker" and would silently fall
+                # back to a lossy strict-``gt`` cursor (F1). ``tiebreak_field``
+                # is always resolved here (the ``None`` case is refused
+                # above), so fail safe on a null value rather than lose data.
+                tiebreak_value = record.get(tiebreak_field)
+                if tiebreak_value is None:
+                    raise ValueError(
+                        f"Tiebreaker field '{tiebreak_field}' is null on a record "
+                        f"of '{table_name}'. A tiebreaker must be unique and "
+                        f"non-null to guarantee no rows are dropped at a cursor "
+                        f"boundary. Set 'tiebreaker_field' to a non-nullable "
+                        f"unique property, or run this table in snapshot mode."
+                    )
                 records.append(record)
                 last_emitted_cursor = cursor_value
-                if tiebreak_field is not None:
-                    last_emitted_tiebreak = record.get(tiebreak_field)
+                last_emitted_tiebreak = tiebreak_value
 
             # No records emitted → terminate the microbatch with the
             # same offset so Spark sees "no progress" and stops.
@@ -1485,7 +1584,7 @@ def register_lakeflow_source(spark):
             page_size: int = 1000,
             order_by_field: Optional[str] = None,
             secondary_order_field: Optional[str] = None,
-        ) -> Tuple[List[dict], str]:
+        ) -> Tuple[List[dict], Optional[str]]:
             """
             Fetch a single page of data from Palantir API using the
             loadObjectSet endpoint with snapshot=true for consistent
@@ -1530,53 +1629,30 @@ def register_lakeflow_source(spark):
                     )
                 body["orderBy"] = {"fields": order_fields}
 
-            # Retry policy: only transient failures retry. Everything else
-            # (4xx/5xx that isn't 429 or 503) propagates immediately —
-            # otherwise a real auth/config error like 401 (expired token)
-            # or 404 (wrong ontology name) would burn 1+2+4+8 = 15s of
-            # sleep and 5 wasted load-balancer hits before the user sees
-            # the actual error.
-            max_retries = 5
-            for attempt in range(max_retries):
-                try:
-                    response = self._session.post(url, json=body, timeout=120)
-                except (requests.ConnectionError, requests.Timeout) as e:
-                    if attempt < max_retries - 1:
-                        self._sleep_before_retry(attempt)
-                        continue
-                    raise RuntimeError(
-                        f"Failed to fetch data after {max_retries} retries "
-                        f"(network error): {e}"
-                    ) from e
+            # Transient failures (429/503/network) retry with bounded
+            # jittered backoff; everything else returns here for the
+            # non-transient check below.
+            response = self._request_with_retry(
+                "post", url, timeout=120, json_body=body, error_label="loadObjects"
+            )
 
-                if response.status_code in (429, 503):
-                    if attempt < max_retries - 1:
-                        self._sleep_before_retry(attempt, response)
-                        continue
-                    raise RuntimeError(
-                        f"Failed to fetch data after {max_retries} retries: "
-                        f"last status {response.status_code}"
-                    )
+            # Non-transient 4xx/5xx — raise immediately, no retry. Wrap in a
+            # RuntimeError carrying Palantir's structured error body
+            # (errorCode/errorName/parameters) and the request URL, so a
+            # 400 (bad filter) / 401 (expired token) / 403 (missing scope) /
+            # 404 (wrong ontology or object type) surfaces the actionable
+            # detail instead of a bare status line. No secret leak: the
+            # bearer token is sent in a header, never in the URL or body.
+            if response.status_code >= 400:
+                raise RuntimeError(
+                    f"Palantir loadObjects request failed with status "
+                    f"{response.status_code} for {url}: {response.text}"
+                )
 
-                # Non-transient 4xx/5xx — raise immediately, no retry. Wrap
-                # in a RuntimeError carrying Palantir's structured error body
-                # (errorCode/errorName/parameters) and the request URL, so a
-                # 400 (bad filter) / 401 (expired token) / 403 (missing
-                # scope) / 404 (wrong ontology or object type) surfaces the
-                # actionable detail instead of a bare status line. Mirrors
-                # the error contract of _ensure_object_types_cached. No
-                # secret leak: the bearer token is sent in a header, never in
-                # the URL or response body.
-                if response.status_code >= 400:
-                    raise RuntimeError(
-                        f"Palantir loadObjects request failed with status "
-                        f"{response.status_code} for {url}: {response.text}"
-                    )
-
-                data = response.json()
-                records = data.get("data", [])
-                next_page_token = data.get("nextPageToken")
-                return records, next_page_token
+            data = response.json()
+            records = data.get("data", [])
+            next_page_token = data.get("nextPageToken")
+            return records, next_page_token
 
 
     ########################################################
