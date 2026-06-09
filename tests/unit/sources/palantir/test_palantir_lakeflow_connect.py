@@ -1,3 +1,4 @@
+import json
 import time
 from unittest.mock import MagicMock, patch
 
@@ -268,7 +269,10 @@ class TestPalantirCursorTypes:
         # Lex compare on raw strings would have left the EST form
         # past-init in, breaking the cap. Datetime-aware compare
         # correctly identifies the post-init record.
-        assert offset == {"max_cursor_value": "2026-05-09T08:00:00-05:00"}
+        assert offset == {
+            "max_cursor_value": "2026-05-09T08:00:00-05:00",
+            "max_tiebreak_value": "a",
+        }
 
     def test_numeric_cursor_does_not_crash_on_cap(self):
         """When ``cursor_field`` is an int (e.g. auto-incrementing ID),
@@ -284,7 +288,7 @@ class TestPalantirCursorTypes:
             )
             emitted = list(emitted_iter)
         assert len(emitted) == 3
-        assert offset == {"max_cursor_value": 102}
+        assert offset == {"max_cursor_value": 102, "max_tiebreak_value": "2"}
 
     def test_date_cursor_caps_at_init_time_boundary(self):
         """When cursor_field is a date (10-char ``YYYY-MM-DD``), the
@@ -309,29 +313,36 @@ class TestPalantirCursorTypes:
         # Only pre-init records emitted; offset is last pre-init cursor
         # (preserving the date-only shape).
         assert [r["row_id"] for r in emitted] == ["a", "b"]
-        assert offset == {"max_cursor_value": "2026-05-08"}
+        assert offset == {"max_cursor_value": "2026-05-08", "max_tiebreak_value": "b"}
 
-    def test_early_exit_when_search_max_equals_prev_cursor(self):
-        """Early-exit short-circuit fires when the search peek returns
-        a value ``<= prev_max_cursor``. ``loadObjects`` must not be
-        called and the offset must round-trip unchanged so Spark
-        Streaming terminates the microbatch.
+    def test_early_exit_when_search_max_below_prev_cursor(self):
+        """Early-exit short-circuit fires when the search peek returns a
+        value strictly BELOW ``prev_max_cursor`` (nothing new exists).
+        With a composite (cursor, tiebreaker) cursor the connector must
+        NOT short-circuit on an *equal* max — un-read rows may still
+        share that boundary cursor value — so the skip condition is
+        strictly-less. ``loadObjects`` must not be called and the offset
+        must round-trip unchanged so Spark Streaming terminates.
         """
         c = self._connector()
-        prev = "2026-04-02T00:00:00Z"
+        prev_offset = {
+            "max_cursor_value": "2026-04-02T00:00:00Z",
+            "max_tiebreak_value": "z",
+        }
+        below = "2026-04-01T00:00:00Z"
         with patch.object(
-            c, "_get_max_cursor_value", return_value=prev
+            c, "_get_max_cursor_value", return_value=below
         ) as search_spy, patch.object(
             c, "_fetch_page"
         ) as fetch_spy:
             emitted_iter, offset = c.read_table(
                 "FlightsFinal",
-                {"max_cursor_value": prev},
+                prev_offset,
                 {"cursor_field": "arrivalTimestamp"},
             )
             emitted = list(emitted_iter)
         assert emitted == []
-        assert offset == {"max_cursor_value": prev}
+        assert offset == prev_offset
         search_spy.assert_called_once_with("FlightsFinal", "arrivalTimestamp")
         fetch_spy.assert_not_called()
 
@@ -359,7 +370,13 @@ class TestPalantirCursorTypes:
             )
             emitted = list(emitted_iter)
         assert [r["row_id"] for r in emitted] == ["x"]
-        assert offset == {"max_cursor_value": "2026-04-03T00:00:00Z"}
+        # Resuming from a cursor-only offset (no tiebreaker persisted),
+        # the connector uses the legacy strict gt filter, and the new
+        # offset now carries the tiebreaker for subsequent composite runs.
+        assert offset == {
+            "max_cursor_value": "2026-04-03T00:00:00Z",
+            "max_tiebreak_value": "x",
+        }
         # First call's object_set must be the where:gt filter.
         first_call = fetch_spy.call_args_list[0]
         object_set = first_call.args[0]
@@ -420,21 +437,22 @@ class TestPalantirCursorTypes:
 
     def test_early_exit_handles_numeric_cursor(self):
         """The cursor comparison helper must work for numeric cursors
-        too: when the search peek returns an int ``<= prev``, the
-        short-circuit fires. ``_to_utc_datetime`` returns ``None`` for
-        non-strings, so the helper falls back to direct ``>``.
+        too: when the search peek returns an int strictly below ``prev``,
+        the short-circuit fires. ``_to_utc_datetime`` returns ``None``
+        for non-strings, so the helper falls back to direct ``>``.
         """
         c = self._connector()
+        prev_offset = {"max_cursor_value": 100, "max_tiebreak_value": "z"}
         with patch.object(
-            c, "_get_max_cursor_value", return_value=100
+            c, "_get_max_cursor_value", return_value=99
         ), patch.object(c, "_fetch_page") as fetch_spy:
             emitted_iter, offset = c.read_table(
                 "FlightsFinal",
-                {"max_cursor_value": 100},
+                prev_offset,
                 {"cursor_field": "seq"},
             )
             assert list(emitted_iter) == []
-        assert offset == {"max_cursor_value": 100}
+        assert offset == prev_offset
         fetch_spy.assert_not_called()
 
     def test_offset_advances_to_last_emitted_record(self):
@@ -465,7 +483,78 @@ class TestPalantirCursorTypes:
             )
             emitted = list(emitted_iter)
         assert [r["row_id"] for r in emitted] == ["a", "b"]
-        assert offset == {"max_cursor_value": "2026-04-02T00:00:00Z"}
+        # Offset now carries the tiebreaker (row_id) alongside the
+        # cursor so the next microbatch resumes with the composite
+        # (cursor, tiebreaker) filter — no tie-group can be split.
+        assert offset == {
+            "max_cursor_value": "2026-04-02T00:00:00Z",
+            "max_tiebreak_value": "b",
+        }
+
+    def test_tied_cursor_at_cap_boundary_not_lost(self):
+        """Regression for the CDC tied-cursor data-loss bug (F1): when
+        records sharing one cursor value straddle the ``max_records``
+        boundary, the composite (cursor, tiebreaker) offset must resume
+        WITHIN the tie-group (``gt`` on the tiebreaker), so the un-emitted
+        tied rows are recovered rather than skipped by a strict ``gt``
+        on the cursor alone.
+        """
+        c = self._connector()
+        # Three records share one timestamp; cap=2 splits the tie group.
+        tied = [
+            {"row_id": "a", "arrivalTimestamp": "2026-04-01T00:00:00Z"},
+            {"row_id": "b", "arrivalTimestamp": "2026-04-01T00:00:00Z"},
+            {"row_id": "c", "arrivalTimestamp": "2026-04-01T00:00:00Z"},
+        ]
+        topts = {"cursor_field": "arrivalTimestamp", "max_records_per_batch": "2"}
+
+        # Batch 1: first two of the tie group, offset carries (ts, row_id).
+        with patch.object(c, "_fetch_page", return_value=(tied, None)):
+            it1, offset1 = c.read_table("FlightsFinal", None, topts)
+            emitted1 = list(it1)
+        assert [r["row_id"] for r in emitted1] == ["a", "b"]
+        assert offset1 == {
+            "max_cursor_value": "2026-04-01T00:00:00Z",
+            "max_tiebreak_value": "b",
+        }
+
+        # Batch 2: dataset max cursor EQUALS the checkpoint, but the
+        # un-read tied row 'c' must still be fetched (no early-exit), via
+        # the composite where clause. Simulate the filtered page = [c].
+        with patch.object(
+            c, "_get_max_cursor_value", return_value="2026-04-01T00:00:00Z"
+        ), patch.object(
+            c, "_fetch_page", return_value=([tied[2]], None)
+        ) as fetch_spy:
+            it2, offset2 = c.read_table("FlightsFinal", offset1, topts)
+            emitted2 = list(it2)
+        # The tied remainder is recovered, NOT silently dropped.
+        assert [r["row_id"] for r in emitted2] == ["c"]
+        fetch_spy.assert_called()
+        # And the resume filter is the composite (cursor, tiebreaker).
+        object_set = fetch_spy.call_args_list[0].args[0]
+        assert object_set["type"] == "filter"
+        assert object_set["where"] == {
+            "type": "or",
+            "value": [
+                {
+                    "type": "gt",
+                    "field": "arrivalTimestamp",
+                    "value": "2026-04-01T00:00:00Z",
+                },
+                {
+                    "type": "and",
+                    "value": [
+                        {
+                            "type": "eq",
+                            "field": "arrivalTimestamp",
+                            "value": "2026-04-01T00:00:00Z",
+                        },
+                        {"type": "gt", "field": "row_id", "value": "b"},
+                    ],
+                },
+            ],
+        }
 
 
 class TestPalantirSessionCleanup:
@@ -625,11 +714,12 @@ class TestPalantirHostnameNormalization:
         c = self._make("https://yourcompany.palantirfoundry.com")
         assert c.base_url == "https://yourcompany.palantirfoundry.com"
 
-    def test_http_scheme_preserved(self):
-        # Matches the OSIPI convention: a user-supplied scheme is
-        # preserved verbatim rather than silently upgraded.
-        c = self._make("http://yourcompany.palantirfoundry.com")
-        assert c.base_url == "http://yourcompany.palantirfoundry.com"
+    def test_http_scheme_rejected(self):
+        # F9: a plaintext http:// base URL would send the bearer token
+        # unencrypted, so it is rejected rather than used. Foundry is
+        # HTTPS-only and the docs specify https:// exclusively.
+        with pytest.raises(ValueError, match="https://"):
+            self._make("http://yourcompany.palantirfoundry.com")
 
     def test_trailing_slash_stripped(self):
         c = self._make("https://yourcompany.palantirfoundry.com/")
@@ -698,6 +788,10 @@ def _mock_response(status: int, json_payload: dict = None, headers: dict = None)
     # nested MagicMock, breaking Retry-After parsing in tests).
     r.headers = headers or {}
     r.json.return_value = json_payload or {}
+    # ``response.text`` carries Palantir's structured error body, which
+    # the connector folds into the RuntimeError it raises on a
+    # non-transient status (F3).
+    r.text = json.dumps(json_payload) if json_payload is not None else ""
     if status >= 400:
         r.raise_for_status.side_effect = requests.HTTPError(
             f"HTTP {status}", response=r
@@ -731,7 +825,7 @@ class TestPalantirFetchPageRetry:
         with patch.object(
             c._session, "post", return_value=_mock_response(401)
         ) as post_spy, patch.object(time, "sleep") as sleep_spy:
-            with pytest.raises(requests.HTTPError):
+            with pytest.raises(RuntimeError, match="401"):
                 c._fetch_page({"type": "base", "objectType": "T"})
         assert post_spy.call_count == 1
         sleep_spy.assert_not_called()
@@ -745,10 +839,30 @@ class TestPalantirFetchPageRetry:
         with patch.object(
             c._session, "post", return_value=_mock_response(404)
         ) as post_spy, patch.object(time, "sleep") as sleep_spy:
-            with pytest.raises(requests.HTTPError):
+            with pytest.raises(RuntimeError, match="404"):
                 c._fetch_page({"type": "base", "objectType": "T"})
         assert post_spy.call_count == 1
         sleep_spy.assert_not_called()
+
+    def test_non_transient_error_includes_palantir_error_body(self):
+        """F3: a non-transient 4xx must raise a RuntimeError that folds
+        in Palantir's structured error body (errorCode/errorName) and the
+        status, so failures are actionable instead of a bare status line.
+        """
+        c = self._connector()
+        err = {
+            "errorCode": "INVALID_ARGUMENT",
+            "errorName": "PropertiesNotFound",
+            "parameters": {"properties": ["bogusField"]},
+        }
+        with patch.object(
+            c._session, "post", return_value=_mock_response(400, err)
+        ), patch.object(time, "sleep"):
+            with pytest.raises(RuntimeError) as exc:
+                c._fetch_page({"type": "base", "objectType": "T"})
+        msg = str(exc.value)
+        assert "400" in msg
+        assert "PropertiesNotFound" in msg  # the error body is included
 
     def test_429_retries_then_succeeds(self):
         """A 429 followed by a 200 must succeed — the retry path is
@@ -927,3 +1041,183 @@ class TestPalantirFetchPageRetry:
             c._fetch_page({"type": "base", "objectType": "T"})
         # Should fall back to attempt=0 exp backoff: [0.5, 1.5).
         assert 0.5 <= sleeps[0] < 1.5
+
+
+class TestPalantirObjectTypesRetry:
+    """F7: the schema-discovery GET (`_ensure_object_types_cached`) is the
+    first request of every trigger, so it must retry transient 429/503 /
+    network errors like the data path — and fail fast on other 4xx/5xx.
+    """
+
+    @staticmethod
+    def _connector() -> PalantirLakeflowConnect:
+        return PalantirLakeflowConnect({
+            "token": "fake",
+            "hostname": "fake.palantirfoundry.com",
+            "ontology_api_name": "ontology-fake",
+        })
+
+    def test_objecttypes_get_retries_on_429_then_succeeds(self):
+        c = self._connector()
+        responses = [
+            _mock_response(429),
+            _mock_response(200, {"data": [{"apiName": "FlightsFinal"}]}),
+        ]
+        with patch.object(
+            c._session, "get", side_effect=responses
+        ) as get_spy, patch.object(time, "sleep"):
+            tables = c.list_tables()
+        assert get_spy.call_count == 2
+        assert "FlightsFinal" in tables
+
+    def test_objecttypes_get_retries_on_503_then_succeeds(self):
+        c = self._connector()
+        responses = [
+            _mock_response(503),
+            _mock_response(503),
+            _mock_response(200, {"data": [{"apiName": "FlightsFinal"}]}),
+        ]
+        with patch.object(
+            c._session, "get", side_effect=responses
+        ) as get_spy, patch.object(time, "sleep"):
+            c.list_tables()
+        assert get_spy.call_count == 3
+
+    def test_objecttypes_get_fails_fast_on_404(self):
+        c = self._connector()
+        err = {"errorCode": "NOT_FOUND", "errorName": "OntologyNotFound"}
+        with patch.object(
+            c._session, "get", return_value=_mock_response(404, err)
+        ) as get_spy, patch.object(time, "sleep") as sleep_spy:
+            with pytest.raises(RuntimeError, match="OntologyNotFound"):
+                c.list_tables()
+        assert get_spy.call_count == 1
+        sleep_spy.assert_not_called()
+
+    def test_objecttypes_get_exhausts_429_then_raises(self):
+        c = self._connector()
+        with patch.object(
+            c._session, "get", return_value=_mock_response(429)
+        ) as get_spy, patch.object(time, "sleep"):
+            with pytest.raises(RuntimeError, match="429"):
+                c.list_tables()
+        assert get_spy.call_count == 5
+
+
+class TestPalantirSchemaEdgeCases:
+    """F2: schema discovery must fail clearly for property-less object
+    types and must not silently swallow unmapped Palantir types."""
+
+    @staticmethod
+    def _connector() -> PalantirLakeflowConnect:
+        return PalantirLakeflowConnect({
+            "token": "fake",
+            "hostname": "fake.palantirfoundry.com",
+            "ontology_api_name": "ontology-fake",
+        })
+
+    def test_empty_object_type_raises_clear_error(self):
+        """No properties and no primaryKey -> empty schema. Must raise an
+        actionable ValueError rather than return StructType([]) (which
+        Spark later rejects opaquely)."""
+        c = self._connector()
+        with pytest.raises(ValueError, match="no readable columns"):
+            c._build_schema_from_object_type(
+                {"apiName": "EmptyType", "properties": {}}
+            )
+
+    def test_unmapped_type_falls_back_to_string_with_warning(self):
+        """An unrecognised Palantir type maps to StringType, but must log
+        a warning so the silent stringification is visible."""
+        from databricks.labs.community_connector.sources.palantir import (
+            palantir as _pmod,
+        )
+        c = self._connector()
+        with patch.object(_pmod.logger, "warning") as warn_spy:
+            mapped = c._map_palantir_type_to_spark({"type": "mediaReference"})
+        from pyspark.sql.types import StringType
+        assert isinstance(mapped, StringType)
+        warn_spy.assert_called_once()
+        assert "mediaReference" in str(warn_spy.call_args)
+
+    def test_known_type_does_not_warn(self):
+        """A recognised type maps directly with no warning."""
+        from databricks.labs.community_connector.sources.palantir import (
+            palantir as _pmod,
+        )
+        from pyspark.sql.types import LongType
+        c = self._connector()
+        with patch.object(_pmod.logger, "warning") as warn_spy:
+            mapped = c._map_palantir_type_to_spark({"type": "integer"})
+        assert isinstance(mapped, LongType)
+        warn_spy.assert_not_called()
+
+
+class TestPalantirPagination:
+    """F10/F11: exercise multi-page pagination (nextPageToken threading)
+    and the snapshot read path through the real _fetch_page → loadObjects
+    request. The single-page simulator default and the _fetch_page-mocking
+    snapshot unit tests leave both wires uncovered.
+    """
+
+    @staticmethod
+    def _connector() -> PalantirLakeflowConnect:
+        c = PalantirLakeflowConnect({
+            "token": "fake",
+            "hostname": "fake.palantirfoundry.com",
+            "ontology_api_name": "ontology-fake",
+        })
+        # Pre-seed the object-type cache so read_table_metadata doesn't
+        # hit the (unreachable) live API.
+        c._object_types_cache = {
+            "FlightsFinal": {"primaryKey": "flightId", "properties": {}}
+        }
+        return c
+
+    def test_pagination_threads_page_token_across_pages(self):
+        """F10: _generate_all_pages must follow nextPageToken to the next
+        page, and _fetch_page must send the previous page's token as
+        ``pageToken``. Page 1 returns a token, page 2 returns null."""
+        c = self._connector()
+        page1 = _mock_response(
+            200, {"data": [{"flightId": "1"}, {"flightId": "2"}],
+                  "nextPageToken": "TOK1"}
+        )
+        page2 = _mock_response(
+            200, {"data": [{"flightId": "3"}], "nextPageToken": None}
+        )
+        with patch.object(
+            c._session, "post", side_effect=[page1, page2]
+        ) as post_spy, patch.object(time, "sleep"):
+            records = list(c._generate_all_pages("FlightsFinal", 100))
+        # Records from BOTH pages, in order.
+        assert [r["flightId"] for r in records] == ["1", "2", "3"]
+        assert post_spy.call_count == 2
+        # Page 1 request carries no pageToken; page 2 carries page 1's token.
+        first_body = post_spy.call_args_list[0].kwargs["json"]
+        second_body = post_spy.call_args_list[1].kwargs["json"]
+        assert "pageToken" not in first_body
+        assert second_body["pageToken"] == "TOK1"
+
+    def test_snapshot_reads_through_loadobjects_without_orderby(self):
+        """F11: snapshot mode (no cursor_field) must traverse
+        _fetch_page → loadObjects and parse the response. The posted body
+        must be a base objectSet with no ``orderBy`` and no ``where``
+        filter, and the offset must be empty (one-pass, no resume)."""
+        c = self._connector()
+        page = _mock_response(
+            200, {"data": [{"flightId": "a"}, {"flightId": "b"}],
+                  "nextPageToken": None}
+        )
+        with patch.object(
+            c._session, "post", side_effect=[page]
+        ) as post_spy, patch.object(time, "sleep"):
+            emitted_iter, offset = c.read_table("FlightsFinal", None, {})
+            records = list(emitted_iter)
+        assert [r["flightId"] for r in records] == ["a", "b"]
+        assert offset == {}
+        body = post_spy.call_args_list[0].kwargs["json"]
+        assert "orderBy" not in body
+        assert body["objectSet"] == {
+            "type": "base", "objectType": "FlightsFinal"
+        }

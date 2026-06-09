@@ -262,6 +262,17 @@ curl -X POST \
 | `nextPageToken` | string or null | Token for next page; `null` when no more pages |
 | `totalCount` | string | Total number of matching objects |
 
+**System fields** — every record also carries four `__`-prefixed system fields that are **not** part of the object type's declared `properties` and are therefore **excluded from the connector's discovered schema** (the example above shows declared properties only):
+
+| Field | Example | Notes |
+|---|---|---|
+| `__rid` | `ri.phonograph2-objects.main.object.v4.…` | Stable, globally-unique object Resource ID — the canonical identifier for joins/lineage |
+| `__primaryKey` | `98d908cb…` | Foundry's internal primary-key value (used by the connector as the merge key **only** when the ontology declares no `primaryKey`) |
+| `__apiName` | `FlightsFinal` | The object type's API name |
+| `__title` | `98d908cb…` | The object's display title |
+
+These cannot be used as a `cursor_field` or `tiebreaker_field`: the objectSet API rejects `__`-prefixed fields in `orderBy`/`where` with `PropertiesNotFound`. To ingest one (e.g. `__rid`), expose it as a declared property in the ontology or capture it downstream.
+
 **Pagination behavior**:
 - `snapshot=true` freezes data at the start of pagination — all pages read from the same consistent state.
 - Pass `nextPageToken` from the response as `pageToken` in the next request body.

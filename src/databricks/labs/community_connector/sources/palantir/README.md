@@ -8,7 +8,7 @@ The Lakeflow Palantir Foundry Connector allows you to extract data from Palantir
 
 - **Dynamic Schema Discovery**: Automatically discovers schemas from Palantir object type definitions
 - **Flexible Ingestion Modes**: Supports both snapshot and incremental (CDC) sync
-- **Memory-Efficient Snapshot Streaming**: Snapshot mode yields records page by page via a generator, avoiding OOM on large datasets. Incremental mode materialises records up to `max_records_per_batch` (default 100,000) so the offset can advance to the last-emitted cursor; the next microbatch resumes via server-side `where: gt`.
+- **Memory-Efficient Snapshot Streaming**: Snapshot mode yields records page by page via a generator, avoiding OOM on large datasets. Incremental mode materialises records up to `max_records_per_batch` (default 100,000) so the offset can advance to the last-emitted record; the next microbatch resumes via a server-side composite `(cursor_field, tiebreaker_field)` filter (`cursor > prev` OR `cursor == prev AND tiebreaker > prev`). The tiebreaker (a unique sortable property, defaulting to the declared primary key) ensures rows sharing a non-unique cursor value — e.g. many rows at the same `arrivalTimestamp` — are never skipped or duplicated across a batch boundary.
 - **Early-Exit Cursor Peek**: A single `orderBy desc, pageSize=1` call on the search endpoint short-circuits incremental polls when the dataset hasn't advanced past the checkpoint, skipping the `loadObjects` round-trip on no-op ticks. Checkpointing itself is driven by the last emitted record's cursor.
 - **Complex Type Support**: Handles geopoints, arrays, structs, and nested objects
 - **In-Memory Caching**: Caches schemas and metadata for improved performance
@@ -106,10 +106,13 @@ The connector supports the following table-specific options via `table_configura
 | `cursor_field` | string | Property name for incremental sync tracking. Omit for snapshot mode. | `"arrivalTimestamp"` |
 | `page_size` | string | Number of records per API request (default 1000, max 10000) | `"10000"` |
 | `max_records_per_batch` | string | Admission cap per microbatch — **incremental mode only** (snapshot mode streams all records in one framework-driven pass with no resume mechanism, so a cap there would silently drop data). Default 100000. Smaller values reduce driver memory; larger values reduce the number of microbatches needed to drain a backlog. | `"50000"` |
+| `tiebreaker_field` | string | **Incremental mode only.** A unique, sortable property used to break ties when `cursor_field` is non-unique (e.g. many rows share one `arrivalTimestamp`). The connector resumes on the composite `(cursor_field, tiebreaker_field)` so rows sharing a boundary cursor value are never skipped or duplicated. Defaults to the ontology's declared primary-key property. Must be a **declared property** — Foundry rejects system fields (`__primaryKey`/`__rid`) in `orderBy`/`where`. If no usable property exists, run the table in snapshot mode. | `"flightId"` |
 
 ## Supported Objects
 
 The connector dynamically discovers all object types in your configured ontology. Each object type becomes a table that can be synced.
+
+> **System fields (`__`-prefixed) are not ingested by default.** Every `loadObjects` record carries four Palantir system fields — `__rid` (stable, globally-unique object Resource ID; useful for joins/lineage), `__primaryKey`, `__apiName`, and `__title`. The connector builds each table's schema from the object type's declared **properties** only, so these system fields are excluded from the discovered schema. (`__primaryKey` is still used internally as the merge key when the ontology declares no primary key.) To ingest one — e.g. `__rid` — expose it as a declared property in the ontology or capture it downstream. Note: Foundry rejects `__`-prefixed fields in `orderBy`/`where`, so they cannot be used as a `cursor_field` or `tiebreaker_field`.
 
 ### Ingestion Modes
 
@@ -118,14 +121,17 @@ The connector dynamically discovers all object types in your configured ontology
 - Use when: object types don't have update timestamps or full refresh is preferred
 - Configuration: Don't specify `cursor_field`
 - Reads all records using a memory-efficient generator (one page at a time)
+- **No mid-snapshot checkpoint:** snapshot mode reads the whole object type in a single framework-driven pass (offset is always `{}`), so there is no resume point. If the pass is interrupted partway — e.g. a token expiry (401, which is not retried) or the Foundry snapshot-consistency token timing out on a very long drain — the next trigger **restarts the entire read from the beginning**. For very large object types, prefer incremental (CDC) mode, ensure the token TTL comfortably exceeds the expected drain time, or size compute so the drain completes well within those limits.
 
 **Incremental Mode (CDC)** — `scd_type: SCD_TYPE_2`
 - Only syncs new/updated records based on cursor field
 - Use when: object types have timestamp fields for tracking changes
 - Configuration: Specify `cursor_field` in table options
-- Server-side filtering: uses `where: gt` via objectSet composition so the API only returns records newer than the checkpoint — no full scan needed on incremental runs
-- Early-exit short-circuit: on subsequent runs, peeks at the dataset's current max cursor via `search orderBy desc, pageSize=1` and skips the data fetch entirely when nothing has advanced past the checkpoint
-- Checkpoint advances to the cursor of the last emitted record so admission-capped batches resume correctly via `where: gt last_emitted` on the next tick
+- Server-side filtering: uses a composite `(cursor_field, tiebreaker_field)` filter via objectSet composition (`cursor > prev` OR `cursor == prev AND tiebreaker > prev`) so the API only returns records strictly after the checkpoint — no full scan, and rows sharing a non-unique cursor value are never skipped or duplicated across a batch boundary
+- Early-exit short-circuit: on subsequent runs, peeks at the dataset's current max cursor via `search orderBy desc, pageSize=1` and skips the data fetch when the max is strictly **below** the checkpoint (an *equal* max still proceeds, since un-read rows may share that cursor value)
+  - *Eventual-consistency caveat:* the peek uses the **`search`** endpoint while the read uses **`loadObjects`**. Foundry's search index can briefly lag the object store, so a stale (lower) `search` max can defer a microbatch until the index catches up. This delays — never drops — data (the rows arrive on a later tick), and it self-corrects. If you need the lowest possible latency, the early-exit is an optimization you can accept the small staleness from.
+- Checkpoint advances to the `(cursor, tiebreaker)` of the last emitted record so admission-capped batches resume exactly where they left off on the next tick
+- **Admission cap (`_init_time`) — timestamp cursors only:** the per-trigger cap that defers records arriving *after* the connector started works by comparing the cursor to wall-clock start time, so it applies **only when `cursor_field` is a timestamp**. For non-timestamp cursors (numeric IDs, UUIDs) there is no wall-clock value to compare, so the cap is skipped and the connector drains until the source is caught up — still bounded per microbatch by `max_records_per_batch`, with no data loss. Use a timestamp cursor if you want per-trigger admission control.
 
 **SCD Type Behavior:**
 
