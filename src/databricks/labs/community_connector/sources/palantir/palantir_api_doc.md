@@ -41,7 +41,7 @@ For this connector, Palantir ontology object types are treated as **tables**. Th
 - Each object type maps to one table, named by its `apiName`.
 - The connector supports snapshot (full refresh) and CDC (incremental with server-side filtering) ingestion modes.
 - Data is fetched via `loadObjectSet` with `snapshot=true` for consistent pagination across large datasets.
-- CDC incremental runs use server-side `where: gt` filtering via objectSet composition.
+- CDC incremental runs use a server-side composite `(cursor_field, tiebreaker)` filter via objectSet composition.
 - Max cursor lookup uses the search endpoint with `orderBy desc, pageSize=1`.
 - Transient errors (429, 503, `ConnectionError`, `Timeout`) are retried with jittered exponential backoff up to 5 attempts; ``Retry-After`` is honoured on 429/503 when present.
 - Link types, action types, and query types are **not** supported.
@@ -282,7 +282,7 @@ These cannot be used as a `cursor_field` or `tiebreaker_field`: the objectSet AP
 **Connector behavior**:
 - Uses a generator to yield records page by page, keeping only one page (~10K records) in memory at a time. Avoids OOM on large datasets.
 - In snapshot mode: base objectSet, pages through all objects.
-- In CDC mode: filtered objectSet with `where: gt` on cursor field. On incremental runs, the API only returns records newer than the checkpoint — no full scan needed.
+- In CDC mode: filtered objectSet with a composite `(cursor, tiebreaker)` filter — `cursor > prev` OR (`cursor == prev` AND `tiebreaker > prev_tiebreak`). On incremental runs the API only returns records after the checkpoint — no full scan needed.
 - Retries transient errors (429, 503, `ConnectionError`, `Timeout`) with jittered exponential backoff up to 5 attempts. On 429/503, honours the `Retry-After` header as the base wait when present (integer-seconds form). Non-transient 4xx/5xx propagate immediately so misconfiguration (e.g. 401 expired token, 404 wrong ontology) surfaces without burning retry budget.
 - `pageSize` is capped at 10,000.
 
@@ -293,7 +293,7 @@ These cannot be used as a `cursor_field` or `tiebreaker_field`: the objectSet AP
 
 **Used by**: `_get_max_cursor_value()`
 
-**Purpose**: Peek the dataset's current max cursor value (single record sorted descending on the cursor field) to drive the incremental early-exit short-circuit. If the peeked value hasn't advanced past the connector's checkpoint, the read returns an empty iterator with the unchanged offset and skips the `loadObjects` round-trip entirely. The checkpoint itself is set from the last emitted record's cursor — this endpoint is an optimization, not the checkpointing mechanism.
+**Purpose**: Peek the dataset's current max cursor value (single record sorted descending on the cursor field) to drive the incremental early-exit short-circuit. The read is skipped (empty iterator, unchanged offset) **only when the peeked max is strictly *below* the checkpoint** — definitively nothing new. An *equal* max may still hide un-read rows that share that cursor value (resolved by the composite tiebreaker on the read), so the read proceeds. The checkpoint itself is set from the last emitted record — this endpoint is an optimization, not the checkpointing mechanism.
 
 > **Note**: An earlier version of this connector tried the `/objectSets/aggregate` endpoint first as a "lightweight max-cursor lookup" and fell back to `search`. Palantir returns HTTP 500 for `aggregate` against the object types we use, so the fallback path was the only one that ever produced a result. The aggregate code path was removed to skip the doomed HTTP round-trip on every CDC tick.
 

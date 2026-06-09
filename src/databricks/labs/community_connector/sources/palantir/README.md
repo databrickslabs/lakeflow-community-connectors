@@ -9,7 +9,7 @@ The Lakeflow Palantir Foundry Connector allows you to extract data from Palantir
 - **Dynamic Schema Discovery**: Automatically discovers schemas from Palantir object type definitions
 - **Flexible Ingestion Modes**: Supports both snapshot and incremental (CDC) sync
 - **Memory-Efficient Snapshot Streaming**: Snapshot mode yields records page by page via a generator, avoiding OOM on large datasets. Incremental mode materialises records up to `max_records_per_batch` (default 100,000) so the offset can advance to the last-emitted record; the next microbatch resumes via a server-side composite `(cursor_field, tiebreaker_field)` filter (`cursor > prev` OR `cursor == prev AND tiebreaker > prev`). The tiebreaker (a unique sortable property, defaulting to the declared primary key) ensures rows sharing a non-unique cursor value — e.g. many rows at the same `arrivalTimestamp` — are never skipped or duplicated across a batch boundary.
-- **Early-Exit Cursor Peek**: A single `orderBy desc, pageSize=1` call on the search endpoint short-circuits incremental polls when the dataset hasn't advanced past the checkpoint, skipping the `loadObjects` round-trip on no-op ticks. Checkpointing itself is driven by the last emitted record's cursor.
+- **Early-Exit Cursor Peek**: A single `orderBy desc, pageSize=1` call on the search endpoint short-circuits an incremental poll **only when the dataset's max cursor is strictly *below* the checkpoint** (definitively nothing new), skipping the `loadObjects` round-trip. An *equal* max still reads, since un-read rows may share that cursor value. Checkpointing itself is driven by the last emitted record.
 - **Complex Type Support**: Handles geopoints, arrays, structs, and nested objects
 - **In-Memory Caching**: Caches schemas and metadata for improved performance
 
@@ -272,7 +272,7 @@ Databricks Delta Table (Unity Catalog)
 
 ### 5. Scalability Guidelines
 - **< 10M records**: Current approach works well
-- **10M - 100M**: Use `page_size=10000` to minimise API round-trips; CDC mode already uses server-side `where: gt` filtering on every incremental run
+- **10M - 100M**: Use `page_size=10000` to minimise API round-trips; CDC mode already uses a server-side composite `(cursor_field, tiebreaker)` filter on every incremental run
 - **100M+**: Consider the Foundry Dataset API for bulk export
 
 ## Troubleshooting
@@ -350,7 +350,7 @@ SELECT COUNT(*) FROM catalog.schema.table_name
 
 1. **Single Ontology Per Connection**: Each Unity Catalog connection targets one Palantir ontology. Create multiple connections for multiple ontologies.
 
-2. **Server-Side Filtering on Incremental Only**: The initial full load fetches all records. Subsequent incremental runs use server-side `where: gt` filtering to fetch only new records.
+2. **Server-Side Filtering on Incremental Only**: The initial full load fetches all records. Subsequent incremental runs use a server-side composite `(cursor_field, tiebreaker)` filter to fetch only new records.
 
 3. **Object Types Only**: Currently supports object types. Link types and action types are not supported.
 
