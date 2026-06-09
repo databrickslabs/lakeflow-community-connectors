@@ -93,22 +93,15 @@ The YouTube connector exposes **nine** tables from the YouTube Data API v3:
 
 ### Pagination
 
-The YouTube API paginates with `pageToken` / `nextPageToken`. The connector uses **two patterns**, depending on the table:
+All tables are **snapshot**: each pipeline run performs a full re-read. The YouTube API paginates with `pageToken` / `nextPageToken`, but that pagination stays **inside** the connector — it is not exposed to the Lakeflow framework as an incremental cursor.
 
-**Page-per-call** (`channels`, `playlists`, `activities`, `comment_threads`, `subscriptions`, `video_categories`):
+**Drain-all snapshot** (all tables except `videos` by `video_ids`):
 
-- Each `read_table` call fetches **one API page** (up to `max_results` items, default 50).
-- The connector returns `next_offset = {"pageToken": "<token>"}` until the last page, then `{"pageToken": None}`.
-- The Lakeflow framework passes that offset into the next call until offsets converge (no more data).
-- A final tail call with `pageToken: None` returns an empty batch (no re-fetch of page 1).
+- One `read_table` call loops API pages until `nextPageToken` is absent or `max_pages` is reached.
+- Returns all accumulated rows with `{"done": True}`.
+- A tail call with `{"done": True}` returns an empty batch (no duplicate rows, no extra API calls).
 
-**Drain-all in one call** (`search`, `playlist_items`, `videos` with `chart=mostPopular`):
-
-- The connector loops API pages **inside a single** `read_table` call until `nextPageToken` is absent or `max_pages` is reached.
-- Returns all accumulated rows once with `{"pageToken": None}`.
-- Each pipeline **snapshot** run starts fresh (full re-read of the query/playlist/chart).
-
-**Single request** (`videos` with `video_ids`): one API call, no pagination.
+**Single request** (`videos` with `video_ids`): one API call, then `{"done": True}`.
 
 **`published_after` (activities, search):** optional **query filter** (ISO 8601 → API `publishedAfter`), not a framework cursor. `activities` ingestion is snapshot; each run re-reads unless you narrow the window with `published_after`.
 
@@ -254,7 +247,7 @@ For OAuth-only tables (`mine=true`), ensure the connection uses `client_id`, `cl
 
 ### Step 3: Run and Schedule the Pipeline
 
-Run the pipeline using your usual Lakeflow or Databricks orchestration. Within a single ingestion, page-per-call tables advance via `pageToken` until exhausted; drain-all tables return the full batch in one call. Snapshot tables re-read from the start on each scheduled run unless you filter with options like `published_after`.
+Run the pipeline using your usual Lakeflow or Databricks orchestration. Each snapshot table drains all API pages in one `read_table` call and returns `{"done": True}`; the next framework call is a no-op. Scheduled runs start fresh unless you narrow the window with options like `published_after`.
 
 #### Best Practices
 
