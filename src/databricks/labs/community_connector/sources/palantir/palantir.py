@@ -547,7 +547,9 @@ class PalantirLakeflowConnect(LakeflowConnect):
             return None
         return seconds
 
-    def _sleep_before_retry(self, attempt: int, response=None) -> None:
+    def _sleep_before_retry(
+        self, attempt: int, response: Optional[requests.Response] = None
+    ) -> None:
         """Sleep before retrying a transient failure.
 
         Honours ``Retry-After`` when the server set it (429/503),
@@ -578,7 +580,7 @@ class PalantirLakeflowConnect(LakeflowConnect):
     def _request_with_retry(
         self, method: str, url: str, *, timeout: int,
         json_body: Optional[dict] = None, error_label: str,
-    ):
+    ) -> requests.Response:
         """Issue an HTTP request under the connector's bounded
         transient-retry policy and return the ``requests.Response``.
 
