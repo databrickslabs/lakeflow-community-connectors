@@ -19,8 +19,8 @@ To configure the connector, provide the following parameters in your connector o
 |-----------|------|----------|-------------|---------|
 | `client_id` | string | Yes | OAuth Client ID from Zoho API Console | `1000.XXXXX...` |
 | `client_secret` | string | Yes | OAuth Client Secret from Zoho API Console | `abc123...` |
-| `refresh_token` | string | Yes | OAuth Refresh Token (never expires) | `1000.YYYYY...` |
-| `base_url` | string | No | Zoho accounts URL for your data center | `https://accounts.zoho.com` |
+| `refresh_token` | string | Yes | OAuth Refresh Token (never expires). Obtained automatically via the OAuth flow during connection setup. | `1000.YYYYY...` |
+| `region` | string | Yes | Zoho data center for your account. One of `US`, `EU`, `IN`, `AU`, `CN`, `JP`. Defaults to `US`. | `EU` |
 | `initial_load_start_date` | string | No | Starting point for the first sync. If omitted, syncs all historical data. (ISO 8601 format) | `2024-01-01T00:00:00Z` |
 
 ### Table-Level Options
@@ -88,20 +88,20 @@ curl -X POST "https://{accounts-server}/oauth/v2/token" \
 
 The response will contain your `refresh_token` - save this securely!
 
-### Base URL by Data Center
+### Region → Accounts URL
 
-Choose the appropriate `base_url` (Zoho accounts URL) based on your data center:
+The `region` parameter selects which Zoho data center the connector talks to.
+The connector and the OAuth flow both derive the correct accounts URL from
+this value automatically:
 
-| Data Center | Base URL |
-|-------------|----------|
-| US | `https://accounts.zoho.com` |
-| EU | `https://accounts.zoho.eu` |
-| IN | `https://accounts.zoho.in` |
-| AU | `https://accounts.zoho.com.au` |
-| CN | `https://accounts.zoho.com.cn` |
-| JP | `https://accounts.zoho.jp` |
-
-The connector automatically derives the correct API endpoint from the accounts URL.
+| Region | Accounts URL |
+|--------|--------------|
+| `US` | `https://accounts.zoho.com` |
+| `EU` | `https://accounts.zoho.eu` |
+| `IN` | `https://accounts.zoho.in` |
+| `AU` | `https://accounts.zoho.com.au` |
+| `CN` | `https://accounts.zoho.com.cn` |
+| `JP` | `https://accounts.zoho.jp` |
 
 ### Create a Unity Catalog Connection
 
@@ -362,7 +362,7 @@ The connector implements automatic retry with exponential backoff for rate limit
 If you see "Token refresh response missing 'access_token'":
 1. Verify your `client_id` and `client_secret` are correct
 2. Check that your `refresh_token` is valid (hasn't been revoked)
-3. Ensure you're using the correct `base_url` for your data center
+3. Ensure `region` matches the data center where your Zoho account lives
 
 **Empty Module Data:**
 

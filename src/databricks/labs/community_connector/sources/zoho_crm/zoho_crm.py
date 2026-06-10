@@ -23,6 +23,36 @@ from databricks.labs.community_connector.sources.zoho_crm.handlers import (
 
 logger = logging.getLogger(__name__)
 
+# Zoho accounts URL per data center region. Keep in sync with the
+# `endpoints_by_region` block in connector_spec.yaml.
+_ACCOUNTS_URL_BY_REGION = {
+    "US": "https://accounts.zoho.com",
+    "EU": "https://accounts.zoho.eu",
+    "IN": "https://accounts.zoho.in",
+    "AU": "https://accounts.zoho.com.au",
+    "CN": "https://accounts.zoho.com.cn",
+    "JP": "https://accounts.zoho.jp",
+}
+_DEFAULT_REGION = "US"
+
+
+def _resolve_accounts_url(options: dict[str, str]) -> str:
+    """Resolve the Zoho accounts URL from options.
+
+    Prefer `region` (current spec); fall back to `base_url` for connections
+    created against the previous spec shape so existing dev configs still load.
+    """
+    region = options.get("region")
+    if region:
+        url = _ACCOUNTS_URL_BY_REGION.get(region.upper())
+        if not url:
+            raise ValueError(
+                f"Unknown Zoho region '{region}'. "
+                f"Expected one of: {', '.join(_ACCOUNTS_URL_BY_REGION)}"
+            )
+        return url
+    return options.get("base_url", _ACCOUNTS_URL_BY_REGION[_DEFAULT_REGION])
+
 
 class ZohoCRMLakeflowConnect(LakeflowConnect):
     """
@@ -40,8 +70,9 @@ class ZohoCRMLakeflowConnect(LakeflowConnect):
             - client_id: OAuth Client ID from Zoho API Console
             - client_secret: OAuth Client Secret from Zoho API Console
             - refresh_token: Long-lived refresh token obtained from OAuth flow
-            - base_url (optional): Zoho accounts URL for OAuth.
-              Defaults to https://accounts.zoho.com
+            - region (optional): Zoho data center region — US, EU, IN, AU, CN, JP.
+              Defaults to US (accounts.zoho.com). Also accepts the legacy
+              `base_url` option for backwards compatibility.
             - initial_load_start_date (optional): Starting point for the first sync.
         """
         client_id = options.get("client_id")
@@ -55,7 +86,7 @@ class ZohoCRMLakeflowConnect(LakeflowConnect):
             )
 
         self.initial_load_start_date = options.get("initial_load_start_date")
-        accounts_url = options.get("base_url", "https://accounts.zoho.com")
+        accounts_url = _resolve_accounts_url(options)
 
         self._client = ZohoAPIClient(
             client_id=client_id,
