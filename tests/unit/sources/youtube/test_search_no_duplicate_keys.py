@@ -86,24 +86,17 @@ def test_search_single_call_no_duplicate_keys(mock_connector):
 
 
 def test_search_second_call_returns_empty_so_no_duplicates_across_calls(mock_connector):
-    """Pipeline: first call returns data, second call with returned offset must return 0 records."""
+    """Snapshot search should terminate with offset=None after first call."""
     table_options = {"q": "databricks", "type": "video", "max_pages": "10"}
-    all_keys = []
-    start_offset = {}
-    for _ in range(3):  # At most 3 calls; second and third should return empty
-        records_iter, next_offset = mock_connector.read_table("search", start_offset, table_options)
-        records = list(records_iter)
-        for r in records:
-            all_keys.append((r.get("search_query"), r.get("result_index")))
-        if not records:
-            break
-        start_offset = next_offset
+    records_iter, next_offset = mock_connector.read_table("search", {}, table_options)
+    records = list(records_iter)
+    all_keys = [(r.get("search_query"), r.get("result_index")) for r in records]
     unique_keys = set(all_keys)
     assert len(unique_keys) == len(all_keys), (
         f"Duplicate keys across pipeline calls: total={len(all_keys)} unique={len(unique_keys)}. "
         f"Duplicates: {[k for k in all_keys if all_keys.count(k) > 1][:10]}"
     )
-    assert len(records) == 0, "Second call should return 0 records when offset has done=True"
+    assert next_offset is None
     assert len(all_keys) == 125, "Only first call should have returned 125 records"
 
 

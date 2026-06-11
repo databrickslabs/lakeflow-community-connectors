@@ -132,7 +132,7 @@
 - **Base URL**: `https://www.googleapis.com/youtube/v3`
 - **Method**: GET for all list endpoints.
 - **Pagination (API)**: `pageToken` (request) and `nextPageToken` / `prevPageToken` (response). `maxResults` 1–50 (1–100 for commentThreads and comments). Continue until `nextPageToken` is absent or empty.
-- **Pagination (connector)**: All snapshot tables drain API pages inside one `read_table` call and return `{"done": True}` to the framework (no incremental `pageToken` offset). Use `max_pages` to cap internal fetches where supported.
+- **Pagination (connector)**: All snapshot tables drain API pages inside one `read_table` call and return `None` offset to the framework (no incremental `pageToken` offset). Use `max_pages` to cap internal fetches where supported.
 - **Quota**: Default 10,000 units/day. Each list call = 1 unit; **search.list = 100 units**. Throttle to stay under quota.
 
 ---

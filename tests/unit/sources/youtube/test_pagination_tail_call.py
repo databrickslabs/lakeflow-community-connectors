@@ -1,8 +1,4 @@
-"""
-Snapshot tail-call: after a full drain, read_table returns {"done": True}.
-The framework calls again with that offset; readers must return empty rows
-without extra API requests.
-"""
+"""Snapshot reads should terminate with offset=None in one call."""
 import sys
 from pathlib import Path
 from unittest.mock import MagicMock
@@ -13,10 +9,7 @@ _ROOT = Path(__file__).resolve().parents[4]
 if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 
-from databricks.labs.community_connector.sources.youtube.youtube import (
-    YouTubeLakeflowConnect,
-    _SNAPSHOT_DONE_OFFSET,
-)
+from databricks.labs.community_connector.sources.youtube.youtube import YouTubeLakeflowConnect
 
 _OPTIONS = {"client_id": "x", "client_secret": "y", "refresh_token": "z"}
 
@@ -65,15 +58,10 @@ def mock_connector():
         ("comment_threads", {"video_id": "vid123"}),
     ],
 )
-def test_tail_call_with_done_returns_empty(mock_connector, table_name, table_options):
-    """Second read with end offset must not re-emit rows or call the API again."""
+def test_snapshot_read_returns_none_offset(mock_connector, table_name, table_options):
+    """Snapshot reads return None offset so framework terminates immediately."""
     records_iter, end_offset = mock_connector.read_table(table_name, {}, table_options)
     first = list(records_iter)
     assert len(first) > 0
-    assert end_offset == _SNAPSHOT_DONE_OFFSET
-
-    tail_iter, tail_offset = mock_connector.read_table(table_name, end_offset, table_options)
-    tail_records = list(tail_iter)
-    assert tail_records == []
-    assert tail_offset == _SNAPSHOT_DONE_OFFSET
+    assert end_offset is None
     assert mock_connector._request.call_count == 1

@@ -4,7 +4,7 @@ Implements LakeflowConnect for ingesting channels, playlists, playlist_items,
 videos, search, activities, comment_threads, subscriptions, and video_categories.
 Supports API key (public data) or OAuth 2.0 (client_id, client_secret, refresh_token)
 for private/mine data. All tables are snapshot: each read drains API pages internally
-and returns a ``{"done": True}`` sentinel (actitime-style) for framework termination.
+and returns ``None`` offset for framework termination.
 """
 
 import time
@@ -28,10 +28,13 @@ RETRIABLE_STATUS_CODES = {429, 500, 503}
 MAX_RESULTS_DEFAULT = 50
 # commentThreads and comments support 1-100; other list endpoints support 1-50
 MAX_RESULTS_COMMENT_THREADS = 100
-_SNAPSHOT_DONE_OFFSET = {"done": True}
 
 
-def _max_results(table_options: dict[str, str], default: int = MAX_RESULTS_DEFAULT, cap: int = 50) -> int:
+def _max_results(
+    table_options: dict[str, str],
+    default: int = MAX_RESULTS_DEFAULT,
+    cap: int = 50,
+) -> int:
     """Parse max_results from table_options; clamp to [1, cap]. Used for pagination page size."""
     raw = table_options.get("max_results") or ""
     if not raw:
@@ -56,13 +59,11 @@ def _parse_max_pages(
         return default
 
 
-def _snapshot_done_short_circuit(
-    start_offset: dict,
-) -> tuple[Iterator[dict], dict] | None:
-    """Return empty batch when snapshot read already completed in this trigger."""
-    if start_offset and start_offset.get("done"):
-        return iter([]), start_offset
-    return None
+def _chunked_ids(raw_ids: str, size: int = 50) -> list[list[str]]:
+    """Split comma-separated IDs into de-duplicated fixed-size batches."""
+    ids = [item.strip() for item in raw_ids.split(",") if item.strip()]
+    unique_ids = list(dict.fromkeys(ids))
+    return [unique_ids[i : i + size] for i in range(0, len(unique_ids), size)]
 
 
 def _retry_wait_seconds(resp: requests.Response, backoff: float) -> float:
@@ -257,7 +258,9 @@ def _flatten_activity(item: dict) -> dict:
         "snippet_title": _get_nested(item, "snippet.title"),
         "snippet_type": _get_nested(item, "snippet.type"),
         "snippet_channelTitle": _get_nested(item, "snippet.channelTitle"),
-        "contentDetails_upload_videoId": upload.get("videoId") if isinstance(upload, dict) else None,
+        "contentDetails_upload_videoId": (
+            upload.get("videoId") if isinstance(upload, dict) else None
+        ),
         "contentDetails_like_videoId": (
             like.get("resourceId", {}).get("videoId")
             if isinstance(like, dict) and isinstance(like.get("resourceId"), dict)
@@ -338,17 +341,13 @@ class YouTubeLakeflowConnect(LakeflowConnect):
                 "YouTube connector requires either 'api_key' or all of "
                 "'client_id', 'client_secret', 'refresh_token' in options, not both"
             )
-        if self._api_key:
-            self._access_token = None
-            self._token_expires_at = 0.0
-        else:
-            if not self._client_id or not self._client_secret or not self._refresh_token:
-                raise ValueError(
-                    "YouTube connector requires either 'api_key' or all of "
-                    "'client_id', 'client_secret', 'refresh_token' in options"
-                )
-            self._access_token = None
-            self._token_expires_at = 0.0
+        if not self._api_key and not has_oauth:
+            raise ValueError(
+                "YouTube connector requires either 'api_key' or all of "
+                "'client_id', 'client_secret', 'refresh_token' in options"
+            )
+        self._access_token = None
+        self._token_expires_at = 0.0
         self._session = requests.Session()
 
     def _get_access_token(self) -> str:
@@ -364,6 +363,7 @@ class YouTubeLakeflowConnect(LakeflowConnect):
                 "grant_type": "refresh_token",
             },
             headers={"Content-Type": "application/x-www-form-urlencoded"},
+            timeout=60,
         )
         if resp.status_code == 401:
             raise ValueError(
@@ -469,7 +469,7 @@ class YouTubeLakeflowConnect(LakeflowConnect):
         table_name: str,
         start_offset: dict,
         table_options: dict[str, str],
-    ) -> tuple[Iterator[dict], dict]:
+    ) -> tuple[Iterator[dict], dict | None]:
         self._validate_table(table_name)
         readers = {
             "channels": self._read_channels,
@@ -486,10 +486,7 @@ class YouTubeLakeflowConnect(LakeflowConnect):
 
     def _read_channels(
         self, start_offset: dict, table_options: dict[str, str]
-    ) -> tuple[Iterator[dict], dict]:
-        done = _snapshot_done_short_circuit(start_offset)
-        if done:
-            return done
+    ) -> tuple[Iterator[dict], dict | None]:
         params: dict[str, Any] = {"part": "snippet,statistics,contentDetails"}
         channel_ids = (table_options.get("channel_ids") or "").strip()
         if channel_ids:
@@ -503,14 +500,11 @@ class YouTubeLakeflowConnect(LakeflowConnect):
         records = self._drain_paginated_list(
             "channels", params, _flatten_channel, table_options
         )
-        return iter(records), _SNAPSHOT_DONE_OFFSET
+        return iter(records), None
 
     def _read_playlists(
         self, start_offset: dict, table_options: dict[str, str]
-    ) -> tuple[Iterator[dict], dict]:
-        done = _snapshot_done_short_circuit(start_offset)
-        if done:
-            return done
+    ) -> tuple[Iterator[dict], dict | None]:
         params: dict[str, Any] = {"part": "snippet,contentDetails"}
         pl_ids = (table_options.get("playlist_ids") or "").strip()
         ch_id = (table_options.get("channel_id") or "").strip()
@@ -525,14 +519,11 @@ class YouTubeLakeflowConnect(LakeflowConnect):
         records = self._drain_paginated_list(
             "playlists", params, _flatten_playlist, table_options
         )
-        return iter(records), _SNAPSHOT_DONE_OFFSET
+        return iter(records), None
 
     def _read_playlist_items(
         self, start_offset: dict, table_options: dict[str, str]
-    ) -> tuple[Iterator[dict], dict]:
-        done = _snapshot_done_short_circuit(start_offset)
-        if done:
-            return done
+    ) -> tuple[Iterator[dict], dict | None]:
         playlist_id = (table_options.get("playlist_id") or "").strip()
         if not playlist_id:
             raise ValueError("playlist_items requires playlist_id in table_options")
@@ -543,27 +534,28 @@ class YouTubeLakeflowConnect(LakeflowConnect):
         records = self._drain_paginated_list(
             "playlistItems", params, _flatten_playlist_item, table_options
         )
-        return iter(records), _SNAPSHOT_DONE_OFFSET
+        return iter(records), None
 
     def _read_videos(
         self, start_offset: dict, table_options: dict[str, str]
-    ) -> tuple[Iterator[dict], dict]:
-        done = _snapshot_done_short_circuit(start_offset)
-        if done:
-            return done
+    ) -> tuple[Iterator[dict], dict | None]:
         video_ids = (table_options.get("video_ids") or "").strip()
         use_chart = (table_options.get("chart") or "").lower() == "mostpopular"
         if video_ids:
-            params = {
-                "part": "snippet,statistics,contentDetails",
-                "id": video_ids,
-                "maxResults": _max_results(table_options, cap=50),
-            }
-            resp = self._request("videos", params=params)
-            self._ensure_ok(resp, "videos")
-            items = resp.json().get("items") or []
-            records = [_flatten_video(i) for i in items]
-            return iter(records), _SNAPSHOT_DONE_OFFSET
+            id_batches = _chunked_ids(video_ids, size=50)
+            if not id_batches:
+                raise ValueError("videos requires non-empty video_ids")
+            records: list[dict] = []
+            for id_batch in id_batches:
+                params = {
+                    "part": "snippet,statistics,contentDetails",
+                    "id": ",".join(id_batch),
+                }
+                resp = self._request("videos", params=params)
+                self._ensure_ok(resp, "videos")
+                items = resp.json().get("items") or []
+                records.extend(_flatten_video(i) for i in items)
+            return iter(records), None
         if use_chart:
             params: dict[str, Any] = {
                 "part": "snippet,statistics,contentDetails",
@@ -581,15 +573,12 @@ class YouTubeLakeflowConnect(LakeflowConnect):
                 max_pages_default=20,
                 max_pages_cap=100,
             )
-            return iter(records), _SNAPSHOT_DONE_OFFSET
+            return iter(records), None
         raise ValueError("videos requires video_ids or chart=mostPopular")
 
     def _read_search(
         self, start_offset: dict, table_options: dict[str, str]
-    ) -> tuple[Iterator[dict], dict]:
-        done = _snapshot_done_short_circuit(start_offset)
-        if done:
-            return done
+    ) -> tuple[Iterator[dict], dict | None]:
         q = (table_options.get("q") or "").strip()
         if not q:
             raise ValueError("search requires q (query) in table_options")
@@ -620,14 +609,11 @@ class YouTubeLakeflowConnect(LakeflowConnect):
             page_token = data.get("nextPageToken")
             if not page_token:
                 break
-        return iter(all_records), _SNAPSHOT_DONE_OFFSET
+        return iter(all_records), None
 
     def _read_activities(
         self, start_offset: dict, table_options: dict[str, str]
-    ) -> tuple[Iterator[dict], dict]:
-        done = _snapshot_done_short_circuit(start_offset)
-        if done:
-            return done
+    ) -> tuple[Iterator[dict], dict | None]:
         params: dict[str, Any] = {"part": "snippet,contentDetails"}
         ch_id = (table_options.get("channel_id") or "").strip()
         if ch_id:
@@ -641,14 +627,11 @@ class YouTubeLakeflowConnect(LakeflowConnect):
         records = self._drain_paginated_list(
             "activities", params, _flatten_activity, table_options
         )
-        return iter(records), _SNAPSHOT_DONE_OFFSET
+        return iter(records), None
 
     def _read_comment_threads(
         self, start_offset: dict, table_options: dict[str, str]
-    ) -> tuple[Iterator[dict], dict]:
-        done = _snapshot_done_short_circuit(start_offset)
-        if done:
-            return done
+    ) -> tuple[Iterator[dict], dict | None]:
         video_id = (table_options.get("video_id") or "").strip()
         channel_id = (table_options.get("channel_id") or "").strip()
         if video_id:
@@ -667,14 +650,11 @@ class YouTubeLakeflowConnect(LakeflowConnect):
             max_results_default=MAX_RESULTS_COMMENT_THREADS,
             detail=ident,
         )
-        return iter(records), _SNAPSHOT_DONE_OFFSET
+        return iter(records), None
 
     def _read_subscriptions(
         self, start_offset: dict, table_options: dict[str, str]
-    ) -> tuple[Iterator[dict], dict]:
-        done = _snapshot_done_short_circuit(start_offset)
-        if done:
-            return done
+    ) -> tuple[Iterator[dict], dict | None]:
         params: dict[str, Any] = {"part": "snippet"}
         ch_id = (table_options.get("channel_id") or "").strip()
         if ch_id:
@@ -686,14 +666,11 @@ class YouTubeLakeflowConnect(LakeflowConnect):
         records = self._drain_paginated_list(
             "subscriptions", params, _flatten_subscription, table_options
         )
-        return iter(records), _SNAPSHOT_DONE_OFFSET
+        return iter(records), None
 
     def _read_video_categories(
         self, start_offset: dict, table_options: dict[str, str]
-    ) -> tuple[Iterator[dict], dict]:
-        done = _snapshot_done_short_circuit(start_offset)
-        if done:
-            return done
+    ) -> tuple[Iterator[dict], dict | None]:
         region_code = (table_options.get("region_code") or "").strip()
         if not region_code:
             raise ValueError(
@@ -709,4 +686,4 @@ class YouTubeLakeflowConnect(LakeflowConnect):
             max_pages_default=20,
             max_pages_cap=100,
         )
-        return iter(records), _SNAPSHOT_DONE_OFFSET
+        return iter(records), None

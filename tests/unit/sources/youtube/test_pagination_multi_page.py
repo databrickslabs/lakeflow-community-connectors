@@ -1,7 +1,4 @@
-"""
-Multi-page snapshot reads: all API pages drain inside one read_table call;
-tail call with {"done": True} adds no rows or requests.
-"""
+"""Multi-page snapshot reads: all API pages drain inside one read_table call."""
 import sys
 from pathlib import Path
 from unittest.mock import MagicMock
@@ -12,10 +9,7 @@ _ROOT = Path(__file__).resolve().parents[4]
 if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 
-from databricks.labs.community_connector.sources.youtube.youtube import (
-    YouTubeLakeflowConnect,
-    _SNAPSHOT_DONE_OFFSET,
-)
+from databricks.labs.community_connector.sources.youtube.youtube import YouTubeLakeflowConnect
 
 _OPTIONS = {"api_key": "test-key"}
 
@@ -80,7 +74,7 @@ class _MockConnector(YouTubeLakeflowConnect):
 def test_snapshot_drains_all_pages_in_one_call_then_tail_is_empty(
     table_name, table_options, path
 ):
-    """One read_table drains API pages; tail call with done is empty."""
+    """One read_table drains API pages and terminates with offset=None."""
     conn = _MockConnector()
     calls: list[str | None] = []
 
@@ -113,11 +107,29 @@ def test_snapshot_drains_all_pages_in_one_call_then_tail_is_empty(
     r1, end = conn.read_table(table_name, {}, table_options)
     first = list(r1)
     assert len(first) == 3 if path == "playlistItems" else 2
-    assert end == _SNAPSHOT_DONE_OFFSET
+    assert end is None
     assert calls == [None, "tok2"]
     assert conn._request.call_count == 2
 
-    r2, end2 = conn.read_table(table_name, end, table_options)
-    assert list(r2) == []
-    assert end2 == _SNAPSHOT_DONE_OFFSET
-    assert conn._request.call_count == 2
+
+def test_videos_video_ids_chunks_requests_in_batches_of_50():
+    """video_ids path should chunk >50 IDs into multiple videos.list calls."""
+    conn = _MockConnector()
+    seen_ids: list[list[str]] = []
+
+    def fake_request(req_path, params=None):
+        assert req_path == "videos"
+        ids = ((params or {}).get("id") or "").split(",")
+        seen_ids.append(ids)
+        return _ok_response([_video_item(video_id) for video_id in ids], None)
+
+    conn._request.side_effect = fake_request
+    raw_ids = ",".join(f"vid{i}" for i in range(1, 121))
+
+    rows, end = conn.read_table("videos", {}, {"video_ids": raw_ids})
+    records = list(rows)
+    assert end is None
+    assert len(seen_ids) == 3
+    assert [len(batch) for batch in seen_ids] == [50, 50, 20]
+    assert len(records) == 120
+    assert conn._request.call_count == 3
