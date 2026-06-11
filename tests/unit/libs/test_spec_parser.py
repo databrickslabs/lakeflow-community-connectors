@@ -209,6 +209,75 @@ def test_get_table_configurations_returns_all_table_configs():
     assert all_configs["table_c"] == {"option_1": "val1", "option_2": "val2"}
 
 
+def test_cluster_by_is_stripped_from_table_configuration():
+    """cluster_by is a destination-side option and must not be forwarded to the source."""
+    spec = {
+        "connection_name": "test_conn",
+        "objects": [
+            {
+                "table": {
+                    "source_table": "test_table",
+                    "table_configuration": {
+                        "cluster_by": ["customer_id", "event_date"],
+                        "some_option": "value",
+                    },
+                }
+            },
+        ],
+    }
+    parser = SpecParser(spec)
+    config = parser.get_table_configuration("test_table")
+    assert "cluster_by" not in config
+    assert config == {"some_option": "value"}
+
+
+@pytest.mark.parametrize(
+    "value,expected",
+    [
+        (["customer_id", "event_date"], ["customer_id", "event_date"]),
+        ("customer_id", ["customer_id"]),
+        ("customer_id,event_date", ["customer_id", "event_date"]),
+        (" customer_id , event_date ", ["customer_id", "event_date"]),
+        ('["customer_id", "event_date"]', ["customer_id", "event_date"]),
+    ],
+)
+def test_get_cluster_by_accepts_list_or_string(value, expected):
+    """cluster_by accepts list, single string, comma-separated string, or JSON-array string."""
+    spec = {
+        "connection_name": "test_conn",
+        "objects": [
+            {
+                "table": {
+                    "source_table": "test_table",
+                    "table_configuration": {"cluster_by": value},
+                }
+            },
+        ],
+    }
+    parser = SpecParser(spec)
+    assert parser.get_cluster_by("test_table") == expected
+
+
+def test_get_cluster_by_returns_none_when_not_specified():
+    """When cluster_by is not in the spec, get_cluster_by returns None."""
+    spec = {
+        "connection_name": "test_conn",
+        "objects": [
+            {"table": {"source_table": "t1"}},
+            {
+                "table": {
+                    "source_table": "t2",
+                    "table_configuration": {"some_option": "v"},
+                }
+            },
+        ],
+    }
+    parser = SpecParser(spec)
+    assert parser.get_cluster_by("t1") is None
+    assert parser.get_cluster_by("t2") is None
+    assert parser.get_cluster_by("unknown_table") is None
+
+
 def test_scd_type_validation_case_insensitive():
     """Test that SCD type is case-insensitive and normalized to uppercase."""
     spec = {
