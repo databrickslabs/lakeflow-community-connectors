@@ -138,7 +138,11 @@ COMMENT_THREADS_SCHEMA = StructType(
         StructField("snippet_videoId", StringType(), nullable=True),
         StructField("snippet_topLevelComment_id", StringType(), nullable=True),
         StructField("snippet_topLevelComment_snippet_textDisplay", StringType(), nullable=True),
-        StructField("snippet_topLevelComment_snippet_authorDisplayName", StringType(), nullable=True),
+        StructField(
+            "snippet_topLevelComment_snippet_authorDisplayName",
+            StringType(),
+            nullable=True,
+        ),
         StructField("snippet_topLevelComment_snippet_publishedAt", StringType(), nullable=True),
         StructField("snippet_topLevelComment_snippet_likeCount", StringType(), nullable=True),
         StructField("snippet_canReply", StringType(), nullable=True),

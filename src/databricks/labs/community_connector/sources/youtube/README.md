@@ -98,10 +98,9 @@ All tables are **snapshot**: each pipeline run performs a full re-read. The YouT
 **Drain-all snapshot** (all tables except `videos` by `video_ids`):
 
 - One `read_table` call loops API pages until `nextPageToken` is absent or `max_pages` is reached.
-- Returns all accumulated rows with `{"done": True}`.
-- A tail call with `{"done": True}` returns an empty batch (no duplicate rows, no extra API calls).
+- Returns all accumulated rows with offset `None` (snapshot termination).
 
-**Single request** (`videos` with `video_ids`): one API call, then `{"done": True}`.
+**`videos` with `video_ids`**: connector chunks comma-separated IDs into batches of 50 (API limit), issues one request per batch, and returns offset `None`.
 
 **`published_after` (activities, search):** optional **query filter** (ISO 8601 → API `publishedAfter`), not a framework cursor. `activities` ingestion is snapshot; each run re-reads unless you narrow the window with `published_after`.
 
@@ -137,7 +136,7 @@ Table-specific options are passed via the pipeline spec under `table_configurati
 | **channels** | **Exactly one of:** `channel_ids`, `for_username`, or `mine=true` | `channel_ids`: comma-separated channel IDs. `for_username`: YouTube username. `mine=true`: authenticated user's channel (OAuth). |
 | **playlists** | **Exactly one of:** `playlist_ids`, `channel_id`, or `mine=true` | `playlist_ids`: comma-separated playlist IDs. `channel_id`: list playlists for this channel. `mine=true`: authenticated user's playlists (OAuth). |
 | **playlist_items** | `playlist_id` (required) | The playlist ID whose items to list. Optional: **`max_pages`** (cap pages, e.g. `"20"` = at most 1,000 items). |
-| **videos** | **Exactly one of:** `video_ids` or `chart=mostPopular` | `video_ids`: comma-separated video IDs. `chart=mostPopular`: popular videos. Optional: `region_code`, `video_category_id` (with chart), **`max_pages`** (cap pages when using chart, e.g. `"10"` = at most 500 results). |
+| **videos** | **Exactly one of:** `video_ids` or `chart=mostPopular` | `video_ids`: comma-separated video IDs (connector batches in chunks of 50 IDs/request). `chart=mostPopular`: popular videos. Optional: `region_code`, `video_category_id` (with chart), **`max_pages`** (cap pages when using chart, e.g. `"10"` = at most 500 results). |
 | **search** | `q` (required) | Search query string. Optional: `type`, `channel_id`, `published_after`, `order`, **`max_pages`** (cap total pages, e.g. `"10"` = at most 10×50 = 500 results). |
 | **activities** | **Exactly one of:** `channel_id` or `mine=true` | `channel_id`: list activities for this channel. `mine=true`: authenticated user's activities (OAuth). Optional: `published_after`. |
 | **comment_threads** | **Exactly one of:** `video_id` or `channel_id` | `video_id`: comments for this video (recommended). Use a video from your channel: open the video on YouTube, copy the ID from the URL (`?v=VIDEO_ID`). If you get 403, that video may have comments disabled—try another. `channel_id`: often returns 403; prefer `video_id`. |
@@ -247,7 +246,7 @@ For OAuth-only tables (`mine=true`), ensure the connection uses `client_id`, `cl
 
 ### Step 3: Run and Schedule the Pipeline
 
-Run the pipeline using your usual Lakeflow or Databricks orchestration. Each snapshot table drains all API pages in one `read_table` call and returns `{"done": True}`; the next framework call is a no-op. Scheduled runs start fresh unless you narrow the window with options like `published_after`.
+Run the pipeline using your usual Lakeflow or Databricks orchestration. Each snapshot table drains all API pages in one `read_table` call and returns `None` offset so the framework terminates that read. Scheduled runs start fresh unless you narrow the window with options like `published_after`.
 
 #### Best Practices
 
