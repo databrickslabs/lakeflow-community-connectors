@@ -1,0 +1,52 @@
+# YouTube Data API v3 (uses ``requests`` directly).
+#
+# Host: https://www.googleapis.com/youtube/v3/...
+# Auth: ``key`` query param (api_key) or Bearer token (OAuth).
+# List responses use ``items`` + ``nextPageToken``; corpus files are full bodies
+# with ``nextPageToken`` null so connectors stop after one page.
+
+endpoints:
+  - path: /youtube/v3/channels
+    method: GET
+    corpus: channels_list
+    response: {single_entity: true, pagination_style: none}
+
+  - path: /youtube/v3/playlists
+    method: GET
+    corpus: playlists_list
+    response: {single_entity: true, pagination_style: none}
+
+  - path: /youtube/v3/playlistItems
+    method: GET
+    corpus: playlist_items_list
+    response: {single_entity: true, pagination_style: none}
+
+  - path: /youtube/v3/videos
+    method: GET
+    corpus: videos_list
+    response: {single_entity: true, pagination_style: none}
+
+  - path: /youtube/v3/search
+    method: GET
+    corpus: search_list
+    response: {single_entity: true, pagination_style: none}
+
+  - path: /youtube/v3/activities
+    method: GET
+    corpus: activities_list
+    response: {single_entity: true, pagination_style: none}
+
+  - path: /youtube/v3/commentThreads
+    method: GET
+    corpus: comment_threads_list
+    response: {single_entity: true, pagination_style: none}
+
+  - path: /youtube/v3/subscriptions
+    method: GET
+    corpus: subscriptions_list
+    response: {single_entity: true, pagination_style: none}
+
+  - path: /youtube/v3/videoCategories
+    method: GET
+    corpus: video_categories_list
+    response: {single_entity: true, pagination_style: none}

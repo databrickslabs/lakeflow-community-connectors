@@ -1,0 +1,71 @@
+# youtube Community Connector Spec
+# This file defines the specification for the connector including
+# connection parameters and allowlist options.
+
+# ============================================================================
+# Display name (required for Databricks to show connection parameter prompts)
+# ============================================================================
+display_name: YouTube
+
+# ============================================================================
+# Connection Parameters
+# Provide ONE authentication method:
+#   - api_key: public data (channels by id, playlists, videos, search)
+#   - oauth: client_id + client_secret + refresh_token for private/mine data
+# ============================================================================
+connection:
+  auth_methods:
+    - name: api_key
+      description: >
+        Authenticate with a YouTube Data API v3 key from Google Cloud Console.
+        Use for public data (channels by id, playlists, videos, search).
+      parameters:
+        - name: api_key
+          type: string
+          required: true
+          secret: true
+          description: >
+            YouTube Data API v3 key from Google Cloud Console.
+
+    - name: oauth
+      description: >
+        Authenticate with OAuth 2.0 (client ID, client secret, and refresh token).
+        Required for mine=true, subscriptions, and other private data.
+      parameters:
+        - name: client_id
+          type: string
+          required: true
+          description: >
+            OAuth 2.0 client ID from Google Cloud Console.
+
+        - name: client_secret
+          type: string
+          required: true
+          secret: true
+          description: >
+            OAuth 2.0 client secret from Google Cloud Console.
+
+        - name: refresh_token
+          type: string
+          required: true
+          secret: true
+          description: >
+            Long-lived refresh token with access_type=offline. Obtain via
+            authenticate.py or the OAuth consent flow below.
+
+  oauth:
+    authorization_url: "https://accounts.google.com/o/oauth2/v2/auth"
+    token_url: "https://oauth2.googleapis.com/token"
+    scopes: "https://www.googleapis.com/auth/youtube.readonly"
+    extra_auth_params:
+      access_type: "offline"
+      prompt: "consent"
+
+# ============================================================================
+# External Options Allowlist
+# Table-specific options read by the connector (channels, playlists, playlist_items,
+# videos, search, activities, comment_threads, subscriptions, video_categories). Include this
+# comma-separated list in the UC connection's externalOptionsAllowList so
+# Databricks can pass them through to the connector.
+# ============================================================================
+external_options_allowlist: "channel_id,channel_ids,chart,for_username,max_pages,max_results,mine,order,playlist_id,playlist_ids,published_after,q,region_code,type,video_category_id,video_id,video_ids"
