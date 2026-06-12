@@ -19,9 +19,10 @@ To configure the connector, provide the following parameters in your connector o
 |-----------|------|----------|-------------|---------|
 | `client_id` | string | Yes | OAuth Client ID from Zoho API Console | `1000.XXXXX...` |
 | `client_secret` | string | Yes | OAuth Client Secret from Zoho API Console | `abc123...` |
-| `refresh_token` | string | Yes | OAuth Refresh Token (never expires). Obtained automatically via the OAuth flow during connection setup. | `1000.YYYYY...` |
 | `region` | string | Yes | Zoho data center for your account. One of `US`, `EU`, `IN`, `AU`, `CN`, `JP`. Defaults to `US`. | `EU` |
 | `initial_load_start_date` | string | No | Starting point for the first sync. If omitted, syncs all historical data. (ISO 8601 format) | `2024-01-01T00:00:00Z` |
+
+OAuth tokens (access / refresh) are managed by Unity Catalog and are not user-supplied.
 
 ### Table-Level Options
 
@@ -361,8 +362,7 @@ The connector implements automatic retry with exponential backoff for rate limit
 
 If you see "Token refresh response missing 'access_token'":
 1. Verify your `client_id` and `client_secret` are correct
-2. Check that your `refresh_token` is valid (hasn't been revoked)
-3. Ensure `region` matches the data center where your Zoho account lives
+2. Ensure `region` matches the data center where your Zoho account lives
 
 **Empty Module Data:**
 

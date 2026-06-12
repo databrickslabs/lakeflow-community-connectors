@@ -94,20 +94,30 @@ class ZohoAPIClient:  # pylint: disable=too-many-instance-attributes
 
     def __init__(
         self,
-        client_id: str,
-        client_secret: str,
-        refresh_token: str,
         accounts_url: str = "https://accounts.zoho.com",
+        access_token: Optional[str] = None,
+        client_id: Optional[str] = None,
+        client_secret: Optional[str] = None,
+        refresh_token: Optional[str] = None,
     ) -> None:
         """
         Initialize the API client.
 
-        Args:
-            client_id: OAuth Client ID from Zoho API Console
-            client_secret: OAuth Client Secret from Zoho API Console
-            refresh_token: Long-lived refresh token from OAuth flow
-            accounts_url: Zoho accounts URL for OAuth (region-specific)
+        Two authentication modes:
+
+        1. UC-managed: caller passes a pre-issued ``access_token``. The client
+           uses it directly and never attempts a refresh — UC owns token
+           lifecycle on the connection.
+        2. Local-dev: caller passes ``client_id`` + ``client_secret`` +
+           ``refresh_token``. The client mints access tokens itself by calling
+           Zoho's refresh endpoint, used by ``authenticate.py`` flows.
         """
+        if not access_token and not all([client_id, client_secret, refresh_token]):
+            raise ValueError(
+                "ZohoAPIClient requires either 'access_token' (UC-managed) "
+                "or 'client_id' + 'client_secret' + 'refresh_token' (local dev)."
+            )
+
         self.client_id = client_id
         self.client_secret = client_secret
         self.refresh_token = refresh_token
@@ -120,8 +130,11 @@ class ZohoAPIClient:  # pylint: disable=too-many-instance-attributes
         self.api_url = f"https://www.zohoapis.{domain_suffix}"
 
         # Token management
-        self._access_token: Optional[str] = None
+        self._access_token: Optional[str] = access_token
+        # When the caller pre-issues the token, expiry is owned by the caller
+        # (UC); we trust it for the life of this client.
         self._token_expires_at: Optional[datetime] = None
+        self._token_externally_managed: bool = bool(access_token)
 
         # HTTP session for connection pooling
         self._session = requests.Session()
@@ -131,6 +144,10 @@ class ZohoAPIClient:  # pylint: disable=too-many-instance-attributes
         Get a valid access token, refreshing if necessary.
         Access tokens expire after 1 hour (3600 seconds).
         """
+        # Externally-issued token (UC-managed): return as-is.
+        if self._token_externally_managed and self._access_token:
+            return self._access_token
+
         # Check if we have a valid token (with 5-minute buffer)
         if self._access_token and self._token_expires_at:
             if datetime.now() < self._token_expires_at - timedelta(minutes=5):

@@ -62,10 +62,14 @@ connection:
   # `extra_auth_params`  — provider-specific knobs folded into the authorization
   #                        URL. For Zoho: access_type=offline + prompt=consent
   #                        are required to obtain a refresh_token.
-  # `endpoints_by_region`— multi-region endpoint map. The `parameter` field
-  #                        names the connection param whose value selects the
-  #                        endpoint set; `values` keys must match that param's
-  #                        `enum` exactly.
+  #
+  # Endpoints — declare exactly one of:
+  # * flat `authorization_url` + `token_url` for single-region providers
+  #   (Gmail, GitHub, etc.), OR
+  # * `endpoints_by_region` for providers hosted in multiple data centers.
+  #   The `parameter` field names a connection param (must be `enum`-typed);
+  #   `values` keys must match that param's `enum` exactly. Zoho hosts six
+  #   data centers, so it uses this form.
   # ---------------------------------------------------------------------------
   oauth:
     flow: u2m
