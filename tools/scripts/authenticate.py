@@ -71,6 +71,71 @@ def extract_oauth_config(spec: dict) -> dict | None:
     return spec.get("connection", {}).get("oauth")
 
 
+def resolve_oauth_endpoints(oauth_cfg: dict, collected: dict[str, str]) -> dict:
+    """Return an effective oauth config with flat authorization_url + token_url.
+
+    Two spec shapes are supported:
+
+    1. Flat (single-region): `oauth` carries `authorization_url` and
+       `token_url` directly. Returned as-is.
+
+    2. Multi-region: `oauth.endpoints_by_region` carries a `parameter` (the
+       name of a connection param whose enum value selects the endpoint set)
+       and a `values` map keyed by that param's enum values. The user's
+       selected value is read from `collected` and looked up.
+
+    The returned dict is a shallow copy of `oauth_cfg` with the resolved
+    `authorization_url` and `token_url` fields set; `endpoints_by_region` is
+    stripped so downstream code doesn't have to know about it.
+
+    PKCE is not yet supported in this CLI; an explicit `pkce: true` in the
+    spec raises so that connectors that require it don't silently succeed
+    with a non-PKCE authorization.
+    """
+    if oauth_cfg.get("pkce"):
+        raise ValueError(
+            "Spec sets oauth.pkce: true, but this CLI does not support PKCE yet. "
+            "Either set pkce: false in connector_spec.yaml or extend authenticate.py "
+            "to generate the code_verifier / code_challenge pair."
+        )
+
+    region_block = oauth_cfg.get("endpoints_by_region")
+    if region_block is None:
+        if not oauth_cfg.get("authorization_url") or not oauth_cfg.get("token_url"):
+            raise ValueError(
+                "oauth block must define either flat `authorization_url` + `token_url`, "
+                "or `endpoints_by_region.{parameter, values}`."
+            )
+        return dict(oauth_cfg)
+
+    param_name = region_block.get("parameter")
+    values = region_block.get("values") or {}
+    if not param_name or not values:
+        raise ValueError(
+            "oauth.endpoints_by_region must define both `parameter` and `values`."
+        )
+
+    selected = collected.get(param_name)
+    if not selected:
+        raise ValueError(
+            f"Cannot resolve OAuth endpoints: the connection param '{param_name}' "
+            f"referenced by oauth.endpoints_by_region.parameter was not provided. "
+            f"Expected one of: {', '.join(values)}."
+        )
+
+    endpoints = values.get(selected)
+    if not endpoints:
+        raise ValueError(
+            f"No OAuth endpoints defined for {param_name}={selected!r}. "
+            f"Expected one of: {', '.join(values)}."
+        )
+
+    resolved = {k: v for k, v in oauth_cfg.items() if k != "endpoints_by_region"}
+    resolved["authorization_url"] = endpoints["authorization_url"]
+    resolved["token_url"] = endpoints["token_url"]
+    return resolved
+
+
 # ---------------------------------------------------------------------------
 # OAuth helpers
 # ---------------------------------------------------------------------------
@@ -122,18 +187,48 @@ def _exchange_code(
 # ---------------------------------------------------------------------------
 
 def prompt_for_parameter(param: dict) -> str | None:
-    """Prompt the user for a single parameter value in the terminal."""
+    """Prompt the user for a single parameter value in the terminal.
+
+    Honors `enum` (renders a numbered choice list; accepts an index or a
+    literal enum value) and `default` (used when the user submits an empty
+    line). When both are present, the default must be one of the enum values.
+    """
     name = param["name"]
     description = param.get("description", "").strip()
     required = param.get("required", False)
     is_secret = param.get("secret", False)
+    enum_values = param.get("enum")
+    default = param.get("default")
 
     tag = "REQUIRED" if required else "optional"
     print(f"\n── {name} ({tag}) ──")
     if description:
         print(f"   {description}")
 
-    prompt_text = f"  {name}: "
+    if enum_values:
+        for idx, choice in enumerate(enum_values, start=1):
+            marker = "  (default)" if default is not None and choice == default else ""
+            print(f"   {idx}. {choice}{marker}")
+        prompt_text = f"  {name} [enter number or value]: "
+        raw = input(prompt_text).strip()
+        if not raw:
+            if default is not None:
+                return str(default)
+            if required:
+                print(f"  ⚠  '{name}' is required. Please choose a value.")
+                return prompt_for_parameter(param)
+            return None
+        if raw.isdigit():
+            idx = int(raw)
+            if 1 <= idx <= len(enum_values):
+                return str(enum_values[idx - 1])
+        if raw in [str(v) for v in enum_values]:
+            return raw
+        print(f"  ⚠  '{raw}' is not one of: {', '.join(str(v) for v in enum_values)}")
+        return prompt_for_parameter(param)
+
+    default_hint = f" [{default}]" if default is not None else ""
+    prompt_text = f"  {name}{default_hint}: "
     if is_secret:
         value = getpass.getpass(prompt_text)
     else:
@@ -142,19 +237,14 @@ def prompt_for_parameter(param: dict) -> str | None:
     value = value.strip()
 
     if not value:
+        if default is not None:
+            return str(default)
         if required:
             print(f"  ⚠  '{name}' is required. Please provide a value.")
             return prompt_for_parameter(param)
         return None
 
     return value
-
-
-def _prompt_oauth_setting(name: str, default: str) -> str:
-    """Prompt for an OAuth setting, showing the default. Enter keeps the default."""
-    print(f"\n── {name} ──")
-    value = input(f"  [{default}]: ").strip()
-    return value or default
 
 
 def _run_oauth_flow_cli(  # pylint: disable=too-many-statements
@@ -328,18 +418,11 @@ def run_cli(  # pylint: disable=too-many-locals,too-many-statements,too-many-bra
         cid = collected.get("client_id", "")
         csec = collected.get("client_secret", "")
         if cid and csec:
-            # Let user review / override OAuth settings
-            print("\n▸ OAuth 2.0 Settings (press Enter to accept defaults):")
-            effective_cfg = dict(oauth_cfg)
-            effective_cfg["authorization_url"] = _prompt_oauth_setting(
-                "authorization_url", oauth_cfg["authorization_url"],
-            )
-            effective_cfg["token_url"] = _prompt_oauth_setting(
-                "token_url", oauth_cfg["token_url"],
-            )
-            effective_cfg["scopes"] = _prompt_oauth_setting(
-                "scopes", oauth_cfg.get("scopes", ""),
-            )
+            # Endpoints come from the spec — possibly via a region selector — so
+            # we no longer prompt the user to type/edit URLs. Resolution
+            # surfaces a clear error if the spec is malformed or a required
+            # selector param wasn't collected.
+            effective_cfg = resolve_oauth_endpoints(oauth_cfg, collected)
 
             print("\n▸ OAuth 2.0 Authorization")
             refresh_token = _run_oauth_flow_cli(effective_cfg, cid, csec, port)
@@ -437,16 +520,14 @@ async function startOAuth(){
   var csecEl=document.getElementById('client_secret');
   if(!cidEl||!cidEl.value.trim()){alert('Please fill in client_id first.');return}
   if(!csecEl||!csecEl.value.trim()){alert('Please fill in client_secret first.');return}
+  // Collect every form field (inputs + selects) so the server can resolve
+  // endpoints via spec.oauth.endpoints_by_region when applicable.
   var body={};
-  document.querySelectorAll('input[name]:not([disabled])').forEach(function(el){
-    if(el.value.trim()) body[el.name]=el.value.trim();
-  });
-  var au=document.getElementById('__oauth_authorization_url');
-  var tu=document.getElementById('__oauth_token_url');
-  var sc=document.getElementById('__oauth_scopes');
-  if(au) body.__oauth_authorization_url=au.value.trim();
-  if(tu) body.__oauth_token_url=tu.value.trim();
-  if(sc) body.__oauth_scopes=sc.value.trim();
+  document.querySelectorAll('input[name]:not([disabled]),select[name]:not([disabled])')
+    .forEach(function(el){
+      var v=(el.value||'').toString().trim();
+      if(v) body[el.name]=v;
+    });
   var st=document.getElementById('oauth-status');
   if(st){st.textContent='Starting OAuth flow\\u2026';st.className='oauth-status pending'}
   try{
@@ -455,6 +536,7 @@ async function startOAuth(){
     });
     if(!resp.ok) throw new Error('Server error '+resp.status);
     var data=await resp.json();
+    if(data.error){throw new Error(data.error)}
     if(st){st.textContent='Waiting for authorization in popup\\u2026'}
     var popup=window.open(data.auth_url,'oauth_popup','width=600,height=700,scrollbars=yes');
     if(!popup&&st){st.textContent='Popup blocked \\u2014 please allow popups and try again.';
@@ -484,10 +566,11 @@ def _render_field(param: dict, disabled: bool = False) -> str:
     desc = param.get("description", "").strip()
     required = param.get("required", False)
     is_secret = param.get("secret", False)
+    enum_values = param.get("enum")
+    default = param.get("default")
 
     tag_cls = "req" if required else "opt"
     tag_label = "required" if required else "optional"
-    input_type = "password" if is_secret else "text"
     req_attr = "required" if required else ""
     dis_attr = "disabled" if disabled else ""
 
@@ -496,42 +579,41 @@ def _render_field(param: dict, disabled: bool = False) -> str:
                  f'<span class="tag {tag_cls}">{tag_label}</span></label>')
     if desc:
         lines.append(f'<div class="desc">{_esc(desc)}</div>')
-    lines.append(f'<input type="{input_type}" id="{_esc(name)}" name="{_esc(name)}" '
-                 f'autocomplete="off" {req_attr} {dis_attr}/>')
+
+    if enum_values:
+        options_html = []
+        for choice in enum_values:
+            value = _esc(str(choice))
+            selected = " selected" if default is not None and choice == default else ""
+            options_html.append(f'<option value="{value}"{selected}>{value}</option>')
+        lines.append(
+            f'<select id="{_esc(name)}" name="{_esc(name)}" class="auth-select" '
+            f'{req_attr} {dis_attr}>{"".join(options_html)}</select>'
+        )
+    else:
+        input_type = "password" if is_secret else "text"
+        value_attr = f' value="{_esc(str(default))}"' if default is not None else ""
+        lines.append(
+            f'<input type="{input_type}" id="{_esc(name)}" name="{_esc(name)}" '
+            f'autocomplete="off"{value_attr} {req_attr} {dis_attr}/>'
+        )
     lines.append('</div>')
     return "\n".join(lines)
 
 
-def _render_oauth_section(oauth_cfg: dict, port: int) -> str:
-    """Render the OAuth 2.0 section with editable settings and Authorize button."""
+def _render_oauth_section(port: int) -> str:
+    """Render the OAuth 2.0 section with the Authorize button.
+
+    OAuth endpoints come from the spec (resolved via `resolve_oauth_endpoints`
+    against the submitted form values), so the user is never asked to type or
+    edit URLs. The connector_spec is the source of truth.
+    """
     redirect_uri = f"http://localhost:{port}/oauth/callback"
-    auth_url = _esc(oauth_cfg.get("authorization_url", ""))
-    token_url = _esc(oauth_cfg.get("token_url", ""))
-    scopes = _esc(oauth_cfg.get("scopes", ""))
 
     lines = [
         '<div class="section-title">OAuth 2.0 Authorization</div>',
         f'<div class="redirect-uri"><strong>Redirect URI</strong> '
         f'(register in your OAuth app): <code>{_esc(redirect_uri)}</code></div>',
-        # authorization_url — no name attr so it doesn't submit with the form
-        '<div class="field">',
-        '<label for="__oauth_authorization_url">authorization_url'
-        '<span class="tag opt">editable</span></label>',
-        f'<input type="text" id="__oauth_authorization_url"'
-        f' value="{auth_url}" autocomplete="off"/>',
-        '</div>',
-        # token_url
-        '<div class="field">',
-        '<label for="__oauth_token_url">token_url'
-        '<span class="tag opt">editable</span></label>',
-        f'<input type="text" id="__oauth_token_url" value="{token_url}" autocomplete="off"/>',
-        '</div>',
-        # scopes
-        '<div class="field">',
-        '<label for="__oauth_scopes">scopes'
-        '<span class="tag opt">editable</span></label>',
-        f'<input type="text" id="__oauth_scopes" value="{scopes}" autocomplete="off"/>',
-        '</div>',
         # hidden refresh_token (filled by OAuth flow, submitted with form)
         '<input type="hidden" id="refresh_token" name="refresh_token" />',
         # Authorize button + status
@@ -600,7 +682,7 @@ def _build_form_html(  # pylint: disable=too-many-locals,too-many-branches
 
     # OAuth section at the bottom
     if oauth_cfg:
-        parts.append(_render_oauth_section(oauth_cfg, port))
+        parts.append(_render_oauth_section(port))
 
     parts.append('<button type="submit">Save Configuration</button>')
     parts.append('</form>')
@@ -714,14 +796,14 @@ def run_browser(  # pylint: disable=too-many-statements,too-many-locals
             client_id = body.get("client_id", "")
             client_secret = body.get("client_secret", "")
 
-            # Build effective config from spec defaults + user overrides
-            effective_cfg = dict(oauth_cfg)
-            if body.get("__oauth_authorization_url"):
-                effective_cfg["authorization_url"] = body["__oauth_authorization_url"]
-            if body.get("__oauth_token_url"):
-                effective_cfg["token_url"] = body["__oauth_token_url"]
-            if "__oauth_scopes" in body:
-                effective_cfg["scopes"] = body["__oauth_scopes"]
+            # Endpoints come from the spec, possibly via a region selector whose
+            # value is in `body`. The helper raises with a clear message if the
+            # spec is malformed or a required selector value is missing.
+            try:
+                effective_cfg = resolve_oauth_endpoints(oauth_cfg, body)
+            except ValueError as exc:
+                self._send_json({"error": str(exc)})
+                return
 
             state = secrets.token_urlsafe(32)
             redirect_uri = f"http://localhost:{port}/oauth/callback"

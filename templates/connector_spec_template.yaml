@@ -19,6 +19,20 @@
 # and provide all its required parameters. Common parameters apply to all methods.
 # ============================================================================
 connection:
+  # Parameter attributes:
+  #   name         (string, required) — the option key passed to the connector.
+  #   type         (string)            — `string`, `integer`, or `boolean`.
+  #   required     (bool, default false) — UI/CLI enforces non-empty input.
+  #   secret       (bool, default false) — UI/CLI masks input.
+  #   default      (any)               — pre-filled value; used when the user
+  #                                      submits empty input.
+  #   enum         (list)              — restricts the param to a fixed set of
+  #                                      values; UI renders a Select, CLI
+  #                                      renders a numbered list. Required if
+  #                                      the param is referenced from
+  #                                      `oauth.endpoints_by_region.parameter`.
+  #   description  (string)            — shown to the user.
+  #
   # ---------------------------------------------------------------------------
   # OPTION A: Single Authentication Method (use this for simple connectors)
   # ---------------------------------------------------------------------------
@@ -29,11 +43,13 @@ connection:
   #     description: >
   #       API key used for authentication.
   #
-  #   - name: base_url
+  #   - name: region
   #     type: string
-  #     required: false
+  #     required: true
+  #     default: US
+  #     enum: [US, EU]
   #     description: >
-  #       Base URL for the API. Override if using a custom instance.
+  #       Data center region for your account.
 
   # ---------------------------------------------------------------------------
   # OPTION B: Multiple Authentication Methods (use for connectors with choices)
@@ -81,21 +97,61 @@ connection:
 
   # ---------------------------------------------------------------------------
   # OAuth 2.0 Authorization Code Flow (optional)
+  #
   # Uncomment this section if the source uses OAuth 2.0 for authentication.
-  # The authenticate tool will run the browser-based OAuth flow automatically
-  # so the user only needs to provide client_id and client_secret; the
-  # refresh_token is obtained via the redirect.  These three parameter names
-  # are the standard OAuth 2.0 names and are expected in the parameters list.
-  # The authorization_url, token_url, and scopes are defaults that the user
-  # can override at runtime.
+  # The authenticate tool runs the browser-based flow so the user only
+  # supplies client_id + client_secret; the refresh_token (or, for UC, the
+  # access_token + server-side refresh) is obtained from the provider.
+  #
+  # Required:
+  #   - scopes               OAuth scope string sent on the authorization URL.
+  #   - One of `authorization_url` + `token_url` OR `endpoints_by_region`
+  #     (see the two forms below).
+  #
+  # Optional:
+  #   - flow                 u2m (default) | m2m | u2m_per_user.
+  #                          Selects the UC community OAuth subtype.
+  #   - pkce                 true | false (default false). Set to true when
+  #                          the provider requires PKCE for confidential
+  #                          clients. The labs CLI does NOT yet implement
+  #                          PKCE — `pkce: true` will error there until
+  #                          authenticate.py is extended.
+  #   - extra_auth_params    Provider-specific knobs folded into the
+  #                          authorization URL (e.g. access_type=offline,
+  #                          prompt=consent, audience=…).
   # ---------------------------------------------------------------------------
+
+  # Form 1 — single-region: provider has one global pair of endpoints.
   # oauth:
+  #   flow: u2m
+  #   pkce: false
+  #   scopes: "read write"
   #   authorization_url: "https://example.com/oauth/authorize"
   #   token_url: "https://example.com/oauth/token"
+  #   extra_auth_params:
+  #     access_type: "offline"
+  #     prompt: "consent"
+
+  # Form 2 — multi-region: provider has different endpoints per data center.
+  # Add an enum-typed connection param to the `parameters` list above (e.g.
+  # `region` with `enum: [US, EU, …]` and a `default`), then key the
+  # endpoint map below by those same enum values.
+  # oauth:
+  #   flow: u2m
+  #   pkce: false
   #   scopes: "read write"
   #   extra_auth_params:
   #     access_type: "offline"
   #     prompt: "consent"
+  #   endpoints_by_region:
+  #     parameter: region
+  #     values:
+  #       US:
+  #         authorization_url: "https://accounts.example.com/oauth/authorize"
+  #         token_url: "https://accounts.example.com/oauth/token"
+  #       EU:
+  #         authorization_url: "https://accounts.example.eu/oauth/authorize"
+  #         token_url: "https://accounts.example.eu/oauth/token"
 
 # ============================================================================
 # External Options Allowlist
