@@ -17,9 +17,9 @@ class TestFT1Extraction:
     def test_comprehensive_ft1(self):
         msg = parse_first(load_sample("sample_adt_comprehensive.hl7"))
         row = extract_segment(msg, "FT1", _extract_ft1)
-        assert row["transaction_type"] == "CG"
-        assert row["transaction_code"] == "99285"
-        assert row["transaction_code_text"] == "Emergency dept visit, high severity"
+        assert row["transaction_type"]["code"] == "CG"
+        assert row["transaction_code"]["code"] == "99285"
+        assert row["transaction_code"]["text"] == "Emergency dept visit, high severity"
         assert row["transaction_quantity"] == 1
         assert row["transaction_description"] == "Emergency Department Visit"
         assert row["transaction_date_start"] == "2024-03-01T00:00:00"
@@ -30,11 +30,11 @@ class TestFT1Extraction:
         segs = segments_of_type(msg, "FT1")
         assert len(segs) == 2
         row1 = _extract_ft1(segs[0])
-        assert row1["transaction_code"] == "27447"
+        assert row1["transaction_code"]["code"] == "27447"
         assert row1["transaction_batch_id"] == "BATCH001"
         assert row1["transaction_date_start"] == "2024-03-10T00:00:00"
         row2 = _extract_ft1(segs[1])
-        assert row2["transaction_code"] == "01402"
+        assert row2["transaction_code"]["code"] == "01402"
         assert row2["transaction_description"] == "Anesthesia for Knee Surgery"
 
     def test_ft1_date_range(self):
@@ -70,13 +70,13 @@ class TestFT1Extraction:
         )
         row = _extract_ft1(msg.get_segment("FT1"))
         # FT1.30 — Payment Reference ID (CX)
-        assert row["payment_reference_id"] == "CHK12345"
-        assert row["payment_reference_id_check_digit"] == "7"
-        assert row["payment_reference_id_check_digit_scheme"] == "M11"
-        assert row["payment_reference_id_assigning_authority"] == "MEDIBANK"
-        assert row["payment_reference_id_assigning_authority_universal_id"] == "2.16.840.1.113883.3.51"
-        assert row["payment_reference_id_assigning_authority_universal_id_type"] == "ISO"
-        assert row["payment_reference_id_type_code"] == "PRN"
+        assert row["payment_reference_id"]["id"] == "CHK12345"
+        assert row["payment_reference_id"]["check_digit"] == "7"
+        assert row["payment_reference_id"]["check_digit_scheme"] == "M11"
+        assert row["payment_reference_id"]["assigning_authority"] == "MEDIBANK"
+        assert row["payment_reference_id"]["assigning_authority_universal_id"] == "2.16.840.1.113883.3.51"
+        assert row["payment_reference_id"]["assigning_authority_universal_id_type"] == "ISO"
+        assert row["payment_reference_id"]["type_code"] == "PRN"
         # FT1.31 — Transaction Reference Key (SI, repeatable)
         assert row["transaction_reference_key"] == ["10", "11", "12"]
         # FT1.32 — Performing Facility (XON, repeatable)
@@ -87,19 +87,19 @@ class TestFT1Extraction:
         assert perf[1]["name"] == "Sub Clinic"
         assert perf[1]["id"] == "456"
         # FT1.33 — Ordering Facility (XON, non-repeating)
-        assert row["ordering_facility"] == "Order Hosp"
-        assert row["ordering_facility_id"] == "789"
+        assert row["ordering_facility"]["name"] == "Order Hosp"
+        assert row["ordering_facility"]["id"] == "789"
         # FT1.38 — Referral Number (CX)
-        assert row["referral_number"] == "REF999"
-        assert row["referral_number_assigning_authority"] == "AUTH"
-        assert row["referral_number_type_code"] == "RN"
+        assert row["referral_number"]["id"] == "REF999"
+        assert row["referral_number"]["assigning_authority"] == "AUTH"
+        assert row["referral_number"]["type_code"] == "RN"
         # FT1.39 — Authorization Number (CX)
-        assert row["authorization_number"] == "AUTH777"
-        assert row["authorization_number_assigning_authority"] == "PAYER"
-        assert row["authorization_number_type_code"] == "AUT"
+        assert row["authorization_number"]["id"] == "AUTH777"
+        assert row["authorization_number"]["assigning_authority"] == "PAYER"
+        assert row["authorization_number"]["type_code"] == "AUT"
         # FT1.43 — NDC Qty and UoM (CQ)
-        assert row["ndc_qty_and_uom"] == "30.0"
-        assert row["ndc_qty_and_uom_units"] == "mg"
+        assert row["ndc_qty_and_uom"]["quantity"] == "30.0"
+        assert row["ndc_qty_and_uom"]["units"] == "mg"
 
     def test_ft1_cp_and_pl_components(self):
         msg = parse_message(
@@ -111,27 +111,27 @@ class TestFT1Extraction:
         )
         row = _extract_ft1(msg.get_segment("FT1"))
         # FT1.11 — Transaction Amount Extended (CP)
-        assert row["transaction_amount_extended"] == "150.00"
-        assert row["transaction_amount_extended_currency"] == "USD"
-        assert row["transaction_amount_extended_price_type"] == "UP"
+        assert row["transaction_amount_extended"]["price"] == "150.00"
+        assert row["transaction_amount_extended"]["currency"] == "USD"
+        assert row["transaction_amount_extended"]["price_type"] == "UP"
         # FT1.12 — Transaction Amount Unit (CP)
-        assert row["transaction_amount_unit"] == "75.00"
-        assert row["transaction_amount_unit_currency"] == "USD"
+        assert row["transaction_amount_unit"]["price"] == "75.00"
+        assert row["transaction_amount_unit"]["currency"] == "USD"
         # FT1.15 — Insurance Amount (CP)
-        assert row["insurance_amount"] == "50.00"
-        assert row["insurance_amount_currency"] == "USD"
+        assert row["insurance_amount"]["price"] == "50.00"
+        assert row["insurance_amount"]["currency"] == "USD"
         # FT1.16 — Assigned Patient Location (PL)
-        assert row["assigned_patient_location_point_of_care"] == "ICU"
-        assert row["assigned_patient_location_room"] == "101"
-        assert row["assigned_patient_location_bed"] == "A"
-        assert row["assigned_patient_location_facility"] == "MED"
-        assert row["assigned_patient_location_status"] == "O"
-        assert row["assigned_patient_location_type"] == "N"
-        assert row["assigned_patient_location_building"] == "BLDG1"
-        assert row["assigned_patient_location_floor"] == "F2"
+        assert row["assigned_patient_location"]["point_of_care"] == "ICU"
+        assert row["assigned_patient_location"]["room"] == "101"
+        assert row["assigned_patient_location"]["bed"] == "A"
+        assert row["assigned_patient_location"]["facility"] == "MED"
+        assert row["assigned_patient_location"]["status"] == "O"
+        assert row["assigned_patient_location"]["type"] == "N"
+        assert row["assigned_patient_location"]["building"] == "BLDG1"
+        assert row["assigned_patient_location"]["floor"] == "F2"
         # FT1.22 — Unit Cost (CP)
-        assert row["unit_cost"] == "90.00"
-        assert row["unit_cost_currency"] == "USD"
+        assert row["unit_cost"]["price"] == "90.00"
+        assert row["unit_cost"]["currency"] == "USD"
 
 
 class TestFT1MissingFields:
@@ -158,7 +158,7 @@ class TestFT1MissingFields:
         )
         row = _extract_ft1(msg.get_segment("FT1"))
         assert row["transaction_batch_id"] == "BATCH99"
-        assert row["transaction_type"] == "CG"
-        assert row["transaction_code"] == "99213"
-        assert row["transaction_code_text"] == "Office Visit"
+        assert row["transaction_type"]["code"] == "CG"
+        assert row["transaction_code"]["code"] == "99213"
+        assert row["transaction_code"]["text"] == "Office Visit"
         assert row["transaction_description"] == "Office visit"

@@ -150,20 +150,11 @@ allow_null_columns = {
     "evn": {
         "date_time_planned_event",
         "event_reason",
-        "event_reason_text",
-        "event_reason_coding_system",
-        "event_reason_alt_code",
-        "event_reason_alt_text",
-        "event_reason_alt_coding_system",
-        "event_reason_coding_system_version",
-        "event_reason_alt_coding_system_version",
-        "event_reason_original_text",
         "event_occurred",
-        "event_facility",
-        "event_facility_universal_id",
-        "event_facility_universal_id_type"
+        "event_facility"
     },
     "ft1": {
+        "assigned_patient_location",
         "transaction_id_check_digit",
         "transaction_id_check_digit_scheme",
         "transaction_id_assigning_authority",
@@ -684,6 +675,10 @@ allow_null_columns = {
         "vip_indicator_original_text"
     },
     "iam": {
+        "statused_by_person",
+        "inactivated_by_person",
+        "initially_recorded_by_person",
+        "modified_by_person",
         "allergen_type_code_text",
         "allergen_type_code_coding_system",
         "allergen_type_code_alt_code",
@@ -1296,6 +1291,8 @@ allow_null_columns = {
         "special_access_restriction"
     },
     "nk1": {
+        "telecommunication_info",
+        "contact_telecommunication_info",
         "relationship_alt_code",
         "relationship_alt_text",
         "relationship_alt_coding_system",
@@ -1489,6 +1486,7 @@ allow_null_columns = {
         "contact_telecommunication_info_preference_order"
     },
     "nte": {
+        "entered_by",
         "source_of_comment",
         "comment_type",
         "comment_type_text",
@@ -1528,6 +1526,8 @@ allow_null_columns = {
         "coded_comment"
     },
     "obr": {
+        "charge_to_practice",
+        "parent_results_observation_identifier",
         "service_alt_code",
         "service_alt_text",
         "service_alt_coding_system",
@@ -1676,6 +1676,8 @@ allow_null_columns = {
         "action_code"
     },
     "obx": {
+        "performing_org_address",
+        "performing_org_medical_director",
         "observation_id_alt_code",
         "observation_id_alt_text",
         "observation_id_alt_coding_system",
@@ -1809,6 +1811,7 @@ allow_null_columns = {
         "observation_related_specimen"
     },
     "orc": {
+        "enterers_location",
         "placer_group_number",
         "placer_group_number_namespace_id",
         "placer_group_number_universal_id",
@@ -2060,6 +2063,7 @@ allow_null_columns = {
         "retirement_date"
     },
     "pid": {
+        "drivers_license",
         "patient_external_id",
         "patient_external_id_check_digit",
         "patient_external_id_check_digit_scheme",
@@ -2290,6 +2294,10 @@ allow_null_columns = {
         "parent_procedure_id_universal_id_type"
     },
     "pv1": {
+        "prior_patient_location",
+        "temporary_location",
+        "pending_location",
+        "prior_temporary_location",
         "patient_class_text",
         "patient_class_coding_system",
         "patient_class_alt_code",
@@ -2598,6 +2606,7 @@ allow_null_columns = {
         "service_episode_identifier_security_check_scheme"
     },
     "pv2": {
+        "prior_pending_location",
         "prior_pending_location_point_of_care",
         "prior_pending_location_room",
         "prior_pending_location_bed",
@@ -2783,6 +2792,8 @@ allow_null_columns = {
         "advance_directive_last_verified_date"
     },
     "rxa": {
+        "administer_at",
+        "administered_at_address",
         "administered_code_alt_code",
         "administered_code_alt_text",
         "administered_code_alt_coding_system",
@@ -2880,6 +2891,12 @@ allow_null_columns = {
         "administered_tag_identifier"
     },
     "sch": {
+        "placer_contact_phone",
+        "placer_contact_location",
+        "filler_contact_phone",
+        "filler_contact_location",
+        "entered_by_location",
+        "alternate_placer_order_group_number",
         "placer_appointment_id_universal_id",
         "placer_appointment_id_universal_id_type",
         "filler_appointment_id_universal_id",

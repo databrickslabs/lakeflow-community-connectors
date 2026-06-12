@@ -22,7 +22,7 @@ class TestNK1Extraction:
         row = extract_segment(msg, "NK1", _extract_nk1)
         assert row["names"][0]["family_name"] == "Doe"
         assert row["names"][0]["given_name"] == "Jane"
-        assert row["relationship"] == "SPO"
+        assert row["relationship"]["code"] == "SPO"
 
     def test_comprehensive_multiple_nk1(self):
         msg = parse_first(load_sample("sample_adt_comprehensive.hl7"))
@@ -31,10 +31,10 @@ class TestNK1Extraction:
         row1 = _extract_nk1(segs[0])
         assert row1["names"][0]["family_name"] == "Martinez"
         assert row1["names"][0]["given_name"] == "Carlos"
-        assert row1["relationship"] == "SPO"
+        assert row1["relationship"]["code"] == "SPO"
         row2 = _extract_nk1(segs[1])
         assert row2["names"][0]["family_name"] == "Martinez"
-        assert row2["relationship"] == "MTH"
+        assert row2["relationship"]["code"] == "MTH"
 
     def test_batch_nk1(self):
         raw = load_sample("sample_batch_mixed.hl7")
@@ -42,7 +42,7 @@ class TestNK1Extraction:
         msg3 = parse_message(msgs[2])
         row = extract_segment(msg3, "NK1", _extract_nk1)
         assert row["names"][0]["family_name"] == "Batch"
-        assert row["relationship"] == "SPO"
+        assert row["relationship"]["code"] == "SPO"
 
 
 class TestNK1MissingFields:
@@ -80,8 +80,8 @@ class TestNK1NewComposites:
             "NK1|" + "|".join(seg_fields)
         )
         row = _extract_nk1(msg.get_segment("NK1"))
-        assert row["job_code"] == "ENG"
-        assert row["job_code_text"] == "Engineer"
-        assert row["job_code_class"] == "IT"
-        assert row["job_code_class_text"] == "Information Tech"
-        assert row["job_code_description"] == "Senior software dev"
+        assert row["job_code"]["code"] == "ENG"
+        assert row["job_code"]["text"] == "Engineer"
+        assert row["job_code"]["class"] == "IT"
+        assert row["job_code"]["class_text"] == "Information Tech"
+        assert row["job_code"]["description"] == "Senior software dev"

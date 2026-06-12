@@ -17,19 +17,19 @@ class TestIN1Extraction:
     def test_comprehensive_in1(self):
         msg = parse_first(load_sample("sample_adt_comprehensive.hl7"))
         row = extract_segment(msg, "IN1", _extract_in1)
-        assert row["insurance_plan"] == "BCBS001"
-        assert row["insurance_plan_text"] == "Blue Cross Blue Shield"
+        assert row["insurance_plan"]["code"] == "BCBS001"
+        assert row["insurance_plan"]["text"] == "Blue Cross Blue Shield"
         assert row["insurance_company_name"][0]["name"] == "Blue Cross Blue Shield of Illinois"
         assert row["group_number"] == "GRP7700"
-        assert row["plan_type"] == "PPO"
+        assert row["plan_type"]["code"] == "PPO"
         assert row["insured_names"][0]["family_name"] == "Martinez"
-        assert row["insureds_relationship_to_patient"] == "SEL"
+        assert row["insureds_relationship_to_patient"]["code"] == "SEL"
 
     def test_dft_in1(self):
         msg = parse_first(load_sample("sample_dft_financial.hl7"))
         row = extract_segment(msg, "IN1", _extract_in1)
-        assert row["insurance_plan"] == "AETNA01"
-        assert row["plan_type"] == "HMO"
+        assert row["insurance_plan"]["code"] == "AETNA01"
+        assert row["plan_type"]["code"] == "HMO"
         assert row["group_number"] == "GRP4400"
 
 
@@ -53,8 +53,8 @@ class TestIN1MissingFields:
             "IN1|1|PLAN001^Basic Plan|COMP001^^^INS"
         )
         row = _extract_in1(msg.get_segment("IN1"))
-        assert row["insurance_plan"] == "PLAN001"
-        assert row["insurance_plan_text"] == "Basic Plan"
+        assert row["insurance_plan"]["code"] == "PLAN001"
+        assert row["insurance_plan"]["text"] == "Basic Plan"
         # IN1-3 is now CX array (v2.9): check first repetition's ID
         assert row["insurance_company"][0]["id"] == "COMP001"
         assert row["insurance_company"][0]["assigning_authority"] == "INS"
@@ -108,9 +108,9 @@ class TestIN1NewComposites:
         row = _extract_in1(msg.get_segment("IN1"))
         assert row["plan_effective_date"] is not None
         assert row["plan_expiration_date"] is not None
-        assert row["authorization_information"] == "AUTH123"
-        assert row["authorization_information_date"] is not None
-        assert row["authorization_information_source"] == "InsuranceCo"
+        assert row["authorization_information"]["number"] == "AUTH123"
+        assert row["authorization_information"]["date"] is not None
+        assert row["authorization_information"]["source"] == "InsuranceCo"
         ehp = row["external_health_plan_identifiers"]
         assert len(ehp) == 2
         assert ehp[0]["code"] == "ABC123"

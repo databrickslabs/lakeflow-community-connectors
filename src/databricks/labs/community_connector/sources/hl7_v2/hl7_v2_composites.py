@@ -1,14 +1,16 @@
 """HL7 v2 composite-type helpers and null-safe primitives.
 
 These helpers extract every component (and sub-component, where present)
-of HL7 v2 composite data types into individually named keys.  They are
-used by the per-segment extractors in :mod:`hl7_v2_extractors` and exposed
-at module level so per-segment unit tests can import them directly.
+of HL7 v2 composite data types.  They are used by the per-segment
+extractors in :mod:`hl7_v2_extractors` and exposed at module level so
+per-segment unit tests can import them directly.
 
-Naming convention: ``_xpn_fields(seg, n, prefix)`` produces keys like
-``{prefix}_family_name``, ``{prefix}_given_name``, ... .  Array variants
-(``_xpn_array_fields``) produce a single key holding a list of dicts so
-all repetitions are preserved.
+Naming convention: a single-occurrence composite helper (e.g.
+``_cwe_fields(seg, n, prefix)``) produces one key ``prefix`` whose value is
+a struct-shaped dict (``{"code": ..., "text": ...}``) or ``None`` when all
+sub-components are empty.  Array variants (e.g. ``_xpn_array_fields``)
+produce a single key holding a list of such dicts so all repetitions are
+preserved.
 """
 
 from __future__ import annotations
@@ -29,6 +31,11 @@ from databricks.labs.community_connector.sources.hl7_v2.hl7_v2_parser import (
 def _v(s: str) -> str | None:
     """Return *s* if non-empty, else None."""
     return s if s else None
+
+
+def _nonnull(d: dict) -> dict | None:
+    """Collapse an all-None composite dict to None (empty STRUCT -> NULL)."""
+    return d if any(v is not None for v in d.values()) else None
 
 
 def _i(s: str) -> int | None:
@@ -87,33 +94,6 @@ def _parse_dtm(s: str) -> str | None:
 # ---------------------------------------------------------------------------
 
 
-def _xpn_fields(
-    seg: HL7Segment, field_n: int, prefix: str, *, repeating: bool = True
-) -> dict:
-    """XPN (Extended Person Name) — 14 active components."""
-    def gc(comp):
-        if repeating:
-            return _v(seg.get_rep_component(field_n, 1, comp))
-        return _v(seg.get_component(field_n, comp))
-
-    return {
-        f"{prefix}_family_name": gc(1),
-        f"{prefix}_given_name": gc(2),
-        f"{prefix}_middle_name": gc(3),
-        f"{prefix}_suffix": gc(4),
-        f"{prefix}_prefix": gc(5),
-        f"{prefix}_degree": gc(6),
-        f"{prefix}_name_type_code": gc(7),
-        f"{prefix}_name_representation_code": gc(8),
-        f"{prefix}_name_context": gc(9),
-        f"{prefix}_name_assembly_order": gc(11),
-        f"{prefix}_name_effective_date": gc(12),
-        f"{prefix}_name_expiration_date": gc(13),
-        f"{prefix}_professional_suffix": gc(14),
-        f"{prefix}_called_by": gc(15),
-    }
-
-
 def _xpn_array_fields(
     seg: HL7Segment, field_n: int, column_name: str
 ) -> dict:
@@ -162,68 +142,99 @@ def _xcn_fields(
             return _v(seg.get_rep_sub_component(field_n, 1, comp, sub))
         return _v(seg.get_sub_component(field_n, comp, sub))
 
-    return {
-        f"{prefix}_id": gc(1),
-        f"{prefix}_family_name": gc(2),
-        f"{prefix}_given_name": gc(3),
-        f"{prefix}_middle_name": gc(4),
-        f"{prefix}_suffix": gc(5),
-        f"{prefix}_prefix": gc(6),
-        f"{prefix}_degree": gc(7),
-        f"{prefix}_source_table": gc(8),
-        f"{prefix}_assigning_authority": gsc(9, 1),
-        f"{prefix}_assigning_authority_universal_id": gsc(9, 2),
-        f"{prefix}_assigning_authority_universal_id_type": gsc(9, 3),
-        f"{prefix}_name_type_code": gc(10),
-        f"{prefix}_check_digit": gc(11),
-        f"{prefix}_check_digit_scheme": gc(12),
-        f"{prefix}_identifier_type_code": gc(13),
-        f"{prefix}_assigning_facility": gsc(14, 1),
-        f"{prefix}_assigning_facility_universal_id": gsc(14, 2),
-        f"{prefix}_assigning_facility_universal_id_type": gsc(14, 3),
-        f"{prefix}_name_representation_code": gc(15),
-        f"{prefix}_name_assembly_order": gc(18),
-        f"{prefix}_effective_date": gc(19),
-        f"{prefix}_expiration_date": gc(20),
-        f"{prefix}_professional_suffix": gc(21),
-    }
+    return {prefix: _nonnull({
+        "id": gc(1),
+        "family_name": gc(2),
+        "given_name": gc(3),
+        "middle_name": gc(4),
+        "suffix": gc(5),
+        "prefix": gc(6),
+        "degree": gc(7),
+        "source_table": gc(8),
+        "assigning_authority": gsc(9, 1),
+        "assigning_authority_universal_id": gsc(9, 2),
+        "assigning_authority_universal_id_type": gsc(9, 3),
+        "name_type_code": gc(10),
+        "check_digit": gc(11),
+        "check_digit_scheme": gc(12),
+        "identifier_type_code": gc(13),
+        "assigning_facility": gsc(14, 1),
+        "assigning_facility_universal_id": gsc(14, 2),
+        "assigning_facility_universal_id_type": gsc(14, 3),
+        "name_representation_code": gc(15),
+        "name_assembly_order": gc(18),
+        "effective_date": gc(19),
+        "expiration_date": gc(20),
+        "professional_suffix": gc(21),
+    })}
 
 
 def _cwe_fields(
     seg: HL7Segment, field_n: int, prefix: str, *, repeating: bool = False
 ) -> dict:
-    """CWE (Coded With Exceptions) — 9 active components (10-22 are OID/value-set metadata, rarely populated)."""
-    def gc(comp):
-        if repeating:
-            return _v(seg.get_rep_component(field_n, 1, comp))
-        return _v(seg.get_component(field_n, comp))
-
-    return {
-        f"{prefix}": gc(1),
-        f"{prefix}_text": gc(2),
-        f"{prefix}_coding_system": gc(3),
-        f"{prefix}_alt_code": gc(4),
-        f"{prefix}_alt_text": gc(5),
-        f"{prefix}_alt_coding_system": gc(6),
-        f"{prefix}_coding_system_version": gc(7),
-        f"{prefix}_alt_coding_system_version": gc(8),
-        f"{prefix}_original_text": gc(9),
-    }
+    """CWE single occurrence as a nested STRUCT column keyed by ``prefix``."""
+    return {prefix: _cwe_struct(seg, field_n, repeating=repeating)}
 
 
 def _hd_fields(
     seg: HL7Segment, field_n: int, prefix: str, *, repeating: bool = False
 ) -> dict:
-    """HD (Hierarchic Designator) — 3 components."""
+    """HD single occurrence as a nested STRUCT column keyed by ``prefix``."""
+    return {prefix: _hd_struct(seg, field_n, repeating=repeating)}
+
+
+# ---------------------------------------------------------------------------
+# Struct-typed single-occurrence composite extractors
+#
+# These return a single dict (the STRUCT value) or None when the field is
+# absent, instead of spreading flat ``{prefix}_<subfield>`` keys onto the row.
+# The dict keys match the corresponding ``_*_STRUCT`` definitions in
+# ``hl7_v2_schemas``. Used by the per-segment extractors for 0..1 / 1..1
+# composites; repeating composites keep using the ``_*_array_fields`` helpers.
+# ---------------------------------------------------------------------------
+
+
+def _cwe_struct(
+    seg: HL7Segment, field_n: int, *, repeating: bool = False
+) -> dict | None:
+    """CWE (Coded With Exceptions) single occurrence as a STRUCT dict (or None)."""
+    if not seg.get_field(field_n):
+        return None
+
     def gc(comp):
         if repeating:
             return _v(seg.get_rep_component(field_n, 1, comp))
         return _v(seg.get_component(field_n, comp))
 
     return {
-        f"{prefix}": gc(1),
-        f"{prefix}_universal_id": gc(2),
-        f"{prefix}_universal_id_type": gc(3),
+        "code": gc(1),
+        "text": gc(2),
+        "coding_system": gc(3),
+        "alt_code": gc(4),
+        "alt_text": gc(5),
+        "alt_coding_system": gc(6),
+        "coding_system_version": gc(7),
+        "alt_coding_system_version": gc(8),
+        "original_text": gc(9),
+    }
+
+
+def _hd_struct(
+    seg: HL7Segment, field_n: int, *, repeating: bool = False
+) -> dict | None:
+    """HD (Hierarchic Designator) single occurrence as a STRUCT dict (or None)."""
+    if not seg.get_field(field_n):
+        return None
+
+    def gc(comp):
+        if repeating:
+            return _v(seg.get_rep_component(field_n, 1, comp))
+        return _v(seg.get_component(field_n, comp))
+
+    return {
+        "namespace_id": gc(1),
+        "universal_id": gc(2),
+        "universal_id_type": gc(3),
     }
 
 
@@ -236,12 +247,12 @@ def _ei_fields(
             return _v(seg.get_rep_component(field_n, 1, comp))
         return _v(seg.get_component(field_n, comp))
 
-    return {
-        f"{prefix}": gc(1),
-        f"{prefix}_namespace_id": gc(2),
-        f"{prefix}_universal_id": gc(3),
-        f"{prefix}_universal_id_type": gc(4),
-    }
+    return {prefix: _nonnull({
+        "entity_identifier": gc(1),
+        "namespace_id": gc(2),
+        "universal_id": gc(3),
+        "universal_id_type": gc(4),
+    })}
 
 
 def _cp_fields(seg: HL7Segment, field_n: int, prefix: str) -> dict:
@@ -257,25 +268,25 @@ def _cp_fields(seg: HL7Segment, field_n: int, prefix: str) -> dict:
     def gsc(comp, sub):
         return _v(seg.get_sub_component(field_n, comp, sub))
 
-    return {
-        f"{prefix}":                      gsc(1, 1) or gc(1),
-        f"{prefix}_currency":             gsc(1, 2),
-        f"{prefix}_price_type":           gc(2),
-        f"{prefix}_from_value":           gc(3),
-        f"{prefix}_to_value":             gc(4),
-        f"{prefix}_range_units":          gsc(5, 1) or gc(5),
-        f"{prefix}_range_units_text":     gsc(5, 2),
-        f"{prefix}_range_units_coding_system": gsc(5, 3),
-        f"{prefix}_range_type":           gc(6),
-    }
+    return {prefix: _nonnull({
+        "price":                      gsc(1, 1) or gc(1),
+        "currency":                   gsc(1, 2),
+        "price_type":                 gc(2),
+        "from_value":                 gc(3),
+        "to_value":                   gc(4),
+        "range_units":                gsc(5, 1) or gc(5),
+        "range_units_text":           gsc(5, 2),
+        "range_units_coding_system":  gsc(5, 3),
+        "range_type":                 gc(6),
+    })}
 
 
 def _pt_fields(seg: HL7Segment, field_n: int, prefix: str) -> dict:
     """PT (Processing Type) — 2 ID components: Processing ID, Processing Mode."""
-    return {
-        f"{prefix}": _v(seg.get_component(field_n, 1)),
-        f"{prefix}_mode": _v(seg.get_component(field_n, 2)),
-    }
+    return {prefix: _nonnull({
+        "id": _v(seg.get_component(field_n, 1)),
+        "mode": _v(seg.get_component(field_n, 2)),
+    })}
 
 
 def _vid_fields(seg: HL7Segment, field_n: int, prefix: str) -> dict:
@@ -286,24 +297,24 @@ def _vid_fields(seg: HL7Segment, field_n: int, prefix: str) -> dict:
     def gsc(comp, sub):
         return _v(seg.get_sub_component(field_n, comp, sub))
 
-    return {
-        f"{prefix}": gc(1),
-        f"{prefix}_internationalization": gsc(2, 1) or gc(2),
-        f"{prefix}_internationalization_text": gsc(2, 2),
-        f"{prefix}_internationalization_coding_system": gsc(2, 3),
-        f"{prefix}_international_version": gsc(3, 1) or gc(3),
-        f"{prefix}_international_version_text": gsc(3, 2),
-        f"{prefix}_international_version_coding_system": gsc(3, 3),
-    }
+    return {prefix: _nonnull({
+        "id": gc(1),
+        "internationalization": gsc(2, 1) or gc(2),
+        "internationalization_text": gsc(2, 2),
+        "internationalization_coding_system": gsc(2, 3),
+        "international_version": gsc(3, 1) or gc(3),
+        "international_version_text": gsc(3, 2),
+        "international_version_coding_system": gsc(3, 3),
+    })}
 
 
 def _aui_fields(seg: HL7Segment, field_n: int, prefix: str) -> dict:
     """AUI (Authorization Information) — 3 components: ST (number), DT (date), ST (source)."""
-    return {
-        f"{prefix}": _v(seg.get_component(field_n, 1)),
-        f"{prefix}_date": _parse_dtm(seg.get_component(field_n, 2)),
-        f"{prefix}_source": _v(seg.get_component(field_n, 3)),
-    }
+    return {prefix: _nonnull({
+        "number": _v(seg.get_component(field_n, 1)),
+        "date": _parse_dtm(seg.get_component(field_n, 2)),
+        "source": _v(seg.get_component(field_n, 3)),
+    })}
 
 
 def _sps_fields(seg: HL7Segment, field_n: int, prefix: str) -> dict:
@@ -314,16 +325,16 @@ def _sps_fields(seg: HL7Segment, field_n: int, prefix: str) -> dict:
     def gsc(comp, sub):
         return _v(seg.get_sub_component(field_n, comp, sub))
 
-    return {
-        f"{prefix}":                            gsc(1, 1) or gc(1),  # SPS.1.1 (CWE.1 source code)
-        f"{prefix}_text":                       gsc(1, 2),           # SPS.1.2 (CWE.2 source text)
-        f"{prefix}_additives":                  gsc(2, 1) or gc(2),  # SPS.2.1 (CWE.1 additives)
-        f"{prefix}_collection_method":          gc(3),               # SPS.3 (TX)
-        f"{prefix}_body_site":                  gsc(4, 1) or gc(4),  # SPS.4.1 (CWE.1 body site)
-        f"{prefix}_site_modifier":              gsc(5, 1) or gc(5),  # SPS.5.1 (CWE.1 site modifier)
-        f"{prefix}_collection_method_modifier": gsc(6, 1) or gc(6),  # SPS.6.1 (CWE.1 method mod)
-        f"{prefix}_role":                       gsc(7, 1) or gc(7),  # SPS.7.1 (CWE.1 specimen role)
-    }
+    return {prefix: _nonnull({
+        "code":                       gsc(1, 1) or gc(1),  # SPS.1.1 (CWE.1 source code)
+        "text":                       gsc(1, 2),           # SPS.1.2 (CWE.2 source text)
+        "additives":                  gsc(2, 1) or gc(2),  # SPS.2.1 (CWE.1 additives)
+        "collection_method":          gc(3),               # SPS.3 (TX)
+        "body_site":                  gsc(4, 1) or gc(4),  # SPS.4.1 (CWE.1 body site)
+        "site_modifier":              gsc(5, 1) or gc(5),  # SPS.5.1 (CWE.1 site modifier)
+        "collection_method_modifier": gsc(6, 1) or gc(6),  # SPS.6.1 (CWE.1 method mod)
+        "role":                       gsc(7, 1) or gc(7),  # SPS.7.1 (CWE.1 specimen role)
+    })}
 
 
 def _dln_fields(seg: HL7Segment, field_n: int, prefix: str) -> dict:
@@ -331,11 +342,11 @@ def _dln_fields(seg: HL7Segment, field_n: int, prefix: str) -> dict:
     def gc(comp):
         return _v(seg.get_component(field_n, comp))
 
-    return {
-        f"{prefix}_number":          gc(1),
-        f"{prefix}_issuing_state":   gc(2),
-        f"{prefix}_expiration_date": _parse_dtm(gc(3)),
-    }
+    return {prefix: _nonnull({
+        "number":          gc(1),
+        "issuing_state":   gc(2),
+        "expiration_date": _parse_dtm(gc(3)),
+    })}
 
 
 def _dld_fields(seg: HL7Segment, field_n: int, prefix: str) -> dict:
@@ -346,10 +357,10 @@ def _dld_fields(seg: HL7Segment, field_n: int, prefix: str) -> dict:
     def gsc(comp, sub):
         return _v(seg.get_sub_component(field_n, comp, sub))
 
-    return {
-        f"{prefix}":               gsc(1, 1) or gc(1),
-        f"{prefix}_effective_date": _parse_dtm(gc(2)),
-    }
+    return {prefix: _nonnull({
+        "code":           gsc(1, 1) or gc(1),
+        "effective_date": _parse_dtm(gc(2)),
+    })}
 
 
 def _fc_fields(seg: HL7Segment, field_n: int, prefix: str) -> dict:
@@ -360,18 +371,18 @@ def _fc_fields(seg: HL7Segment, field_n: int, prefix: str) -> dict:
     def gc(comp):
         return _v(seg.get_component(field_n, comp))
 
-    return {
-        f"{prefix}": gsc(1, 1) or gc(1),
-        f"{prefix}_text": gsc(1, 2),
-        f"{prefix}_coding_system": gsc(1, 3),
-        f"{prefix}_alt_code": gsc(1, 4),
-        f"{prefix}_alt_text": gsc(1, 5),
-        f"{prefix}_alt_coding_system": gsc(1, 6),
-        f"{prefix}_coding_system_version": gsc(1, 7),
-        f"{prefix}_alt_coding_system_version": gsc(1, 8),
-        f"{prefix}_original_text": gsc(1, 9),
-        f"{prefix}_effective_date": _parse_dtm(gc(2)),
-    }
+    return {prefix: _nonnull({
+        "code": gsc(1, 1) or gc(1),
+        "text": gsc(1, 2),
+        "coding_system": gsc(1, 3),
+        "alt_code": gsc(1, 4),
+        "alt_text": gsc(1, 5),
+        "alt_coding_system": gsc(1, 6),
+        "coding_system_version": gsc(1, 7),
+        "alt_coding_system_version": gsc(1, 8),
+        "original_text": gsc(1, 9),
+        "effective_date": _parse_dtm(gc(2)),
+    })}
 
 
 def _fc_array_fields(seg: HL7Segment, field_n: int, column_name: str) -> dict:
@@ -460,15 +471,15 @@ def _jcc_fields(seg: HL7Segment, field_n: int, prefix: str) -> dict:
     def gc(comp):
         return _v(seg.get_component(field_n, comp))
 
-    return {
-        f"{prefix}": gsc(1, 1) or gc(1),
-        f"{prefix}_text": gsc(1, 2),
-        f"{prefix}_coding_system": gsc(1, 3),
-        f"{prefix}_class": gsc(2, 1) or gc(2),
-        f"{prefix}_class_text": gsc(2, 2),
-        f"{prefix}_class_coding_system": gsc(2, 3),
-        f"{prefix}_description": gc(3),
-    }
+    return {prefix: _nonnull({
+        "code": gsc(1, 1) or gc(1),
+        "text": gsc(1, 2),
+        "coding_system": gsc(1, 3),
+        "class": gsc(2, 1) or gc(2),
+        "class_text": gsc(2, 2),
+        "class_coding_system": gsc(2, 3),
+        "description": gc(3),
+    })}
 
 
 def _moc_fields(seg: HL7Segment, field_n: int, prefix: str) -> dict:
@@ -479,13 +490,13 @@ def _moc_fields(seg: HL7Segment, field_n: int, prefix: str) -> dict:
     def gc(comp):
         return _v(seg.get_component(field_n, comp))
 
-    return {
-        f"{prefix}_monetary_amount":           gsc(1, 1) or gc(1),  # MOC.1.1 (MO.1 quantity, NM)
-        f"{prefix}_monetary_amount_currency":  gsc(1, 2),            # MOC.1.2 (MO.2 denom, ID)
-        f"{prefix}_charge_code":               gsc(2, 1) or gc(2),  # MOC.2.1 (CWE.1 code)
-        f"{prefix}_charge_code_text":          gsc(2, 2),            # MOC.2.2 (CWE.2 text)
-        f"{prefix}_charge_code_coding_system": gsc(2, 3),            # MOC.2.3 (CWE.3 coding system)
-    }
+    return {prefix: _nonnull({
+        "monetary_amount":           gsc(1, 1) or gc(1),  # MOC.1.1 (MO.1 quantity, NM)
+        "monetary_amount_currency":  gsc(1, 2),            # MOC.1.2 (MO.2 denom, ID)
+        "charge_code":               gsc(2, 1) or gc(2),  # MOC.2.1 (CWE.1 code)
+        "charge_code_text":          gsc(2, 2),            # MOC.2.2 (CWE.2 text)
+        "charge_code_coding_system": gsc(2, 3),            # MOC.2.3 (CWE.3 coding system)
+    })}
 
 
 def _prl_fields(seg: HL7Segment, field_n: int, prefix: str) -> dict:
@@ -496,13 +507,13 @@ def _prl_fields(seg: HL7Segment, field_n: int, prefix: str) -> dict:
     def gc(comp):
         return _v(seg.get_component(field_n, comp))
 
-    return {
-        f"{prefix}": gsc(1, 1) or gc(1),
-        f"{prefix}_text": gsc(1, 2),
-        f"{prefix}_coding_system": gsc(1, 3),
-        f"{prefix}_sub_id": gc(2),
-        f"{prefix}_descriptor": gc(3),
-    }
+    return {prefix: _nonnull({
+        "code": gsc(1, 1) or gc(1),
+        "text": gsc(1, 2),
+        "coding_system": gsc(1, 3),
+        "sub_id": gc(2),
+        "descriptor": gc(3),
+    })}
 
 
 def _ndl_fields(seg: HL7Segment, field_n: int, prefix: str) -> dict:
@@ -513,25 +524,25 @@ def _ndl_fields(seg: HL7Segment, field_n: int, prefix: str) -> dict:
     def gc(comp):
         return _v(seg.get_component(field_n, comp))
 
-    return {
-        f"{prefix}": gsc(1, 1),
-        f"{prefix}_family_name": gsc(1, 2),
-        f"{prefix}_given_name": gsc(1, 3),
-        f"{prefix}_middle_name": gsc(1, 4),
-        f"{prefix}_suffix": gsc(1, 5),
-        f"{prefix}_prefix": gsc(1, 6),
-        f"{prefix}_degree": gsc(1, 7),
-        f"{prefix}_start_datetime": _parse_dtm(gc(2)),
-        f"{prefix}_end_datetime": _parse_dtm(gc(3)),
-        f"{prefix}_point_of_care": gc(4),
-        f"{prefix}_room": gc(5),
-        f"{prefix}_bed": gc(6),
-        f"{prefix}_facility": gsc(7, 1) or gc(7),
-        f"{prefix}_location_status": gc(8),
-        f"{prefix}_patient_location_type": gc(9),
-        f"{prefix}_building": gc(10),
-        f"{prefix}_floor": gc(11),
-    }
+    return {prefix: _nonnull({
+        "id": gsc(1, 1),
+        "family_name": gsc(1, 2),
+        "given_name": gsc(1, 3),
+        "middle_name": gsc(1, 4),
+        "suffix": gsc(1, 5),
+        "prefix": gsc(1, 6),
+        "degree": gsc(1, 7),
+        "start_datetime": _parse_dtm(gc(2)),
+        "end_datetime": _parse_dtm(gc(3)),
+        "point_of_care": gc(4),
+        "room": gc(5),
+        "bed": gc(6),
+        "facility": gsc(7, 1) or gc(7),
+        "location_status": gc(8),
+        "patient_location_type": gc(9),
+        "building": gc(10),
+        "floor": gc(11),
+    })}
 
 
 def _ndl_array_fields(seg: HL7Segment, field_n: int, column_name: str) -> dict:
@@ -626,10 +637,10 @@ def _cq_fields(seg: HL7Segment, field_n: int, prefix: str) -> dict:
     def gsc(comp, sub):
         return _v(seg.get_sub_component(field_n, comp, sub))
 
-    return {
-        f"{prefix}": gc(1),
-        f"{prefix}_units": gsc(2, 1) or gc(2),
-    }
+    return {prefix: _nonnull({
+        "quantity": gc(1),
+        "units": gsc(2, 1) or gc(2),
+    })}
 
 
 def _pl_fields(seg: HL7Segment, field_n: int, prefix: str) -> dict:
@@ -645,19 +656,19 @@ def _pl_fields(seg: HL7Segment, field_n: int, prefix: str) -> dict:
     def gsc(comp, sub):
         return _v(seg.get_sub_component(field_n, comp, sub))
 
-    return {
-        f"{prefix}_point_of_care": gsc(1, 1) or gc(1),
-        f"{prefix}_room": gsc(2, 1) or gc(2),
-        f"{prefix}_bed": gsc(3, 1) or gc(3),
-        f"{prefix}_facility": gsc(4, 1) or gc(4),
-        f"{prefix}_status": gc(5),
-        f"{prefix}_type": gc(6),
-        f"{prefix}_building": gsc(7, 1) or gc(7),
-        f"{prefix}_floor": gsc(8, 1) or gc(8),
-        f"{prefix}_description": gc(9),
-        f"{prefix}_comprehensive_id": gsc(10, 1) or gc(10),
-        f"{prefix}_assigning_authority": gsc(11, 1) or gc(11),
-    }
+    return {prefix: _nonnull({
+        "point_of_care": gsc(1, 1) or gc(1),
+        "room": gsc(2, 1) or gc(2),
+        "bed": gsc(3, 1) or gc(3),
+        "facility": gsc(4, 1) or gc(4),
+        "status": gc(5),
+        "type": gc(6),
+        "building": gsc(7, 1) or gc(7),
+        "floor": gsc(8, 1) or gc(8),
+        "description": gc(9),
+        "comprehensive_id": gsc(10, 1) or gc(10),
+        "assigning_authority": gsc(11, 1) or gc(11),
+    })}
 
 
 def _cwe_array_fields(
@@ -1035,16 +1046,18 @@ def _eip_fields(seg: HL7Segment, field_n: int, prefix: str) -> dict:
     def gsc(comp, sub):
         return _v(seg.get_sub_component(field_n, comp, sub))
 
-    return {
-        f"{prefix}_placer_assigned_identifier":                      gsc(1, 1) or gc(1),
-        f"{prefix}_placer_assigned_identifier_namespace_id":         gsc(1, 2),
-        f"{prefix}_placer_assigned_identifier_universal_id":         gsc(1, 3),
-        f"{prefix}_placer_assigned_identifier_universal_id_type":    gsc(1, 4),
-        f"{prefix}_filler_assigned_identifier":                      gsc(2, 1) or gc(2),
-        f"{prefix}_filler_assigned_identifier_namespace_id":         gsc(2, 2),
-        f"{prefix}_filler_assigned_identifier_universal_id":         gsc(2, 3),
-        f"{prefix}_filler_assigned_identifier_universal_id_type":    gsc(2, 4),
-    }
+    def _ei(comp):
+        return _nonnull({
+            "entity_identifier": gsc(comp, 1) or gc(comp),
+            "namespace_id": gsc(comp, 2),
+            "universal_id": gsc(comp, 3),
+            "universal_id_type": gsc(comp, 4),
+        })
+
+    return {prefix: _nonnull({
+        "placer_assigned_identifier": _ei(1),
+        "filler_assigned_identifier": _ei(2),
+    })}
 
 
 def _mo_fields(seg: HL7Segment, field_n: int, prefix: str) -> dict:
@@ -1052,10 +1065,10 @@ def _mo_fields(seg: HL7Segment, field_n: int, prefix: str) -> dict:
     def gc(comp):
         return _v(seg.get_component(field_n, comp))
 
-    return {
-        f"{prefix}":          gc(1),
-        f"{prefix}_currency": gc(2),
-    }
+    return {prefix: _nonnull({
+        "amount":   gc(1),
+        "currency": gc(2),
+    })}
 
 
 def _og_fields(seg: HL7Segment, field_n: int, prefix: str) -> dict:
@@ -1067,12 +1080,12 @@ def _og_fields(seg: HL7Segment, field_n: int, prefix: str) -> dict:
     def gc(comp):
         return _v(seg.get_component(field_n, comp))
 
-    return {
-        f"{prefix}":            gc(1),
-        f"{prefix}_group":      gc(2),
-        f"{prefix}_sequence":   gc(3),
-        f"{prefix}_identifier": gc(4),
-    }
+    return {prefix: _nonnull({
+        "sub_identifier": gc(1),
+        "group":          gc(2),
+        "sequence":       gc(3),
+        "identifier":     gc(4),
+    })}
 
 
 def _xon_fields(
@@ -1089,22 +1102,22 @@ def _xon_fields(
             return _v(seg.get_rep_sub_component(field_n, 1, comp, sub))
         return _v(seg.get_sub_component(field_n, comp, sub))
 
-    return {
-        f"{prefix}": gc(1),
-        f"{prefix}_type_code": gc(2),
-        f"{prefix}_id": gc(3),
-        f"{prefix}_check_digit": gc(4),
-        f"{prefix}_check_digit_scheme": gc(5),
-        f"{prefix}_assigning_authority": gsc(6, 1),
-        f"{prefix}_assigning_authority_universal_id": gsc(6, 2),
-        f"{prefix}_assigning_authority_universal_id_type": gsc(6, 3),
-        f"{prefix}_id_type_code": gc(7),
-        f"{prefix}_assigning_facility": gsc(8, 1),
-        f"{prefix}_assigning_facility_universal_id": gsc(8, 2),
-        f"{prefix}_assigning_facility_universal_id_type": gsc(8, 3),
-        f"{prefix}_name_rep_code": gc(9),
-        f"{prefix}_identifier": gc(10),
-    }
+    return {prefix: _nonnull({
+        "name": gc(1),
+        "type_code": gc(2),
+        "id": gc(3),
+        "check_digit": gc(4),
+        "check_digit_scheme": gc(5),
+        "assigning_authority": gsc(6, 1),
+        "assigning_authority_universal_id": gsc(6, 2),
+        "assigning_authority_universal_id_type": gsc(6, 3),
+        "id_type_code": gc(7),
+        "assigning_facility": gsc(8, 1),
+        "assigning_facility_universal_id": gsc(8, 2),
+        "assigning_facility_universal_id_type": gsc(8, 3),
+        "name_rep_code": gc(9),
+        "identifier": gc(10),
+    })}
 
 
 def _cx_fields(
@@ -1121,24 +1134,24 @@ def _cx_fields(
             return _v(seg.get_rep_sub_component(field_n, 1, comp, sub))
         return _v(seg.get_sub_component(field_n, comp, sub))
 
-    return {
-        f"{prefix}": gc(1),
-        f"{prefix}_check_digit": gc(2),
-        f"{prefix}_check_digit_scheme": gc(3),
-        f"{prefix}_assigning_authority": gsc(4, 1),
-        f"{prefix}_assigning_authority_universal_id": gsc(4, 2),
-        f"{prefix}_assigning_authority_universal_id_type": gsc(4, 3),
-        f"{prefix}_type_code": gc(5),
-        f"{prefix}_assigning_facility": gsc(6, 1),
-        f"{prefix}_assigning_facility_universal_id": gsc(6, 2),
-        f"{prefix}_assigning_facility_universal_id_type": gsc(6, 3),
-        f"{prefix}_effective_date": gc(7),
-        f"{prefix}_expiration_date": gc(8),
-        f"{prefix}_assigning_jurisdiction": gc(9),
-        f"{prefix}_assigning_agency": gc(10),
-        f"{prefix}_security_check": gc(11),
-        f"{prefix}_security_check_scheme": gc(12),
-    }
+    return {prefix: _nonnull({
+        "id": gc(1),
+        "check_digit": gc(2),
+        "check_digit_scheme": gc(3),
+        "assigning_authority": gsc(4, 1),
+        "assigning_authority_universal_id": gsc(4, 2),
+        "assigning_authority_universal_id_type": gsc(4, 3),
+        "type_code": gc(5),
+        "assigning_facility": gsc(6, 1),
+        "assigning_facility_universal_id": gsc(6, 2),
+        "assigning_facility_universal_id_type": gsc(6, 3),
+        "effective_date": gc(7),
+        "expiration_date": gc(8),
+        "assigning_jurisdiction": gc(9),
+        "assigning_agency": gc(10),
+        "security_check": gc(11),
+        "security_check_scheme": gc(12),
+    })}
 
 
 def _xtn_fields(
@@ -1155,26 +1168,26 @@ def _xtn_fields(
             return _v(seg.get_rep_sub_component(field_n, 1, comp, sub))
         return _v(seg.get_sub_component(field_n, comp, sub))
 
-    return {
-        f"{prefix}_number": gc(1),
-        f"{prefix}_use_code": gc(2),
-        f"{prefix}_equipment_type": gc(3),
-        f"{prefix}_communication_address": gc(4),
-        f"{prefix}_country_code": gc(5),
-        f"{prefix}_area_code": gc(6),
-        f"{prefix}_local_number": gc(7),
-        f"{prefix}_extension": gc(8),
-        f"{prefix}_any_text": gc(9),
-        f"{prefix}_extension_prefix": gc(10),
-        f"{prefix}_speed_dial_code": gc(11),
-        f"{prefix}_unformatted_number": gc(12),
-        f"{prefix}_effective_start_date": gc(13),
-        f"{prefix}_expiration_date": gc(14),
-        f"{prefix}_expiration_reason": gsc(15, 1),
-        f"{prefix}_protection_code": gsc(16, 1),
-        f"{prefix}_shared_telecom_id": gsc(17, 1),
-        f"{prefix}_preference_order": gc(18),
-    }
+    return {prefix: _nonnull({
+        "number": gc(1),
+        "use_code": gc(2),
+        "equipment_type": gc(3),
+        "communication_address": gc(4),
+        "country_code": gc(5),
+        "area_code": gc(6),
+        "local_number": gc(7),
+        "extension": gc(8),
+        "any_text": gc(9),
+        "extension_prefix": gc(10),
+        "speed_dial_code": gc(11),
+        "unformatted_number": gc(12),
+        "effective_start_date": gc(13),
+        "expiration_date": gc(14),
+        "expiration_reason": gsc(15, 1),
+        "protection_code": gsc(16, 1),
+        "shared_telecom_id": gsc(17, 1),
+        "preference_order": gc(18),
+    })}
 
 
 def _xad_fields(
@@ -1191,35 +1204,35 @@ def _xad_fields(
             return _v(seg.get_rep_sub_component(field_n, 1, comp, sub))
         return _v(seg.get_sub_component(field_n, comp, sub))
 
-    return {
-        f"{prefix}_street": gc(1),
-        f"{prefix}_other_designation": gc(2),
-        f"{prefix}_city": gc(3),
-        f"{prefix}_state": gc(4),
-        f"{prefix}_zip": gc(5),
-        f"{prefix}_country": gc(6),
-        f"{prefix}_type": gc(7),
-        f"{prefix}_other_geographic": gc(8),
-        f"{prefix}_county_parish_code": gsc(9, 1),
-        f"{prefix}_county_parish_text": gsc(9, 2),
-        f"{prefix}_county_parish_coding_system": gsc(9, 3),
-        f"{prefix}_census_tract": gsc(10, 1),
-        f"{prefix}_census_tract_text": gsc(10, 2),
-        f"{prefix}_census_tract_coding_system": gsc(10, 3),
-        f"{prefix}_representation_code": gc(11),
-        f"{prefix}_effective_date": gc(13),
-        f"{prefix}_expiration_date": gc(14),
-        f"{prefix}_expiration_reason": gsc(15, 1),
-        f"{prefix}_expiration_reason_text": gsc(15, 2),
-        f"{prefix}_expiration_reason_coding_system": gsc(15, 3),
-        f"{prefix}_temporary_indicator": gc(16),
-        f"{prefix}_bad_address_indicator": gc(17),
-        f"{prefix}_usage": gc(18),
-        f"{prefix}_addressee": gc(19),
-        f"{prefix}_comment": gc(20),
-        f"{prefix}_preference_order": gc(21),
-        f"{prefix}_protection_code": gsc(22, 1),
-        f"{prefix}_protection_code_text": gsc(22, 2),
-        f"{prefix}_protection_code_coding_system": gsc(22, 3),
-        f"{prefix}_identifier": gsc(23, 1),
-    }
+    return {prefix: _nonnull({
+        "street": gc(1),
+        "other_designation": gc(2),
+        "city": gc(3),
+        "state": gc(4),
+        "zip": gc(5),
+        "country": gc(6),
+        "type": gc(7),
+        "other_geographic": gc(8),
+        "county_parish_code": gsc(9, 1),
+        "county_parish_text": gsc(9, 2),
+        "county_parish_coding_system": gsc(9, 3),
+        "census_tract": gsc(10, 1),
+        "census_tract_text": gsc(10, 2),
+        "census_tract_coding_system": gsc(10, 3),
+        "representation_code": gc(11),
+        "effective_date": gc(13),
+        "expiration_date": gc(14),
+        "expiration_reason": gsc(15, 1),
+        "expiration_reason_text": gsc(15, 2),
+        "expiration_reason_coding_system": gsc(15, 3),
+        "temporary_indicator": gc(16),
+        "bad_address_indicator": gc(17),
+        "usage": gc(18),
+        "addressee": gc(19),
+        "comment": gc(20),
+        "preference_order": gc(21),
+        "protection_code": gsc(22, 1),
+        "protection_code_text": gsc(22, 2),
+        "protection_code_coding_system": gsc(22, 3),
+        "identifier": gsc(23, 1),
+    })}

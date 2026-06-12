@@ -21,7 +21,7 @@ class TestPIDExtraction:
         assert row["patient_names"][0]["family_name"] == "Doe"
         assert row["patient_names"][0]["given_name"] == "John"
         assert row["date_of_birth"] is not None
-        assert row["administrative_sex"] == "M"
+        assert row["administrative_sex"]["code"] == "M"
         assert row["address"][0]["city"] == "Boston"
         assert row["address"][0]["state"] == "MA"
 
@@ -31,13 +31,13 @@ class TestPIDExtraction:
         # PID-10 race is ArrayType<CWE> (0..* per spec); first rep's components in [0].
         assert row["race"][0]["code"] == "2028-9"
         assert row["race"][0]["text"] == "Asian"
-        assert row["administrative_sex"] == "F"
+        assert row["administrative_sex"]["code"] == "F"
 
     def test_gc_pid_ethnicity(self):
         msg = parse_first(load_sample("sample_oru_gc_testing.hl7"))
         row = extract_segment(msg, "PID", _extract_pid)
         assert row["race"][0]["code"] == "2076-8"
-        assert row["administrative_sex"] == "M"
+        assert row["administrative_sex"]["code"] == "M"
         # PID-22 ethnic_group is ArrayType<CWE> (0..* per spec).
         assert row["ethnic_group"][0]["code"] == "H"
 
@@ -46,7 +46,7 @@ class TestPIDExtraction:
         row = extract_segment(msg, "PID", _extract_pid)
         assert row["patient_names"][0]["family_name"] == "Martinez"
         assert row["patient_names"][0]["given_name"] == "Sofia"
-        assert row["marital_status"] == "M"
+        assert row["marital_status"]["code"] == "M"
         assert row["address"][0]["zip"] == "60614"
         assert row["ssn"] == "987-65-4321"
 
@@ -153,10 +153,10 @@ class TestPIDExternalId:
             "PID|1|EXT001^^M11^EXT_SYS^PI|||Doe^John"
         )
         row = _extract_pid(msg.get_segment("PID"))
-        assert row["patient_external_id"] == "EXT001"
-        assert row["patient_external_id_check_digit_scheme"] == "M11"
-        assert row["patient_external_id_assigning_authority"] == "EXT_SYS"
-        assert row["patient_external_id_type_code"] == "PI"
+        assert row["patient_external_id"]["id"] == "EXT001"
+        assert row["patient_external_id"]["check_digit_scheme"] == "M11"
+        assert row["patient_external_id"]["assigning_authority"] == "EXT_SYS"
+        assert row["patient_external_id"]["type_code"] == "PI"
 
     def test_pid4_alternate_id_cx_struct(self):
         msg = parse_message(
@@ -164,9 +164,9 @@ class TestPIDExternalId:
             "PID|1|||ALT999^^M11^ALT_SYS^AN||Doe^John"
         )
         row = _extract_pid(msg.get_segment("PID"))
-        assert row["alternate_patient_id"] == "ALT999"
-        assert row["alternate_patient_id_assigning_authority"] == "ALT_SYS"
-        assert row["alternate_patient_id_type_code"] == "AN"
+        assert row["alternate_patient_id"]["id"] == "ALT999"
+        assert row["alternate_patient_id"]["assigning_authority"] == "ALT_SYS"
+        assert row["alternate_patient_id"]["type_code"] == "AN"
 
     def test_pid2_absent_yields_none(self):
         msg = parse_message(

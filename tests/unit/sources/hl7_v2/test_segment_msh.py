@@ -38,21 +38,21 @@ class TestMSHExtraction:
         assert row["message_code"] == "ADT"
         assert row["trigger_event"] == "A01"
         assert row["message_structure"] == "ADT_A01"
-        assert row["version_id"] == "2.5.1"
-        assert row["processing_id"] == "P"
+        assert row["version_id"]["id"] == "2.5.1"
+        assert row["processing_id"]["id"] == "P"
 
     def test_oru_covid_msh(self):
         msg = parse_first(load_sample("sample_oru_covid.hl7"))
         row = extract_segment(msg, "MSH", _extract_msh)
         assert row["message_code"] == "ORU"
         assert row["trigger_event"] == "R01"
-        assert row["version_id"] == "2.5"
+        assert row["version_id"]["id"] == "2.5"
 
     def test_celr_msh_with_timezone(self):
         msg = parse_first(load_sample("sample_oru_lab_celr.hl7"))
         row = extract_segment(msg, "MSH", _extract_msh)
         assert row["message_code"] == "ORU"
-        assert row["version_id"] == "2.5.1"
+        assert row["version_id"]["id"] == "2.5.1"
         assert row["message_datetime"] is not None
 
     def test_flu_ar_msh_security(self):
@@ -67,13 +67,13 @@ class TestMSHExtraction:
             "MSH|^~\\&|A|B|C|D|20240101120000||ADT^A01|MSG001|P^A|2.5.1^EN&English&L^EN-US&US English&L\r"
         )
         row = _extract_msh(msg.get_segment("MSH"))
-        assert row["processing_id"] == "P"
-        assert row["processing_id_mode"] == "A"
-        assert row["version_id"] == "2.5.1"
-        assert row["version_id_internationalization"] == "EN"
-        assert row["version_id_internationalization_text"] == "English"
-        assert row["version_id_internationalization_coding_system"] == "L"
-        assert row["version_id_international_version"] == "EN-US"
+        assert row["processing_id"]["id"] == "P"
+        assert row["processing_id"]["mode"] == "A"
+        assert row["version_id"]["id"] == "2.5.1"
+        assert row["version_id"]["internationalization"] == "EN"
+        assert row["version_id"]["internationalization_text"] == "English"
+        assert row["version_id"]["internationalization_coding_system"] == "L"
+        assert row["version_id"]["international_version"] == "EN-US"
 
 
 # ── Extraction: field details ───────────────────────────────────────────────

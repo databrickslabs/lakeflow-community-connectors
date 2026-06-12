@@ -18,12 +18,12 @@ class TestTXAExtraction:
     def test_mdm_txa(self):
         msg = parse_first(load_sample("sample_mdt_txa.hl7"))
         row = extract_segment(msg, "TXA", _extract_txa)
-        assert row["document_type"] == "DS"
+        assert row["document_type"]["code"] == "DS"
         assert row["document_content_presentation"] == "TX"
         assert row["primary_activity_provider"][0]["id"] == "DOC005"
         assert row["originator"][0]["id"] == "DOC005"
         assert row["transcriptionist"][0]["id"] == "TRANS001"
-        assert row["unique_document_number"] == "TXA10001"
+        assert row["unique_document_number"]["entity_identifier"] == "TXA10001"
         assert row["unique_document_file_name"] == "DISCHSUM_20240320.txt"
         assert row["document_completion_status"] == "AU"
         assert row["document_availability_status"] == "AV"
@@ -41,7 +41,7 @@ class TestTXAMissingFields:
         )
         row = _extract_txa(msg.get_segment("TXA"))
         assert row["set_id"] == 1
-        assert row["document_type"] == "DS"
+        assert row["document_type"]["code"] == "DS"
         assert row["document_content_presentation"] is None
         assert row["activity_datetime"] is None
         assert row["origination_datetime"] is None
@@ -55,7 +55,7 @@ class TestTXAMissingFields:
             "TXA|1|HP|TX|20240301120000|DOC001"
         )
         row = _extract_txa(msg.get_segment("TXA"))
-        assert row["document_type"] == "HP"
+        assert row["document_type"]["code"] == "HP"
         assert row["document_content_presentation"] == "TX"
         assert row["activity_datetime"] is not None
         assert row["primary_activity_provider"][0]["id"] == "DOC001"

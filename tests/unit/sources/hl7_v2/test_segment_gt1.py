@@ -19,8 +19,8 @@ class TestGT1Extraction:
         row = extract_segment(msg, "GT1", _extract_gt1)
         assert row["guarantor_names"][0]["family_name"] == "Martinez"
         assert row["guarantor_names"][0]["given_name"] == "Carlos"
-        assert row["guarantor_administrative_sex"] == "M"
-        assert row["guarantor_relationship"] == "SPO"
+        assert row["guarantor_administrative_sex"]["code"] == "M"
+        assert row["guarantor_relationship"]["code"] == "SPO"
 
     def test_dft_multiple_gt1(self):
         msg = parse_first(load_sample("sample_dft_financial.hl7"))
@@ -35,7 +35,7 @@ class TestGT1Extraction:
         row2 = _extract_gt1(segs[1])
         assert row2["guarantor_names"][0]["family_name"] == "Wilson"
         assert row2["guarantor_names"][0]["given_name"] == "Sarah"
-        assert row2["guarantor_administrative_sex"] == "F"
+        assert row2["guarantor_administrative_sex"]["code"] == "F"
 
 
 class TestGT1MissingFields:
@@ -86,11 +86,11 @@ class TestGT1NewComposites:
         assert row["guarantor_date_end"] is not None
         assert row["guarantor_hire_effective_date"] is not None
         assert row["employment_stop_date"] is not None
-        assert row["job_code_class"] == "ENG"
-        assert row["job_code_class_text"] == "Engineer"
-        assert row["job_code_class_class"] == "MGMT"
-        assert row["job_code_class_class_text"] == "Management"
-        assert row["job_code_class_description"] == "Senior Eng"
-        assert row["guarantor_financial_class"] == "PPO"
-        assert row["guarantor_financial_class_text"] == "Preferred Provider"
-        assert row["guarantor_financial_class_effective_date"] is not None
+        assert row["job_code_class"]["code"] == "ENG"
+        assert row["job_code_class"]["text"] == "Engineer"
+        assert row["job_code_class"]["class"] == "MGMT"
+        assert row["job_code_class"]["class_text"] == "Management"
+        assert row["job_code_class"]["description"] == "Senior Eng"
+        assert row["guarantor_financial_class"]["code"] == "PPO"
+        assert row["guarantor_financial_class"]["text"] == "Preferred Provider"
+        assert row["guarantor_financial_class"]["effective_date"] is not None

@@ -17,13 +17,13 @@ class TestSCHExtraction:
     def test_siu_sch(self):
         msg = parse_first(load_sample("sample_siu_scheduling.hl7"))
         row = extract_segment(msg, "SCH", _extract_sch)
-        assert row["placer_appointment_id"] == "APT10001"
-        assert row["filler_appointment_id"] == "APT10001"
+        assert row["placer_appointment_id"]["entity_identifier"] == "APT10001"
+        assert row["filler_appointment_id"]["entity_identifier"] == "APT10001"
         assert row["occurrence_number"] == 3
-        assert row["appointment_reason"] == "CHECKUP"
-        assert row["appointment_type"] == "FU"
+        assert row["appointment_reason"]["code"] == "CHECKUP"
+        assert row["appointment_type"]["code"] == "FU"
         assert row["appointment_duration"] == 30
-        assert row["filler_status_code"] == "BOOKED"
+        assert row["filler_status_code"]["code"] == "BOOKED"
         assert row["placer_contact_person"][0]["id"] == "DOC002"
 
 
@@ -34,7 +34,7 @@ class TestSCHMissingFields:
             "SCH|APT001"
         )
         row = _extract_sch(msg.get_segment("SCH"))
-        assert row["placer_appointment_id"] == "APT001"
+        assert row["placer_appointment_id"]["entity_identifier"] == "APT001"
         assert row["filler_appointment_id"] is None
         assert row["occurrence_number"] is None
         assert row["appointment_reason"] is None
@@ -48,9 +48,9 @@ class TestSCHMissingFields:
             "SCH|APT100^PLACER|APT100^FILLER|1||||ROUTINE^Routine checkup||60|min^minutes"
         )
         row = _extract_sch(msg.get_segment("SCH"))
-        assert row["placer_appointment_id"] == "APT100"
-        assert row["filler_appointment_id"] == "APT100"
+        assert row["placer_appointment_id"]["entity_identifier"] == "APT100"
+        assert row["filler_appointment_id"]["entity_identifier"] == "APT100"
         assert row["occurrence_number"] == 1
-        assert row["appointment_reason"] == "ROUTINE"
+        assert row["appointment_reason"]["code"] == "ROUTINE"
         assert row["appointment_duration"] == 60
-        assert row["appointment_duration_units"] == "min"
+        assert row["appointment_duration_units"]["code"] == "min"

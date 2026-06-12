@@ -18,21 +18,21 @@ class TestDG1Extraction:
         msg = parse_first(load_sample("sample_adt.hl7"))
         row = extract_segment(msg, "DG1", _extract_dg1)
         assert row["diagnosis_coding_method"] == "ICD10"
-        assert row["diagnosis_code"] == "J18.9"
-        assert row["diagnosis_code_text"] == "Pneumonia unspecified"
-        assert row["diagnosis_type"] == "A"
+        assert row["diagnosis_code"]["code"] == "J18.9"
+        assert row["diagnosis_code"]["text"] == "Pneumonia unspecified"
+        assert row["diagnosis_type"]["code"] == "A"
 
     def test_comprehensive_multiple_dg1(self):
         msg = parse_first(load_sample("sample_adt_comprehensive.hl7"))
         segs = segments_of_type(msg, "DG1")
         assert len(segs) == 2
         row1 = _extract_dg1(segs[0])
-        assert row1["diagnosis_code"] == "I21.0"
+        assert row1["diagnosis_code"]["code"] == "I21.0"
         assert row1["diagnosis_priority"] == 1
         row2 = _extract_dg1(segs[1])
-        assert row2["diagnosis_code"] == "I50.9"
-        assert row2["diagnosis_type"] == "W"
-        assert row2["diagnosis_code_text"] == "Heart failure unspecified"
+        assert row2["diagnosis_code"]["code"] == "I50.9"
+        assert row2["diagnosis_type"]["code"] == "W"
+        assert row2["diagnosis_code"]["text"] == "Heart failure unspecified"
 
 
 class TestDG1MissingFields:
@@ -45,7 +45,6 @@ class TestDG1MissingFields:
         assert row["set_id"] == 1
         assert row["diagnosis_coding_method"] is None
         assert row["diagnosis_code"] is None
-        assert row["diagnosis_code_text"] is None
         assert row["diagnosis_type"] is None
         assert row["diagnosis_priority"] is None
 
@@ -56,9 +55,9 @@ class TestDG1MissingFields:
         )
         row = _extract_dg1(msg.get_segment("DG1"))
         assert row["diagnosis_coding_method"] == "ICD10"
-        assert row["diagnosis_code"] == "E11.9"
-        assert row["diagnosis_code_text"] == "Type 2 diabetes"
-        assert row["diagnosis_code_coding_system"] == "I10"
+        assert row["diagnosis_code"]["code"] == "E11.9"
+        assert row["diagnosis_code"]["text"] == "Type 2 diabetes"
+        assert row["diagnosis_code"]["coding_system"] == "I10"
 
 
 class TestDG1CweLosslessExtraction:
@@ -77,9 +76,9 @@ class TestDG1CweLosslessExtraction:
             "DG1|1|ICD10|J18.9|||A^Admitting^HL70052"
         )
         row = _extract_dg1(msg.get_segment("DG1"))
-        assert row["diagnosis_type"] == "A"
-        assert row["diagnosis_type_text"] == "Admitting"
-        assert row["diagnosis_type_coding_system"] == "HL70052"
+        assert row["diagnosis_type"]["code"] == "A"
+        assert row["diagnosis_type"]["text"] == "Admitting"
+        assert row["diagnosis_type"]["coding_system"] == "HL70052"
 
     def test_diagnosis_type_bare_code(self):
         # Common case: sender sends just the code, all other CWE components NULL.
@@ -88,9 +87,9 @@ class TestDG1CweLosslessExtraction:
             "DG1|1|ICD10|J18.9|||W"
         )
         row = _extract_dg1(msg.get_segment("DG1"))
-        assert row["diagnosis_type"] == "W"
-        assert row["diagnosis_type_text"] is None
-        assert row["diagnosis_type_coding_system"] is None
+        assert row["diagnosis_type"]["code"] == "W"
+        assert row["diagnosis_type"]["text"] is None
+        assert row["diagnosis_type"]["coding_system"] is None
 
     def test_diagnosing_clinician_xcn_array_lossless(self):
         """DG1-16 (diagnosingClinician) is XCN 0..* per HL7 v2.9 — must capture
@@ -150,6 +149,6 @@ class TestDG1CweLosslessExtraction:
             "MSH|^~\\&|A|B|C|D|20240101||ADT^A01|1|P|2.5\r" + segment
         )
         row = _extract_dg1(msg.get_segment("DG1"))
-        assert row["present_on_admission_indicator"] == "Y"
-        assert row["present_on_admission_indicator_text"] == "Yes"
-        assert row["present_on_admission_indicator_coding_system"] == "HL70136"
+        assert row["present_on_admission_indicator"]["code"] == "Y"
+        assert row["present_on_admission_indicator"]["text"] == "Yes"
+        assert row["present_on_admission_indicator"]["coding_system"] == "HL70136"

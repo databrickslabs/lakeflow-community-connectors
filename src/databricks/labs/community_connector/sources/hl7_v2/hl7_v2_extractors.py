@@ -18,6 +18,7 @@ from databricks.labs.community_connector.sources.hl7_v2.hl7_v2_composites import
     _cq_fields,
     _cwe_array_fields,
     _cwe_fields,
+    _cwe_struct,
     _cx_array_fields,
     _cx_fields,
     _dld_fields,
@@ -29,6 +30,7 @@ from databricks.labs.community_connector.sources.hl7_v2.hl7_v2_composites import
     _fc_array_fields,
     _fc_fields,
     _hd_fields,
+    _hd_struct,
     _dtm_array_fields,
     _i,
     _id_array_fields,
@@ -55,7 +57,6 @@ from databricks.labs.community_connector.sources.hl7_v2.hl7_v2_composites import
     _xon_array_fields,
     _xon_fields,
     _xpn_array_fields,
-    _xpn_fields,
     _xtn_array_fields,
     _xtn_fields,
 )
@@ -451,10 +452,10 @@ def _extract_evn(seg: HL7Segment) -> dict:
         "event_type_code": _v(seg.get_field(1)),
         "recorded_datetime": _parse_dtm(seg.get_field(2)),
         "date_time_planned_event": _parse_dtm(seg.get_field(3)),
-        **_cwe_fields(seg, 4, "event_reason", repeating=False),
+        "event_reason": _cwe_struct(seg, 4),
         **_xcn_array_fields(seg, 5, "operator"),
         "event_occurred": _parse_dtm(seg.get_field(6)),
-        **_hd_fields(seg, 7, "event_facility", repeating=False),
+        "event_facility": _hd_struct(seg, 7),
     }
 
 

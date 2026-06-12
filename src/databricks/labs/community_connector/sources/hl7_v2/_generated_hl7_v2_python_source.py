@@ -878,6 +878,11 @@ def register_lakeflow_source(spark):
         return s if s else None
 
 
+    def _nonnull(d: dict) -> dict | None:
+        """Collapse an all-None composite dict to None (empty STRUCT -> NULL)."""
+        return d if any(v is not None for v in d.values()) else None
+
+
     def _i(s: str) -> int | None:
         """Parse *s* as int; return None on failure."""
         if not s:
@@ -934,33 +939,6 @@ def register_lakeflow_source(spark):
     # ---------------------------------------------------------------------------
 
 
-    def _xpn_fields(
-        seg: HL7Segment, field_n: int, prefix: str, *, repeating: bool = True
-    ) -> dict:
-        """XPN (Extended Person Name) — 14 active components."""
-        def gc(comp):
-            if repeating:
-                return _v(seg.get_rep_component(field_n, 1, comp))
-            return _v(seg.get_component(field_n, comp))
-
-        return {
-            f"{prefix}_family_name": gc(1),
-            f"{prefix}_given_name": gc(2),
-            f"{prefix}_middle_name": gc(3),
-            f"{prefix}_suffix": gc(4),
-            f"{prefix}_prefix": gc(5),
-            f"{prefix}_degree": gc(6),
-            f"{prefix}_name_type_code": gc(7),
-            f"{prefix}_name_representation_code": gc(8),
-            f"{prefix}_name_context": gc(9),
-            f"{prefix}_name_assembly_order": gc(11),
-            f"{prefix}_name_effective_date": gc(12),
-            f"{prefix}_name_expiration_date": gc(13),
-            f"{prefix}_professional_suffix": gc(14),
-            f"{prefix}_called_by": gc(15),
-        }
-
-
     def _xpn_array_fields(
         seg: HL7Segment, field_n: int, column_name: str
     ) -> dict:
@@ -1009,68 +987,99 @@ def register_lakeflow_source(spark):
                 return _v(seg.get_rep_sub_component(field_n, 1, comp, sub))
             return _v(seg.get_sub_component(field_n, comp, sub))
 
-        return {
-            f"{prefix}_id": gc(1),
-            f"{prefix}_family_name": gc(2),
-            f"{prefix}_given_name": gc(3),
-            f"{prefix}_middle_name": gc(4),
-            f"{prefix}_suffix": gc(5),
-            f"{prefix}_prefix": gc(6),
-            f"{prefix}_degree": gc(7),
-            f"{prefix}_source_table": gc(8),
-            f"{prefix}_assigning_authority": gsc(9, 1),
-            f"{prefix}_assigning_authority_universal_id": gsc(9, 2),
-            f"{prefix}_assigning_authority_universal_id_type": gsc(9, 3),
-            f"{prefix}_name_type_code": gc(10),
-            f"{prefix}_check_digit": gc(11),
-            f"{prefix}_check_digit_scheme": gc(12),
-            f"{prefix}_identifier_type_code": gc(13),
-            f"{prefix}_assigning_facility": gsc(14, 1),
-            f"{prefix}_assigning_facility_universal_id": gsc(14, 2),
-            f"{prefix}_assigning_facility_universal_id_type": gsc(14, 3),
-            f"{prefix}_name_representation_code": gc(15),
-            f"{prefix}_name_assembly_order": gc(18),
-            f"{prefix}_effective_date": gc(19),
-            f"{prefix}_expiration_date": gc(20),
-            f"{prefix}_professional_suffix": gc(21),
-        }
+        return {prefix: _nonnull({
+            "id": gc(1),
+            "family_name": gc(2),
+            "given_name": gc(3),
+            "middle_name": gc(4),
+            "suffix": gc(5),
+            "prefix": gc(6),
+            "degree": gc(7),
+            "source_table": gc(8),
+            "assigning_authority": gsc(9, 1),
+            "assigning_authority_universal_id": gsc(9, 2),
+            "assigning_authority_universal_id_type": gsc(9, 3),
+            "name_type_code": gc(10),
+            "check_digit": gc(11),
+            "check_digit_scheme": gc(12),
+            "identifier_type_code": gc(13),
+            "assigning_facility": gsc(14, 1),
+            "assigning_facility_universal_id": gsc(14, 2),
+            "assigning_facility_universal_id_type": gsc(14, 3),
+            "name_representation_code": gc(15),
+            "name_assembly_order": gc(18),
+            "effective_date": gc(19),
+            "expiration_date": gc(20),
+            "professional_suffix": gc(21),
+        })}
 
 
     def _cwe_fields(
         seg: HL7Segment, field_n: int, prefix: str, *, repeating: bool = False
     ) -> dict:
-        """CWE (Coded With Exceptions) — 9 active components (10-22 are OID/value-set metadata, rarely populated)."""
-        def gc(comp):
-            if repeating:
-                return _v(seg.get_rep_component(field_n, 1, comp))
-            return _v(seg.get_component(field_n, comp))
-
-        return {
-            f"{prefix}": gc(1),
-            f"{prefix}_text": gc(2),
-            f"{prefix}_coding_system": gc(3),
-            f"{prefix}_alt_code": gc(4),
-            f"{prefix}_alt_text": gc(5),
-            f"{prefix}_alt_coding_system": gc(6),
-            f"{prefix}_coding_system_version": gc(7),
-            f"{prefix}_alt_coding_system_version": gc(8),
-            f"{prefix}_original_text": gc(9),
-        }
+        """CWE single occurrence as a nested STRUCT column keyed by ``prefix``."""
+        return {prefix: _cwe_struct(seg, field_n, repeating=repeating)}
 
 
     def _hd_fields(
         seg: HL7Segment, field_n: int, prefix: str, *, repeating: bool = False
     ) -> dict:
-        """HD (Hierarchic Designator) — 3 components."""
+        """HD single occurrence as a nested STRUCT column keyed by ``prefix``."""
+        return {prefix: _hd_struct(seg, field_n, repeating=repeating)}
+
+
+    # ---------------------------------------------------------------------------
+    # Struct-typed single-occurrence composite extractors
+    #
+    # These return a single dict (the STRUCT value) or None when the field is
+    # absent, instead of spreading flat ``{prefix}_<subfield>`` keys onto the row.
+    # The dict keys match the corresponding ``_*_STRUCT`` definitions in
+    # ``hl7_v2_schemas``. Used by the per-segment extractors for 0..1 / 1..1
+    # composites; repeating composites keep using the ``_*_array_fields`` helpers.
+    # ---------------------------------------------------------------------------
+
+
+    def _cwe_struct(
+        seg: HL7Segment, field_n: int, *, repeating: bool = False
+    ) -> dict | None:
+        """CWE (Coded With Exceptions) single occurrence as a STRUCT dict (or None)."""
+        if not seg.get_field(field_n):
+            return None
+
         def gc(comp):
             if repeating:
                 return _v(seg.get_rep_component(field_n, 1, comp))
             return _v(seg.get_component(field_n, comp))
 
         return {
-            f"{prefix}": gc(1),
-            f"{prefix}_universal_id": gc(2),
-            f"{prefix}_universal_id_type": gc(3),
+            "code": gc(1),
+            "text": gc(2),
+            "coding_system": gc(3),
+            "alt_code": gc(4),
+            "alt_text": gc(5),
+            "alt_coding_system": gc(6),
+            "coding_system_version": gc(7),
+            "alt_coding_system_version": gc(8),
+            "original_text": gc(9),
+        }
+
+
+    def _hd_struct(
+        seg: HL7Segment, field_n: int, *, repeating: bool = False
+    ) -> dict | None:
+        """HD (Hierarchic Designator) single occurrence as a STRUCT dict (or None)."""
+        if not seg.get_field(field_n):
+            return None
+
+        def gc(comp):
+            if repeating:
+                return _v(seg.get_rep_component(field_n, 1, comp))
+            return _v(seg.get_component(field_n, comp))
+
+        return {
+            "namespace_id": gc(1),
+            "universal_id": gc(2),
+            "universal_id_type": gc(3),
         }
 
 
@@ -1083,12 +1092,12 @@ def register_lakeflow_source(spark):
                 return _v(seg.get_rep_component(field_n, 1, comp))
             return _v(seg.get_component(field_n, comp))
 
-        return {
-            f"{prefix}": gc(1),
-            f"{prefix}_namespace_id": gc(2),
-            f"{prefix}_universal_id": gc(3),
-            f"{prefix}_universal_id_type": gc(4),
-        }
+        return {prefix: _nonnull({
+            "entity_identifier": gc(1),
+            "namespace_id": gc(2),
+            "universal_id": gc(3),
+            "universal_id_type": gc(4),
+        })}
 
 
     def _cp_fields(seg: HL7Segment, field_n: int, prefix: str) -> dict:
@@ -1104,25 +1113,25 @@ def register_lakeflow_source(spark):
         def gsc(comp, sub):
             return _v(seg.get_sub_component(field_n, comp, sub))
 
-        return {
-            f"{prefix}":                      gsc(1, 1) or gc(1),
-            f"{prefix}_currency":             gsc(1, 2),
-            f"{prefix}_price_type":           gc(2),
-            f"{prefix}_from_value":           gc(3),
-            f"{prefix}_to_value":             gc(4),
-            f"{prefix}_range_units":          gsc(5, 1) or gc(5),
-            f"{prefix}_range_units_text":     gsc(5, 2),
-            f"{prefix}_range_units_coding_system": gsc(5, 3),
-            f"{prefix}_range_type":           gc(6),
-        }
+        return {prefix: _nonnull({
+            "price":                      gsc(1, 1) or gc(1),
+            "currency":                   gsc(1, 2),
+            "price_type":                 gc(2),
+            "from_value":                 gc(3),
+            "to_value":                   gc(4),
+            "range_units":                gsc(5, 1) or gc(5),
+            "range_units_text":           gsc(5, 2),
+            "range_units_coding_system":  gsc(5, 3),
+            "range_type":                 gc(6),
+        })}
 
 
     def _pt_fields(seg: HL7Segment, field_n: int, prefix: str) -> dict:
         """PT (Processing Type) — 2 ID components: Processing ID, Processing Mode."""
-        return {
-            f"{prefix}": _v(seg.get_component(field_n, 1)),
-            f"{prefix}_mode": _v(seg.get_component(field_n, 2)),
-        }
+        return {prefix: _nonnull({
+            "id": _v(seg.get_component(field_n, 1)),
+            "mode": _v(seg.get_component(field_n, 2)),
+        })}
 
 
     def _vid_fields(seg: HL7Segment, field_n: int, prefix: str) -> dict:
@@ -1133,24 +1142,24 @@ def register_lakeflow_source(spark):
         def gsc(comp, sub):
             return _v(seg.get_sub_component(field_n, comp, sub))
 
-        return {
-            f"{prefix}": gc(1),
-            f"{prefix}_internationalization": gsc(2, 1) or gc(2),
-            f"{prefix}_internationalization_text": gsc(2, 2),
-            f"{prefix}_internationalization_coding_system": gsc(2, 3),
-            f"{prefix}_international_version": gsc(3, 1) or gc(3),
-            f"{prefix}_international_version_text": gsc(3, 2),
-            f"{prefix}_international_version_coding_system": gsc(3, 3),
-        }
+        return {prefix: _nonnull({
+            "id": gc(1),
+            "internationalization": gsc(2, 1) or gc(2),
+            "internationalization_text": gsc(2, 2),
+            "internationalization_coding_system": gsc(2, 3),
+            "international_version": gsc(3, 1) or gc(3),
+            "international_version_text": gsc(3, 2),
+            "international_version_coding_system": gsc(3, 3),
+        })}
 
 
     def _aui_fields(seg: HL7Segment, field_n: int, prefix: str) -> dict:
         """AUI (Authorization Information) — 3 components: ST (number), DT (date), ST (source)."""
-        return {
-            f"{prefix}": _v(seg.get_component(field_n, 1)),
-            f"{prefix}_date": _parse_dtm(seg.get_component(field_n, 2)),
-            f"{prefix}_source": _v(seg.get_component(field_n, 3)),
-        }
+        return {prefix: _nonnull({
+            "number": _v(seg.get_component(field_n, 1)),
+            "date": _parse_dtm(seg.get_component(field_n, 2)),
+            "source": _v(seg.get_component(field_n, 3)),
+        })}
 
 
     def _sps_fields(seg: HL7Segment, field_n: int, prefix: str) -> dict:
@@ -1161,16 +1170,16 @@ def register_lakeflow_source(spark):
         def gsc(comp, sub):
             return _v(seg.get_sub_component(field_n, comp, sub))
 
-        return {
-            f"{prefix}":                            gsc(1, 1) or gc(1),  # SPS.1.1 (CWE.1 source code)
-            f"{prefix}_text":                       gsc(1, 2),           # SPS.1.2 (CWE.2 source text)
-            f"{prefix}_additives":                  gsc(2, 1) or gc(2),  # SPS.2.1 (CWE.1 additives)
-            f"{prefix}_collection_method":          gc(3),               # SPS.3 (TX)
-            f"{prefix}_body_site":                  gsc(4, 1) or gc(4),  # SPS.4.1 (CWE.1 body site)
-            f"{prefix}_site_modifier":              gsc(5, 1) or gc(5),  # SPS.5.1 (CWE.1 site modifier)
-            f"{prefix}_collection_method_modifier": gsc(6, 1) or gc(6),  # SPS.6.1 (CWE.1 method mod)
-            f"{prefix}_role":                       gsc(7, 1) or gc(7),  # SPS.7.1 (CWE.1 specimen role)
-        }
+        return {prefix: _nonnull({
+            "code":                       gsc(1, 1) or gc(1),  # SPS.1.1 (CWE.1 source code)
+            "text":                       gsc(1, 2),           # SPS.1.2 (CWE.2 source text)
+            "additives":                  gsc(2, 1) or gc(2),  # SPS.2.1 (CWE.1 additives)
+            "collection_method":          gc(3),               # SPS.3 (TX)
+            "body_site":                  gsc(4, 1) or gc(4),  # SPS.4.1 (CWE.1 body site)
+            "site_modifier":              gsc(5, 1) or gc(5),  # SPS.5.1 (CWE.1 site modifier)
+            "collection_method_modifier": gsc(6, 1) or gc(6),  # SPS.6.1 (CWE.1 method mod)
+            "role":                       gsc(7, 1) or gc(7),  # SPS.7.1 (CWE.1 specimen role)
+        })}
 
 
     def _dln_fields(seg: HL7Segment, field_n: int, prefix: str) -> dict:
@@ -1178,11 +1187,11 @@ def register_lakeflow_source(spark):
         def gc(comp):
             return _v(seg.get_component(field_n, comp))
 
-        return {
-            f"{prefix}_number":          gc(1),
-            f"{prefix}_issuing_state":   gc(2),
-            f"{prefix}_expiration_date": _parse_dtm(gc(3)),
-        }
+        return {prefix: _nonnull({
+            "number":          gc(1),
+            "issuing_state":   gc(2),
+            "expiration_date": _parse_dtm(gc(3)),
+        })}
 
 
     def _dld_fields(seg: HL7Segment, field_n: int, prefix: str) -> dict:
@@ -1193,10 +1202,10 @@ def register_lakeflow_source(spark):
         def gsc(comp, sub):
             return _v(seg.get_sub_component(field_n, comp, sub))
 
-        return {
-            f"{prefix}":               gsc(1, 1) or gc(1),
-            f"{prefix}_effective_date": _parse_dtm(gc(2)),
-        }
+        return {prefix: _nonnull({
+            "code":           gsc(1, 1) or gc(1),
+            "effective_date": _parse_dtm(gc(2)),
+        })}
 
 
     def _fc_fields(seg: HL7Segment, field_n: int, prefix: str) -> dict:
@@ -1207,18 +1216,18 @@ def register_lakeflow_source(spark):
         def gc(comp):
             return _v(seg.get_component(field_n, comp))
 
-        return {
-            f"{prefix}": gsc(1, 1) or gc(1),
-            f"{prefix}_text": gsc(1, 2),
-            f"{prefix}_coding_system": gsc(1, 3),
-            f"{prefix}_alt_code": gsc(1, 4),
-            f"{prefix}_alt_text": gsc(1, 5),
-            f"{prefix}_alt_coding_system": gsc(1, 6),
-            f"{prefix}_coding_system_version": gsc(1, 7),
-            f"{prefix}_alt_coding_system_version": gsc(1, 8),
-            f"{prefix}_original_text": gsc(1, 9),
-            f"{prefix}_effective_date": _parse_dtm(gc(2)),
-        }
+        return {prefix: _nonnull({
+            "code": gsc(1, 1) or gc(1),
+            "text": gsc(1, 2),
+            "coding_system": gsc(1, 3),
+            "alt_code": gsc(1, 4),
+            "alt_text": gsc(1, 5),
+            "alt_coding_system": gsc(1, 6),
+            "coding_system_version": gsc(1, 7),
+            "alt_coding_system_version": gsc(1, 8),
+            "original_text": gsc(1, 9),
+            "effective_date": _parse_dtm(gc(2)),
+        })}
 
 
     def _fc_array_fields(seg: HL7Segment, field_n: int, column_name: str) -> dict:
@@ -1307,15 +1316,15 @@ def register_lakeflow_source(spark):
         def gc(comp):
             return _v(seg.get_component(field_n, comp))
 
-        return {
-            f"{prefix}": gsc(1, 1) or gc(1),
-            f"{prefix}_text": gsc(1, 2),
-            f"{prefix}_coding_system": gsc(1, 3),
-            f"{prefix}_class": gsc(2, 1) or gc(2),
-            f"{prefix}_class_text": gsc(2, 2),
-            f"{prefix}_class_coding_system": gsc(2, 3),
-            f"{prefix}_description": gc(3),
-        }
+        return {prefix: _nonnull({
+            "code": gsc(1, 1) or gc(1),
+            "text": gsc(1, 2),
+            "coding_system": gsc(1, 3),
+            "class": gsc(2, 1) or gc(2),
+            "class_text": gsc(2, 2),
+            "class_coding_system": gsc(2, 3),
+            "description": gc(3),
+        })}
 
 
     def _moc_fields(seg: HL7Segment, field_n: int, prefix: str) -> dict:
@@ -1326,13 +1335,13 @@ def register_lakeflow_source(spark):
         def gc(comp):
             return _v(seg.get_component(field_n, comp))
 
-        return {
-            f"{prefix}_monetary_amount":           gsc(1, 1) or gc(1),  # MOC.1.1 (MO.1 quantity, NM)
-            f"{prefix}_monetary_amount_currency":  gsc(1, 2),            # MOC.1.2 (MO.2 denom, ID)
-            f"{prefix}_charge_code":               gsc(2, 1) or gc(2),  # MOC.2.1 (CWE.1 code)
-            f"{prefix}_charge_code_text":          gsc(2, 2),            # MOC.2.2 (CWE.2 text)
-            f"{prefix}_charge_code_coding_system": gsc(2, 3),            # MOC.2.3 (CWE.3 coding system)
-        }
+        return {prefix: _nonnull({
+            "monetary_amount":           gsc(1, 1) or gc(1),  # MOC.1.1 (MO.1 quantity, NM)
+            "monetary_amount_currency":  gsc(1, 2),            # MOC.1.2 (MO.2 denom, ID)
+            "charge_code":               gsc(2, 1) or gc(2),  # MOC.2.1 (CWE.1 code)
+            "charge_code_text":          gsc(2, 2),            # MOC.2.2 (CWE.2 text)
+            "charge_code_coding_system": gsc(2, 3),            # MOC.2.3 (CWE.3 coding system)
+        })}
 
 
     def _prl_fields(seg: HL7Segment, field_n: int, prefix: str) -> dict:
@@ -1343,13 +1352,13 @@ def register_lakeflow_source(spark):
         def gc(comp):
             return _v(seg.get_component(field_n, comp))
 
-        return {
-            f"{prefix}": gsc(1, 1) or gc(1),
-            f"{prefix}_text": gsc(1, 2),
-            f"{prefix}_coding_system": gsc(1, 3),
-            f"{prefix}_sub_id": gc(2),
-            f"{prefix}_descriptor": gc(3),
-        }
+        return {prefix: _nonnull({
+            "code": gsc(1, 1) or gc(1),
+            "text": gsc(1, 2),
+            "coding_system": gsc(1, 3),
+            "sub_id": gc(2),
+            "descriptor": gc(3),
+        })}
 
 
     def _ndl_fields(seg: HL7Segment, field_n: int, prefix: str) -> dict:
@@ -1360,25 +1369,25 @@ def register_lakeflow_source(spark):
         def gc(comp):
             return _v(seg.get_component(field_n, comp))
 
-        return {
-            f"{prefix}": gsc(1, 1),
-            f"{prefix}_family_name": gsc(1, 2),
-            f"{prefix}_given_name": gsc(1, 3),
-            f"{prefix}_middle_name": gsc(1, 4),
-            f"{prefix}_suffix": gsc(1, 5),
-            f"{prefix}_prefix": gsc(1, 6),
-            f"{prefix}_degree": gsc(1, 7),
-            f"{prefix}_start_datetime": _parse_dtm(gc(2)),
-            f"{prefix}_end_datetime": _parse_dtm(gc(3)),
-            f"{prefix}_point_of_care": gc(4),
-            f"{prefix}_room": gc(5),
-            f"{prefix}_bed": gc(6),
-            f"{prefix}_facility": gsc(7, 1) or gc(7),
-            f"{prefix}_location_status": gc(8),
-            f"{prefix}_patient_location_type": gc(9),
-            f"{prefix}_building": gc(10),
-            f"{prefix}_floor": gc(11),
-        }
+        return {prefix: _nonnull({
+            "id": gsc(1, 1),
+            "family_name": gsc(1, 2),
+            "given_name": gsc(1, 3),
+            "middle_name": gsc(1, 4),
+            "suffix": gsc(1, 5),
+            "prefix": gsc(1, 6),
+            "degree": gsc(1, 7),
+            "start_datetime": _parse_dtm(gc(2)),
+            "end_datetime": _parse_dtm(gc(3)),
+            "point_of_care": gc(4),
+            "room": gc(5),
+            "bed": gc(6),
+            "facility": gsc(7, 1) or gc(7),
+            "location_status": gc(8),
+            "patient_location_type": gc(9),
+            "building": gc(10),
+            "floor": gc(11),
+        })}
 
 
     def _ndl_array_fields(seg: HL7Segment, field_n: int, column_name: str) -> dict:
@@ -1473,10 +1482,10 @@ def register_lakeflow_source(spark):
         def gsc(comp, sub):
             return _v(seg.get_sub_component(field_n, comp, sub))
 
-        return {
-            f"{prefix}": gc(1),
-            f"{prefix}_units": gsc(2, 1) or gc(2),
-        }
+        return {prefix: _nonnull({
+            "quantity": gc(1),
+            "units": gsc(2, 1) or gc(2),
+        })}
 
 
     def _pl_fields(seg: HL7Segment, field_n: int, prefix: str) -> dict:
@@ -1492,19 +1501,19 @@ def register_lakeflow_source(spark):
         def gsc(comp, sub):
             return _v(seg.get_sub_component(field_n, comp, sub))
 
-        return {
-            f"{prefix}_point_of_care": gsc(1, 1) or gc(1),
-            f"{prefix}_room": gsc(2, 1) or gc(2),
-            f"{prefix}_bed": gsc(3, 1) or gc(3),
-            f"{prefix}_facility": gsc(4, 1) or gc(4),
-            f"{prefix}_status": gc(5),
-            f"{prefix}_type": gc(6),
-            f"{prefix}_building": gsc(7, 1) or gc(7),
-            f"{prefix}_floor": gsc(8, 1) or gc(8),
-            f"{prefix}_description": gc(9),
-            f"{prefix}_comprehensive_id": gsc(10, 1) or gc(10),
-            f"{prefix}_assigning_authority": gsc(11, 1) or gc(11),
-        }
+        return {prefix: _nonnull({
+            "point_of_care": gsc(1, 1) or gc(1),
+            "room": gsc(2, 1) or gc(2),
+            "bed": gsc(3, 1) or gc(3),
+            "facility": gsc(4, 1) or gc(4),
+            "status": gc(5),
+            "type": gc(6),
+            "building": gsc(7, 1) or gc(7),
+            "floor": gsc(8, 1) or gc(8),
+            "description": gc(9),
+            "comprehensive_id": gsc(10, 1) or gc(10),
+            "assigning_authority": gsc(11, 1) or gc(11),
+        })}
 
 
     def _cwe_array_fields(
@@ -1882,16 +1891,18 @@ def register_lakeflow_source(spark):
         def gsc(comp, sub):
             return _v(seg.get_sub_component(field_n, comp, sub))
 
-        return {
-            f"{prefix}_placer_assigned_identifier":                      gsc(1, 1) or gc(1),
-            f"{prefix}_placer_assigned_identifier_namespace_id":         gsc(1, 2),
-            f"{prefix}_placer_assigned_identifier_universal_id":         gsc(1, 3),
-            f"{prefix}_placer_assigned_identifier_universal_id_type":    gsc(1, 4),
-            f"{prefix}_filler_assigned_identifier":                      gsc(2, 1) or gc(2),
-            f"{prefix}_filler_assigned_identifier_namespace_id":         gsc(2, 2),
-            f"{prefix}_filler_assigned_identifier_universal_id":         gsc(2, 3),
-            f"{prefix}_filler_assigned_identifier_universal_id_type":    gsc(2, 4),
-        }
+        def _ei(comp):
+            return _nonnull({
+                "entity_identifier": gsc(comp, 1) or gc(comp),
+                "namespace_id": gsc(comp, 2),
+                "universal_id": gsc(comp, 3),
+                "universal_id_type": gsc(comp, 4),
+            })
+
+        return {prefix: _nonnull({
+            "placer_assigned_identifier": _ei(1),
+            "filler_assigned_identifier": _ei(2),
+        })}
 
 
     def _mo_fields(seg: HL7Segment, field_n: int, prefix: str) -> dict:
@@ -1899,10 +1910,10 @@ def register_lakeflow_source(spark):
         def gc(comp):
             return _v(seg.get_component(field_n, comp))
 
-        return {
-            f"{prefix}":          gc(1),
-            f"{prefix}_currency": gc(2),
-        }
+        return {prefix: _nonnull({
+            "amount":   gc(1),
+            "currency": gc(2),
+        })}
 
 
     def _og_fields(seg: HL7Segment, field_n: int, prefix: str) -> dict:
@@ -1914,12 +1925,12 @@ def register_lakeflow_source(spark):
         def gc(comp):
             return _v(seg.get_component(field_n, comp))
 
-        return {
-            f"{prefix}":            gc(1),
-            f"{prefix}_group":      gc(2),
-            f"{prefix}_sequence":   gc(3),
-            f"{prefix}_identifier": gc(4),
-        }
+        return {prefix: _nonnull({
+            "sub_identifier": gc(1),
+            "group":          gc(2),
+            "sequence":       gc(3),
+            "identifier":     gc(4),
+        })}
 
 
     def _xon_fields(
@@ -1936,22 +1947,22 @@ def register_lakeflow_source(spark):
                 return _v(seg.get_rep_sub_component(field_n, 1, comp, sub))
             return _v(seg.get_sub_component(field_n, comp, sub))
 
-        return {
-            f"{prefix}": gc(1),
-            f"{prefix}_type_code": gc(2),
-            f"{prefix}_id": gc(3),
-            f"{prefix}_check_digit": gc(4),
-            f"{prefix}_check_digit_scheme": gc(5),
-            f"{prefix}_assigning_authority": gsc(6, 1),
-            f"{prefix}_assigning_authority_universal_id": gsc(6, 2),
-            f"{prefix}_assigning_authority_universal_id_type": gsc(6, 3),
-            f"{prefix}_id_type_code": gc(7),
-            f"{prefix}_assigning_facility": gsc(8, 1),
-            f"{prefix}_assigning_facility_universal_id": gsc(8, 2),
-            f"{prefix}_assigning_facility_universal_id_type": gsc(8, 3),
-            f"{prefix}_name_rep_code": gc(9),
-            f"{prefix}_identifier": gc(10),
-        }
+        return {prefix: _nonnull({
+            "name": gc(1),
+            "type_code": gc(2),
+            "id": gc(3),
+            "check_digit": gc(4),
+            "check_digit_scheme": gc(5),
+            "assigning_authority": gsc(6, 1),
+            "assigning_authority_universal_id": gsc(6, 2),
+            "assigning_authority_universal_id_type": gsc(6, 3),
+            "id_type_code": gc(7),
+            "assigning_facility": gsc(8, 1),
+            "assigning_facility_universal_id": gsc(8, 2),
+            "assigning_facility_universal_id_type": gsc(8, 3),
+            "name_rep_code": gc(9),
+            "identifier": gc(10),
+        })}
 
 
     def _cx_fields(
@@ -1968,24 +1979,24 @@ def register_lakeflow_source(spark):
                 return _v(seg.get_rep_sub_component(field_n, 1, comp, sub))
             return _v(seg.get_sub_component(field_n, comp, sub))
 
-        return {
-            f"{prefix}": gc(1),
-            f"{prefix}_check_digit": gc(2),
-            f"{prefix}_check_digit_scheme": gc(3),
-            f"{prefix}_assigning_authority": gsc(4, 1),
-            f"{prefix}_assigning_authority_universal_id": gsc(4, 2),
-            f"{prefix}_assigning_authority_universal_id_type": gsc(4, 3),
-            f"{prefix}_type_code": gc(5),
-            f"{prefix}_assigning_facility": gsc(6, 1),
-            f"{prefix}_assigning_facility_universal_id": gsc(6, 2),
-            f"{prefix}_assigning_facility_universal_id_type": gsc(6, 3),
-            f"{prefix}_effective_date": gc(7),
-            f"{prefix}_expiration_date": gc(8),
-            f"{prefix}_assigning_jurisdiction": gc(9),
-            f"{prefix}_assigning_agency": gc(10),
-            f"{prefix}_security_check": gc(11),
-            f"{prefix}_security_check_scheme": gc(12),
-        }
+        return {prefix: _nonnull({
+            "id": gc(1),
+            "check_digit": gc(2),
+            "check_digit_scheme": gc(3),
+            "assigning_authority": gsc(4, 1),
+            "assigning_authority_universal_id": gsc(4, 2),
+            "assigning_authority_universal_id_type": gsc(4, 3),
+            "type_code": gc(5),
+            "assigning_facility": gsc(6, 1),
+            "assigning_facility_universal_id": gsc(6, 2),
+            "assigning_facility_universal_id_type": gsc(6, 3),
+            "effective_date": gc(7),
+            "expiration_date": gc(8),
+            "assigning_jurisdiction": gc(9),
+            "assigning_agency": gc(10),
+            "security_check": gc(11),
+            "security_check_scheme": gc(12),
+        })}
 
 
     def _xtn_fields(
@@ -2002,26 +2013,26 @@ def register_lakeflow_source(spark):
                 return _v(seg.get_rep_sub_component(field_n, 1, comp, sub))
             return _v(seg.get_sub_component(field_n, comp, sub))
 
-        return {
-            f"{prefix}_number": gc(1),
-            f"{prefix}_use_code": gc(2),
-            f"{prefix}_equipment_type": gc(3),
-            f"{prefix}_communication_address": gc(4),
-            f"{prefix}_country_code": gc(5),
-            f"{prefix}_area_code": gc(6),
-            f"{prefix}_local_number": gc(7),
-            f"{prefix}_extension": gc(8),
-            f"{prefix}_any_text": gc(9),
-            f"{prefix}_extension_prefix": gc(10),
-            f"{prefix}_speed_dial_code": gc(11),
-            f"{prefix}_unformatted_number": gc(12),
-            f"{prefix}_effective_start_date": gc(13),
-            f"{prefix}_expiration_date": gc(14),
-            f"{prefix}_expiration_reason": gsc(15, 1),
-            f"{prefix}_protection_code": gsc(16, 1),
-            f"{prefix}_shared_telecom_id": gsc(17, 1),
-            f"{prefix}_preference_order": gc(18),
-        }
+        return {prefix: _nonnull({
+            "number": gc(1),
+            "use_code": gc(2),
+            "equipment_type": gc(3),
+            "communication_address": gc(4),
+            "country_code": gc(5),
+            "area_code": gc(6),
+            "local_number": gc(7),
+            "extension": gc(8),
+            "any_text": gc(9),
+            "extension_prefix": gc(10),
+            "speed_dial_code": gc(11),
+            "unformatted_number": gc(12),
+            "effective_start_date": gc(13),
+            "expiration_date": gc(14),
+            "expiration_reason": gsc(15, 1),
+            "protection_code": gsc(16, 1),
+            "shared_telecom_id": gsc(17, 1),
+            "preference_order": gc(18),
+        })}
 
 
     def _xad_fields(
@@ -2038,38 +2049,38 @@ def register_lakeflow_source(spark):
                 return _v(seg.get_rep_sub_component(field_n, 1, comp, sub))
             return _v(seg.get_sub_component(field_n, comp, sub))
 
-        return {
-            f"{prefix}_street": gc(1),
-            f"{prefix}_other_designation": gc(2),
-            f"{prefix}_city": gc(3),
-            f"{prefix}_state": gc(4),
-            f"{prefix}_zip": gc(5),
-            f"{prefix}_country": gc(6),
-            f"{prefix}_type": gc(7),
-            f"{prefix}_other_geographic": gc(8),
-            f"{prefix}_county_parish_code": gsc(9, 1),
-            f"{prefix}_county_parish_text": gsc(9, 2),
-            f"{prefix}_county_parish_coding_system": gsc(9, 3),
-            f"{prefix}_census_tract": gsc(10, 1),
-            f"{prefix}_census_tract_text": gsc(10, 2),
-            f"{prefix}_census_tract_coding_system": gsc(10, 3),
-            f"{prefix}_representation_code": gc(11),
-            f"{prefix}_effective_date": gc(13),
-            f"{prefix}_expiration_date": gc(14),
-            f"{prefix}_expiration_reason": gsc(15, 1),
-            f"{prefix}_expiration_reason_text": gsc(15, 2),
-            f"{prefix}_expiration_reason_coding_system": gsc(15, 3),
-            f"{prefix}_temporary_indicator": gc(16),
-            f"{prefix}_bad_address_indicator": gc(17),
-            f"{prefix}_usage": gc(18),
-            f"{prefix}_addressee": gc(19),
-            f"{prefix}_comment": gc(20),
-            f"{prefix}_preference_order": gc(21),
-            f"{prefix}_protection_code": gsc(22, 1),
-            f"{prefix}_protection_code_text": gsc(22, 2),
-            f"{prefix}_protection_code_coding_system": gsc(22, 3),
-            f"{prefix}_identifier": gsc(23, 1),
-        }
+        return {prefix: _nonnull({
+            "street": gc(1),
+            "other_designation": gc(2),
+            "city": gc(3),
+            "state": gc(4),
+            "zip": gc(5),
+            "country": gc(6),
+            "type": gc(7),
+            "other_geographic": gc(8),
+            "county_parish_code": gsc(9, 1),
+            "county_parish_text": gsc(9, 2),
+            "county_parish_coding_system": gsc(9, 3),
+            "census_tract": gsc(10, 1),
+            "census_tract_text": gsc(10, 2),
+            "census_tract_coding_system": gsc(10, 3),
+            "representation_code": gc(11),
+            "effective_date": gc(13),
+            "expiration_date": gc(14),
+            "expiration_reason": gsc(15, 1),
+            "expiration_reason_text": gsc(15, 2),
+            "expiration_reason_coding_system": gsc(15, 3),
+            "temporary_indicator": gc(16),
+            "bad_address_indicator": gc(17),
+            "usage": gc(18),
+            "addressee": gc(19),
+            "comment": gc(20),
+            "preference_order": gc(21),
+            "protection_code": gsc(22, 1),
+            "protection_code_text": gsc(22, 2),
+            "protection_code_coding_system": gsc(22, 3),
+            "identifier": gsc(23, 1),
+        })}
 
 
     ########################################################
@@ -2460,10 +2471,10 @@ def register_lakeflow_source(spark):
             "event_type_code": _v(seg.get_field(1)),
             "recorded_datetime": _parse_dtm(seg.get_field(2)),
             "date_time_planned_event": _parse_dtm(seg.get_field(3)),
-            **_cwe_fields(seg, 4, "event_reason", repeating=False),
+            "event_reason": _cwe_struct(seg, 4),
             **_xcn_array_fields(seg, 5, "operator"),
             "event_occurred": _parse_dtm(seg.get_field(6)),
-            **_hd_fields(seg, 7, "event_facility", repeating=False),
+            "event_facility": _hd_struct(seg, 7),
         }
 
 
@@ -3124,26 +3135,6 @@ def register_lakeflow_source(spark):
         return StructField(name, LongType(), nullable=False)
 
 
-    def _xpn_schema(prefix: str, label: str, field_ref: str) -> list[StructField]:
-        """XPN (Extended Person Name) — 14 active component fields."""
-        return [
-            _s(f"{prefix}_family_name",              f"{label} family/last name ({field_ref}.1)"),
-            _s(f"{prefix}_given_name",               f"{label} given/first name ({field_ref}.2)"),
-            _s(f"{prefix}_middle_name",              f"{label} middle name or initial ({field_ref}.3)"),
-            _s(f"{prefix}_suffix",                   f"{label} suffix, e.g. Jr, III ({field_ref}.4)"),
-            _s(f"{prefix}_prefix",                   f"{label} prefix/title, e.g. Dr, Mr ({field_ref}.5)"),
-            _s(f"{prefix}_degree",                   f"{label} degree, e.g. MD, PhD ({field_ref}.6, deprecated)"),
-            _s(f"{prefix}_name_type_code",           f"{label} name type: L=Legal, D=Display, M=Maiden ({field_ref}.7, Table 0200)"),
-            _s(f"{prefix}_name_representation_code", f"{label} name representation: I=Ideographic, A=Alphabetic ({field_ref}.8, Table 0465)"),
-            _s(f"{prefix}_name_context",             f"{label} name context ({field_ref}.9, CWE, Table 0448)"),
-            _s(f"{prefix}_name_assembly_order",      f"{label} name assembly order: G=Given-Family, F=Family-Given ({field_ref}.11, Table 0444)"),
-            _s(f"{prefix}_name_effective_date",      f"{label} name effective date ({field_ref}.12, DTM)"),
-            _s(f"{prefix}_name_expiration_date",     f"{label} name expiration date ({field_ref}.13, DTM)"),
-            _s(f"{prefix}_professional_suffix",      f"{label} professional suffix, e.g. RN, FACS ({field_ref}.14)"),
-            _s(f"{prefix}_called_by",                f"{label} preferred name / nickname ({field_ref}.15)"),
-        ]
-
-
     _XPN_STRUCT = StructType([
         StructField("family_name", StringType(), nullable=True),
         StructField("given_name", StringType(), nullable=True),
@@ -3172,6 +3163,13 @@ def register_lakeflow_source(spark):
         StructField("coding_system_version", StringType(), nullable=True),
         StructField("alt_coding_system_version", StringType(), nullable=True),
         StructField("original_text", StringType(), nullable=True),
+    ])
+
+
+    _HD_STRUCT = StructType([
+        StructField("namespace_id", StringType(), nullable=True),
+        StructField("universal_id", StringType(), nullable=True),
+        StructField("universal_id_type", StringType(), nullable=True),
     ])
 
 
@@ -3379,6 +3377,119 @@ def register_lakeflow_source(spark):
     ])
 
 
+    # --- Single-occurrence composite STRUCTs (no repeating/array counterpart) ---
+
+    _CP_STRUCT = StructType([
+        StructField("price", StringType(), nullable=True),
+        StructField("currency", StringType(), nullable=True),
+        StructField("price_type", StringType(), nullable=True),
+        StructField("from_value", StringType(), nullable=True),
+        StructField("to_value", StringType(), nullable=True),
+        StructField("range_units", StringType(), nullable=True),
+        StructField("range_units_text", StringType(), nullable=True),
+        StructField("range_units_coding_system", StringType(), nullable=True),
+        StructField("range_type", StringType(), nullable=True),
+    ])
+
+
+    _PT_STRUCT = StructType([
+        StructField("id", StringType(), nullable=True),
+        StructField("mode", StringType(), nullable=True),
+    ])
+
+
+    _VID_STRUCT = StructType([
+        StructField("id", StringType(), nullable=True),
+        StructField("internationalization", StringType(), nullable=True),
+        StructField("internationalization_text", StringType(), nullable=True),
+        StructField("internationalization_coding_system", StringType(), nullable=True),
+        StructField("international_version", StringType(), nullable=True),
+        StructField("international_version_text", StringType(), nullable=True),
+        StructField("international_version_coding_system", StringType(), nullable=True),
+    ])
+
+
+    _SPS_STRUCT = StructType([
+        StructField("code", StringType(), nullable=True),
+        StructField("text", StringType(), nullable=True),
+        StructField("additives", StringType(), nullable=True),
+        StructField("collection_method", StringType(), nullable=True),
+        StructField("body_site", StringType(), nullable=True),
+        StructField("site_modifier", StringType(), nullable=True),
+        StructField("collection_method_modifier", StringType(), nullable=True),
+        StructField("role", StringType(), nullable=True),
+    ])
+
+
+    _AUI_STRUCT = StructType([
+        StructField("number", StringType(), nullable=True),
+        StructField("date", StringType(), nullable=True),
+        StructField("source", StringType(), nullable=True),
+    ])
+
+
+    _DLN_STRUCT = StructType([
+        StructField("number", StringType(), nullable=True),
+        StructField("issuing_state", StringType(), nullable=True),
+        StructField("expiration_date", StringType(), nullable=True),
+    ])
+
+
+    _DLD_STRUCT = StructType([
+        StructField("code", StringType(), nullable=True),
+        StructField("effective_date", StringType(), nullable=True),
+    ])
+
+
+    _JCC_STRUCT = StructType([
+        StructField("code", StringType(), nullable=True),
+        StructField("text", StringType(), nullable=True),
+        StructField("coding_system", StringType(), nullable=True),
+        StructField("class", StringType(), nullable=True),
+        StructField("class_text", StringType(), nullable=True),
+        StructField("class_coding_system", StringType(), nullable=True),
+        StructField("description", StringType(), nullable=True),
+    ])
+
+
+    _MOC_STRUCT = StructType([
+        StructField("monetary_amount", StringType(), nullable=True),
+        StructField("monetary_amount_currency", StringType(), nullable=True),
+        StructField("charge_code", StringType(), nullable=True),
+        StructField("charge_code_text", StringType(), nullable=True),
+        StructField("charge_code_coding_system", StringType(), nullable=True),
+    ])
+
+
+    _PRL_STRUCT = StructType([
+        StructField("code", StringType(), nullable=True),
+        StructField("text", StringType(), nullable=True),
+        StructField("coding_system", StringType(), nullable=True),
+        StructField("sub_id", StringType(), nullable=True),
+        StructField("descriptor", StringType(), nullable=True),
+    ])
+
+
+    _CQ_STRUCT = StructType([
+        StructField("quantity", StringType(), nullable=True),
+        StructField("units", StringType(), nullable=True),
+    ])
+
+
+    _MO_STRUCT = StructType([
+        StructField("amount", StringType(), nullable=True),
+        StructField("currency", StringType(), nullable=True),
+    ])
+
+
+    _OG_STRUCT = StructType([
+        StructField("sub_identifier", StringType(), nullable=True),
+        StructField("group", StringType(), nullable=True),
+        StructField("sequence", StringType(), nullable=True),
+        StructField("identifier", StringType(), nullable=True),
+    ])
+
+
     def _xpn_array_schema(column_name: str, label: str, field_ref: str) -> list[StructField]:
         """XPN (Extended Person Name) — repeating field as ArrayType(StructType([...]))."""
         return [StructField(column_name, ArrayType(_XPN_STRUCT, containsNull=True), nullable=True)]
@@ -3430,66 +3541,45 @@ def register_lakeflow_source(spark):
 
 
     def _xcn_schema(prefix: str, label: str, field_ref: str) -> list[StructField]:
-        """XCN (Extended Composite ID Number and Name for Persons) — 21 active component fields."""
-        return [
-            _s(f"{prefix}_id",                                      f"{label} person identifier ({field_ref}.1)"),
-            _s(f"{prefix}_family_name",                              f"{label} family/last name ({field_ref}.2)"),
-            _s(f"{prefix}_given_name",                               f"{label} given/first name ({field_ref}.3)"),
-            _s(f"{prefix}_middle_name",                              f"{label} middle name ({field_ref}.4)"),
-            _s(f"{prefix}_suffix",                                   f"{label} name suffix ({field_ref}.5)"),
-            _s(f"{prefix}_prefix",                                   f"{label} name prefix ({field_ref}.6)"),
-            _s(f"{prefix}_degree",                                   f"{label} degree ({field_ref}.7, deprecated)"),
-            _s(f"{prefix}_source_table",                             f"{label} source table ({field_ref}.8)"),
-            _s(f"{prefix}_assigning_authority",                      f"{label} assigning authority namespace ID ({field_ref}.9.1, HD)"),
-            _s(f"{prefix}_assigning_authority_universal_id",         f"{label} assigning authority universal ID ({field_ref}.9.2)"),
-            _s(f"{prefix}_assigning_authority_universal_id_type",    f"{label} assigning authority universal ID type ({field_ref}.9.3)"),
-            _s(f"{prefix}_name_type_code",                           f"{label} name type code ({field_ref}.10)"),
-            _s(f"{prefix}_check_digit",                              f"{label} check digit ({field_ref}.11)"),
-            _s(f"{prefix}_check_digit_scheme",                       f"{label} check digit scheme ({field_ref}.12)"),
-            _s(f"{prefix}_identifier_type_code",                     f"{label} identifier type code ({field_ref}.13)"),
-            _s(f"{prefix}_assigning_facility",                       f"{label} assigning facility namespace ID ({field_ref}.14.1, HD)"),
-            _s(f"{prefix}_assigning_facility_universal_id",          f"{label} assigning facility universal ID ({field_ref}.14.2)"),
-            _s(f"{prefix}_assigning_facility_universal_id_type",     f"{label} assigning facility universal ID type ({field_ref}.14.3)"),
-            _s(f"{prefix}_name_representation_code",                 f"{label} name representation code ({field_ref}.15)"),
-            _s(f"{prefix}_name_assembly_order",                      f"{label} name assembly order ({field_ref}.18)"),
-            _s(f"{prefix}_effective_date",                           f"{label} effective date ({field_ref}.19)"),
-            _s(f"{prefix}_expiration_date",                          f"{label} expiration date ({field_ref}.20)"),
-            _s(f"{prefix}_professional_suffix",                      f"{label} professional suffix ({field_ref}.21)"),
-        ]
+        """XCN (Extended Composite ID Number and Name for Persons) single occurrence as STRUCT (21 components)."""
+        return [StructField(prefix, _XCN_STRUCT, nullable=True)]
 
 
     def _cwe_schema(prefix: str, label: str, field_ref: str) -> list[StructField]:
-        """CWE (Coded With Exceptions) — 9 active component fields (10-22 are OID/value-set metadata, rarely populated)."""
-        return [
-            _s(f"{prefix}",                           f"{label} code ({field_ref}.1)"),
-            _s(f"{prefix}_text",                      f"{label} text ({field_ref}.2)"),
-            _s(f"{prefix}_coding_system",             f"{label} coding system ({field_ref}.3, Table 0396)"),
-            _s(f"{prefix}_alt_code",                  f"{label} alternate code ({field_ref}.4)"),
-            _s(f"{prefix}_alt_text",                  f"{label} alternate text ({field_ref}.5)"),
-            _s(f"{prefix}_alt_coding_system",         f"{label} alternate coding system ({field_ref}.6, Table 0396)"),
-            _s(f"{prefix}_coding_system_version",     f"{label} coding system version ID ({field_ref}.7)"),
-            _s(f"{prefix}_alt_coding_system_version", f"{label} alternate coding system version ID ({field_ref}.8)"),
-            _s(f"{prefix}_original_text",             f"{label} original text ({field_ref}.9)"),
-        ]
+        """CWE (Coded With Exceptions) single occurrence as STRUCT (9 active components)."""
+        return [StructField(prefix, _CWE_STRUCT, nullable=True)]
 
 
     def _hd_schema(prefix: str, label: str, field_ref: str) -> list[StructField]:
-        """HD (Hierarchic Designator) — 3 component fields."""
-        return [
-            _s(f"{prefix}",                    f"{label} namespace ID ({field_ref}.1)"),
-            _s(f"{prefix}_universal_id",       f"{label} universal ID ({field_ref}.2)"),
-            _s(f"{prefix}_universal_id_type",  f"{label} universal ID type ({field_ref}.3)"),
-        ]
+        """HD (Hierarchic Designator) single occurrence as STRUCT (3 components)."""
+        return [StructField(prefix, _HD_STRUCT, nullable=True)]
+
+
+    # ---------------------------------------------------------------------------
+    # Struct-typed single-occurrence composite fields
+    #
+    # For 0..1 / 1..1 composites we now model the whole composite as one nested
+    # STRUCT column (e.g. ``event_reason STRUCT<code, text, ...>``) rather than a
+    # row of flat ``<prefix>_<subfield>`` columns. This mirrors the convention used
+    # by the ``fhir`` connector (CodeableConcept, HumanName, ...) and keeps each HL7
+    # composite isomorphic to its FHIR target type. Repeating composites continue to
+    # use ``ARRAY<STRUCT<...>>`` via the ``_*_array_schema`` helpers.
+    # ---------------------------------------------------------------------------
+
+
+    def _cwe_struct_field(name: str, label: str, field_ref: str) -> StructField:
+        """CWE (Coded With Exceptions) single occurrence as ``STRUCT`` (9 components)."""
+        return StructField(name, _CWE_STRUCT, nullable=True)
+
+
+    def _hd_struct_field(name: str, label: str, field_ref: str) -> StructField:
+        """HD (Hierarchic Designator) single occurrence as ``STRUCT`` (3 components)."""
+        return StructField(name, _HD_STRUCT, nullable=True)
 
 
     def _ei_schema(prefix: str, label: str, field_ref: str) -> list[StructField]:
-        """EI (Entity Identifier) — 4 component fields."""
-        return [
-            _s(f"{prefix}",                    f"{label} entity identifier ({field_ref}.1)"),
-            _s(f"{prefix}_namespace_id",       f"{label} namespace ID ({field_ref}.2)"),
-            _s(f"{prefix}_universal_id",       f"{label} universal ID ({field_ref}.3)"),
-            _s(f"{prefix}_universal_id_type",  f"{label} universal ID type ({field_ref}.4)"),
-        ]
+        """EI (Entity Identifier) single occurrence as STRUCT (4 components)."""
+        return [StructField(prefix, _EI_INNER_STRUCT, nullable=True)]
 
 
     def _cp_schema(prefix: str, label: str, field_ref: str) -> list[StructField]:
@@ -3500,94 +3590,42 @@ def register_lakeflow_source(spark):
         table 0205), From Value (CP.3, NM), To Value (CP.4, NM), Range Units
         (CP.5, CWE code only), Range Type (CP.6, table 0298).
         """
-        return [
-            _s(f"{prefix}",             f"{label} price quantity ({field_ref}.1.1, MO)"),
-            _s(f"{prefix}_currency",    f"{label} price ISO 4217 currency code ({field_ref}.1.2, MO)"),
-            _s(f"{prefix}_price_type",  f"{label} price type ({field_ref}.2, ID, Table 0205)"),
-            _s(f"{prefix}_from_value",  f"{label} range from value ({field_ref}.3, NM)"),
-            _s(f"{prefix}_to_value",    f"{label} range to value ({field_ref}.4, NM)"),
-            _s(f"{prefix}_range_units",               f"{label} range units code ({field_ref}.5.1, CWE.1)"),
-            _s(f"{prefix}_range_units_text",          f"{label} range units text ({field_ref}.5.2, CWE.2)"),
-            _s(f"{prefix}_range_units_coding_system", f"{label} range units coding system ({field_ref}.5.3, CWE.3)"),
-            _s(f"{prefix}_range_type",                f"{label} range type ({field_ref}.6, ID, Table 0298)"),
-        ]
+        return [StructField(prefix, _CP_STRUCT, nullable=True)]
 
 
     def _pt_schema(prefix: str, label: str, field_ref: str) -> list[StructField]:
         """PT (Processing Type) — 2 ID components."""
-        return [
-            _s(f"{prefix}",      f"{label} processing ID ({field_ref}.1, ID; Table 0103)"),
-            _s(f"{prefix}_mode", f"{label} processing mode ({field_ref}.2, ID; Table 0207)"),
-        ]
+        return [StructField(prefix, _PT_STRUCT, nullable=True)]
 
 
     def _vid_schema(prefix: str, label: str, field_ref: str) -> list[StructField]:
         """VID (Version Identifier) — ID + 2 CWE components."""
-        return [
-            _s(f"{prefix}",                                          f"{label} version ID ({field_ref}.1, ID)"),
-            _s(f"{prefix}_internationalization",                     f"{label} internationalization code ({field_ref}.2.1, CWE)"),
-            _s(f"{prefix}_internationalization_text",                f"{label} internationalization text ({field_ref}.2.2, CWE)"),
-            _s(f"{prefix}_internationalization_coding_system",       f"{label} internationalization coding system ({field_ref}.2.3, CWE)"),
-            _s(f"{prefix}_international_version",                    f"{label} international version ID ({field_ref}.3.1, CWE)"),
-            _s(f"{prefix}_international_version_text",               f"{label} international version text ({field_ref}.3.2, CWE)"),
-            _s(f"{prefix}_international_version_coding_system",      f"{label} international version coding system ({field_ref}.3.3, CWE)"),
-        ]
+        return [StructField(prefix, _VID_STRUCT, nullable=True)]
 
 
     def _sps_schema(prefix: str, label: str, field_ref: str) -> list[StructField]:
         """SPS (Specimen Source) — 7 components. Withdrawn in v2.7; used for backward compatibility with v2.3–v2.6."""
-        return [
-            _s(f"{prefix}",                              f"{label} source name/code ({field_ref}.1.1, CWE.1)"),
-            _s(f"{prefix}_text",                         f"{label} source name text ({field_ref}.1.2, CWE.2)"),
-            _s(f"{prefix}_additives",                    f"{label} additives code ({field_ref}.2.1, CWE.1)"),
-            _s(f"{prefix}_collection_method",            f"{label} collection method ({field_ref}.3, TX)"),
-            _s(f"{prefix}_body_site",                    f"{label} body site code ({field_ref}.4.1, CWE.1)"),
-            _s(f"{prefix}_site_modifier",                f"{label} site modifier code ({field_ref}.5.1, CWE.1)"),
-            _s(f"{prefix}_collection_method_modifier",   f"{label} collection method modifier ({field_ref}.6.1, CWE.1)"),
-            _s(f"{prefix}_role",                         f"{label} specimen role ({field_ref}.7.1, CWE.1)"),
-        ]
+        return [StructField(prefix, _SPS_STRUCT, nullable=True)]
 
 
     def _aui_schema(prefix: str, label: str, field_ref: str) -> list[StructField]:
         """AUI (Authorization Information) — ST + DT + ST."""
-        return [
-            _s(f"{prefix}",        f"{label} authorization number ({field_ref}.1, ST)"),
-            _ts(f"{prefix}_date",  f"{label} authorization effective date ({field_ref}.2, DT)"),
-            _s(f"{prefix}_source", f"{label} authorization source ({field_ref}.3, ST)"),
-        ]
+        return [StructField(prefix, _AUI_STRUCT, nullable=True)]
 
 
     def _dln_schema(prefix: str, label: str, field_ref: str) -> list[StructField]:
         """DLN (Driver's License Number) — 3 components: license number (ST) + issuing state (IS) + expiration date (DT)."""
-        return [
-            _s(f"{prefix}_number",          f"{label} license number ({field_ref}.1, ST)"),
-            _s(f"{prefix}_issuing_state",   f"{label} issuing state, province, country ({field_ref}.2, IS, Table 0333)"),
-            _ts(f"{prefix}_expiration_date", f"{label} expiration date ({field_ref}.3, DT)"),
-        ]
+        return [StructField(prefix, _DLN_STRUCT, nullable=True)]
 
 
     def _dld_schema(prefix: str, label: str, field_ref: str) -> list[StructField]:
         """DLD (Discharge Location and Date) — 2 components: location code (CWE.1) + effective date (DTM)."""
-        return [
-            _s(f"{prefix}",               f"{label} location code ({field_ref}.1, CWE.1)"),
-            _ts(f"{prefix}_effective_date", f"{label} effective date ({field_ref}.2, DTM)"),
-        ]
+        return [StructField(prefix, _DLD_STRUCT, nullable=True)]
 
 
     def _fc_schema(prefix: str, label: str, field_ref: str) -> list[StructField]:
         """FC (Financial Class) single-rep — CWE + DTM."""
-        return [
-            _s(f"{prefix}",                          f"{label} class code ({field_ref}.1.1, CWE)"),
-            _s(f"{prefix}_text",                     f"{label} class text ({field_ref}.1.2, CWE)"),
-            _s(f"{prefix}_coding_system",            f"{label} class coding system ({field_ref}.1.3, CWE)"),
-            _s(f"{prefix}_alt_code",                 f"{label} class alt code ({field_ref}.1.4, CWE)"),
-            _s(f"{prefix}_alt_text",                 f"{label} class alt text ({field_ref}.1.5, CWE)"),
-            _s(f"{prefix}_alt_coding_system",        f"{label} class alt coding system ({field_ref}.1.6, CWE)"),
-            _s(f"{prefix}_coding_system_version",    f"{label} class coding system version ({field_ref}.1.7, CWE)"),
-            _s(f"{prefix}_alt_coding_system_version", f"{label} class alt coding system version ({field_ref}.1.8, CWE)"),
-            _s(f"{prefix}_original_text",            f"{label} class original text ({field_ref}.1.9, CWE)"),
-            _ts(f"{prefix}_effective_date",          f"{label} effective date ({field_ref}.2, DTM)"),
-        ]
+        return [StructField(prefix, _FC_STRUCT, nullable=True)]
 
 
     def _fc_array_schema(column_name: str, label: str, field_ref: str) -> list[StructField]:
@@ -3597,60 +3635,22 @@ def register_lakeflow_source(spark):
 
     def _jcc_schema(prefix: str, label: str, field_ref: str) -> list[StructField]:
         """JCC (Job Code/Class) — CWE + CWE + TX."""
-        return [
-            _s(f"{prefix}",                       f"{label} job code ({field_ref}.1.1, CWE)"),
-            _s(f"{prefix}_text",                  f"{label} job code text ({field_ref}.1.2, CWE)"),
-            _s(f"{prefix}_coding_system",         f"{label} job code coding system ({field_ref}.1.3, CWE)"),
-            _s(f"{prefix}_class",                 f"{label} job class ({field_ref}.2.1, CWE)"),
-            _s(f"{prefix}_class_text",            f"{label} job class text ({field_ref}.2.2, CWE)"),
-            _s(f"{prefix}_class_coding_system",   f"{label} job class coding system ({field_ref}.2.3, CWE)"),
-            _s(f"{prefix}_description",           f"{label} job description ({field_ref}.3, TX)"),
-        ]
+        return [StructField(prefix, _JCC_STRUCT, nullable=True)]
 
 
     def _moc_schema(prefix: str, label: str, field_ref: str) -> list[StructField]:
         """MOC (Money and Code) — MOC.1: MO (Monetary Amount) + MOC.2: CWE (Charge Code)."""
-        return [
-            _s(f"{prefix}_monetary_amount",           f"{label} monetary quantity ({field_ref}.1.1, MO.1, NM)"),
-            _s(f"{prefix}_monetary_amount_currency",  f"{label} ISO 4217 denomination ({field_ref}.1.2, MO.2, ID)"),
-            _s(f"{prefix}_charge_code",               f"{label} charge code ({field_ref}.2.1, CWE.1)"),
-            _s(f"{prefix}_charge_code_text",          f"{label} charge code text ({field_ref}.2.2, CWE.2)"),
-            _s(f"{prefix}_charge_code_coding_system", f"{label} charge code coding system ({field_ref}.2.3, CWE.3)"),
-        ]
+        return [StructField(prefix, _MOC_STRUCT, nullable=True)]
 
 
     def _prl_schema(prefix: str, label: str, field_ref: str) -> list[StructField]:
         """PRL (Parent Result Link) — CWE + ST + TX."""
-        return [
-            _s(f"{prefix}",                f"{label} parent observation ID ({field_ref}.1.1, CWE)"),
-            _s(f"{prefix}_text",           f"{label} parent observation text ({field_ref}.1.2, CWE)"),
-            _s(f"{prefix}_coding_system",  f"{label} parent observation coding system ({field_ref}.1.3, CWE)"),
-            _s(f"{prefix}_sub_id",         f"{label} parent observation sub-ID ({field_ref}.2, ST)"),
-            _s(f"{prefix}_descriptor",     f"{label} parent observation descriptor ({field_ref}.3, TX)"),
-        ]
+        return [StructField(prefix, _PRL_STRUCT, nullable=True)]
 
 
     def _ndl_schema(prefix: str, label: str, field_ref: str) -> list[StructField]:
         """NDL (Name with Date and Location) single-rep — 11 components."""
-        return [
-            _s(f"{prefix}",                      f"{label} ID ({field_ref}.1.1, CNN)"),
-            _s(f"{prefix}_family_name",          f"{label} family name ({field_ref}.1.2, CNN)"),
-            _s(f"{prefix}_given_name",           f"{label} given name ({field_ref}.1.3, CNN)"),
-            _s(f"{prefix}_middle_name",          f"{label} middle name ({field_ref}.1.4, CNN)"),
-            _s(f"{prefix}_suffix",               f"{label} suffix ({field_ref}.1.5, CNN)"),
-            _s(f"{prefix}_prefix",               f"{label} prefix ({field_ref}.1.6, CNN)"),
-            _s(f"{prefix}_degree",               f"{label} degree ({field_ref}.1.7, CNN)"),
-            _ts(f"{prefix}_start_datetime",      f"{label} start date/time ({field_ref}.2, DTM)"),
-            _ts(f"{prefix}_end_datetime",        f"{label} end date/time ({field_ref}.3, DTM)"),
-            _s(f"{prefix}_point_of_care",        f"{label} point of care ({field_ref}.4, IS)"),
-            _s(f"{prefix}_room",                 f"{label} room ({field_ref}.5, IS)"),
-            _s(f"{prefix}_bed",                  f"{label} bed ({field_ref}.6, IS)"),
-            _s(f"{prefix}_facility",             f"{label} facility ({field_ref}.7.1, HD)"),
-            _s(f"{prefix}_location_status",      f"{label} location status ({field_ref}.8, IS)"),
-            _s(f"{prefix}_patient_location_type", f"{label} patient location type ({field_ref}.9, IS)"),
-            _s(f"{prefix}_building",             f"{label} building ({field_ref}.10, IS)"),
-            _s(f"{prefix}_floor",                f"{label} floor ({field_ref}.11, IS)"),
-        ]
+        return [StructField(prefix, _NDL_STRUCT, nullable=True)]
 
 
     def _ndl_array_schema(column_name: str, label: str, field_ref: str) -> list[StructField]:
@@ -3669,10 +3669,7 @@ def register_lakeflow_source(spark):
         CQ.1 = Quantity (NM) — stored as ``{prefix}``.
         CQ.2 = Units (CWE) — code only from CQ.2.1, stored as ``{prefix}_units``.
         """
-        return [
-            _s(f"{prefix}",       f"{label} quantity ({field_ref}.1, NM)"),
-            _s(f"{prefix}_units", f"{label} units code ({field_ref}.2.1, CWE)"),
-        ]
+        return [StructField(prefix, _CQ_STRUCT, nullable=True)]
 
 
     def _pl_schema(prefix: str, label: str, field_ref: str) -> list[StructField]:
@@ -3682,41 +3679,17 @@ def register_lakeflow_source(spark):
         floor, assigning_authority) is captured as its HD.1 namespace ID, matching
         PV1.3 / NK1.3 single-component composite flattening precedent.
         """
-        return [
-            _s(f"{prefix}_point_of_care",       f"{label} point of care ({field_ref}.1.1, HD; Table 0302)"),
-            _s(f"{prefix}_room",                f"{label} room ({field_ref}.2.1, HD; Table 0303)"),
-            _s(f"{prefix}_bed",                 f"{label} bed ({field_ref}.3.1, HD; Table 0304)"),
-            _s(f"{prefix}_facility",            f"{label} facility ({field_ref}.4.1, HD)"),
-            _s(f"{prefix}_status",              f"{label} location status ({field_ref}.5, IS; Table 0306)"),
-            _s(f"{prefix}_type",                f"{label} person location type ({field_ref}.6, IS; Table 0305)"),
-            _s(f"{prefix}_building",            f"{label} building ({field_ref}.7.1, HD; Table 0307)"),
-            _s(f"{prefix}_floor",               f"{label} floor ({field_ref}.8.1, HD; Table 0308)"),
-            _s(f"{prefix}_description",         f"{label} location description ({field_ref}.9, ST)"),
-            _s(f"{prefix}_comprehensive_id",    f"{label} comprehensive location identifier ({field_ref}.10.1, EI)"),
-            _s(f"{prefix}_assigning_authority", f"{label} assigning authority for location ({field_ref}.11.1, HD; Table 0363)"),
-        ]
+        return [StructField(prefix, _PL_STRUCT, nullable=True)]
 
 
     def _eip_schema(prefix: str, label: str, field_ref: str) -> list[StructField]:
         """EIP (Entity Identifier Pair) — single instance: 8 flat fields for placer and filler EI."""
-        return [
-            _s(f"{prefix}_placer_assigned_identifier",                   f"{label} placer assigned identifier ({field_ref}.1.1, EIP.1)"),
-            _s(f"{prefix}_placer_assigned_identifier_namespace_id",       f"{label} placer assigned identifier namespace ID ({field_ref}.1.2)"),
-            _s(f"{prefix}_placer_assigned_identifier_universal_id",       f"{label} placer assigned identifier universal ID ({field_ref}.1.3)"),
-            _s(f"{prefix}_placer_assigned_identifier_universal_id_type",  f"{label} placer assigned identifier universal ID type ({field_ref}.1.4)"),
-            _s(f"{prefix}_filler_assigned_identifier",                    f"{label} filler assigned identifier ({field_ref}.2.1, EIP.2)"),
-            _s(f"{prefix}_filler_assigned_identifier_namespace_id",       f"{label} filler assigned identifier namespace ID ({field_ref}.2.2)"),
-            _s(f"{prefix}_filler_assigned_identifier_universal_id",       f"{label} filler assigned identifier universal ID ({field_ref}.2.3)"),
-            _s(f"{prefix}_filler_assigned_identifier_universal_id_type",  f"{label} filler assigned identifier universal ID type ({field_ref}.2.4)"),
-        ]
+        return [StructField(prefix, _EIP_STRUCT, nullable=True)]
 
 
     def _mo_schema(prefix: str, label: str, field_ref: str) -> list[StructField]:
         """MO (Money) — 2 component fields: quantity (NM) + ISO 4217 denomination (ID)."""
-        return [
-            _s(f"{prefix}",          f"{label} monetary quantity ({field_ref}.1, NM)"),
-            _s(f"{prefix}_currency", f"{label} ISO 4217 currency code ({field_ref}.2, ID)"),
-        ]
+        return [StructField(prefix, _MO_STRUCT, nullable=True)]
 
 
     def _og_schema(prefix: str, label: str, field_ref: str) -> list[StructField]:
@@ -3725,12 +3698,7 @@ def register_lakeflow_source(spark):
         OG.1 = Original Sub-Identifier (ST) — backward-compatible with the legacy OBX-4 ST value.
         OG.2 = Group (NM), OG.3 = Sequence (NM), OG.4 = Identifier (ST).
         """
-        return [
-            _s(f"{prefix}",            f"{label} original sub-identifier ({field_ref}.1, ST)"),
-            _s(f"{prefix}_group",      f"{label} group ({field_ref}.2, NM)"),
-            _s(f"{prefix}_sequence",   f"{label} sequence ({field_ref}.3, NM)"),
-            _s(f"{prefix}_identifier", f"{label} identifier ({field_ref}.4, ST)"),
-        ]
+        return [StructField(prefix, _OG_STRUCT, nullable=True)]
 
 
     def _ei_array_schema(column_name: str, label: str, field_ref: str) -> list[StructField]:
@@ -3746,104 +3714,22 @@ def register_lakeflow_source(spark):
 
     def _xon_schema(prefix: str, label: str, field_ref: str) -> list[StructField]:
         """XON (Extended Composite Name and Number for Organizations) — 10+ component fields."""
-        return [
-            _s(f"{prefix}",                                         f"{label} organization name ({field_ref}.1)"),
-            _s(f"{prefix}_type_code",                                f"{label} organization name type code ({field_ref}.2)"),
-            _s(f"{prefix}_id",                                       f"{label} ID number ({field_ref}.3)"),
-            _s(f"{prefix}_check_digit",                              f"{label} check digit ({field_ref}.4)"),
-            _s(f"{prefix}_check_digit_scheme",                       f"{label} check digit scheme ({field_ref}.5)"),
-            _s(f"{prefix}_assigning_authority",                      f"{label} assigning authority namespace ID ({field_ref}.6.1, HD)"),
-            _s(f"{prefix}_assigning_authority_universal_id",         f"{label} assigning authority universal ID ({field_ref}.6.2)"),
-            _s(f"{prefix}_assigning_authority_universal_id_type",    f"{label} assigning authority universal ID type ({field_ref}.6.3)"),
-            _s(f"{prefix}_id_type_code",                             f"{label} identifier type code ({field_ref}.7)"),
-            _s(f"{prefix}_assigning_facility",                       f"{label} assigning facility namespace ID ({field_ref}.8.1, HD)"),
-            _s(f"{prefix}_assigning_facility_universal_id",          f"{label} assigning facility universal ID ({field_ref}.8.2)"),
-            _s(f"{prefix}_assigning_facility_universal_id_type",     f"{label} assigning facility universal ID type ({field_ref}.8.3)"),
-            _s(f"{prefix}_name_rep_code",                            f"{label} name representation code ({field_ref}.9)"),
-            _s(f"{prefix}_identifier",                               f"{label} organization identifier ({field_ref}.10)"),
-        ]
+        return [StructField(prefix, _XON_STRUCT, nullable=True)]
 
 
     def _cx_schema(prefix: str, label: str, field_ref: str) -> list[StructField]:
         """CX (Extended Composite ID with Check Digit) — 12 components + HD sub-components."""
-        return [
-            _s(f"{prefix}",                                         f"{label} ID ({field_ref}.1)"),
-            _s(f"{prefix}_check_digit",                              f"{label} check digit ({field_ref}.2)"),
-            _s(f"{prefix}_check_digit_scheme",                       f"{label} check digit scheme ({field_ref}.3)"),
-            _s(f"{prefix}_assigning_authority",                      f"{label} assigning authority namespace ID ({field_ref}.4.1, HD)"),
-            _s(f"{prefix}_assigning_authority_universal_id",         f"{label} assigning authority universal ID ({field_ref}.4.2)"),
-            _s(f"{prefix}_assigning_authority_universal_id_type",    f"{label} assigning authority universal ID type ({field_ref}.4.3)"),
-            _s(f"{prefix}_type_code",                                f"{label} identifier type code ({field_ref}.5)"),
-            _s(f"{prefix}_assigning_facility",                       f"{label} assigning facility namespace ID ({field_ref}.6.1, HD)"),
-            _s(f"{prefix}_assigning_facility_universal_id",          f"{label} assigning facility universal ID ({field_ref}.6.2)"),
-            _s(f"{prefix}_assigning_facility_universal_id_type",     f"{label} assigning facility universal ID type ({field_ref}.6.3)"),
-            _s(f"{prefix}_effective_date",                           f"{label} effective date ({field_ref}.7)"),
-            _s(f"{prefix}_expiration_date",                          f"{label} expiration date ({field_ref}.8)"),
-            _s(f"{prefix}_assigning_jurisdiction",                   f"{label} assigning jurisdiction ({field_ref}.9)"),
-            _s(f"{prefix}_assigning_agency",                         f"{label} assigning agency ({field_ref}.10)"),
-            _s(f"{prefix}_security_check",                           f"{label} security check ({field_ref}.11)"),
-            _s(f"{prefix}_security_check_scheme",                    f"{label} security check scheme ({field_ref}.12, Table 0904)"),
-        ]
+        return [StructField(prefix, _CX_STRUCT, nullable=True)]
 
 
     def _xtn_schema(prefix: str, label: str, field_ref: str) -> list[StructField]:
         """XTN (Extended Telecommunication Number) — 18 component fields."""
-        return [
-            _s(f"{prefix}_number",                  f"{label} telephone number, formatted ({field_ref}.1, deprecated but widely used)"),
-            _s(f"{prefix}_use_code",                f"{label} use code: PRN=Primary, WPN=Work, ORN=Other ({field_ref}.2, Table 0201)"),
-            _s(f"{prefix}_equipment_type",          f"{label} equipment type: PH=Phone, FX=Fax, CP=Cell, Internet=Email ({field_ref}.3, Table 0202)"),
-            _s(f"{prefix}_communication_address",   f"{label} communication address, e.g. email or URL ({field_ref}.4)"),
-            _s(f"{prefix}_country_code",            f"{label} country code ({field_ref}.5)"),
-            _s(f"{prefix}_area_code",               f"{label} area/city code ({field_ref}.6)"),
-            _s(f"{prefix}_local_number",            f"{label} local number ({field_ref}.7)"),
-            _s(f"{prefix}_extension",               f"{label} extension ({field_ref}.8)"),
-            _s(f"{prefix}_any_text",                f"{label} any text / comments ({field_ref}.9)"),
-            _s(f"{prefix}_extension_prefix",        f"{label} extension prefix ({field_ref}.10)"),
-            _s(f"{prefix}_speed_dial_code",         f"{label} speed dial code ({field_ref}.11)"),
-            _s(f"{prefix}_unformatted_number",      f"{label} unformatted telephone number ({field_ref}.12)"),
-            _s(f"{prefix}_effective_start_date",    f"{label} effective start date ({field_ref}.13, DTM)"),
-            _s(f"{prefix}_expiration_date",         f"{label} expiration date ({field_ref}.14, DTM)"),
-            _s(f"{prefix}_expiration_reason",       f"{label} expiration reason code ({field_ref}.15.1, CWE)"),
-            _s(f"{prefix}_protection_code",         f"{label} protection code ({field_ref}.16.1, CWE)"),
-            _s(f"{prefix}_shared_telecom_id",       f"{label} shared telecommunication identifier ({field_ref}.17.1, EI)"),
-            _s(f"{prefix}_preference_order",        f"{label} preference order ({field_ref}.18, NM)"),
-        ]
+        return [StructField(prefix, _XTN_STRUCT, nullable=True)]
 
 
     def _xad_schema(prefix: str, label: str, field_ref: str) -> list[StructField]:
-        """XAD (Extended Address) — 23 components (12 is deprecated/skipped)."""
-        return [
-            _s(f"{prefix}_street",                             f"{label} street address line 1 ({field_ref}.1, SAD)"),
-            _s(f"{prefix}_other_designation",                  f"{label} address line 2, apartment or suite ({field_ref}.2)"),
-            _s(f"{prefix}_city",                               f"{label} city or municipality ({field_ref}.3)"),
-            _s(f"{prefix}_state",                              f"{label} state, province, or region ({field_ref}.4)"),
-            _s(f"{prefix}_zip",                                f"{label} postal or ZIP code ({field_ref}.5)"),
-            _s(f"{prefix}_country",                            f"{label} ISO 3166 country code ({field_ref}.6, Table 0399)"),
-            _s(f"{prefix}_type",                               f"{label} address type: H=Home, B=Business, M=Mailing, C=Current ({field_ref}.7, Table 0190)"),
-            _s(f"{prefix}_other_geographic",                   f"{label} other geographic designation, e.g. neighbourhood ({field_ref}.8)"),
-            _s(f"{prefix}_county_parish_code",                 f"{label} county/parish FIPS code ({field_ref}.9.1, CWE, Table 0289)"),
-            _s(f"{prefix}_county_parish_text",                 f"{label} county/parish name ({field_ref}.9.2)"),
-            _s(f"{prefix}_county_parish_coding_system",        f"{label} county/parish coding system ({field_ref}.9.3)"),
-            _s(f"{prefix}_census_tract",                       f"{label} census tract code ({field_ref}.10.1, CWE, Table 0288)"),
-            _s(f"{prefix}_census_tract_text",                  f"{label} census tract description ({field_ref}.10.2)"),
-            _s(f"{prefix}_census_tract_coding_system",         f"{label} census tract coding system ({field_ref}.10.3)"),
-            _s(f"{prefix}_representation_code",                f"{label} address representation code ({field_ref}.11, Table 0465)"),
-            _s(f"{prefix}_effective_date",                     f"{label} address effective date ({field_ref}.13, DTM)"),
-            _s(f"{prefix}_expiration_date",                    f"{label} address expiration date ({field_ref}.14, DTM)"),
-            _s(f"{prefix}_expiration_reason",                  f"{label} expiration reason code ({field_ref}.15.1, CWE, Table 0616)"),
-            _s(f"{prefix}_expiration_reason_text",             f"{label} expiration reason text ({field_ref}.15.2)"),
-            _s(f"{prefix}_expiration_reason_coding_system",    f"{label} expiration reason coding system ({field_ref}.15.3)"),
-            _s(f"{prefix}_temporary_indicator",                f"{label} temporary indicator: Y/N ({field_ref}.16, Table 0136)"),
-            _s(f"{prefix}_bad_address_indicator",              f"{label} bad address indicator: Y/N ({field_ref}.17, Table 0136)"),
-            _s(f"{prefix}_usage",                              f"{label} address usage ({field_ref}.18, Table 0617)"),
-            _s(f"{prefix}_addressee",                          f"{label} addressee ({field_ref}.19)"),
-            _s(f"{prefix}_comment",                            f"{label} address comment ({field_ref}.20)"),
-            _s(f"{prefix}_preference_order",                   f"{label} preference order ({field_ref}.21, NM)"),
-            _s(f"{prefix}_protection_code",                    f"{label} protection code ({field_ref}.22.1, CWE, Table 0618)"),
-            _s(f"{prefix}_protection_code_text",               f"{label} protection code text ({field_ref}.22.2)"),
-            _s(f"{prefix}_protection_code_coding_system",      f"{label} protection code coding system ({field_ref}.22.3)"),
-            _s(f"{prefix}_identifier",                         f"{label} address identifier ({field_ref}.23.1, EI)"),
-        ]
+        """XAD (Extended Address) single occurrence as STRUCT (23 components, 12 deprecated)."""
+        return [StructField(prefix, _XAD_STRUCT, nullable=True)]
 
 
     # Fields present in every segment table.
@@ -4443,13 +4329,11 @@ def register_lakeflow_source(spark):
             _s("event_type_code",          "Event type code, withdrawn as of v2.7 (EVN-1)"),
             _ts("recorded_datetime",       "Date/time the event was recorded in the sending system, parsed to timestamp (EVN-2)"),
             _ts("date_time_planned_event", "Date/time the event was planned to occur, parsed to timestamp (EVN-3)"),
-        ]
-        + _cwe_schema("event_reason", "Event reason", "EVN-4")
-        + [
+            _cwe_struct_field("event_reason", "Event reason", "EVN-4"),
             *_xcn_array_schema("operator", "Operator (XCN, repeatable per spec)", "EVN-5"),
             _ts("event_occurred",          "Actual date/time the event occurred, parsed to timestamp (EVN-6)"),
+            _hd_struct_field("event_facility", "Event facility", "EVN-7"),
         ]
-        + _hd_schema("event_facility", "Event facility", "EVN-7")
     )
 
     # ---------------------------------------------------------------------------

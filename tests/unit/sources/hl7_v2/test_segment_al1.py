@@ -17,8 +17,8 @@ class TestAL1Extraction:
     def test_adt_al1(self):
         msg = parse_first(load_sample("sample_adt.hl7"))
         row = extract_segment(msg, "AL1", _extract_al1)
-        assert row["allergen_type_code"] == "DA"
-        assert row["allergen_code"] == "PENICILLIN"
+        assert row["allergen_type_code"]["code"] == "DA"
+        assert row["allergen_code"]["code"] == "PENICILLIN"
         # AL1-5 is now ArrayType<CWE-shape struct>; first repetition's code lands in [0].code.
         assert row["allergy_reaction"][0]["code"] == "HIVES"
 
@@ -27,12 +27,12 @@ class TestAL1Extraction:
         segs = segments_of_type(msg, "AL1")
         assert len(segs) == 2
         row1 = _extract_al1(segs[0])
-        assert row1["allergen_code"] == "ASPIRIN"
-        assert row1["allergy_severity_code"] == "SV"
+        assert row1["allergen_code"]["code"] == "ASPIRIN"
+        assert row1["allergy_severity_code"]["code"] == "SV"
         assert row1["allergy_reaction"][0]["code"] == "ANAPHYLAXIS"
         row2 = _extract_al1(segs[1])
-        assert row2["allergen_type_code"] == "FA"
-        assert row2["allergen_code"] == "SHELLFISH"
+        assert row2["allergen_type_code"]["code"] == "FA"
+        assert row2["allergen_code"]["code"] == "SHELLFISH"
 
 
 class TestAL1MissingFields:
@@ -55,9 +55,9 @@ class TestAL1MissingFields:
             "AL1|1|DA^Drug Allergy|CODEINE^Codeine"
         )
         row = _extract_al1(msg.get_segment("AL1"))
-        assert row["allergen_type_code"] == "DA"
-        assert row["allergen_code"] == "CODEINE"
-        assert row["allergen_code_text"] == "Codeine"
+        assert row["allergen_type_code"]["code"] == "DA"
+        assert row["allergen_code"]["code"] == "CODEINE"
+        assert row["allergen_code"]["text"] == "Codeine"
 
 
 class TestAL1ReactionLenientCwe:

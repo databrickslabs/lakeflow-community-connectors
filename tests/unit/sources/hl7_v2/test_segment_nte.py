@@ -43,7 +43,7 @@ class TestNTEExtraction:
         msg = parse_first(load_sample("sample_oru_flu_ar.hl7"))
         row = extract_segment(msg, "NTE", _extract_nte)
         assert row["source_of_comment"] == "L"
-        assert row["comment_type"] == "RE"
+        assert row["comment_type"]["code"] == "RE"
 
 
 class TestNTEMissingFields:

@@ -19,11 +19,11 @@ class TestOBXExtraction:
         segs = segments_of_type(msg, "OBX")
         assert len(segs) == 5
         na = _extract_obx(segs[0])
-        assert na["observation_id"] == "2951-2"
-        assert na["observation_id_text"] == "Sodium"
+        assert na["observation_id"]["code"] == "2951-2"
+        assert na["observation_id"]["text"] == "Sodium"
         assert na["value_type"] == "NM"
         assert na["observation_value"] == ["138"]
-        assert na["units"] == "mEq/L"
+        assert na["units"]["code"] == "mEq/L"
         assert na["references_range"] == "136-145"
         assert na["interpretation_codes"][0]["code"] == "N"
 
@@ -52,7 +52,7 @@ class TestOBXExtraction:
         msg = parse_first(load_sample("sample_oru_flu_ar.hl7"))
         segs = segments_of_type(msg, "OBX")
         row = _extract_obx(segs[0])
-        assert row["performing_organization"] == "MERCY HOSPITAL ROGERS LAB"
+        assert row["performing_organization"]["name"] == "MERCY HOSPITAL ROGERS LAB"
 
 
 class TestOBXMissingFields:
@@ -78,7 +78,7 @@ class TestOBXMissingFields:
         )
         row = _extract_obx(msg.get_segment("OBX"))
         assert row["value_type"] == "ST"
-        assert row["observation_id"] == "1234-5"
+        assert row["observation_id"]["code"] == "1234-5"
         assert row["observation_value"] == ["Result text"]
         assert row["units"] is None
         assert row["references_range"] is None

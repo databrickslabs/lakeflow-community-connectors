@@ -17,8 +17,8 @@ class TestOBRExtraction:
     def test_oru_obr(self):
         msg = parse_first(load_sample("sample_oru.hl7"))
         row = extract_segment(msg, "OBR", _extract_obr)
-        assert row["service"] == "80048"
-        assert row["service_text"] == "Basic Metabolic Panel"
+        assert row["service"]["code"] == "80048"
+        assert row["service"]["text"] == "Basic Metabolic Panel"
         assert row["result_status"] == "F"
 
     def test_covid_obr_multiple(self):
@@ -26,14 +26,14 @@ class TestOBRExtraction:
         segs = segments_of_type(msg, "OBR")
         assert len(segs) == 2
         row1 = _extract_obr(segs[0])
-        assert row1["service"] == "PERSUBJ"
+        assert row1["service"]["code"] == "PERSUBJ"
         row2 = _extract_obr(segs[1])
-        assert row2["service"] == "NOTF"
+        assert row2["service"]["code"] == "NOTF"
 
     def test_celr_obr(self):
         msg = parse_first(load_sample("sample_oru_lab_celr.hl7"))
         row = extract_segment(msg, "OBR", _extract_obr)
-        assert row["service"] == "68991-9"
+        assert row["service"]["code"] == "68991-9"
         assert row["diagnostic_service_section"] == "LAB"
 
 
@@ -46,7 +46,6 @@ class TestOBRMissingFields:
         row = _extract_obr(msg.get_segment("OBR"))
         assert row["set_id"] == 1
         assert row["service"] is None
-        assert row["service_text"] is None
         assert row["result_status"] is None
         assert row["ordering_provider"] is None
         assert row["diagnostic_service_section"] is None
@@ -57,10 +56,10 @@ class TestOBRMissingFields:
             "OBR|1||FIL001|CBC^Complete Blood Count^LN"
         )
         row = _extract_obr(msg.get_segment("OBR"))
-        assert row["service"] == "CBC"
-        assert row["service_text"] == "Complete Blood Count"
-        assert row["service_coding_system"] == "LN"
-        assert row["filler_order_number"] == "FIL001"
+        assert row["service"]["code"] == "CBC"
+        assert row["service"]["text"] == "Complete Blood Count"
+        assert row["service"]["coding_system"] == "LN"
+        assert row["filler_order_number"]["entity_identifier"] == "FIL001"
 
 
 class TestOBRCompositeFields:
@@ -89,31 +88,31 @@ class TestOBRCompositeFields:
         )
         row = _extract_obr(msg.get_segment("OBR"))
 
-        assert row["collection_volume"] == "10.5"
-        assert row["collection_volume_units"] == "mL"
+        assert row["collection_volume"]["quantity"] == "10.5"
+        assert row["collection_volume"]["units"] == "mL"
 
-        assert row["charge_to_practice_monetary_amount"] == "150.00"
-        assert row["charge_to_practice_monetary_amount_currency"] == "USD"
-        assert row["charge_to_practice_charge_code"] == "OFFICE"
-        assert row["charge_to_practice_charge_code_text"] == "Office charge"
+        assert row["charge_to_practice"]["monetary_amount"] == "150.00"
+        assert row["charge_to_practice"]["monetary_amount_currency"] == "USD"
+        assert row["charge_to_practice"]["charge_code"] == "OFFICE"
+        assert row["charge_to_practice"]["charge_code_text"] == "Office charge"
 
-        assert row["parent_result"] == "GLU"
-        assert row["parent_result_text"] == "Glucose result"
-        assert row["parent_result_coding_system"] == "LN"
-        assert row["parent_result_sub_id"] == "SUB1"
-        assert row["parent_result_descriptor"] == "Some descriptor"
+        assert row["parent_result"]["code"] == "GLU"
+        assert row["parent_result"]["text"] == "Glucose result"
+        assert row["parent_result"]["coding_system"] == "LN"
+        assert row["parent_result"]["sub_id"] == "SUB1"
+        assert row["parent_result"]["descriptor"] == "Some descriptor"
 
-        assert row["parent_results_observation_identifier_placer_assigned_identifier"] == "PARENT123"
-        assert row["parent_results_observation_identifier_filler_assigned_identifier"] == "CHILD456"
+        assert row["parent_results_observation_identifier"]["placer_assigned_identifier"]["entity_identifier"] == "PARENT123"
+        assert row["parent_results_observation_identifier"]["filler_assigned_identifier"]["entity_identifier"] == "CHILD456"
 
         principal = row
-        assert principal["principal_result_interpreter"] == "DOC1"
-        assert principal["principal_result_interpreter_family_name"] == "Smith"
-        assert principal["principal_result_interpreter_given_name"] == "Robert"
-        assert principal["principal_result_interpreter_start_datetime"] is not None
-        assert principal["principal_result_interpreter_end_datetime"] is not None
-        assert principal["principal_result_interpreter_point_of_care"] == "WARDA"
-        assert principal["principal_result_interpreter_facility"] == "GENHOSP"
+        assert principal["principal_result_interpreter"]["id"] == "DOC1"
+        assert principal["principal_result_interpreter"]["family_name"] == "Smith"
+        assert principal["principal_result_interpreter"]["given_name"] == "Robert"
+        assert principal["principal_result_interpreter"]["start_datetime"] is not None
+        assert principal["principal_result_interpreter"]["end_datetime"] is not None
+        assert principal["principal_result_interpreter"]["point_of_care"] == "WARDA"
+        assert principal["principal_result_interpreter"]["facility"] == "GENHOSP"
 
         assert row["assistant_result_interpreter"][0]["id"] == "ASSIST1"
         assert row["technician"][0]["family_name"] == "Lab"

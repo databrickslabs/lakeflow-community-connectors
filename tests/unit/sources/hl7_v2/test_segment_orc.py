@@ -22,15 +22,15 @@ class TestORCExtraction:
         msg = parse_first(load_sample("sample_oru_lab_celr.hl7"))
         row = extract_segment(msg, "ORC", _extract_orc)
         assert row["order_control"] == "RE"
-        assert row["filler_order_number"] == "N20V000178-01"
+        assert row["filler_order_number"]["entity_identifier"] == "N20V000178-01"
         assert row["order_status"] == "CM"
 
     def test_gc_orc_with_placer(self):
         msg = parse_first(load_sample("sample_oru_gc_testing.hl7"))
         row = extract_segment(msg, "ORC", _extract_orc)
         assert row["order_control"] == "RE"
-        assert row["placer_order_number"] == "201912"
-        assert row["filler_order_number"] == "21MP000052"
+        assert row["placer_order_number"]["entity_identifier"] == "201912"
+        assert row["filler_order_number"]["entity_identifier"] == "21MP000052"
         # ORC-21 is XON repeatable per spec; flattened to an array of structs.
         assert row["ordering_facility_name"][0]["name"] == "San Francisco Public Health Lab"
 
@@ -64,6 +64,6 @@ class TestORCMissingFields:
         )
         row = _extract_orc(msg.get_segment("ORC"))
         assert row["order_control"] == "NW"
-        assert row["placer_order_number"] == "PLC001"
-        assert row["filler_order_number"] == "FIL001"
+        assert row["placer_order_number"]["entity_identifier"] == "PLC001"
+        assert row["filler_order_number"]["entity_identifier"] == "FIL001"
         assert row["order_status"] == "SC"

@@ -17,19 +17,19 @@ class TestPV1Extraction:
     def test_adt_pv1(self):
         msg = parse_first(load_sample("sample_adt.hl7"))
         row = extract_segment(msg, "PV1", _extract_pv1)
-        assert row["patient_class"] == "I"
-        assert row["assigned_patient_location_point_of_care"] == "MED"
-        assert row["assigned_patient_location_room"] == "101"
+        assert row["patient_class"]["code"] == "I"
+        assert row["assigned_patient_location"]["point_of_care"] == "MED"
+        assert row["assigned_patient_location"]["room"] == "101"
         assert row["attending_doctor"][0]["id"] == "DOC001"
         assert row["attending_doctor"][0]["family_name"] == "Smith"
 
     def test_comprehensive_pv1(self):
         msg = parse_first(load_sample("sample_adt_comprehensive.hl7"))
         row = extract_segment(msg, "PV1", _extract_pv1)
-        assert row["patient_class"] == "I"
-        assert row["assigned_patient_location_point_of_care"] == "ICU"
-        assert row["hospital_service"] == "CCU"
-        assert row["visit_number"] == "VN20240301001"
+        assert row["patient_class"]["code"] == "I"
+        assert row["assigned_patient_location"]["point_of_care"] == "ICU"
+        assert row["hospital_service"]["code"] == "CCU"
+        assert row["visit_number"]["id"] == "VN20240301001"
         assert row["admit_datetime"] is not None
 
 
@@ -41,8 +41,8 @@ class TestPV1MissingFields:
         )
         row = _extract_pv1(msg.get_segment("PV1"))
         assert row["set_id"] == 1
-        assert row["patient_class"] == "I"
-        assert row["assigned_patient_location_point_of_care"] is None
+        assert row["patient_class"]["code"] == "I"
+        assert row["assigned_patient_location"] is None
         assert row["attending_doctor"] is None
         assert row["hospital_service"] is None
         assert row["admit_datetime"] is None
@@ -55,10 +55,10 @@ class TestPV1MissingFields:
             "PV1|1|O|CLINIC^200^A"
         )
         row = _extract_pv1(msg.get_segment("PV1"))
-        assert row["patient_class"] == "O"
-        assert row["assigned_patient_location_point_of_care"] == "CLINIC"
-        assert row["assigned_patient_location_room"] == "200"
-        assert row["assigned_patient_location_bed"] == "A"
+        assert row["patient_class"]["code"] == "O"
+        assert row["assigned_patient_location"]["point_of_care"] == "CLINIC"
+        assert row["assigned_patient_location"]["room"] == "200"
+        assert row["assigned_patient_location"]["bed"] == "A"
 
 
 class TestPV1NewComposites:
@@ -80,5 +80,5 @@ class TestPV1NewComposites:
         assert row["financial_class"][0]["effective_date"] is not None
         assert row["financial_class"][1]["code"] == "HMO"
         assert row["financial_class"][1]["text"] == "Health Maint"
-        assert row["discharged_to_location"] == "HOME"
-        assert row["discharged_to_location_effective_date"] is not None
+        assert row["discharged_to_location"]["code"] == "HOME"
+        assert row["discharged_to_location"]["effective_date"] is not None

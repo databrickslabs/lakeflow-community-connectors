@@ -18,7 +18,7 @@ class TestMRGExtraction:
         msg = parse_first(load_sample("sample_adt_comprehensive.hl7"))
         row = extract_segment(msg, "MRG", _extract_mrg)
         assert row["prior_patient_id"][0]["id"] == "MRN77001"
-        assert row["prior_patient_account_number"] == "MRN66001"
+        assert row["prior_patient_account_number"]["id"] == "MRN66001"
 
 
 class TestMRGMissingFields:

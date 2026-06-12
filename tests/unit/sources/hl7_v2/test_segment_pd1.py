@@ -18,7 +18,7 @@ class TestPD1Extraction:
         msg = parse_first(load_sample("sample_adt_comprehensive.hl7"))
         row = extract_segment(msg, "PD1", _extract_pd1)
         assert row["patient_primary_facility"][0]["name"] == "CHICAGO PRIMARY CARE"
-        assert row["patient_primary_care_provider_id"] == "8877665"
+        assert row["patient_primary_care_provider"]["id"] == "8877665"
 
 
 class TestPD1MissingFields:
@@ -31,7 +31,7 @@ class TestPD1MissingFields:
         assert row["living_dependency"] is None
         assert row["living_arrangement"] is None
         assert row["patient_primary_facility"] is None
-        assert row["patient_primary_care_provider_id"] is None
+        assert row["patient_primary_care_provider"] is None
         assert row["student_indicator"] is None
         assert row["organ_donor_code"] is None
         assert row["living_will_code"] is None
@@ -43,4 +43,4 @@ class TestPD1MissingFields:
         )
         row = _extract_pd1(msg.get_segment("PD1"))
         assert row["patient_primary_facility"][0]["name"] == "MAIN CLINIC"
-        assert row["organ_donor_code"] == "Y"
+        assert row["organ_donor_code"]["code"] == "Y"

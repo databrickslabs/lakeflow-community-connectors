@@ -69,19 +69,20 @@ class TestFieldTypes:
     @pytest.mark.parametrize("table", SEGMENT_TABLES)
     def test_all_fields_are_string_long_or_array(self, table):
         # Most fields are StringType (HL7 strings) or LongType (set_id, counts).
-        # Repeating composite types (XPN names, CWE codes, EI ids) are stored
-        # as ArrayType(StructType(...)) or ArrayType(StringType()) so all
-        # repetitions are preserved without flattening.
+        # Single-occurrence composite types (CWE codes, HD designators, ...) are
+        # stored as a nested StructType column. Repeating composite types (XPN
+        # names, CWE codes, EI ids) are stored as ArrayType(StructType(...)) or
+        # ArrayType(StringType()) so all repetitions are preserved.
         schema = get_schema(table)
         for field in schema.fields:
             dt = field.dataType
-            ok = isinstance(dt, (StringType, LongType))
+            ok = isinstance(dt, (StringType, LongType, StructType))
             if not ok and isinstance(dt, ArrayType):
                 element_type = dt.elementType
                 ok = isinstance(element_type, (StringType, StructType))
             assert ok, (
                 f"Schema '{table}' field '{field.name}' has unexpected type "
-                f"{dt}. Expected StringType, LongType, or "
+                f"{dt}. Expected StringType, LongType, StructType, or "
                 f"ArrayType of StringType/StructType."
             )
 

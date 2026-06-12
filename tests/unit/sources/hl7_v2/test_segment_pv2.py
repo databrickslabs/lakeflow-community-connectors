@@ -29,7 +29,7 @@ class TestPV2MissingFields:
             "PV2"
         )
         row = _extract_pv2(msg.get_segment("PV2"))
-        assert row["prior_pending_location_point_of_care"] is None
+        assert row["prior_pending_location"] is None
         assert row["accommodation_code"] is None
         assert row["expected_admit_datetime"] is None
         assert row["expected_discharge_datetime"] is None
@@ -51,5 +51,5 @@ class TestPV2MissingFields:
             "PV2|||CHF^Congestive Heart Failure|||||||||Cardiac evaluation"
         )
         row = _extract_pv2(msg.get_segment("PV2"))
-        assert row["admit_reason"] == "CHF"
+        assert row["admit_reason"]["code"] == "CHF"
         assert row["visit_description"] == "Cardiac evaluation"
