@@ -2611,7 +2611,12 @@ def test_contained_incremental_terminates_when_offset_unchanged():
 
 
 @responses.activate
-def test_contained_incremental_truncation_returns_parent_idx_offset():
+def test_contained_incremental_truncation_trims_boundary_cohort():
+    """When the per-parent walk truncates, the trailing same-cursor cohort
+    of the truncated chain is trimmed and the offset carries a
+    ``truncated_chain_cursor`` so the resumed call re-picks up exactly
+    that cohort without skipping it (Option A boundary trim, scoped to
+    the truncated chain only)."""
     _mock_nested_metadata()
     responses.get(f"{SERVICE_URL}Parents", json={"value": [{"Id": 1}, {"Id": 2}]})
     responses.get(
@@ -2631,10 +2636,256 @@ def test_contained_incremental_truncation_returns_parent_idx_offset():
         {"cursor_field": "ModifiedAt", "max_records_per_batch": "2"},
     )
     rows = list(records)
+    # Trim drops the c2 boundary cohort; only c1 is emitted.
+    assert len(rows) == 1
+    assert rows[0]["ModifiedAt"] == "2024-01-01T00:00:00Z"
+    # Resume re-fetches parent 0 from cursor gt c1, picking up c2 + beyond.
+    assert offset == {
+        "parent_idx": 0,
+        "truncated_chain_cursor": "2024-01-01T00:00:00Z",
+    }
+
+
+@responses.activate
+def test_contained_incremental_truncation_raises_when_cohort_exceeds_cap():
+    """If max_records_per_batch is smaller than a single same-cursor
+    cohort within one parent, trimming leaves zero rows and we surface
+    an actionable RuntimeError (same shape as the flat path)."""
+    _mock_nested_metadata()
+    responses.get(f"{SERVICE_URL}Parents", json={"value": [{"Id": 1}]})
+    responses.get(
+        f"{SERVICE_URL}Parents(1)/Children",
+        json={
+            "value": [
+                {"Id": 11, "Label": "a", "ModifiedAt": "2024-01-01T00:00:00Z"},
+                {"Id": 12, "Label": "b", "ModifiedAt": "2024-01-01T00:00:00Z"},
+                {"Id": 13, "Label": "c", "ModifiedAt": "2024-01-01T00:00:00Z"},
+            ]
+        },
+        match_querystring=False,
+    )
+    c = _make()
+    with pytest.raises(RuntimeError, match="largest same-cursor cohort"):
+        records, _ = c.read_table(
+            "Parents__Children",
+            None,
+            {"cursor_field": "ModifiedAt", "max_records_per_batch": "2"},
+        )
+        list(records)
+
+
+@responses.activate
+def test_contained_incremental_truncation_resume_uses_chain_cursor():
+    """A resumed read with ``truncated_chain_cursor`` issues
+    ``cursor gt <chain_cursor>`` to the truncated chain only — subsequent
+    chains keep using the outer ``cursor`` value, since per-parent cursor
+    distributions are independent."""
+    _mock_nested_metadata()
+    responses.get(f"{SERVICE_URL}Parents", json={"value": [{"Id": 1}, {"Id": 2}]})
+    responses.add(
+        responses.GET,
+        f"{SERVICE_URL}Parents(1)/Children",
+        json={"value": [{"Id": 12, "Label": "b", "ModifiedAt": "2024-01-02T00:00:00Z"}]},
+        match_querystring=False,
+    )
+    responses.add(
+        responses.GET,
+        f"{SERVICE_URL}Parents(2)/Children",
+        json={"value": [{"Id": 21, "Label": "x", "ModifiedAt": "2024-01-05T00:00:00Z"}]},
+        match_querystring=False,
+    )
+    c = _make()
+    records, offset = c.read_table(
+        "Parents__Children",
+        {"parent_idx": 0, "truncated_chain_cursor": "2024-01-01T00:00:00Z"},
+        {"cursor_field": "ModifiedAt"},
+    )
+    rows = list(records)
+    # Both chains' rows come through; offset is back to natural-completion shape.
+    assert {r["ModifiedAt"] for r in rows} == {
+        "2024-01-02T00:00:00Z",
+        "2024-01-05T00:00:00Z",
+    }
+    assert offset == {"cursor": "2024-01-05T00:00:00Z"}
+    # First leaf call uses the chain cursor; second uses the outer cursor (None here).
+    p1_call = next(c for c in responses.calls if "Parents(1)/Children" in c.request.url)
+    assert "ModifiedAt%20gt%202024-01-01" in p1_call.request.url or (
+        "ModifiedAt+gt+2024-01-01" in p1_call.request.url
+    )
+
+
+@responses.activate
+def test_contained_incremental_truncation_uses_nextlink_at_page_boundary():
+    """When the per-parent walk hits ``max_records_per_batch`` exactly at
+    a page boundary and the chain has more pages, the connector parks
+    ``chain_next_link`` (the server's @odata.nextLink) in the offset
+    rather than rebuilding the URL with ``cursor gt …``. The resumed
+    call hands the link back to the server unchanged."""
+    _mock_nested_metadata()
+    responses.get(f"{SERVICE_URL}Parents", json={"value": [{"Id": 1}, {"Id": 2}]})
+    next_link = f"{SERVICE_URL}Parents(1)/Children?$skiptoken=opaque-token"
+    responses.add(
+        responses.GET,
+        f"{SERVICE_URL}Parents(1)/Children",
+        json={
+            "value": [
+                {"Id": 11, "Label": "a", "ModifiedAt": "2024-01-01T00:00:00Z"},
+                {"Id": 12, "Label": "b", "ModifiedAt": "2024-01-02T00:00:00Z"},
+            ],
+            "@odata.nextLink": next_link,
+        },
+        match_querystring=False,
+    )
+    c = _make()
+    records, offset = c.read_table(
+        "Parents__Children",
+        None,
+        {"cursor_field": "ModifiedAt", "max_records_per_batch": "2"},
+    )
+    rows = list(records)
+    # Whole page emitted (page-boundary truncation; no Option A trim).
     assert len(rows) == 2
-    # Capped mid-walk: parent_idx parked so resume continues at parent 1.
-    assert offset["parent_idx"] == 0  # truncated while walking parent index 0
-    assert offset["cursor"] == "2024-01-02T00:00:00Z"
+    assert offset == {
+        "parent_idx": 0,
+        "chain_next_link": next_link,
+    }
+
+
+@responses.activate
+def test_contained_incremental_resume_from_chain_next_link():
+    """A resumed read with ``chain_next_link`` in the offset hits the
+    skiptoken URL directly (no URL rebuild), then carries on to the
+    next chain when that page indicates the chain is done."""
+    _mock_nested_metadata()
+    responses.get(f"{SERVICE_URL}Parents", json={"value": [{"Id": 1}, {"Id": 2}]})
+    skip_url = f"{SERVICE_URL}Parents(1)/Children?$skiptoken=opaque-token"
+    responses.add(
+        responses.GET,
+        skip_url,
+        json={"value": [{"Id": 13, "Label": "c", "ModifiedAt": "2024-01-03T00:00:00Z"}]},
+        match_querystring=False,
+    )
+    responses.add(
+        responses.GET,
+        f"{SERVICE_URL}Parents(2)/Children",
+        json={"value": [{"Id": 21, "Label": "x", "ModifiedAt": "2024-01-05T00:00:00Z"}]},
+        match_querystring=False,
+    )
+    c = _make()
+    records, offset = c.read_table(
+        "Parents__Children",
+        {"parent_idx": 0, "chain_next_link": skip_url},
+        {"cursor_field": "ModifiedAt"},
+    )
+    rows = list(records)
+    assert {r["ModifiedAt"] for r in rows} == {
+        "2024-01-03T00:00:00Z",
+        "2024-01-05T00:00:00Z",
+    }
+    assert offset == {"cursor": "2024-01-05T00:00:00Z"}
+    # Resumed URL is the skiptoken — no `$filter=` reconstruction.
+    skip_call = next(c for c in responses.calls if "skiptoken" in c.request.url)
+    assert skip_call is not None
+
+
+@responses.activate
+def test_ancestor_cursor_truncation_parks_chain_next_link():
+    """Ancestor-cursor mode has no Option A fallback (every leaf under a
+    chain shares the chain's stamped cursor by construction). On
+    truncation it relies solely on the server's @odata.nextLink to
+    resume the chain's leaf fetch."""
+    _mock_nested_metadata()
+    responses.get(f"{SERVICE_URL}Parents", json={"value": [{"Id": 1}]})
+    responses.add(
+        responses.GET,
+        f"{SERVICE_URL}Parents(1)/Children",
+        json={"value": [{"Id": 11, "ModifiedAt": "2024-01-01T00:00:00Z"}]},
+        match_querystring=False,
+    )
+    notes_next = f"{SERVICE_URL}Parents(1)/Children(11)/Notes?$skiptoken=tok"
+    responses.add(
+        responses.GET,
+        f"{SERVICE_URL}Parents(1)/Children(11)/Notes",
+        json={
+            "value": [{"Id": 100, "Text": "a"}, {"Id": 101, "Text": "b"}],
+            "@odata.nextLink": notes_next,
+        },
+        match_querystring=False,
+    )
+    c = _make()
+    records, offset = c.read_table(
+        "Parents__Children__Notes",
+        None,
+        {"cursor_field": "ModifiedAt", "max_records_per_batch": "2"},
+    )
+    rows = list(records)
+    assert len(rows) == 2
+    # All leaf rows stamped with the ancestor cursor (unchanged behavior).
+    assert all(r["ModifiedAt"] == "2024-01-01T00:00:00Z" for r in rows)
+    # New: offset carries the nextLink for the truncated chain.
+    assert offset["chain_next_link"] == notes_next
+    assert offset["parent_idx"] == 0
+
+
+@responses.activate
+def test_ancestor_cursor_truncation_preserves_original_since():
+    """On truncation in ancestor-cursor mode, the offset's ``cursor``
+    preserves the original ``since`` rather than advancing to the global
+    max emitted. This is the fix for the cross-chain interleaved-cursor
+    bug: chain enumeration is depth-first by top-level parent, so
+    ancestor cursors interleave across parents. If we used max(emitted)
+    we'd filter out lower-cursor chains under later top-level parents
+    on resume — even though they were never emitted."""
+    _mock_nested_metadata()
+    responses.get(f"{SERVICE_URL}Parents", json={"value": [{"Id": 1}, {"Id": 2}]})
+    # Under Parent(1): Children with HIGHER cursors first (filtered/ordered server-side).
+    responses.add(
+        responses.GET,
+        f"{SERVICE_URL}Parents(1)/Children",
+        json={
+            "value": [
+                {"Id": 11, "ModifiedAt": "2024-01-10T00:00:00Z"},
+                {"Id": 12, "ModifiedAt": "2024-01-20T00:00:00Z"},
+            ]
+        },
+        match_querystring=False,
+    )
+    # Under Parent(2): Children with LOWER cursors — these interleave below
+    # Parent(1)'s already-emitted max.
+    responses.add(
+        responses.GET,
+        f"{SERVICE_URL}Parents(2)/Children",
+        json={
+            "value": [
+                {"Id": 21, "ModifiedAt": "2024-01-05T00:00:00Z"},
+            ]
+        },
+        match_querystring=False,
+    )
+    # Each Children's Notes (under Parent 1 only — Parent 2 not reached on batch 1).
+    responses.add(
+        responses.GET,
+        f"{SERVICE_URL}Parents(1)/Children(11)/Notes",
+        json={"value": [{"Id": 100, "Text": "a"}]},
+        match_querystring=False,
+    )
+    responses.add(
+        responses.GET,
+        f"{SERVICE_URL}Parents(1)/Children(12)/Notes",
+        json={"value": [{"Id": 200, "Text": "b"}]},
+        match_querystring=False,
+    )
+    c = _make()
+    records, offset = c.read_table(
+        "Parents__Children__Notes",
+        # since=2023-01-01 chosen to ensure the live filter includes all chains.
+        {"cursor": "2023-01-01T00:00:00Z"},
+        {"cursor_field": "ModifiedAt", "max_records_per_batch": "2"},
+    )
+    list(records)
+    # Truncated: preserved since (NOT max emitted 2024-01-20).
+    assert offset.get("cursor") == "2023-01-01T00:00:00Z"
+    assert offset.get("parent_idx") is not None
 
 
 # --- ancestor-cursor incremental ---

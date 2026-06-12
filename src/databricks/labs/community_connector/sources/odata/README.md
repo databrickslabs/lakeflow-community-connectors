@@ -344,9 +344,49 @@ stamps the ancestor's cursor value onto every emitted leaf row.
 the ancestor's declared type. Set ``cursor_field`` to a column name
 that isn't anywhere on the path → ``ValueError``.
 
-Known limitation: no same-cursor boundary trim across truncation. Set
-``max_records_per_batch`` above the largest expected same-cursor cohort
-per parent, or pick a higher-cardinality cursor.
+Truncation handling: when a per-parent walk hits the
+``max_records_per_batch`` cap, the connector prefers a **nextLink-based
+mid-chain resume**. The server's @odata.nextLink for the partially-paged
+chain is parked in the offset as ``chain_next_link``; the resumed call
+hands that link back to the server, which picks up exactly where it
+stopped without reconstructing ``$filter``/``$orderby``/``$select`` state.
+Subsequent parents in the same resume keep using the original ``cursor``
+``since``. After the resumed walk completes naturally, the offset
+collapses back to ``{"cursor": <max>}``; ``apply_changes`` dedupes any
+cross-batch repeats.
+
+In leaf-cursor mode, when the chain ended on the truncating page (no
+nextLink available), the connector falls back to **Option A trim**: the
+trailing same-cursor cohort within that chain's emit is dropped and a
+``truncated_chain_cursor`` is parked. The resumed call rebuilds the URL
+with ``cursor gt truncated_chain_cursor`` for that one parent. If even
+one parent's same-cursor cohort exceeds ``max_records_per_batch``, the
+connector raises ``RuntimeError`` — raise the cap, or pick a
+higher-cardinality cursor.
+
+In ancestor-cursor mode there is no Option A fallback (every leaf under
+a chain shares the chain's stamped cursor by construction, so a
+within-chain ``cursor gt`` rebuild can't split it). The mode relies
+solely on ``chain_next_link``; if a server doesn't return durable
+@odata.nextLink values, raise ``max_records_per_batch`` above the
+largest per-chain leaf count.
+
+Cross-chain interleaving: ancestor-cursor mode walks chains depth-first
+by top-level parent, so ancestor cursors interleave across top-level
+parents (sibling chains under one parent are cursor-ordered, but
+Parent 2's lowest cursor can be below Parent 1's highest). On
+truncation the connector therefore preserves the **original** ``since``
+in the offset rather than advancing to the global max emitted, so the
+resumed call's rebuild of ``chains_with_cursor`` includes every chain
+that batch 1 saw — including any lower-cursor chains under later
+parents that hadn't been reached yet. A ``running_max`` is accumulated
+across resume batches so when the resume completes naturally the
+next regular trigger gets the actual highest cursor seen as its filter
+floor (a fresh first-ever resume that originated from ``since=None``
+would otherwise drop the cursor entirely on completion and re-walk
+the table on the next trigger). Cross-batch re-emission of
+already-seen chains is deduped by ``apply_changes`` on the composite
+primary key.
 
 ### Disallowed combinations
 

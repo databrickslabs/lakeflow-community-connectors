@@ -856,17 +856,34 @@ class ODataLakeflowConnect(LakeflowConnect, SupportsNamespaces, ContainedNavMixi
         the client to prepend the service root. urljoin handles both
         cases — absolutes pass through unchanged.
         """
+        for page_rows, _ in self._fetch_pages_with_links(url):
+            yield from page_rows
+
+    def _fetch_pages_with_links(self, url: str) -> Iterator[tuple[list[dict], str | None]]:
+        """Page-aware variant of ``_fetch_pages``: yields
+        ``(page_rows, next_url)`` for each HTTP response.
+
+        Lets callers checkpoint at page boundaries — the yielded
+        ``next_url`` is the resolved @odata.nextLink (or ``None`` when
+        the chain is exhausted). Resuming from that link on a later
+        call hands the server back its own opaque skiptoken; the server
+        picks up exactly where it left off without the caller needing
+        to reconstruct ``$filter``/``$orderby``/``$select`` state.
+        """
         session = self._get_session()
         next_url: str | None = url
         while next_url:
             resp = self._http_get(session, next_url)
             resp.raise_for_status()
             payload = resp.json()
-            for item in payload.get("value", []):
-                # Strip OData control properties that aren't real fields.
-                yield {k: v for k, v in item.items() if not k.startswith("@odata.")}
+            page_rows = [
+                {k: v for k, v in item.items() if not k.startswith("@odata.")}
+                for item in payload.get("value", [])
+            ]
             raw_next = payload.get("@odata.nextLink")
-            next_url = urljoin(resp.url, raw_next) if raw_next else None
+            new_next = urljoin(resp.url, raw_next) if raw_next else None
+            yield page_rows, new_next
+            next_url = new_next
 
     def _http_get(self, session: requests.Session, url: str, **kwargs: Any) -> requests.Response:
         """GET with auth-aware 401/403 handling.
