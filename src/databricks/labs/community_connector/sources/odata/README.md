@@ -49,6 +49,108 @@ For other auth methods, swap `token` for the relevant fields:
 | `oauth2` (client credentials) | `oauth2_token_url`, `oauth2_client_id`, `oauth2_client_secret` (optionally `oauth2_scope`) | Server-to-server. Mints a fresh access token at session start; re-mints pre-emptively when `expires_in` is exhausted (60 s safety buffer). |
 | `oauth2` (authorization code) | Same as above **plus** `oauth2_refresh_token` (and optionally `oauth2_access_token`) | User-delegated. The pre-issued access token is used directly, then refreshed via `grant_type=refresh_token` either pre-emptively when the deadline approaches or reactively on a 401 from the source. Rotated refresh tokens are tracked automatically. |
 
+#### OAuth2 — client credentials (server-to-server)
+
+Use when the connector authenticates as itself (a service principal /
+machine identity). The connector mints a fresh access token at session
+start by POSTing `grant_type=client_credentials` to the token endpoint
+and re-mints pre-emptively when `expires_in` runs out (60 s safety
+buffer).
+
+```bash
+community-connector create_connection odata odata_connection \
+  -o '{
+        "service_url": "https://your-host/odata/v4/",
+        "auth_type": "oauth2",
+        "oauth2_token_url": "https://login.example.com/oauth/token",
+        "oauth2_client_id": "<client-id>",
+        "oauth2_client_secret": "<client-secret>",
+        "oauth2_scope": "read:everything"
+      }' \
+  --spec ./src/databricks/labs/community_connector/sources/odata/connector_spec.yaml
+```
+
+`oauth2_scope` is optional — include it only when the token endpoint
+requires (or accepts) a `scope` parameter for client_credentials. For
+Azure AD / Entra ID flows the value is typically `<resource>/.default`
+(e.g. `https://graph.microsoft.com/.default`).
+
+If you prefer to leave `auth_type` off, the connector auto-detects
+`oauth2` from the presence of `oauth2_client_id` + `oauth2_client_secret`.
+
+#### OAuth2 — authorization code (user-delegated, refresh-token rotation)
+
+Use when the source enforces per-user access and you've already run an
+interactive consent flow to obtain a refresh token. The connector uses
+the pre-issued access token (if provided) until it expires, then
+refreshes it via `grant_type=refresh_token`. Rotated refresh tokens
+returned in the refresh response are tracked in memory automatically.
+
+```bash
+community-connector create_connection odata odata_connection \
+  -o '{
+        "service_url": "https://graph.microsoft.com/v1.0/",
+        "auth_type": "oauth2",
+        "oauth2_token_url": "https://login.microsoftonline.com/<tenant-id>/oauth2/v2.0/token",
+        "oauth2_client_id": "<app-client-id>",
+        "oauth2_client_secret": "<app-client-secret>",
+        "oauth2_scope": "https://graph.microsoft.com/.default offline_access",
+        "oauth2_refresh_token": "<long-lived-refresh-token>",
+        "oauth2_access_token": "<optional-pre-issued-access-token>"
+      }' \
+  --spec ./src/databricks/labs/community_connector/sources/odata/connector_spec.yaml
+```
+
+Notes:
+
+- `oauth2_access_token` is optional. When omitted the connector calls
+  the refresh endpoint immediately at session start to mint the first
+  access token.
+- `offline_access` (or the provider's equivalent) must be in
+  `oauth2_scope` if your provider gates refresh-token issuance on it.
+- The refresh token isn't persisted back to the UC connection — if your
+  provider rotates refresh tokens on each refresh and the connector
+  restarts, you may need to obtain a fresh refresh token interactively.
+  Most providers accept the same refresh token repeatedly until it's
+  explicitly revoked or expires.
+
+#### Python SDK form (any OAuth2 variant)
+
+```python
+from databricks.sdk import WorkspaceClient
+
+w = WorkspaceClient()
+
+service_url = "https://your-host/odata/v4/"
+
+w.api_client.do(
+    "POST",
+    "/api/2.1/unity-catalog/connections",
+    body={
+        "name": "odata_connection",
+        "connection_type": "COMMUNITY",
+        "comment": f"service_url={service_url}",
+        "options": {
+            "sourceName": "odata",
+            "service_url": service_url,
+            "auth_type": "oauth2",
+            "oauth2_token_url": "https://login.example.com/oauth/token",
+            "oauth2_client_id": "<client-id>",
+            "oauth2_client_secret": "<client-secret>",
+            "oauth2_scope": "read:everything",
+            # For authorization-code flow, add:
+            # "oauth2_refresh_token": "<refresh-token>",
+            # "oauth2_access_token": "<optional-pre-issued-access-token>",
+            "externalOptionsAllowList": (
+                "namespace,cursor_field,select,filter,"
+                "page_size,max_records_per_batch,delta_tracking,"
+                "expand_contained"
+            ),
+        },
+    },
+)
+```
+
 Auth error handling:
 
 - **Token-endpoint 4xx during the OAuth refresh-token grant** raises a
