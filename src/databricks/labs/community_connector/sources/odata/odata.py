@@ -39,6 +39,7 @@ import os
 import pickle
 import tempfile
 import time
+from dataclasses import dataclass, field
 from typing import Any, Iterator
 from urllib.parse import urljoin
 from xml.etree import ElementTree as ET
@@ -136,7 +137,7 @@ _SEQUENCE_COUNTER = itertools.count()
 # ``spark.readStream.format("lakeflow_connect").load()`` call; within
 # a single Python process this cache makes all instances share one
 # parse.
-_METADATA_CACHE: dict[str, tuple[str, ET.Element]] = {}
+_METADATA_CACHE: dict[str, tuple[str, ET.Element, "_CsdlIndex"]] = {}
 
 # On-disk CSDL cache. PySpark's Python Data Source forks a fresh
 # ``pyspark.daemon`` worker for schema inference on every ``.load()``
@@ -175,6 +176,134 @@ def _clear_metadata_cache() -> None:
         pass
 
 
+@dataclass
+class _CsdlIndex:
+    """One-time index of a parsed CSDL document.
+
+    Before this index existed every metadata lookup (resolve an entity
+    set to its type, follow a base-type chain, find an entity type by
+    qualified name) re-walked the whole ET tree. On a multi-MB CSDL
+    that's tens of milliseconds per call, and the connector makes
+    dozens of calls per table — measurable both during INITIALIZING
+    (table discovery, schema inference) and during steady-state
+    incremental reads (FK column resolution per batch).
+
+    The index is built once per parsed root and bundled with that root
+    in the in-memory cache; whenever the root is refreshed (file-cache
+    TTL expiry, in-process eviction) the index is rebuilt with it.
+    Per-instance memo dicts hang off ``ODataLakeflowConnect`` rather
+    than this dataclass — they're populated lazily by callers and
+    invalidated when the index they were built against is replaced.
+    """
+
+    # Every ``(schema_namespace, entity_set_name)`` pair declared in
+    # ``$metadata``. Order matches CSDL declaration order so error
+    # hints and listings stay deterministic.
+    entity_set_pairs: list[tuple[str, str]]
+    # ``(namespace, entity_set_name) → entity_type_ref_string`` — the
+    # raw ``EntityType=`` attribute the entity set points at.
+    entity_set_to_type_ref: dict[tuple[str, str], str]
+    # ``entity_set_name → list[(namespace, type_ref)]``. Multiple
+    # entries means the same name lives in two schemas; callers must
+    # disambiguate via the ``namespace`` table option.
+    entity_set_by_name: dict[str, list[tuple[str, str]]]
+    # ``namespace → list[entity_set_name]``. Used for error hints when
+    # a namespace was supplied but the set wasn't found.
+    entity_set_names_by_ns: dict[str, list[str]]
+    # ``namespace_or_alias → canonical_namespace``. CSDL ``Alias``
+    # attributes route through here so ``BaseType="graph.user"``
+    # resolves to the schema declaring ``Namespace="microsoft.graph"``.
+    alias_to_namespace: dict[str, str]
+    # Fully-qualified type name (using canonical namespace) →
+    # ``EntityType`` element. The qname uses the canonical namespace,
+    # not any alias; callers must alias-resolve first.
+    entity_type_by_qname: dict[str, ET.Element]
+    # All namespaces that declare at least one entity set. Used for
+    # error hints when the requested namespace declares only types.
+    namespaces_with_sets: list[str]
+
+
+def _build_csdl_index(root: ET.Element) -> _CsdlIndex:
+    """Single tree walk that populates every lookup in ``_CsdlIndex``.
+
+    The CSDL can declare multiple ``<Schema>`` blocks; each schema can
+    declare entity types and (optionally) an ``<EntityContainer>`` with
+    entity sets. The walk threads schemas → containers → entity sets in
+    one pass while also indexing every ``<EntityType>`` by qualified
+    name. Subsequent dict lookups replace what used to be O(N) tree
+    scans.
+    """
+    entity_set_pairs: list[tuple[str, str]] = []
+    entity_set_to_type_ref: dict[tuple[str, str], str] = {}
+    entity_set_by_name: dict[str, list[tuple[str, str]]] = {}
+    entity_set_names_by_ns: dict[str, list[str]] = {}
+    alias_to_namespace: dict[str, str] = {}
+    entity_type_by_qname: dict[str, ET.Element] = {}
+    namespaces_with_sets: list[str] = []
+
+    for schema in root.iter(f"{_NS_EDM}Schema"):
+        ns = schema.get("Namespace") or ""
+        if ns:
+            alias_to_namespace[ns] = ns
+        alias = schema.get("Alias")
+        if alias:
+            alias_to_namespace[alias] = ns
+
+        for entity_type in schema.findall(f"{_NS_EDM}EntityType"):
+            type_name = entity_type.get("Name")
+            if type_name:
+                entity_type_by_qname[f"{ns}.{type_name}"] = entity_type
+
+        had_set = False
+        for container in schema.iter(f"{_NS_EDM}EntityContainer"):
+            for es in container.iter(f"{_NS_EDM}EntitySet"):
+                set_name = es.get("Name")
+                type_ref = es.get("EntityType") or ""
+                entity_set_pairs.append((ns, set_name))
+                entity_set_to_type_ref[(ns, set_name)] = type_ref
+                entity_set_by_name.setdefault(set_name, []).append((ns, type_ref))
+                entity_set_names_by_ns.setdefault(ns, []).append(set_name)
+                had_set = True
+        if had_set and ns and ns not in namespaces_with_sets:
+            namespaces_with_sets.append(ns)
+
+    return _CsdlIndex(
+        entity_set_pairs=entity_set_pairs,
+        entity_set_to_type_ref=entity_set_to_type_ref,
+        entity_set_by_name=entity_set_by_name,
+        entity_set_names_by_ns=entity_set_names_by_ns,
+        alias_to_namespace=alias_to_namespace,
+        entity_type_by_qname=entity_type_by_qname,
+        namespaces_with_sets=namespaces_with_sets,
+    )
+
+
+@dataclass
+class _MetadataState:
+    """Per-instance bundle for parsed-CSDL state: the root, the index
+    built from it, and the memo dicts populated as callers walk it.
+
+    Bundling lets ``ODataLakeflowConnect`` stay within pylint's
+    instance-attribute budget (one attribute vs. seven) and ensures
+    the memos invalidate atomically when the root is refreshed —
+    callers reach for ``self._metadata`` and either get the full
+    bundle or rebuild it from scratch."""
+
+    root: ET.Element
+    index: _CsdlIndex
+    # All memos are keyed off either ``id(et)`` (for methods taking
+    # an ``ET.Element``) or ``(table_name, namespace)``. They're
+    # safe across the lifetime of ``root`` because element identity
+    # is stable within one parsed tree.
+    fields: dict = field(default_factory=dict)
+    primary_keys: dict = field(default_factory=dict)
+    base_chain: dict = field(default_factory=dict)
+    own_fields: dict = field(default_factory=dict)
+    own_pks: dict = field(default_factory=dict)
+    entity_type: dict = field(default_factory=dict)
+    fk_columns: dict = field(default_factory=dict)
+
+
 def _next_sequence() -> str:
     """Strictly-increasing per-record sequence value for apply_changes.
 
@@ -209,9 +338,19 @@ class ODataLakeflowConnect(LakeflowConnect, SupportsNamespaces, ContainedNavMixi
         super().__init__(options)
         self.service_url = _require(options, "service_url")
         self.timeout = int(options.get("timeout_seconds", "60"))
+        # On-disk pickle TTL. The default suits typical 1-minute SDP
+        # trigger intervals — each trigger spawns a fresh forked
+        # worker, the file cache survives, but stale state is bounded.
+        # Users with stable schemas can raise this to skip even the
+        # first-fork fetch within a longer window; users iterating on
+        # the source model can drop it to 0 to disable file caching.
+        self.metadata_cache_ttl_seconds = int(
+            options.get("metadata_cache_ttl_seconds", _METADATA_FILE_CACHE_TTL_SECONDS)
+        )
         self._session: requests.Session | None = None
-        self._metadata_xml: str | None = None
-        self._metadata_root_cache: ET.Element | None = None
+        # Parsed CSDL bundle: root + lookup index + per-instance memos.
+        # ``None`` until the first ``_metadata_root()`` call.
+        self._metadata: _MetadataState | None = None
         # Monotonic deadline (seconds) for the current OAuth access token.
         # Set when the token endpoint returns ``expires_in``; `None` means we
         # don't know the expiry (user-supplied access token without metadata)
@@ -1233,48 +1372,60 @@ class ODataLakeflowConnect(LakeflowConnect, SupportsNamespaces, ContainedNavMixi
     # ------------------------------------------------------------------
 
     def _metadata_root(self) -> ET.Element:
-        """Return the parsed CSDL root, fetching + parsing on first call
-        only.
+        """Convenience accessor — returns the parsed root from the
+        cached bundle. Most callers want lookups against the index;
+        reach for ``self._metadata_state()`` directly when so."""
+        return self._metadata_state().root
+
+    def _metadata_state(self) -> _MetadataState:
+        """Return the bundled parsed-CSDL state for this instance,
+        fetching + parsing + indexing on first call only.
 
         Four cache layers, checked in order:
 
-        1. Instance ``_metadata_root_cache`` — re-used across every
-           downstream lookup on this connector instance.
+        1. Instance ``self._metadata`` — re-used across every downstream
+           lookup; the per-instance memos hang off this bundle so all
+           the lookup methods see the same cached root + index.
         2. Module ``_METADATA_CACHE`` keyed by ``service_url`` — shared
            across all connector instances in the same Python process.
+           Stores ``(xml_text, root, index)`` so the index isn't
+           rebuilt per instance either.
         3. On-disk pickle at ``_metadata_cache_path(service_url)`` —
-           shared across forked ``pyspark.daemon`` workers (PySpark's
-           Python Data Source forks one per ``.load()`` schema
-           inference, so the in-memory caches don't survive). TTL is
-           short enough that the next pipeline trigger validates the
-           upstream schema.
+           shared across forked ``pyspark.daemon`` workers (PySpark
+           forks one per ``.load()`` schema inference). The pickle
+           stores ``(xml_text, root)``; each fork rebuilds the index
+           from the unpickled root (one tree walk, ~50 ms).
         4. Network — the actual ``GET $metadata``, taken only when no
            cache has it.
         """
-        if self._metadata_root_cache is not None:
-            return self._metadata_root_cache
+        if self._metadata is not None:
+            return self._metadata
         cached = _METADATA_CACHE.get(self.service_url)
         if cached is not None:
-            self._metadata_xml, self._metadata_root_cache = cached
-            return self._metadata_root_cache
+            xml_text, root, index = cached
+            self._metadata = _MetadataState(root=root, index=index)
+            # ``xml_text`` is only needed for the write path; once
+            # cached, we don't carry it on the bundle.
+            del xml_text
+            return self._metadata
         file_cached = self._read_metadata_file_cache()
         if file_cached is not None:
-            self._metadata_xml, self._metadata_root_cache = file_cached
-            _METADATA_CACHE[self.service_url] = file_cached
-            return self._metadata_root_cache
-        if self._metadata_xml is None:
-            session = self._get_session()
-            url = _join_url(self.service_url, "$metadata")
-            resp = self._http_get(session, url, headers={"Accept": "application/xml"})
-            resp.raise_for_status()
-            self._metadata_xml = resp.text
-        self._metadata_root_cache = ET.fromstring(self._metadata_xml)
-        _METADATA_CACHE[self.service_url] = (
-            self._metadata_xml,
-            self._metadata_root_cache,
-        )
-        self._write_metadata_file_cache(self._metadata_xml, self._metadata_root_cache)
-        return self._metadata_root_cache
+            xml_text, root = file_cached
+            index = _build_csdl_index(root)
+            self._metadata = _MetadataState(root=root, index=index)
+            _METADATA_CACHE[self.service_url] = (xml_text, root, index)
+            return self._metadata
+        session = self._get_session()
+        url = _join_url(self.service_url, "$metadata")
+        resp = self._http_get(session, url, headers={"Accept": "application/xml"})
+        resp.raise_for_status()
+        xml_text = resp.text
+        root = ET.fromstring(xml_text)
+        index = _build_csdl_index(root)
+        self._metadata = _MetadataState(root=root, index=index)
+        _METADATA_CACHE[self.service_url] = (xml_text, root, index)
+        self._write_metadata_file_cache(xml_text, root)
+        return self._metadata
 
     def _read_metadata_file_cache(self) -> tuple[str, ET.Element] | None:
         """Return the cached ``(xml_text, parsed_root)`` from the
@@ -1282,12 +1433,14 @@ class ODataLakeflowConnect(LakeflowConnect, SupportsNamespaces, ContainedNavMixi
         ``None`` for any miss (missing, expired, unreadable,
         unpicklable). All failures are silent — the caller falls
         through to the network."""
+        if self.metadata_cache_ttl_seconds <= 0:
+            return None
         path = _metadata_cache_path(self.service_url)
         try:
             mtime = os.path.getmtime(path)
         except OSError:
             return None
-        if time.time() - mtime > _METADATA_FILE_CACHE_TTL_SECONDS:
+        if time.time() - mtime > self.metadata_cache_ttl_seconds:
             return None
         try:
             with open(path, "rb") as fh:
@@ -1310,6 +1463,8 @@ class ODataLakeflowConnect(LakeflowConnect, SupportsNamespaces, ContainedNavMixi
         on-disk pickle. Uses atomic rename so a concurrent reader
         either sees the old file or the fully-written new one, never
         a torn write."""
+        if self.metadata_cache_ttl_seconds <= 0:
+            return
         path = _metadata_cache_path(self.service_url)
         tmp_path = f"{path}.{os.getpid()}.tmp"
         try:
@@ -1327,18 +1482,16 @@ class ODataLakeflowConnect(LakeflowConnect, SupportsNamespaces, ContainedNavMixi
 
     def _entity_set_index(self) -> list[tuple[str, str]]:
         """All (schema_namespace, entity_set_name) pairs declared in $metadata."""
-        root = self._metadata_root()
-        out: list[tuple[str, str]] = []
-        for schema in root.iter(f"{_NS_EDM}Schema"):
-            ns = schema.get("Namespace") or ""
-            for container in schema.iter(f"{_NS_EDM}EntityContainer"):
-                for es in container.iter(f"{_NS_EDM}EntitySet"):
-                    out.append((ns, es.get("Name")))
-        return out
+        return self._metadata_state().index.entity_set_pairs
 
     def _entity_type_for(self, table_name: str, namespace: str | None = None) -> ET.Element:
         """Resolve flat names or contained paths (segment-by-segment via
         contained nav props on the base-type chain)."""
+        state = self._metadata_state()
+        cache_key = (table_name, namespace)
+        cached = state.entity_type.get(cache_key)
+        if cached is not None:
+            return cached
         segments = _parse_contained_path(table_name) or [table_name]
         et = self._flat_entity_type_for(segments[0], namespace)
         for idx, child_segment in enumerate(segments[1:], start=1):
@@ -1358,35 +1511,30 @@ class ODataLakeflowConnect(LakeflowConnect, SupportsNamespaces, ContainedNavMixi
                     f"{child_segment!r} on {segments[idx - 1]!r}) not found in $metadata."
                 )
             et = target_et
+        state.entity_type[cache_key] = et
         return et
 
     def _flat_entity_type_for(self, table_name: str, namespace: str | None = None) -> ET.Element:
         """Resolve a top-level entity-set name to its EntityType element."""
-        root = self._metadata_root()
-        matches: list[tuple[str, str]] = []
-        for schema in root.iter(f"{_NS_EDM}Schema"):
-            ns = schema.get("Namespace") or ""
-            if namespace is not None and ns != namespace:
-                continue
-            for container in schema.iter(f"{_NS_EDM}EntityContainer"):
-                for es in container.iter(f"{_NS_EDM}EntitySet"):
-                    if es.get("Name") == table_name:
-                        matches.append((ns, es.get("EntityType")))
+        index = self._metadata_state().index
+        candidates = index.entity_set_by_name.get(table_name) or []
+        if namespace is not None:
+            matches = [(ns, ref) for ns, ref in candidates if ns == namespace]
+        else:
+            matches = list(candidates)
         if not matches:
-            available = self._entity_set_index()
             if namespace is not None:
-                hint = sorted({es for ns, es in available if ns == namespace})
+                hint = sorted(index.entity_set_names_by_ns.get(namespace, []))
                 if not hint:
                     # The requested namespace has zero entity sets — common
                     # confusion when the user picks a type-only schema
                     # (e.g. one declaring BaseType references) instead of
                     # the schema whose <EntityContainer> declares the sets.
-                    others = sorted({ns for ns, _ in available if ns})
                     raise ValueError(
                         f"Entity set {table_name!r} not found in namespace "
                         f"{namespace!r}. Namespace {namespace!r} declares "
                         f"no entity sets (probably a type-only schema). "
-                        f"Namespaces with entity sets: {others}."
+                        f"Namespaces with entity sets: {sorted(index.namespaces_with_sets)}."
                     )
                 raise ValueError(
                     f"Entity set {table_name!r} not found in namespace "
@@ -1394,7 +1542,7 @@ class ODataLakeflowConnect(LakeflowConnect, SupportsNamespaces, ContainedNavMixi
                 )
             raise ValueError(
                 f"Entity set {table_name!r} not found in $metadata. "
-                f"Available: {sorted({n for _, n in available})}"
+                f"Available: {sorted({n for _, n in index.entity_set_pairs})}"
             )
         if len(matches) > 1:
             namespaces = sorted({m[0] for m in matches})
@@ -1412,25 +1560,18 @@ class ODataLakeflowConnect(LakeflowConnect, SupportsNamespaces, ContainedNavMixi
         return et
 
     def _schema_alias_map(self) -> dict[str, str]:
-        """Build {namespace_or_alias → actual_schema_namespace}.
+        """``{namespace_or_alias → canonical_namespace}``.
 
-        CSDL allows each ``<Schema>`` to declare both a ``Namespace`` and
-        a shorter ``Alias``; downstream type references can use either.
+        Kept as a public-shape method so callers reading the source
+        for OData spec context still find it; internally it's a
+        direct index lookup. CSDL allows each ``<Schema>`` to declare
+        both a ``Namespace`` and a shorter ``Alias``; downstream
+        ``BaseType`` / ``EntityType`` references can use either.
         Microsoft Graph for instance declares
         ``Namespace="microsoft.graph" Alias="graph"`` and then writes
-        ``BaseType="graph.directoryObject"``. We can't resolve those
-        references without honoring the alias.
+        ``BaseType="graph.directoryObject"``.
         """
-        root = self._metadata_root()
-        out: dict[str, str] = {}
-        for schema in root.iter(f"{_NS_EDM}Schema"):
-            ns = schema.get("Namespace") or ""
-            if ns:
-                out[ns] = ns
-            alias = schema.get("Alias")
-            if alias:
-                out[alias] = ns
-        return out
+        return self._metadata_state().index.alias_to_namespace
 
     def _resolve_type_ref(self, type_ref: str) -> ET.Element | None:
         """Find the ``<EntityType>`` element for a qualified type reference.
@@ -1444,18 +1585,11 @@ class ODataLakeflowConnect(LakeflowConnect, SupportsNamespaces, ContainedNavMixi
         if "." not in type_ref:
             return None
         prefix, type_name = type_ref.rsplit(".", 1)
-        aliases = self._schema_alias_map()
-        target_ns = aliases.get(prefix)
+        index = self._metadata_state().index
+        target_ns = index.alias_to_namespace.get(prefix)
         if target_ns is None:
             return None
-        root = self._metadata_root()
-        for schema in root.iter(f"{_NS_EDM}Schema"):
-            if schema.get("Namespace") != target_ns:
-                continue
-            for et in schema.findall(f"{_NS_EDM}EntityType"):
-                if et.get("Name") == type_name:
-                    return et
-        return None
+        return index.entity_type_by_qname.get(f"{target_ns}.{type_name}")
 
     def _resolve_base_chain(self, et: ET.Element) -> list[ET.Element]:
         """Walk the ``BaseType`` chain starting at ``et``.
@@ -1471,6 +1605,11 @@ class ODataLakeflowConnect(LakeflowConnect, SupportsNamespaces, ContainedNavMixi
         Cycles are guarded against (cyclic CSDL is malformed but won't
         crash the connector).
         """
+        state = self._metadata_state()
+        cache_key = id(et)
+        cached = state.base_chain.get(cache_key)
+        if cached is not None:
+            return cached
         chain = [et]
         current = et
         seen: set[str] = set()
@@ -1484,12 +1623,19 @@ class ODataLakeflowConnect(LakeflowConnect, SupportsNamespaces, ContainedNavMixi
                 break
             chain.append(parent)
             current = parent
+        state.base_chain[cache_key] = chain
         return chain
 
     def _fields_for(self, table_name: str, namespace: str | None = None) -> list[StructField]:
+        state = self._metadata_state()
+        cache_key = (table_name, namespace)
+        cached = state.fields.get(cache_key)
+        if cached is not None:
+            return cached
         segments = _parse_contained_path(table_name) or [table_name]
         own_fields = self._own_fields_for_et(self._entity_type_for(table_name, namespace))
         if len(segments) == 1:
+            state.fields[cache_key] = own_fields
             return own_fields
         # Every non-leaf ancestor contributes FK columns (OData v4
         # §13.4.3 — contained-entity keys are unique within parent only).
@@ -1511,12 +1657,19 @@ class ODataLakeflowConnect(LakeflowConnect, SupportsNamespaces, ContainedNavMixi
                         False,
                     )
                 )
-        return fk_fields + own_fields
+        result = fk_fields + own_fields
+        state.fields[cache_key] = result
+        return result
 
     def _own_fields_for_et(self, et: ET.Element) -> list[StructField]:
         """Property fields on ``et`` and its base chain. Walks root → leaf
         so inherited fields appear before leaf's own additions; de-dupes
         by name with closest-to-root winning (spec forbids redeclaration)."""
+        state = self._metadata_state()
+        cache_key = id(et)
+        cached = state.own_fields.get(cache_key)
+        if cached is not None:
+            return cached
         fields: list[StructField] = []
         seen: set[str] = set()
         for type_el in reversed(self._resolve_base_chain(et)):
@@ -1532,12 +1685,19 @@ class ODataLakeflowConnect(LakeflowConnect, SupportsNamespaces, ContainedNavMixi
                         prop.get("Nullable", "true").lower() != "false",
                     )
                 )
+        state.own_fields[cache_key] = fields
         return fields
 
     def _primary_keys_for(self, table_name: str, namespace: str | None = None) -> list[str]:
+        state = self._metadata_state()
+        cache_key = (table_name, namespace)
+        cached = state.primary_keys.get(cache_key)
+        if cached is not None:
+            return cached
         segments = _parse_contained_path(table_name) or [table_name]
         leaf_pks = self._own_primary_keys_for_et(self._entity_type_for(table_name, namespace))
         if len(segments) == 1:
+            state.primary_keys[cache_key] = leaf_pks
             return leaf_pks
         # Composite: every ancestor's FK columns + leaf's own PKs.
         fk_columns = self._resolve_fk_columns(segments, namespace)
@@ -1552,16 +1712,25 @@ class ODataLakeflowConnect(LakeflowConnect, SupportsNamespaces, ContainedNavMixi
             for pk in self._own_primary_keys_for_et(ancestor_et):
                 composite.append(fk_columns[(seg, pk)])
         composite.extend(leaf_pks)
+        state.primary_keys[cache_key] = composite
         return composite
 
     def _own_primary_keys_for_et(self, et: ET.Element) -> list[str]:
         """Primary-key property names (OData v4 §8.4: derived types inherit
         Keys; closest-to-leaf Key wins where multiple levels redeclare)."""
+        state = self._metadata_state()
+        cache_key = id(et)
+        cached = state.own_pks.get(cache_key)
+        if cached is not None:
+            return cached
+        result: list[str] = []
         for type_el in self._resolve_base_chain(et):
             key = type_el.find(f"{_NS_EDM}Key")
             if key is not None:
-                return [ref.get("Name") for ref in key.findall(f"{_NS_EDM}PropertyRef")]
-        return []
+                result = [ref.get("Name") for ref in key.findall(f"{_NS_EDM}PropertyRef")]
+                break
+        state.own_pks[cache_key] = result
+        return result
 
     # ------------------------------------------------------------------
     # Cursor filter formatting

@@ -113,6 +113,17 @@ connection:
       required: false
       description: HTTP timeout per request (seconds). Default 60.
 
+    - name: metadata_cache_ttl_seconds
+      type: string
+      required: false
+      description: >
+        TTL for the on-disk ``$metadata`` pickle cache (seconds). The
+        cache lets forked PySpark Python Data Source workers share one
+        fetch + parse during pipeline INITIALIZING. Default 60. Set to
+        ``0`` to disable file caching entirely; raise for stable
+        schemas where you want to skip even the first-fork fetch over
+        a longer window.
+
     - name: extra_headers
       type: string
       required: false

@@ -282,6 +282,11 @@ class ContainedNavMixin:
         """
         if len(segments) < 2:
             return {}
+        state = self._metadata_state()
+        cache_key = (tuple(segments), namespace)
+        cached = state.fk_columns.get(cache_key)
+        if cached is not None:
+            return cached
         leaf_field_names = {
             f.name
             for f in self._own_fields_for_et(
@@ -301,6 +306,7 @@ class ContainedNavMixin:
                     candidate = "_" + candidate
                 resolved[(seg, pk)] = candidate
                 used.add(candidate)
+        state.fk_columns[cache_key] = resolved
         return resolved
 
     def _tag_with_ancestor_fks(
@@ -624,7 +630,7 @@ class ContainedNavMixin:
     def _walk_contained_with_cursor(
         self,
         segments: list[str],
-        chains: list[list[dict[str, Any]]],
+        chains_iter: Iterator[list[dict[str, Any]]],
         parent_idx_start: int,
         table_options: dict[str, str],
         order_by: str,
@@ -637,7 +643,13 @@ class ContainedNavMixin:
     ) -> tuple[list[dict], bool, int, int, str | None]:
         """Drive the per-parent fetch loop (leaf-cursor mode).
 
-        Resume preference, applied to ``chains[parent_idx_start]`` only:
+        ``chains_iter`` is consumed lazily: the parent-chain enumeration
+        only walks far enough to reach the chain that hits the
+        ``max_records`` cap, and is abandoned (along with all its
+        unfetched ancestor pages) the moment the loop breaks. Peak
+        memory is bounded to one chain regardless of subtree fan-out.
+
+        Resume preference, applied to the chain at ``parent_idx_start``:
 
         1. ``chain_next_link`` (server skiptoken) — fetched directly,
            bypassing URL rebuild. Used when the previous batch parked
@@ -658,11 +670,17 @@ class ContainedNavMixin:
         chain_next_link_out)``."""
         emitted: list[dict] = []
         truncated = False
-        parent_idx = parent_idx_start
+        parent_idx = 0
         chain_start_idx = 0
         chain_next_link_out: str | None = None
-        while parent_idx < len(chains):
-            chain = chains[parent_idx]
+        for chain in chains_iter:
+            # Skip the chains we already emitted in prior batches. The
+            # iterator still pays for the ancestor pages that produce
+            # those chains (no way to skip without knowing the keys),
+            # but no leaf fetches happen here.
+            if parent_idx < parent_idx_start:
+                parent_idx += 1
+                continue
             chain_start_idx = len(emitted)
             chain_since: Any
             initial_url: str
@@ -780,7 +798,7 @@ class ContainedNavMixin:
         chain_next_link_in = (start_offset or {}).get("chain_next_link")
         max_records = int((table_options or {}).get("max_records_per_batch", "100000"))
         order_by = self._leaf_cursor_order_by(table_name, namespace, cursor_field)
-        chains = list(self._iter_parent_key_chains(segments, namespace, table_options))
+        chains_iter = self._iter_parent_key_chains(segments, namespace, table_options)
         (
             emitted,
             truncated,
@@ -789,7 +807,7 @@ class ContainedNavMixin:
             chain_next_link_out,
         ) = self._walk_contained_with_cursor(
             segments,
-            chains,
+            chains_iter,
             int((start_offset or {}).get("parent_idx", 0)),
             table_options,
             order_by,
@@ -857,14 +875,12 @@ class ContainedNavMixin:
         """
         namespace = (table_options or {}).get("namespace")
         since = (start_offset or {}).get("cursor")
-        chains_with_cursor = list(
-            self._iter_parent_chains_with_cursor(
-                segments, namespace, table_options, cursor_level, cursor_field, since
-            )
+        chains_iter = self._iter_parent_chains_with_cursor(
+            segments, namespace, table_options, cursor_level, cursor_field, since
         )
         walk_state = self._walk_ancestor_chains(
             segments,
-            chains_with_cursor,
+            chains_iter,
             table_options,
             cursor_field,
             int((start_offset or {}).get("parent_idx", 0)),
@@ -880,7 +896,7 @@ class ContainedNavMixin:
     def _walk_ancestor_chains(
         self,
         segments: list[str],
-        chains_with_cursor: list[tuple[list[dict[str, Any]], Any]],
+        chains_iter: Iterator[tuple[list[dict[str, Any]], Any]],
         table_options: dict[str, str],
         cursor_field: str,
         parent_idx_start: int,
@@ -889,16 +905,27 @@ class ContainedNavMixin:
         fk_columns: dict[tuple[str, str], str],
     ) -> dict[str, Any]:
         """Walk ancestor chains, fetching each chain's leaf collection
-        and stamping rows with the chain's cursor. Page-aware: a
-        truncation at a page boundary parks the chain's @odata.nextLink;
-        when the chain happens to end on the truncating page,
-        ``parent_idx`` simply advances past it."""
-        parent_idx = parent_idx_start
+        and stamping rows with the chain's cursor.
+
+        ``chains_iter`` is consumed lazily: the per-ancestor enumeration
+        stops as soon as the loop breaks on a ``max_records`` hit, so
+        we never fetch ancestor pages beyond the chain we actually
+        emit from. Peak memory is bounded to one chain.
+
+        Page-aware: a truncation at a page boundary parks the chain's
+        ``@odata.nextLink``; when the chain happens to end on the
+        truncating page, ``parent_idx`` simply advances past it."""
+        parent_idx = 0
         emitted: list[dict] = []
         truncated = False
         chain_next_link_out: str | None = None
-        while parent_idx < len(chains_with_cursor):
-            chain, ancestor_cursor = chains_with_cursor[parent_idx]
+        for chain, ancestor_cursor in chains_iter:
+            # Skip already-emitted chains. Ancestor-page HTTP cost is
+            # unavoidable (we need the keys to identify the chain), but
+            # no leaf fetches happen during the skip.
+            if parent_idx < parent_idx_start:
+                parent_idx += 1
+                continue
             if parent_idx == parent_idx_start and chain_next_link_in is not None:
                 initial_url = chain_next_link_in
             else:
