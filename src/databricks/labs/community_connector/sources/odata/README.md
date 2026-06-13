@@ -241,6 +241,8 @@ delete it and re-create.
 | Option                        | Default | Description |
 | ----------------------------- | ------- | ----------- |
 | `metadata_cache_ttl_seconds`  | 60      | TTL for the on-disk pickle cache of the parsed CSDL (`$metadata`) document at `${TMPDIR}/odata_csdl_<sha256(service_url)>.pickle`. Shared across the forked `pyspark.daemon` workers that SDP spawns for schema inference, so the connector pays the fetch + parse cost once per pipeline init instead of once per `.load()`. Set to `0` to disable file-backed caching (process and instance caches still apply). |
+| `max_retries`                 | 5       | Retry budget for transient HTTP 429 (throttling) and 503 (service unavailable) responses. Each retry honours the server's `Retry-After` header when present (integer seconds or HTTP-date); otherwise the connector falls back to exponential backoff (1, 2, 4, 8, 16 s …). After `max_retries` consecutive throttle responses the batch fails with an actionable `RuntimeError`. Set to `0` to opt out of retrying. |
+| `retry_max_delay_seconds`     | 60      | Per-retry sleep cap (seconds). Applied to both server-supplied `Retry-After` values and the exponential-backoff fallback, so a misbehaving source emitting an hour-long `Retry-After` can't pin a Spark task. |
 
 ## Pipeline (ingest.py)
 

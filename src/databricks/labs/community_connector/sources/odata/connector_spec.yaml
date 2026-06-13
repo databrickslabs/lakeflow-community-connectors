@@ -124,6 +124,26 @@ connection:
         schemas where you want to skip even the first-fork fetch over
         a longer window.
 
+    - name: max_retries
+      type: string
+      required: false
+      description: >
+        Retry budget for transient HTTP 429 (throttling) and 503
+        (service unavailable) responses. Default 5. Set to ``0`` to
+        disable retries (any 429/503 surfaces immediately as
+        RuntimeError).
+
+    - name: retry_max_delay_seconds
+      type: string
+      required: false
+      description: >
+        Cap on a single retry sleep (seconds). Default 60. Honours
+        ``Retry-After`` from the server when present, falling back to
+        exponential backoff (1, 2, 4, 8, 16 …); either way never
+        sleeps longer than this — protects against misbehaving servers
+        emitting hour-long ``Retry-After`` values that would pin a
+        Spark task.
+
     - name: extra_headers
       type: string
       required: false

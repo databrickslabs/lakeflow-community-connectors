@@ -3290,3 +3290,176 @@ def test_partition_get_partitions_empty_when_offsets_equal():
         {"cursor": "z"},
     )
     assert parts == []
+
+
+# ---------------------------------------------------------------------------
+# 429 / 503 retry with backoff
+# ---------------------------------------------------------------------------
+
+
+def _patch_sleep(monkeypatch):
+    """Capture every ``time.sleep`` call from the connector retry loop.
+
+    Returns the list the sleeps are appended into — tests assert on
+    durations directly. The lambda short-circuits the real sleep so the
+    suite stays sub-second.
+    """
+    sleeps: list[float] = []
+    monkeypatch.setattr(
+        "databricks.labs.community_connector.sources.odata.odata.time.sleep",
+        lambda s: sleeps.append(s),
+    )
+    return sleeps
+
+
+@responses.activate
+def test_retry_honours_retry_after_seconds_header(monkeypatch):
+    """``Retry-After: <seconds>`` from the server is the sleep duration."""
+    _mock_metadata()
+    sleeps = _patch_sleep(monkeypatch)
+    call_count = {"n": 0}
+
+    def _customers(request):  # pylint: disable=unused-argument
+        call_count["n"] += 1
+        if call_count["n"] == 1:
+            return (429, {"Retry-After": "7"}, '{"error": "throttled"}')
+        return (200, {}, '{"value": [{"Id": 1, "Name": "A"}]}')
+
+    responses.add_callback(responses.GET, f"{SERVICE_URL}Customers", callback=_customers)
+    c = _make({"token": "t"})
+    rows, _ = c.read_table("Customers", None, {})
+    assert [r["Id"] for r in rows] == [1]
+    assert call_count["n"] == 2
+    assert sleeps == [7.0]
+
+
+@responses.activate
+def test_retry_honours_retry_after_http_date_header(monkeypatch):
+    """``Retry-After: <HTTP-date>`` is parsed to a delta-from-now."""
+    _mock_metadata()
+    sleeps = _patch_sleep(monkeypatch)
+    # 30 seconds in the future, formatted as an HTTP-date.
+    from email.utils import format_datetime
+    from datetime import datetime, timedelta, timezone as tz
+
+    target = datetime.now(tz.utc) + timedelta(seconds=30)
+    http_date = format_datetime(target, usegmt=True)
+    call_count = {"n": 0}
+
+    def _customers(request):  # pylint: disable=unused-argument
+        call_count["n"] += 1
+        if call_count["n"] == 1:
+            return (503, {"Retry-After": http_date}, '{"error": "unavailable"}')
+        return (200, {}, '{"value": [{"Id": 1, "Name": "A"}]}')
+
+    responses.add_callback(responses.GET, f"{SERVICE_URL}Customers", callback=_customers)
+    c = _make({"token": "t"})
+    rows, _ = c.read_table("Customers", None, {})
+    assert [r["Id"] for r in rows] == [1]
+    assert call_count["n"] == 2
+    # Allow ±5 s wiggle for test scheduling jitter; importantly it should
+    # be close to 30, not 0 (parse failure) or 60 (cap miscompare).
+    assert len(sleeps) == 1
+    assert 20.0 <= sleeps[0] <= 30.0
+
+
+@responses.activate
+def test_retry_no_header_uses_exponential_backoff(monkeypatch):
+    """No Retry-After → backoff doubles per attempt (1, 2, 4 …)."""
+    _mock_metadata()
+    sleeps = _patch_sleep(monkeypatch)
+    call_count = {"n": 0}
+
+    def _customers(request):  # pylint: disable=unused-argument
+        call_count["n"] += 1
+        if call_count["n"] < 4:
+            return (429, {}, '{"error": "throttled"}')
+        return (200, {}, '{"value": [{"Id": 1, "Name": "A"}]}')
+
+    responses.add_callback(responses.GET, f"{SERVICE_URL}Customers", callback=_customers)
+    c = _make({"token": "t"})
+    rows, _ = c.read_table("Customers", None, {})
+    assert [r["Id"] for r in rows] == [1]
+    assert call_count["n"] == 4
+    assert sleeps == [1.0, 2.0, 4.0]
+
+
+@responses.activate
+def test_retry_503_also_retried(monkeypatch):
+    """503 is treated the same as 429 — server temporarily unavailable."""
+    _mock_metadata()
+    sleeps = _patch_sleep(monkeypatch)
+    call_count = {"n": 0}
+
+    def _customers(request):  # pylint: disable=unused-argument
+        call_count["n"] += 1
+        if call_count["n"] == 1:
+            return (503, {"Retry-After": "2"}, "")
+        return (200, {}, '{"value": [{"Id": 1, "Name": "A"}]}')
+
+    responses.add_callback(responses.GET, f"{SERVICE_URL}Customers", callback=_customers)
+    c = _make({"token": "t"})
+    rows, _ = c.read_table("Customers", None, {})
+    assert [r["Id"] for r in rows] == [1]
+    assert sleeps == [2.0]
+
+
+@responses.activate
+def test_retry_exhaustion_raises_actionable_runtime_error(monkeypatch):
+    """After max_retries 429s in a row, raise with an actionable message."""
+    _mock_metadata()
+    _patch_sleep(monkeypatch)
+    responses.get(
+        f"{SERVICE_URL}Customers",
+        json={"error": "rate-limited"},
+        status=429,
+        headers={"Retry-After": "1"},
+    )
+    c = _make({"token": "t", "max_retries": "2"})
+    rows, _ = c.read_table("Customers", None, {})
+    with pytest.raises(RuntimeError) as ei:
+        list(rows)
+    msg = str(ei.value)
+    assert "429" in msg
+    assert "throttl" in msg.lower() or "unavailable" in msg.lower()
+    assert "max_retries" in msg
+    assert "retry_max_delay_seconds" in msg
+    assert "Retry-After" in msg
+
+
+@responses.activate
+def test_retry_after_capped_at_retry_max_delay_seconds(monkeypatch):
+    """A pathological ``Retry-After: 9999`` is clamped at the cap."""
+    _mock_metadata()
+    sleeps = _patch_sleep(monkeypatch)
+    call_count = {"n": 0}
+
+    def _customers(request):  # pylint: disable=unused-argument
+        call_count["n"] += 1
+        if call_count["n"] == 1:
+            return (429, {"Retry-After": "9999"}, "")
+        return (200, {}, '{"value": [{"Id": 1, "Name": "A"}]}')
+
+    responses.add_callback(responses.GET, f"{SERVICE_URL}Customers", callback=_customers)
+    c = _make({"token": "t", "retry_max_delay_seconds": "10"})
+    rows, _ = c.read_table("Customers", None, {})
+    assert [r["Id"] for r in rows] == [1]
+    assert sleeps == [10.0]
+
+
+@responses.activate
+def test_retry_disabled_when_max_retries_zero(monkeypatch):
+    """``max_retries=0`` opts out — a single 429 raises immediately."""
+    _mock_metadata()
+    sleeps = _patch_sleep(monkeypatch)
+    responses.get(
+        f"{SERVICE_URL}Customers",
+        json={"error": "rate-limited"},
+        status=429,
+        headers={"Retry-After": "30"},
+    )
+    c = _make({"token": "t", "max_retries": "0"})
+    rows, _ = c.read_table("Customers", None, {})
+    with pytest.raises(RuntimeError):
+        list(rows)
+    assert sleeps == []

@@ -40,6 +40,8 @@ import pickle
 import tempfile
 import time
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
+from email.utils import parsedate_to_datetime
 from typing import Any, Iterator
 from urllib.parse import urljoin
 from xml.etree import ElementTree as ET
@@ -355,6 +357,15 @@ class ODataLakeflowConnect(
         self.metadata_cache_ttl_seconds = int(
             options.get("metadata_cache_ttl_seconds", _METADATA_FILE_CACHE_TTL_SECONDS)
         )
+        # Retry budget for transient server-side failures (HTTP 429 / 503).
+        # 5 attempts at exponential backoff (1, 2, 4, 8, 16 s) covers the
+        # vast majority of momentary throttling spikes from Graph /
+        # Dataverse / S/4HANA Cloud without keeping a Spark task pinned
+        # indefinitely. `retry_max_delay_seconds` caps any single sleep —
+        # honour the server's Retry-After header but never sleep longer
+        # than this (some misbehaving servers emit hour-long values).
+        self.max_retries = int(options.get("max_retries", "5"))
+        self.retry_max_delay_seconds = int(options.get("retry_max_delay_seconds", "60"))
         self._session: requests.Session | None = None
         # Parsed CSDL bundle: root + lookup index + per-instance memos.
         # ``None`` until the first ``_metadata_root()`` call.
@@ -1094,27 +1105,58 @@ class ODataLakeflowConnect(
             next_url = new_next
 
     def _http_get(self, session: requests.Session, url: str, **kwargs: Any) -> requests.Response:
-        """GET with auth-aware 401/403 handling.
+        """GET with auth-aware 401/403 handling + 429/503 retry-with-backoff.
 
-        Three layers, escalating in cost:
+        Outer loop: retry on transient server-side failures (HTTP 429
+        throttling, 503 unavailable). Honours the ``Retry-After`` header
+        when the server provides one (integer seconds or HTTP-date),
+        capped at ``retry_max_delay_seconds`` so a misbehaving server
+        can't pin a Spark task for an hour. When the header is missing,
+        falls back to exponential backoff (1, 2, 4, 8, 16 s …), same
+        cap. After ``max_retries`` attempts, raises :class:`RuntimeError`
+        with the last server response truncated into the message.
 
-        1. **Pre-emptive refresh** — when the token endpoint gave us
-           ``expires_in`` and we're past the recorded deadline (with a
-           60 s safety buffer), swap the bearer header *before* sending
-           the request. Avoids a wasted round-trip on long-running
-           paginated reads that straddle an expiry boundary.
-        2. **Reactive refresh** — caught 401 from the source, OAuth
+        Inner per-attempt logic (see ``_http_get_once``):
+
+        1. **Pre-emptive token refresh** — when the OAuth ``expires_in``
+           clock is past the recorded deadline (60 s safety buffer),
+           swap the bearer header *before* sending. Avoids a wasted
+           round-trip on long paginated reads straddling an expiry
+           boundary.
+        2. **Reactive token refresh** — 401 from the source + OAuth
            refresh path is available → mint a fresh token and retry
-           once. A second 401 here means the access token is fine but
-           the principal lacks read access (different error path).
-        3. **Actionable no-refresh-path failure** — 401 or 403 from
-           the source and no automatic refresh is configured (bearer,
-           basic, api_key, or OAuth without a refresh-issuing token
-           endpoint). Raise a :class:`PermissionError` whose message
-           names the specific connection options the operator should
-           check for the configured auth mode. ``requests.HTTPError``
-           with no context is too opaque to triage from a pipeline log.
+           once. A second 401 means the access token reached the server
+           but the principal lacks access (raise
+           :class:`PermissionError` immediately, no further retry).
+        3. **Actionable no-refresh-path failure** — 401 or 403 with no
+           automatic refresh configured (bearer, basic, api_key, or
+           OAuth without a refresh-issuing token endpoint). Raise
+           :class:`PermissionError` whose message names the specific
+           connection options the operator should check.
+
+        Retries happen between attempts of the inner logic, so a token
+        refresh and a throttle backoff compose cleanly: refresh →
+        request → 429 → sleep → next attempt's pre-emptive refresh
+        check picks up where we left off.
         """
+        attempts = self.max_retries + 1
+        for attempt in range(attempts):
+            resp = self._http_get_once(session, url, **kwargs)
+            if resp.status_code in (429, 503):
+                if attempt >= self.max_retries:
+                    raise RuntimeError(self._throttle_exhausted_error(resp, url, attempt + 1))
+                time.sleep(self._retry_after_delay(resp, attempt))
+                continue
+            return resp
+        # Defensive: the loop always returns or raises before exiting.
+        raise RuntimeError(  # pragma: no cover
+            f"Exhausted retries for {url!r} without producing a response."
+        )
+
+    def _http_get_once(
+        self, session: requests.Session, url: str, **kwargs: Any
+    ) -> requests.Response:
+        """One auth-aware GET attempt; throttle handling lives in `_http_get`."""
         if self._should_preemptively_refresh():
             session.headers["Authorization"] = f"Bearer {self._oauth2_token()}"
         resp = session.get(url, timeout=self.timeout, **kwargs)
@@ -1143,6 +1185,39 @@ class ODataLakeflowConnect(
         if resp.status_code in (401, 403):
             raise PermissionError(self._no_refresh_auth_error(resp, url))
         return resp
+
+    def _retry_after_delay(self, resp: requests.Response, attempt: int) -> float:
+        """Pick the sleep duration before the next retry.
+
+        Priority:
+          1. ``Retry-After`` header — integer seconds or HTTP-date.
+          2. Exponential backoff: ``2**attempt`` seconds (1, 2, 4, 8,
+             16 …).
+
+        Either way the value is capped at ``retry_max_delay_seconds``.
+        """
+        cap = float(self.retry_max_delay_seconds)
+        header = resp.headers.get("Retry-After")
+        if header is not None:
+            parsed = _parse_retry_after(header)
+            if parsed is not None:
+                return min(parsed, cap)
+        return min(float(2**attempt), cap)
+
+    def _throttle_exhausted_error(self, resp: requests.Response, url: str, attempts: int) -> str:
+        """Message for the post-retry-budget RuntimeError."""
+        retry_after = resp.headers.get("Retry-After", "<none>")
+        return (
+            f"OData service returned {resp.status_code} for {url!r} after "
+            f"{attempts} attempts (server is throttling or temporarily "
+            f"unavailable). Last Retry-After header: {retry_after}. "
+            f"Raise 'max_retries' (current: {self.max_retries}) or "
+            f"'retry_max_delay_seconds' (current: {self.retry_max_delay_seconds}) "
+            f"on the connection if the source needs longer cooldowns; "
+            f"reduce read concurrency via the per-table 'num_partitions' "
+            f"option if the throttle is concurrency-driven. Server "
+            f"response: {_truncate(resp.text, 300)}"
+        )
 
     def _no_refresh_auth_error(self, resp: requests.Response, url: str) -> str:
         """Construct an actionable auth-failure message for the no-refresh path.
@@ -1786,6 +1861,39 @@ def _extract_oauth_error_hint(resp: requests.Response) -> str:
         if code:
             return str(code)
     return _truncate(resp.text, 300) or "Unauthorized"
+
+
+def _parse_retry_after(header: str) -> float | None:
+    """Parse an HTTP ``Retry-After`` header into seconds.
+
+    Accepts the two formats RFC 7231 §7.1.3 allows:
+
+      * Integer seconds (``"30"``) — most APIs (Microsoft Graph,
+        Dataverse, S/4HANA Cloud) emit this.
+      * HTTP-date (``"Wed, 21 Oct 2026 07:28:00 GMT"``) — older
+        spec-conformant servers.
+
+    Returns ``None`` for anything unparseable; the caller falls back
+    to exponential backoff. Past-dated HTTP-dates clamp to 0 (retry
+    immediately) rather than returning a negative sleep.
+    """
+    header = header.strip()
+    try:
+        seconds = float(header)
+    except (TypeError, ValueError):
+        seconds = None
+    if seconds is not None:
+        return max(0.0, seconds)
+    try:
+        dt = parsedate_to_datetime(header)
+    except (TypeError, ValueError):
+        return None
+    if dt is None:
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    delta = (dt - datetime.now(timezone.utc)).total_seconds()
+    return max(0.0, delta)
 
 
 def _truncate(text: str, limit: int) -> str:
