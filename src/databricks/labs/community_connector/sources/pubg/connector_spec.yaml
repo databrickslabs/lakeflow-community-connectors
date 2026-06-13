@@ -1,0 +1,48 @@
+# PUBG Community Connector Spec
+# This file defines the specification for the connector including
+# connection parameters and allowlist options.
+
+# ============================================================================
+# Connection Parameters
+# These are provided when creating the Unity Catalog connection.
+# ============================================================================
+display_name: PUBG
+connection:
+  parameters:
+    - name: api_key
+      type: string
+      required: true
+      secret: true
+      description: >
+        PUBG API key (JWT) used for authentication. Obtained by registering an
+        application at https://developer.pubg.com. Sent as a Bearer token in
+        the Authorization header: Authorization: Bearer <api_key>.
+
+    - name: shard
+      type: string
+      required: true
+      description: >
+        Platform shard that scopes all API requests. Determines which platform's
+        data is returned. Must be one of: steam (PC/Steam), psn (PlayStation
+        Network), xbox (Xbox), kakao (Kakao Korea PC), stadia (Google Stadia),
+        or console (cross-platform console).
+
+# ============================================================================
+# External Options Allowlist
+# These table-specific options must be included in the externalOptionsAllowList
+# parameter of the UC connection to allow them to be passed through.
+# Use a comma-separated string of option names.
+# If no table-specific options are needed, set to empty string or omit.
+#
+# Per-table options:
+#   players:       player_names, player_ids
+#   matches:       match_ids
+#   season_stats:  player_ids, season_id
+#   lifetime_stats: player_ids
+#   leaderboards:  season_id, game_modes
+#   mastery:       player_ids, mastery_types
+#   clans:         clan_ids
+#   samples:       (none)
+#   telemetry:     match_ids
+# ============================================================================
+external_options_allowlist: "player_names,player_ids,match_ids,season_id,game_modes,mastery_types,clan_ids"
