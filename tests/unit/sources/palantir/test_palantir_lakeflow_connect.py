@@ -256,6 +256,17 @@ class TestPalantirCursorTypes:
         assert c._to_utc_datetime("2026-05-09") == _dt(
             2026, 5, 9, 0, 0, tzinfo=_tz.utc
         )
+        # Space separator + microseconds — the exact form Palantir
+        # returns for ``arrivalTimestamp`` (the primary cursor field).
+        # ``fromisoformat`` has accepted the space separator since 3.10,
+        # so the cap stays engaged (no silent lexicographic fallback).
+        assert c._to_utc_datetime("2026-04-19 06:20:35.746137") == _dt(
+            2026, 4, 19, 6, 20, 35, 746137, tzinfo=_tz.utc
+        )
+        # Space separator + Z suffix normalises like the T forms.
+        assert c._to_utc_datetime("2026-04-19 06:20:35Z") == _dt(
+            2026, 4, 19, 6, 20, 35, tzinfo=_tz.utc
+        )
         # Non-strings and unparseable values return None so the cap
         # branch silently skips for non-timestamp cursors.
         assert c._to_utc_datetime(12345) is None
