@@ -233,7 +233,7 @@ class ContainedNavMixin:
         cursor_order: str | None = None,
         cursor_select: str | None = None,
     ) -> str:
-        """``A?...&$expand=B($expand=C($expand=D))`` for the full chain.
+        """``A?...&$expand=B($top=N;$expand=C($top=N;$expand=D($top=N)))`` for the full chain.
 
         When ``cursor_level`` is set, ``cursor_filter``/``cursor_order``/
         ``cursor_select`` are injected at the segment that owns the
@@ -243,7 +243,18 @@ class ContainedNavMixin:
         properties from ``$expand`` responses by default; explicitly
         requesting the cursor guarantees the server projects it onto
         the ancestor rows so it can be stamped onto leaf rows. OData
-        v4 §5.1.1.13: inner ``$expand`` options are separated by ``;``."""
+        v4 §5.1.1.13: inner ``$expand`` options are separated by ``;``.
+
+        ``$top`` is emitted at every nested ``$expand`` level so users
+        can tune the inner page size — without it the server picks
+        whatever default it likes (e.g. Hexagon SCApi defaults to 100,
+        which means an 8x request fan-out via ``<NavProp>@odata.nextLink``
+        for a parent with 800 children). ``expand_inner_page_size``
+        overrides; falls back to the top-level ``page_size`` so the
+        single-knob case stays simple. Servers that don't honour
+        ``$top`` inside ``$expand`` ignore it — the wire format is
+        still valid OData v4.
+        """
         top, *children = segments
         base = join_url(self.service_url, top)
         if cursor_level == 0:
@@ -252,9 +263,11 @@ class ContainedNavMixin:
             query = self._format_query_params(table_options, None, None)
         if not children:
             return f"{base}?{query}"
+        opts = table_options or {}
+        inner_top = opts.get("expand_inner_page_size", opts.get("page_size", "1000"))
         inner = ""
         for i in range(len(children) - 1, -1, -1):
-            parts: list[str] = []
+            parts: list[str] = [f"$top={inner_top}"]
             if cursor_level == i + 1:
                 if cursor_select:
                     parts.append(f"$select={cursor_select}")
@@ -264,7 +277,7 @@ class ContainedNavMixin:
                     parts.append(f"$orderby={cursor_order}")
             if inner:
                 parts.append(f"$expand={inner}")
-            inner = f"{children[i]}({';'.join(parts)})" if parts else children[i]
+            inner = f"{children[i]}({';'.join(parts)})"
         return f"{base}?{query}&$expand={inner}"
 
     # --- read paths --------------------------------------------------------

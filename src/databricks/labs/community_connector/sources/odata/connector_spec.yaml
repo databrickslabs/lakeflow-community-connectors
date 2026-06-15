@@ -152,4 +152,4 @@ connection:
         IDs, CSRF tokens, etc.
 
 # Per-table options the pipeline may pass through.
-external_options_allowlist: "namespace,cursor_field,select,filter,page_size,max_records_per_batch,delta_tracking,expand_contained,num_partitions"
+external_options_allowlist: "namespace,cursor_field,select,filter,page_size,expand_inner_page_size,max_records_per_batch,delta_tracking,expand_contained,num_partitions"

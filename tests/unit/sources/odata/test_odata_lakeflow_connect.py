@@ -2211,7 +2211,7 @@ def test_build_expand_url_three_level():
     _mock_nested_metadata()
     c = _make()
     url = c._build_expand_url(["Parents", "Children", "Notes"], {})
-    assert "$expand=Children($expand=Notes)" in url
+    assert "$expand=Children($top=1000;$expand=Notes($top=1000))" in url
     assert url.startswith(f"{SERVICE_URL}Parents?")
 
 
@@ -2220,7 +2220,51 @@ def test_build_expand_url_four_level_nests_correctly():
     _mock_nested_metadata()
     c = _make()
     url = c._build_expand_url(["A", "B", "C", "D"], {})
-    assert "$expand=B($expand=C($expand=D))" in url
+    assert "$expand=B($top=1000;$expand=C($top=1000;$expand=D($top=1000)))" in url
+
+
+@responses.activate
+def test_build_expand_url_inner_top_inherits_page_size():
+    """Inner ``$top`` defaults to the top-level ``page_size`` so the
+    single-knob case stays simple."""
+    _mock_nested_metadata()
+    c = _make()
+    url = c._build_expand_url(["Parents", "Children"], {"page_size": "250"})
+    assert "$top=250" in url
+    assert "$expand=Children($top=250)" in url
+
+
+@responses.activate
+def test_build_expand_url_inner_top_override():
+    """``expand_inner_page_size`` overrides ``page_size`` for the inner
+    ``$expand`` clauses only; the top-level ``$top`` keeps using
+    ``page_size``."""
+    _mock_nested_metadata()
+    c = _make()
+    url = c._build_expand_url(
+        ["Parents", "Children", "Notes"],
+        {"page_size": "100", "expand_inner_page_size": "2000"},
+    )
+    assert "Parents?$top=100" in url
+    assert "$expand=Children($top=2000;$expand=Notes($top=2000))" in url
+
+
+@responses.activate
+def test_build_expand_url_inner_top_with_cursor_clause():
+    """Inner ``$top`` composes with ``$filter``/``$orderby`` when a
+    cursor is injected at that level."""
+    _mock_nested_metadata()
+    c = _make()
+    url = c._build_expand_url(
+        ["Parents", "Children"],
+        {"page_size": "500"},
+        cursor_level=1,
+        cursor_filter="ModifiedAt gt 2024-01-01T00:00:00Z",
+        cursor_order="ModifiedAt asc,Id asc",
+    )
+    assert "$top=500" in url.split("$expand=")[1]
+    assert "$filter=ModifiedAt gt 2024-01-01T00:00:00Z" in url
+    assert "$orderby=ModifiedAt asc,Id asc" in url
 
 
 # --- N+1 snapshot read ---

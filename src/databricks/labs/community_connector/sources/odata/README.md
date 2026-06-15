@@ -143,8 +143,8 @@ w.api_client.do(
             # "oauth2_access_token": "<optional-pre-issued-access-token>",
             "externalOptionsAllowList": (
                 "namespace,cursor_field,select,filter,"
-                "page_size,max_records_per_batch,delta_tracking,"
-                "expand_contained,num_partitions"
+                "page_size,expand_inner_page_size,max_records_per_batch,"
+                "delta_tracking,expand_contained,num_partitions"
             ),
         },
     },
@@ -206,8 +206,8 @@ w.api_client.do(
             "token": "<bearer-token>",
             "externalOptionsAllowList": (
                 "namespace,cursor_field,select,filter,"
-                "page_size,max_records_per_batch,delta_tracking,"
-                "expand_contained,num_partitions"
+                "page_size,expand_inner_page_size,max_records_per_batch,"
+                "delta_tracking,expand_contained,num_partitions"
             ),
         },
     },
@@ -298,7 +298,8 @@ build_pipeline(
 | `cursor_field`          |         | Drives incremental reads. Omit for snapshot. |
 | `select`                | all     | Comma-separated `$select` projection. |
 | `filter`                |         | Extra OData `$filter` expression. |
-| `page_size`             | 1000    | `$top` per HTTP request. |
+| `page_size`             | 1000    | `$top` per HTTP request. Also the default `$top` injected into every nested `$expand(...)` clause when `expand_contained=true`. |
+| `expand_inner_page_size`| `page_size` | Overrides `$top` *inside* every nested `$expand(...)` clause when `expand_contained=true`; the top-level URL keeps using `page_size`. Use this when the server caps inner expansions at a low default (e.g. Hexagon SCApi defaults to 100 inside `$expand`) and you want fewer follow-up `<NavProp>@odata.nextLink` round trips. Servers that don't honour `$top` inside `$expand` ignore it — the wire format is still valid OData v4. |
 | `max_records_per_batch` | 100000  | Per-call upper bound on rows returned. The connector has **no wall-clock ceiling** — `max_records_per_batch` is the only cap on a single batch. Each batch fetches `cursor gt <last>` and pulls up to this many rows, then commits the offset. Smaller values give continuous-mode pipelines lower latency per micro-batch at the cost of more round trips; larger values amortize HTTP overhead. The default of 100000 fits roughly 100 `$top=1000` pages per batch and prioritises throughput; lower it (e.g. to 5000) if you want tighter per-batch latency in a continuous pipeline. |
 | `delta_tracking`        | disabled | Opt-in OData v4 delta queries. Values: `disabled` (default — no behavior change), `auto` (probe once, fall back to cursor/snapshot if the server doesn't acknowledge), `enabled` (require support; error if the server doesn't acknowledge). See [Delta tracking](#delta-tracking) below. |
 | `expand_contained`      | false   | For contained-collection tables (`Parent__Child__...` paths). When `true`, the connector issues a single `GET Parent?$expand=Child($expand=...)` per pipeline trigger instead of the default N+1 traversal (one parent fetch + one per-parent leaf fetch). See [Contained navigation properties](#contained-navigation-properties) below. |
