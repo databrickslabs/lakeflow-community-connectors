@@ -6,20 +6,27 @@
 # ==============================================================================
 
 from abc import ABC, abstractmethod
+from dataclasses import dataclass
 from datetime import datetime
 from decimal import Decimal
 from typing import (
     Any,
     Dict,
     Generator,
+    Iterable,
     Iterator,
     List,
+    Mapping,
     Optional,
     Sequence,
+    Tuple,
 )
 import json
+import os
+import re
 import time
 
+from __future__ import annotations
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pyspark.sql import Row
 from pyspark.sql.datasource import (
@@ -599,6 +606,153 @@ def register_lakeflow_source(spark):
 
 
     ########################################################
+    # src/databricks/labs/community_connector/interface/agent_protocol.py
+    ########################################################
+
+    class ErrorCode:
+        """Canonical error codes for ``_meta.code``.
+
+        Use one of these strings when raising :class:`AgentError` from an
+        :class:`AgentOperation`. The framework defaults to ``internal_error``
+        for uncategorised exceptions and ``bad_request`` for its own
+        detected option errors.
+
+        ``CONNECTION_FAILED`` is the conventional code that
+        :class:`ValidateConnectionOp` implementations raise on a failed
+        health check — keep it consistent across sources so agents can
+        dispatch on it.
+        """
+
+        AUTH_FAILED = "auth_failed"
+        NOT_FOUND = "not_found"
+        PERMISSION_DENIED = "permission_denied"
+        RATE_LIMITED = "rate_limited"
+        BAD_REQUEST = "bad_request"
+        UNSUPPORTED = "unsupported"
+        INTERNAL_ERROR = "internal_error"
+        CONNECTION_FAILED = "connection_failed"
+
+
+    class AgentError(Exception):
+        """Connector-raised error with a canonical agent error code.
+
+        Raise from :meth:`AgentOperation.pull` to communicate a typed error
+        code to the agent. The framework populates ``_meta.code`` from
+        ``self.code`` and ``_meta.message`` from the exception message.
+
+        Args:
+            code: One of the :class:`ErrorCode` constants.
+            message: Human-readable detail; falls back to ``code`` if empty.
+        """
+
+        def __init__(self, code: str, message: str = ""):
+            self.code = code
+            super().__init__(message or code)
+
+
+    @dataclass(frozen=True)
+    class Parameter:
+        """Typed declaration of an :class:`AgentOperation` input option.
+
+        Exposed via ``list_operations.parameters_json`` so agents can plan
+        calls without reading source code. The framework validates required
+        parameters before invoking the op.
+
+        Attributes:
+            name: The option key callers pass on the Spark options dict.
+            type: One of ``"string"``, ``"integer"``, ``"boolean"``, ``"json"``.
+                Spark options arrive as strings; the op is responsible for
+                parsing per the declared type. ``"json"`` indicates the
+                value is a JSON-encoded list/dict packed into the
+                string-typed option.
+            description: One-line text shown to the agent planner.
+            required: If True, the framework rejects calls missing this key
+                with ``bad_request`` before invoking the op.
+            default: Default value when the key is absent. Type-erased; the
+                op interprets it.
+            enum: If set, the value must be one of these strings.
+        """
+
+        name: str
+        type: str = "string"
+        description: str = ""
+        required: bool = False
+        default: Optional[Any] = None
+        enum: Optional[tuple[str, ...]] = None
+
+
+    ########################################################
+    # src/databricks/labs/community_connector/interface/supports_ingestion_agent.py
+    ########################################################
+
+    _VALID_KINDS = frozenset({"metadata", "data"})
+
+
+    class AgentOperation(ABC):
+        """One operation the ingestion agent can dispatch.
+
+        Set :attr:`name`, :attr:`description`, :attr:`kind`, and either
+        :attr:`schema` or :meth:`resolve_schema`; implement :meth:`pull`.
+
+        ``kind = "metadata"`` auto-appends a ``_meta`` column and converts
+        ``pull`` exceptions into a single error row. ``kind = "data"``
+        passes rows through unchanged and lets exceptions propagate.
+        """
+
+        name: str = ""
+        description: str = ""
+        kind: str = "metadata"
+        schema: Optional[StructType] = None
+        #: Typed declaration of accepted input options. Exposed via
+        #: ``list_operations.parameters_json`` so agents can plan calls.
+        #: The framework validates required parameters before invoking
+        #: ``pull``; undeclared options pass through untouched.
+        parameters: Tuple[Parameter, ...] = ()
+
+        def __init_subclass__(cls, **kwargs):
+            super().__init_subclass__(**kwargs)
+            if getattr(cls, "__abstractmethods__", None):
+                return
+            if not isinstance(cls.name, str) or not cls.name:
+                raise TypeError(f"{cls.__name__} must set a non-empty `name`.")
+            if cls.kind not in _VALID_KINDS:
+                raise TypeError(
+                    f"{cls.__name__}.kind must be one of "
+                    f"{sorted(_VALID_KINDS)}, got {cls.kind!r}."
+                )
+
+        def resolve_schema(
+            self, connector: Any, options: Mapping[str, str]
+        ) -> StructType:
+            """Return the result schema. Override for option-dependent schemas."""
+            del connector, options
+            if self.schema is None:
+                raise NotImplementedError(
+                    f"{type(self).__name__} must set `schema` or override "
+                    f"`resolve_schema`."
+                )
+            return self.schema
+
+        @abstractmethod
+        def pull(
+            self, connector: Any, options: Mapping[str, str]
+        ) -> Iterable[Mapping[str, Any]]:
+            """Yield result rows as dicts."""
+
+
+    class SupportsIngestionAgent:
+        """Connector mixin: contribute :class:`AgentOperation` instances."""
+
+        def agent_operations(self) -> Mapping[str, AgentOperation]:
+            """Return ``{name: AgentOperation}``.
+
+            Entries whose name matches a built-in replace the framework
+            default for this connector.
+            """
+            return {}
+
+
+    ########################################################
     # src/databricks/labs/community_connector/sources/gmail/gmail_schemas.py
     ########################################################
 
@@ -939,57 +1093,87 @@ def register_lakeflow_source(spark):
     BATCH_SIZE = 50  # Gmail batch API supports up to 100, using 50 for safety
     MAX_WORKERS = 3  # Concurrent workers for parallel fetching
 
+    # Drive API endpoints. The Gmail connector calls these whenever a message
+    # carries a Drive-hosted attachment (>25 MB or shared via Drive). Requires
+    # the OAuth refresh token to have been granted ``drive.readonly`` alongside
+    # ``gmail.readonly`` at consent time.
+    DRIVE_API_BASE = "https://www.googleapis.com/drive/v3"
+    GOOGLE_NATIVE_MIME_PREFIX = "application/vnd.google-apps."
+
+    # Regex catches the common Drive / Docs / Sheets / Slides URL shapes Gmail
+    # inlines into HTML bodies. The file ID is 25+ chars of [A-Za-z0-9_-].
+    _DRIVE_ID_PATTERN = re.compile(
+        r"(?:drive\.google\.com/(?:file/d/|open\?id=|uc\?[^\"'\s]*?id=)|"
+        r"docs\.google\.com/(?:document|spreadsheets|presentation|drawings)/d/)"
+        r"([A-Za-z0-9_-]{25,})"
+    )
+
+
+    def b64url_decode(data: str) -> bytes:
+        """Decode a base64url string, padding-tolerant.
+
+        Gmail/Drive responses strip ``=`` padding on base64url data; the stdlib
+        decoder rejects unpadded input. Re-pad before calling it.
+        """
+        if not data:
+            return b""
+        padded = data + "=" * (-len(data) % 4)
+        return base64.urlsafe_b64decode(padded)
+
+
+    def extract_drive_file_ids(text: str) -> List[str]:
+        """Extract Drive file IDs from a message body (HTML or plain text).
+
+        Returns IDs in insertion order, deduplicated. Empty list if no Drive
+        URLs are present. Caller is responsible for choosing the right
+        download path (binary via ``alt=media`` vs export for native types).
+        """
+        if not text:
+            return []
+        seen: dict[str, None] = {}
+        for match in _DRIVE_ID_PATTERN.finditer(text):
+            seen.setdefault(match.group(1), None)
+        return list(seen.keys())
+
+
+    class GmailApiError(Exception):
+        """Typed Gmail/Drive API failure carrying the HTTP status.
+
+        Agent ops translate ``status`` to ErrorCode (404→not_found, 403→
+        permission_denied, 401→auth_failed). Plain ``make_request`` callers
+        that previously swallowed 403/404 as ``None`` are unaffected — this
+        type is only raised by paths that opt in (Drive downloads, attachment
+        fetches when ``raise_on_error=True``).
+        """
+
+        def __init__(self, status: int, message: str) -> None:
+            self.status = status
+            super().__init__(f"HTTP {status}: {message}")
+
 
     class GmailApiClient:
-        """Handles Gmail API communication: auth, requests, batch, and parallel fetching."""
+        """Gmail + Drive HTTP client using a pre-issued OAuth access token.
+
+        The COMMUNITY connection's u2m / u2m_per_user flow owns the OAuth
+        dance and hands the connector a valid bearer token on each query.
+        This client treats it as opaque — no refresh, no caching, no
+        client_id/secret. A 401 means the token is expired or revoked;
+        callers re-auth via the CLI.
+        """
 
         BASE_URL = "https://gmail.googleapis.com/gmail/v1"
         BATCH_URL = "https://gmail.googleapis.com/batch/gmail/v1"
+        DRIVE_BASE_URL = DRIVE_API_BASE
 
-        def __init__(
-            self,
-            client_id: str,
-            client_secret: str,
-            refresh_token: str,
-            user_id: str = "me",
-        ) -> None:
-            self.client_id = client_id
-            self.client_secret = client_secret
-            self.refresh_token = refresh_token
+        def __init__(self, access_token: str, user_id: str = "me") -> None:
+            self.access_token = access_token
             self.user_id = user_id
-
-            self._access_token = None
-            self._token_expires_at = 0
             self._session = requests.Session()
 
-        def get_access_token(self) -> str:
-            """Exchange refresh token for access token with caching."""
-            # Return cached token if still valid (with 60s buffer)
-            if self._access_token and time.time() < self._token_expires_at - 60:
-                return self._access_token
-
-            response = requests.post(
-                "https://oauth2.googleapis.com/token",
-                data={
-                    "client_id": self.client_id,
-                    "client_secret": self.client_secret,
-                    "refresh_token": self.refresh_token,
-                    "grant_type": "refresh_token",
-                },
-                timeout=30,
-            )
-            response.raise_for_status()
-            data = response.json()
-
-            self._access_token = data["access_token"]
-            self._token_expires_at = time.time() + data.get("expires_in", 3600)
-
-            return self._access_token
-
         def get_headers(self) -> Dict[str, str]:
-            """Get headers with valid access token."""
+            """Bearer-token headers for Gmail + Drive API calls."""
             return {
-                "Authorization": f"Bearer {self.get_access_token()}",
+                "Authorization": f"Bearer {self.access_token}",
                 "Accept": "application/json",
             }
 
@@ -1116,6 +1300,886 @@ def register_lakeflow_source(spark):
                         # Skip failed fetches, continue with others
                         continue
 
+        # ─── Attachment / Drive download ──────────────────────────────────────
+
+        def get_attachment(
+            self, message_id: str, attachment_id: str
+        ) -> bytes:
+            """Fetch a Gmail attachment by ID and return decoded bytes.
+
+            Calls ``users.messages.attachments.get`` and base64url-decodes the
+            response. Raises :class:`GmailApiError` on 4xx/5xx so callers can
+            map status codes to typed errors.
+            """
+            url = (
+                f"{self.BASE_URL}/users/{self.user_id}"
+                f"/messages/{message_id}/attachments/{attachment_id}"
+            )
+            response = self._session.get(url, headers=self.get_headers(), timeout=120)
+            if response.status_code != 200:
+                raise GmailApiError(response.status_code, response.text)
+            payload = response.json()
+            return b64url_decode(payload.get("data", ""))
+
+        def get_drive_file_metadata(self, file_id: str) -> Dict:
+            """Fetch Drive file metadata (id, name, mimeType, size).
+
+            Needed before downloading to pick between binary download
+            (``alt=media``) and export (Docs/Sheets/Slides). Same access token
+            as Gmail — but only works if the user consented to the
+            ``drive.readonly`` scope at OAuth time.
+            """
+            url = f"{self.DRIVE_BASE_URL}/files/{file_id}"
+            response = self._session.get(
+                url,
+                headers=self.get_headers(),
+                params={"fields": "id,name,mimeType,size"},
+                timeout=60,
+            )
+            if response.status_code != 200:
+                raise GmailApiError(response.status_code, response.text)
+            return response.json()
+
+        def download_drive_file(
+            self,
+            file_id: str,
+            dest_path: str,
+            export_mime_type: Optional[str] = None,
+            chunk_size: int = 1024 * 1024,
+        ) -> Tuple[int, str, str]:
+            """Stream a Drive file to ``dest_path`` and return ``(size, name, mime)``.
+
+            Binary files are fetched via ``files.get?alt=media``. Google-native
+            formats (Docs/Sheets/Slides) require ``files.export`` with a
+            target ``export_mime_type`` — picks ``application/pdf`` if the
+            caller didn't supply one.
+
+            Caller pre-creates the parent directory. Raises
+            :class:`GmailApiError` on 4xx/5xx (use ``status == 403`` to detect
+            the recipient-not-shared case).
+            """
+            metadata = self.get_drive_file_metadata(file_id)
+            mime_type = metadata.get("mimeType", "application/octet-stream")
+            name = metadata.get("name", file_id)
+
+            if mime_type.startswith(GOOGLE_NATIVE_MIME_PREFIX):
+                export_mime = export_mime_type or "application/pdf"
+                url = f"{self.DRIVE_BASE_URL}/files/{file_id}/export"
+                params = {"mimeType": export_mime}
+                effective_mime = export_mime
+            else:
+                url = f"{self.DRIVE_BASE_URL}/files/{file_id}"
+                params = {"alt": "media"}
+                effective_mime = mime_type
+
+            bytes_written = 0
+            with self._session.get(
+                url, headers=self.get_headers(), params=params, timeout=300, stream=True
+            ) as response:
+                if response.status_code != 200:
+                    raise GmailApiError(response.status_code, response.text)
+                with open(dest_path, "wb") as fh:
+                    for chunk in response.iter_content(chunk_size=chunk_size):
+                        if chunk:
+                            fh.write(chunk)
+                            bytes_written += len(chunk)
+            return bytes_written, name, effective_mime
+
+
+    ########################################################
+    # src/databricks/labs/community_connector/sources/gmail/gmail_agent_ops.py
+    ########################################################
+
+    _FILTERABLE_TABLES = frozenset({"messages", "threads"})
+
+    # Typed filter parameters shared by read_table override and search_messages.
+    # Each tuple is (param, render_fn) where render_fn(value) → q fragment.
+    def _q_quote(value: str) -> str:
+        """Wrap a multi-word value in parentheses so Gmail treats it as one operand."""
+        value = value.strip()
+        if not value:
+            return ""
+        if " " in value and not (value.startswith("(") and value.endswith(")")):
+            return f"({value})"
+        return value
+
+
+    def _render_after(v: str) -> str:
+        return f"after:{v}"
+
+
+    def _render_before(v: str) -> str:
+        return f"before:{v}"
+
+
+    def _render_newer_than(v: str) -> str:
+        return f"newer_than:{v}"
+
+
+    def _render_subject(v: str) -> str:
+        return f"subject:{_q_quote(v)}"
+
+
+    def _render_from(v: str) -> str:
+        return f"from:{v}"
+
+
+    def _render_to(v: str) -> str:
+        return f"to:{v}"
+
+
+    def _render_label(v: str) -> str:
+        return f"label:{v}"
+
+
+    def _render_has_attachment(v: str) -> str:
+        return "has:attachment" if v.lower() == "true" else ""
+
+
+    def _render_is_unread(v: str) -> str:
+        return "is:unread" if v.lower() == "true" else ""
+
+
+    def _render_passthrough(v: str) -> str:
+        # Free-form query — let the caller author Gmail syntax directly.
+        return v.strip()
+
+
+    _FILTER_RENDERERS = (
+        ("after_date", _render_after),
+        ("before_date", _render_before),
+        ("newer_than", _render_newer_than),
+        ("subject", _render_subject),
+        ("from_address", _render_from),
+        ("to_address", _render_to),
+        ("label", _render_label),
+        ("has_attachment", _render_has_attachment),
+        ("is_unread", _render_is_unread),
+        ("query", _render_passthrough),
+    )
+
+
+    _FILTER_PARAMETERS = (
+        Parameter(
+            name="after_date",
+            description="Date filter — messages on or after YYYY/MM/DD (day granularity).",
+        ),
+        Parameter(
+            name="before_date",
+            description="Date filter — messages strictly before YYYY/MM/DD (day granularity).",
+        ),
+        Parameter(
+            name="newer_than",
+            description="Relative window like '7d', '2m', '1y' (no hours/seconds).",
+        ),
+        Parameter(name="subject", description="Subject keyword or phrase."),
+        Parameter(name="from_address", description="Sender email or substring."),
+        Parameter(name="to_address", description="Recipient email or substring."),
+        Parameter(
+            name="label",
+            description="Gmail label name (e.g. 'inbox', 'work/urgent'). Spaces become '-'.",
+        ),
+        Parameter(
+            name="has_attachment",
+            type="boolean",
+            description="If true, restrict to messages with attachments.",
+        ),
+        Parameter(
+            name="is_unread",
+            type="boolean",
+            description="If true, restrict to unread messages.",
+        ),
+        Parameter(
+            name="query",
+            description=(
+                "Free-form Gmail search expression appended verbatim. "
+                "Combined with the typed filters via AND."
+            ),
+        ),
+    )
+
+
+    def _compose_query(options: Mapping[str, str]) -> Optional[str]:
+        """Compose typed filter params into a Gmail ``q`` string.
+
+        Returns ``None`` when no filters were supplied (preserves the
+        connector's default listing behaviour). Multiple typed filters are
+        joined with implicit AND, which is Gmail's default conjunction.
+        """
+        fragments: list[str] = []
+        for name, render in _FILTER_RENDERERS:
+            raw = options.get(name)
+            if raw is None or raw == "":
+                continue
+            fragment = render(raw)
+            if fragment:
+                fragments.append(fragment)
+        # Caller's pre-existing q passthrough on the connector — preserve it.
+        raw_q = options.get("q")
+        if raw_q:
+            fragments.append(raw_q)
+        if not fragments:
+            return None
+        return " ".join(fragments)
+
+
+    def _table_options_with_query(
+        options: Mapping[str, str], table_name: str
+    ) -> dict:
+        """Return connector-side options with the composed ``q`` injected.
+
+        Stripped of the typed filter keys (consumed here) and the agent-reserved
+        keys; the connector sees only its own option namespace plus the merged
+        ``q``.
+        """
+        base = dict(_connector_options(options))
+        typed_keys = {name for name, _ in _FILTER_RENDERERS}
+        for key in typed_keys:
+            base.pop(key, None)
+        if table_name in _FILTERABLE_TABLES:
+            composed = _compose_query(options)
+            if composed:
+                base["q"] = composed
+        return base
+
+
+    # ---------------------------------------------------------------------------
+    # Header extraction helpers
+    # ---------------------------------------------------------------------------
+
+    def _header_value(payload: Mapping[str, Any], name: str) -> Optional[str]:
+        """Look up a header by case-insensitive name on a parsed payload."""
+        if not payload:
+            return None
+        target = name.lower()
+        for header in payload.get("headers", []) or []:
+            if (header.get("name") or "").lower() == target:
+                return header.get("value")
+        return None
+
+
+    def _walk_parts(payload: Mapping[str, Any]):
+        """Depth-first iterate every MessagePart in a parsed payload."""
+        if not payload:
+            return
+        stack = [payload]
+        while stack:
+            part = stack.pop()
+            yield part
+            for child in part.get("parts", []) or []:
+                stack.append(child)
+
+
+    def _decode_body_text(payload: Mapping[str, Any], mime_target: str) -> Optional[str]:
+        """Decode the first body part matching ``mime_target`` to text.
+
+        Gmail returns part bodies as base64url; we decode then UTF-8 with
+        ``errors='replace'`` so caller never crashes on legacy encodings.
+        """
+        for part in _walk_parts(payload):
+            if part.get("mimeType") != mime_target:
+                continue
+            body = part.get("body") or {}
+            data = body.get("data")
+            if not data:
+                continue
+            try:
+                return b64url_decode(data).decode("utf-8", errors="replace")
+            except Exception:  # pylint: disable=broad-except
+                return None
+        return None
+
+
+    def _attachment_parts(payload: Mapping[str, Any]):
+        """Yield (filename, mimeType, attachmentId, size) for parts with attachments."""
+        for part in _walk_parts(payload):
+            body = part.get("body") or {}
+            attachment_id = body.get("attachmentId")
+            if not attachment_id:
+                continue
+            yield {
+                "filename": part.get("filename") or "",
+                "mime_type": part.get("mimeType") or "application/octet-stream",
+                "attachment_id": attachment_id,
+                "size_bytes": int(body.get("size") or 0),
+            }
+
+
+    def _safe_int(value: Any) -> Optional[int]:
+        if value is None:
+            return None
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return None
+
+
+    # ---------------------------------------------------------------------------
+    # read_table override: apply typed filters to messages / threads
+    # ---------------------------------------------------------------------------
+
+    class GmailReadTableOp(ReadTableOp):
+        """read_table that composes typed filters into Gmail's ``q`` syntax.
+
+        For ``messages`` and ``threads``, the typed parameters below are joined
+        via AND and become the ``q`` option the connector sends to Gmail. For
+        every other table, behaviour matches the framework default. There is
+        no row cap — callers chain ``.limit(N)`` on the resulting DataFrame.
+        """
+
+        description = (
+            "Read a tabular object. For messages/threads, accepts typed "
+            "filters (after_date, before_date, newer_than, subject, "
+            "from_address, to_address, label, has_attachment, is_unread, "
+            "query) that compose into Gmail search syntax."
+        )
+        parameters = ReadTableOp.parameters + _FILTER_PARAMETERS
+
+        def pull(self, connector, options):
+            table_name = options["tableName"]
+            gmail_options = _table_options_with_query(options, table_name)
+            records, _offset = connector.read_table(table_name, None, gmail_options)
+            return records
+
+
+    # ---------------------------------------------------------------------------
+    # search_messages: lightweight triage view (no body, no payload)
+    # ---------------------------------------------------------------------------
+
+    _SEARCH_MESSAGES_SCHEMA = StructType(
+        [
+            StructField("id", StringType(), False),
+            StructField("threadId", StringType(), True),
+            StructField("from_address", StringType(), True),
+            StructField("to_address", StringType(), True),
+            StructField("subject", StringType(), True),
+            StructField("date", StringType(), True),
+            StructField("snippet", StringType(), True),
+            StructField("labelIds", ArrayType(StringType()), True),
+            StructField("has_attachment", StringType(), True),
+            StructField("size_estimate", LongType(), True),
+        ]
+    )
+
+
+    class SearchMessagesOp(AgentOperation):
+        """Lightweight search returning header-level info, no message bodies.
+
+        Designed for agent triage flows where the planner wants to scan many
+        messages cheaply, then call ``get_message`` only on the ones it picks.
+        Uses Gmail's ``format=metadata`` so each message costs 5 quota units
+        instead of 20 for ``format=full``.
+        """
+
+        name = "search_messages"
+        description = (
+            "Search messages and return one row per match with id, threadId, "
+            "from, to, subject, date, snippet, labels, has_attachment, "
+            "size_estimate. No message bodies."
+        )
+        kind = "data"
+        schema = _SEARCH_MESSAGES_SCHEMA
+        parameters = (
+            Parameter(
+                name="limit",
+                type="integer",
+                default=50,
+                description="Maximum messages to return (default 50, max 500).",
+            ),
+        ) + _FILTER_PARAMETERS
+
+        def pull(self, connector, options):
+            api = connector.api
+            user_id = connector.user_id
+
+            limit = self._int_limit(options)
+            composed_q = _compose_query(options)
+
+            params: dict = {"maxResults": min(max(limit, 1), 500)}
+            if composed_q:
+                params["q"] = composed_q
+
+            # First list to get IDs, then fetch metadata-format for headers only.
+            listing = api.make_request("GET", f"/users/{user_id}/messages", params=params)
+            if not listing or "messages" not in listing:
+                return iter([])
+
+            message_ids = [m["id"] for m in listing.get("messages", [])][:limit]
+            endpoints = [f"/users/{user_id}/messages/{mid}" for mid in message_ids]
+            meta_params = [{"format": "metadata"}] * len(message_ids)
+            results = api.make_batch_request(endpoints, meta_params)
+
+            rows = []
+            for msg in results:
+                if not msg:
+                    continue
+                payload = msg.get("payload") or {}
+                label_ids = msg.get("labelIds") or []
+                rows.append(
+                    {
+                        "id": msg.get("id"),
+                        "threadId": msg.get("threadId"),
+                        "from_address": _header_value(payload, "From"),
+                        "to_address": _header_value(payload, "To"),
+                        "subject": _header_value(payload, "Subject"),
+                        "date": _header_value(payload, "Date"),
+                        "snippet": msg.get("snippet"),
+                        "labelIds": label_ids,
+                        "has_attachment": "true"
+                        if any(_attachment_parts(payload))
+                        else "false",
+                        "size_estimate": _safe_int(msg.get("sizeEstimate")),
+                    }
+                )
+            return iter(rows)
+
+        @staticmethod
+        def _int_limit(options: Mapping[str, str]) -> int:
+            raw = options.get("limit")
+            if raw is None or raw == "":
+                return 50
+            try:
+                return int(raw)
+            except (TypeError, ValueError) as exc:
+                raise AgentError(
+                    ErrorCode.BAD_REQUEST,
+                    f"Option 'limit' must be an integer, got {raw!r}.",
+                ) from exc
+
+
+    # ---------------------------------------------------------------------------
+    # get_message: fetch a single message with decoded plain + html bodies
+    # ---------------------------------------------------------------------------
+
+    _GET_MESSAGE_SCHEMA = StructType(
+        [
+            StructField("id", StringType(), False),
+            StructField("threadId", StringType(), True),
+            StructField("from_address", StringType(), True),
+            StructField("to_address", StringType(), True),
+            StructField("cc_address", StringType(), True),
+            StructField("subject", StringType(), True),
+            StructField("date", StringType(), True),
+            StructField("snippet", StringType(), True),
+            StructField("labelIds", ArrayType(StringType()), True),
+            StructField("body_text", StringType(), True),
+            StructField("body_html", StringType(), True),
+            StructField("size_estimate", LongType(), True),
+            StructField(
+                "attachments",
+                ArrayType(
+                    StructType(
+                        [
+                            StructField("filename", StringType(), True),
+                            StructField("mime_type", StringType(), True),
+                            StructField("attachment_id", StringType(), True),
+                            StructField("size_bytes", LongType(), True),
+                        ]
+                    )
+                ),
+                True,
+            ),
+            StructField("drive_file_ids", ArrayType(StringType()), True),
+        ]
+    )
+
+
+    class GetMessageOp(AgentOperation):
+        """Fetch one message by id with decoded plain-text and HTML bodies.
+
+        Returns a single row. Body parts arrive base64url-encoded from Gmail;
+        this op decodes them so the agent sees ready-to-read text. Drive-
+        hosted attachment IDs are extracted from the HTML body and surfaced
+        in ``drive_file_ids`` so the agent can chain ``download_attachment``.
+        """
+
+        name = "get_message"
+        description = (
+            "Fetch one message by id with decoded body_text/body_html, "
+            "headers, attachments list, and any Drive file IDs referenced "
+            "in the body."
+        )
+        kind = "data"
+        schema = _GET_MESSAGE_SCHEMA
+        parameters = (
+            Parameter(
+                name="message_id",
+                required=True,
+                description="Gmail message id to fetch.",
+            ),
+        )
+
+        def pull(self, connector, options):
+            message_id = options["message_id"]
+            api = connector.api
+            user_id = connector.user_id
+
+            msg = api.make_request(
+                "GET",
+                f"/users/{user_id}/messages/{message_id}",
+                {"format": "full"},
+            )
+            if not msg:
+                raise AgentError(
+                    ErrorCode.NOT_FOUND,
+                    f"Message '{message_id}' not found or inaccessible.",
+                )
+            payload = msg.get("payload") or {}
+            body_text = _decode_body_text(payload, "text/plain")
+            body_html = _decode_body_text(payload, "text/html")
+            drive_ids = extract_drive_file_ids(body_html or body_text or "")
+
+            return iter(
+                [
+                    {
+                        "id": msg.get("id"),
+                        "threadId": msg.get("threadId"),
+                        "from_address": _header_value(payload, "From"),
+                        "to_address": _header_value(payload, "To"),
+                        "cc_address": _header_value(payload, "Cc"),
+                        "subject": _header_value(payload, "Subject"),
+                        "date": _header_value(payload, "Date"),
+                        "snippet": msg.get("snippet"),
+                        "labelIds": msg.get("labelIds") or [],
+                        "body_text": body_text,
+                        "body_html": body_html,
+                        "size_estimate": _safe_int(msg.get("sizeEstimate")),
+                        "attachments": list(_attachment_parts(payload)),
+                        "drive_file_ids": drive_ids,
+                    }
+                ]
+            )
+
+
+    # ---------------------------------------------------------------------------
+    # list_attachments: enumerate gmail-native + Drive-hosted attachments
+    # ---------------------------------------------------------------------------
+
+    _LIST_ATTACHMENTS_SCHEMA = StructType(
+        [
+            StructField("message_id", StringType(), False),
+            StructField("kind", StringType(), False),  # "gmail" or "drive"
+            StructField("attachment_id", StringType(), True),
+            StructField("drive_file_id", StringType(), True),
+            StructField("filename", StringType(), True),
+            StructField("mime_type", StringType(), True),
+            StructField("size_bytes", LongType(), True),
+        ]
+    )
+
+
+    class ListAttachmentsOp(AgentOperation):
+        """List attachments for a message.
+
+        Surfaces two kinds in the same result set:
+          - ``kind = "gmail"``: parts with an ``attachment_id`` from the
+            message payload. Fetch via ``download_attachment`` with
+            ``attachment_id``.
+          - ``kind = "drive"``: file IDs extracted from Drive/Docs links in
+            the message body. Fetch via ``download_attachment`` with
+            ``drive_file_id``. Filename / size enriched via Drive metadata.
+        """
+
+        name = "list_attachments"
+        description = (
+            "List Gmail-native and Drive-hosted attachments for a message id. "
+            "Returns one row per attachment with the IDs the "
+            "download_attachment op needs."
+        )
+        kind = "data"
+        schema = _LIST_ATTACHMENTS_SCHEMA
+        parameters = (
+            Parameter(
+                name="message_id",
+                required=True,
+                description="Gmail message id whose attachments to enumerate.",
+            ),
+        )
+
+        def pull(self, connector, options):
+            message_id = options["message_id"]
+            api = connector.api
+            user_id = connector.user_id
+
+            msg = api.make_request(
+                "GET",
+                f"/users/{user_id}/messages/{message_id}",
+                {"format": "full"},
+            )
+            if not msg:
+                raise AgentError(
+                    ErrorCode.NOT_FOUND,
+                    f"Message '{message_id}' not found or inaccessible.",
+                )
+            payload = msg.get("payload") or {}
+
+            rows: list[dict] = []
+            for part in _attachment_parts(payload):
+                rows.append(
+                    {
+                        "message_id": message_id,
+                        "kind": "gmail",
+                        "attachment_id": part["attachment_id"],
+                        "drive_file_id": None,
+                        "filename": part["filename"],
+                        "mime_type": part["mime_type"],
+                        "size_bytes": part["size_bytes"],
+                    }
+                )
+
+            body_html = _decode_body_text(payload, "text/html")
+            body_text = _decode_body_text(payload, "text/plain")
+            drive_ids = extract_drive_file_ids(body_html or body_text or "")
+            for file_id in drive_ids:
+                # Drive metadata lookup is best-effort; permission errors
+                # surface in the row's mime_type so the agent sees them.
+                try:
+                    meta = api.get_drive_file_metadata(file_id)
+                    rows.append(
+                        {
+                            "message_id": message_id,
+                            "kind": "drive",
+                            "attachment_id": None,
+                            "drive_file_id": file_id,
+                            "filename": meta.get("name"),
+                            "mime_type": meta.get("mimeType"),
+                            "size_bytes": _safe_int(meta.get("size")),
+                        }
+                    )
+                except GmailApiError as exc:
+                    rows.append(
+                        {
+                            "message_id": message_id,
+                            "kind": "drive",
+                            "attachment_id": None,
+                            "drive_file_id": file_id,
+                            "filename": None,
+                            "mime_type": f"error:http_{exc.status}",
+                            "size_bytes": None,
+                        }
+                    )
+            return iter(rows)
+
+
+    # ---------------------------------------------------------------------------
+    # download_attachment: write bytes to a Databricks volume path
+    # ---------------------------------------------------------------------------
+
+    _DOWNLOAD_ATTACHMENT_SCHEMA = StructType(
+        [
+            StructField("volume_path", StringType(), False),
+            StructField("size_bytes", LongType(), True),
+            StructField("mime_type", StringType(), True),
+            StructField("filename", StringType(), True),
+            StructField("source", StringType(), False),  # "gmail" or "drive"
+        ]
+    )
+
+
+    class DownloadAttachmentOp(AgentOperation):
+        """Download an attachment to a Databricks Volume path.
+
+        Two input shapes; exactly one ID must be supplied:
+          - ``attachment_id`` + ``message_id`` → Gmail's
+            ``users.messages.attachments.get``. Decoded bytes are written
+            to ``volume_path``.
+          - ``drive_file_id`` → Drive ``files.get?alt=media`` (binary) or
+            ``files.export`` (Google-native types: Docs/Sheets/Slides).
+            ``export_mime_type`` overrides the default ``application/pdf``
+            export target.
+
+        ``volume_path`` must be a writable path the executor can ``open()``
+        in write-binary mode. The canonical shape is
+        ``/Volumes/<catalog>/<schema>/<volume>/<filename>`` — the op
+        creates the parent directory if needed but does not create the
+        volume itself. The path is required to start with ``/Volumes/`` so
+        the op can't accidentally write outside Unity Catalog (override
+        intentionally via the framework's option dict only).
+        """
+
+        name = "download_attachment"
+        description = (
+            "Download a Gmail or Drive-hosted attachment to a Databricks "
+            "Volume path. Supply attachment_id+message_id for Gmail or "
+            "drive_file_id for Drive."
+        )
+        kind = "metadata"
+        schema = _DOWNLOAD_ATTACHMENT_SCHEMA
+        parameters = (
+            Parameter(
+                name="volume_path",
+                required=True,
+                description=(
+                    "Destination path under /Volumes/<catalog>/<schema>/<volume>/. "
+                    "The parent directory is created if missing."
+                ),
+            ),
+            Parameter(
+                name="message_id",
+                description=(
+                    "Gmail message id. Required when attachment_id is supplied."
+                ),
+            ),
+            Parameter(
+                name="attachment_id",
+                description=(
+                    "Gmail attachment id (from list_attachments where kind=gmail)."
+                ),
+            ),
+            Parameter(
+                name="drive_file_id",
+                description=(
+                    "Drive file id (from list_attachments where kind=drive)."
+                ),
+            ),
+            Parameter(
+                name="export_mime_type",
+                description=(
+                    "For Google-native Drive files, the export MIME type "
+                    "(default 'application/pdf'). Ignored for binary files."
+                ),
+            ),
+        )
+
+        _VOLUME_PREFIX = "/Volumes/"
+
+        def pull(self, connector, options):
+            volume_path = options["volume_path"]
+            if not volume_path.startswith(self._VOLUME_PREFIX):
+                raise AgentError(
+                    ErrorCode.BAD_REQUEST,
+                    f"volume_path must start with '{self._VOLUME_PREFIX}'; "
+                    f"got {volume_path!r}.",
+                )
+
+            attachment_id = options.get("attachment_id") or None
+            message_id = options.get("message_id") or None
+            drive_file_id = options.get("drive_file_id") or None
+
+            if attachment_id and drive_file_id:
+                raise AgentError(
+                    ErrorCode.BAD_REQUEST,
+                    "Supply attachment_id OR drive_file_id, not both.",
+                )
+            if not attachment_id and not drive_file_id:
+                raise AgentError(
+                    ErrorCode.BAD_REQUEST,
+                    "Either attachment_id (with message_id) or drive_file_id "
+                    "is required.",
+                )
+            if attachment_id and not message_id:
+                raise AgentError(
+                    ErrorCode.BAD_REQUEST,
+                    "message_id is required when attachment_id is supplied.",
+                )
+
+            parent = os.path.dirname(volume_path)
+            if parent:
+                try:
+                    os.makedirs(parent, exist_ok=True)
+                except OSError as exc:
+                    raise AgentError(
+                        ErrorCode.PERMISSION_DENIED,
+                        f"Cannot create parent directory '{parent}': {exc}",
+                    ) from exc
+
+            if attachment_id:
+                return iter([self._download_gmail(connector, message_id, attachment_id, volume_path)])
+            return iter([self._download_drive(connector, drive_file_id, volume_path, options)])
+
+        @staticmethod
+        def _download_gmail(connector, message_id, attachment_id, volume_path):
+            try:
+                data = connector.api.get_attachment(message_id, attachment_id)
+            except GmailApiError as exc:
+                raise _agent_error_from_status(exc) from exc
+
+            # Look up filename + mime from the parent message payload so the
+            # row carries it. One extra API call (format=metadata is cheap at
+            # 5 quota units) — worth it for downstream UX.
+            filename = None
+            mime_type = None
+            meta = connector.api.make_request(
+                "GET",
+                f"/users/{connector.user_id}/messages/{message_id}",
+                {"format": "full"},
+            )
+            if meta:
+                for part in _attachment_parts(meta.get("payload") or {}):
+                    if part["attachment_id"] == attachment_id:
+                        filename = part["filename"] or None
+                        mime_type = part["mime_type"]
+                        break
+
+            with open(volume_path, "wb") as fh:
+                fh.write(data)
+
+            return {
+                "volume_path": volume_path,
+                "size_bytes": len(data),
+                "mime_type": mime_type,
+                "filename": filename,
+                "source": "gmail",
+            }
+
+        @staticmethod
+        def _download_drive(connector, drive_file_id, volume_path, options):
+            try:
+                size, name, mime = connector.api.download_drive_file(
+                    drive_file_id,
+                    volume_path,
+                    export_mime_type=options.get("export_mime_type") or None,
+                )
+            except GmailApiError as exc:
+                raise _agent_error_from_status(exc) from exc
+
+            return {
+                "volume_path": volume_path,
+                "size_bytes": size,
+                "mime_type": mime,
+                "filename": name,
+                "source": "drive",
+            }
+
+
+    def _agent_error_from_status(exc: GmailApiError) -> AgentError:
+        """Map HTTP status to a canonical agent ErrorCode."""
+        if exc.status == 401:
+            return AgentError(
+                ErrorCode.AUTH_FAILED,
+                f"Authentication failed: {exc}",
+            )
+        if exc.status == 403:
+            return AgentError(
+                ErrorCode.PERMISSION_DENIED,
+                f"Permission denied (does the OAuth token include drive.readonly?): {exc}",
+            )
+        if exc.status == 404:
+            return AgentError(ErrorCode.NOT_FOUND, str(exc))
+        if exc.status == 429:
+            return AgentError(ErrorCode.RATE_LIMITED, str(exc))
+        return AgentError(ErrorCode.INTERNAL_ERROR, str(exc))
+
+
+    # ---------------------------------------------------------------------------
+    # Entry point — what GmailLakeflowConnect.agent_operations returns
+    # ---------------------------------------------------------------------------
+
+    def build_gmail_agent_operations() -> dict:
+        """Return the agent-operation map for the Gmail connector.
+
+        Wired in via :meth:`GmailLakeflowConnect.agent_operations`. The
+        ``read_table`` entry overrides the framework built-in.
+        """
+        ops = [
+            GmailReadTableOp(),
+            SearchMessagesOp(),
+            GetMessageOp(),
+            ListAttachmentsOp(),
+            DownloadAttachmentOp(),
+        ]
+        return {op.name: op for op in ops}
+
 
     ########################################################
     # src/databricks/labs/community_connector/sources/gmail/gmail.py
@@ -1134,34 +2198,38 @@ def register_lakeflow_source(spark):
         return value if value > 0 else 0
 
 
-    class GmailLakeflowConnect(LakeflowConnect):
+    class GmailLakeflowConnect(LakeflowConnect, SupportsIngestionAgent):
         """Gmail connector implementing the LakeflowConnect interface with 100% API coverage."""
 
         def __init__(self, options: dict[str, str]) -> None:
             """
-            Initialize the Gmail connector with OAuth 2.0 credentials.
+            Initialize the Gmail connector with a pre-issued OAuth access token.
+
+            The Unity Catalog COMMUNITY connection (``community_oauth_flow=u2m``
+            or ``u2m_per_user``) owns the OAuth dance — Databricks performs the
+            authorization-code exchange (and per-user refresh in u2m_per_user
+            mode) and hands the connector a valid bearer token at query time.
+            The connector treats it as opaque: no client_id/secret, no refresh,
+            no token endpoint. A 401 mid-query means the token expired or was
+            revoked; the user re-authorizes through the CLI.
 
             Expected options:
-                - client_id: OAuth 2.0 client ID from Google Cloud Console
-                - client_secret: OAuth 2.0 client secret
-                - refresh_token: Long-lived refresh token obtained via OAuth flow
-                - user_id (optional): User email or 'me' (default: 'me')
+                - access_token: OAuth 2.0 bearer token (Gmail + Drive scopes)
+                - user_id (optional): user email or 'me' (default: 'me')
             """
-            self.client_id = options.get("client_id")
-            self.client_secret = options.get("client_secret")
-            self.refresh_token = options.get("refresh_token")
+            self.access_token = options.get("access_token")
             self.user_id = options.get("user_id", "me")
 
-            if not self.client_id:
-                raise ValueError("Gmail connector requires 'client_id' in options")
-            if not self.client_secret:
-                raise ValueError("Gmail connector requires 'client_secret' in options")
-            if not self.refresh_token:
-                raise ValueError("Gmail connector requires 'refresh_token' in options")
+            if not self.access_token:
+                raise ValueError(
+                    "Gmail connector requires 'access_token' in options. "
+                    "Configure the Unity Catalog connection as TYPE COMMUNITY "
+                    "with community_oauth_flow=u2m or u2m_per_user; the OAuth "
+                    "exchange runs at connection-creation time and the access "
+                    "token is injected into connector options at query time."
+                )
 
-            self.api = GmailApiClient(
-                self.client_id, self.client_secret, self.refresh_token, self.user_id
-            )
+            self.api = GmailApiClient(self.access_token, self.user_id)
 
             # Snapshot the mailbox historyId at init time. Gmail's mailbox
             # historyId advances on every write (new mail, reads, label edits),
@@ -1179,6 +2247,15 @@ def register_lakeflow_source(spark):
         def list_tables(self) -> list[str]:
             """Return the list of available Gmail tables."""
             return SUPPORTED_TABLES.copy()
+
+        def agent_operations(self):
+            """Expose Gmail-specific agent operations on top of the framework built-ins.
+
+            Replaces ``read_table`` with a filter-aware variant and adds
+            ``search_messages``, ``get_message``, ``list_attachments``,
+            ``download_attachment``. See ``gmail_agent_ops`` for details.
+            """
+            return build_gmail_agent_operations()
 
         def get_table_schema(self, table_name: str, table_options: Dict[str, str]) -> StructType:
             """Fetch the schema of a table."""
@@ -1776,6 +2853,804 @@ def register_lakeflow_source(spark):
 
 
     ########################################################
+    # src/databricks/labs/community_connector/sparkpds/ingestion_agent_datasource.py
+    ########################################################
+
+    OPERATION = "operation"
+    SEARCH = "search"
+    PATH = "path"
+    NAME = "name"
+    METADATA_KEY = "metadataKey"
+    TABLE_NAME = "tableName"
+    CATALOG_NAME = "catalogName"
+    SCHEMA_NAME = "schemaName"
+
+    # Built-in operation names exposed for callers and tests.
+    OP_LIST_OBJECTS = "list_objects"
+    OP_READ_TABLE = "read_table"
+    OP_GET_OBJECT_METADATA = "get_object_metadata"
+    OP_VALIDATE_CONNECTION = "validate_connection"
+    OP_LIST_OPERATIONS = "list_operations"
+
+    # Operation kinds.
+    KIND_METADATA = "metadata"
+    KIND_DATA = "data"
+
+    # Operations that can dispatch even when the connector failed to build
+    # (e.g. bad creds). Today this is only `list_operations` — it can yield
+    # the framework's built-in catalog without touching the connector.
+    _CONNECTOR_OPTIONAL_OPS = frozenset({OP_LIST_OPERATIONS})
+
+
+    def _requires_connector(op: AgentOperation) -> bool:
+        return op.name not in _CONNECTOR_OPTIONAL_OPS
+
+    # Reserved keys the agent layer owns. Stripped from the dict passed into
+    # LakeflowConnect.__init__ so the connector can't accidentally interpret an
+    # agent option as one of its own. The user's request options keep these
+    # keys; ops read them via the AgentOperation.pull options dict.
+    _AGENT_RESERVED_KEYS = frozenset(
+        {OPERATION, SEARCH, PATH, NAME, METADATA_KEY}
+    )
+
+
+    def _agent_options(options: Mapping[str, str]) -> dict:
+        """Options visible to ``AgentOperation.pull`` / ``resolve_schema``.
+
+        Strips only the framework-owned ``operation`` key.
+        """
+        return {k: v for k, v in options.items() if k != OPERATION}
+
+
+    def _connector_options(options: Mapping[str, str]) -> dict:
+        """Options passed to ``LakeflowConnect.__init__`` and to read-side calls
+        (``read_table``, ``get_table_schema``, ``read_table_metadata``).
+
+        Strips ``operation`` plus the agent-reserved keys so the connector sees
+        only its own option namespace.
+        """
+        return {k: v for k, v in options.items() if k not in _AGENT_RESERVED_KEYS}
+
+
+    # ---------------------------------------------------------------------------
+    # Schemas
+    # ---------------------------------------------------------------------------
+
+    _META_STRUCT = StructType(
+        [
+            StructField("status", StringType(), False),
+            StructField("code", StringType(), True),
+            StructField("message", StringType(), True),
+        ]
+    )
+
+
+    def _meta_field(nullable: bool) -> StructField:
+        return StructField("_meta", _META_STRUCT, nullable)
+
+
+    _LIST_OBJECTS_BASE_SCHEMA = StructType(
+        [
+            StructField("name", StringType(), True),
+            StructField("type", StringType(), True),
+            StructField("full_path", StringType(), True),
+        ]
+    )
+
+    _GET_OBJECT_METADATA_BASE_SCHEMA = StructType(
+        [
+            StructField("key", StringType(), True),
+            StructField("value", StringType(), True),
+        ]
+    )
+
+    _VALIDATE_CONNECTION_BASE_SCHEMA = StructType([])
+
+    _LIST_OPERATIONS_BASE_SCHEMA = StructType(
+        [
+            StructField("name", StringType(), False),
+            StructField("description", StringType(), True),
+            StructField("kind", StringType(), True),
+            StructField("result_schema_json", StringType(), True),
+            StructField("parameters_json", StringType(), True),
+        ]
+    )
+
+
+    def _meta(
+        status: str = "ok",
+        code: Optional[str] = None,
+        message: Optional[str] = None,
+    ) -> dict:
+        return {"status": status, "code": code, "message": message}
+
+
+    def _error_str(exc: BaseException) -> str:
+        return f"{type(exc).__name__}: {exc}"
+
+
+    # ---------------------------------------------------------------------------
+    # Built-in AgentOperation subclasses.
+    #
+    # Each fixes ``name``, ``description``, ``kind``, ``schema`` and ``pull``.
+    # ``pull`` parses the request options into typed kwargs and delegates to
+    # ``produce`` — the single override point for sources that want a richer
+    # implementation. ``produce`` is the only method a source customising a
+    # built-in should override.
+    # ---------------------------------------------------------------------------
+
+    class ListObjectsOp(AgentOperation):
+        """Built-in: hierarchical listing of objects under an optional parent."""
+
+        name = OP_LIST_OBJECTS
+        description = (
+            "Hierarchical listing of objects. Returns rows of (name, type, full_path). "
+            "`type` is source-defined; conventional values are `schema` / `table` / "
+            "`view` / `synonym`."
+        )
+        kind = KIND_METADATA
+        schema = _LIST_OBJECTS_BASE_SCHEMA
+        parameters = (
+            Parameter(
+                name=PATH,
+                description="Parent path to list under. Empty / missing = top level. "
+                "Format is source-defined.",
+            ),
+            Parameter(
+                name=SEARCH,
+                description="Regex filter applied to result names.",
+            ),
+        )
+
+        def pull(self, connector, options):
+            path = options.get(PATH) or None
+            search = options.get(SEARCH) or None
+            return self.produce(connector, path=path, search=search)
+
+        def produce(
+            self,
+            connector: LakeflowConnect,
+            *,
+            path: Optional[str],
+            search: Optional[str],
+        ) -> Iterable[Mapping[str, Any]]:
+            """Yield rows of ``(name, type, full_path)``.
+
+            Default flat listing derived from ``list_tables``. Override to
+            return hierarchical results or to bind to a source-native
+            listing API.
+            """
+            return _default_list_objects(connector, path, search)
+
+
+    class GetObjectMetadataOp(AgentOperation):
+        """Built-in: per-object metadata as ``(key, value)`` rows.
+
+        Conventional keys (sources are free to add more, but using these
+        for the shared concerns keeps results consistent across sources):
+
+        - ``primary_key`` — comma-joined ordered column list of the PK.
+        - ``table_size`` — source-reported size in bytes (string-encoded).
+        - ``index_columns`` — JSON array of ordered column lists, one per
+          index, e.g. ``[["id"], ["first_name", "last_name"]]``.
+
+        The framework applies the ``metadataKey`` filter case-insensitively
+        after ``produce`` emits, so sources don't need to handle it.
+        """
+
+        name = OP_GET_OBJECT_METADATA
+        description = "Per-object metadata as (key, value) rows."
+        kind = KIND_METADATA
+        schema = _GET_OBJECT_METADATA_BASE_SCHEMA
+        parameters = (
+            Parameter(name=NAME, required=True, description="Object name to describe."),
+            Parameter(
+                name=PATH,
+                description="Parent path of the target object (source-defined).",
+            ),
+            Parameter(
+                name=METADATA_KEY,
+                description=(
+                    "Case-insensitive filter; if set, only rows whose `key` "
+                    "matches are returned."
+                ),
+            ),
+        )
+
+        def pull(self, connector, options):
+            name = options[NAME]  # framework validated required.
+            path = options.get(PATH) or None
+            rows = self.produce(
+                connector,
+                path=path,
+                name=name,
+                table_options=_connector_options(options),
+            )
+            key_filter = options.get(METADATA_KEY)
+            if key_filter:
+                needle = key_filter.lower()
+                rows = (r for r in rows if str(r.get("key", "")).lower() == needle)
+            return rows
+
+        def produce(
+            self,
+            connector: LakeflowConnect,
+            *,
+            path: Optional[str],
+            name: str,
+            table_options: Mapping[str, str],
+        ) -> Iterable[Mapping[str, Any]]:
+            """Yield ``(key, value)`` rows describing the named object.
+
+            Default flattens ``read_table_metadata`` and maps connector
+            keys to the standard ingestion-agent vocabulary
+            (``primary_key`` from ``primary_keys``, ``cursor_column`` from
+            ``cursor_field``).
+            """
+            del path
+            return _default_get_object_metadata(
+                connector,
+                table_name=name,
+                table_options=table_options,
+            )
+
+
+    class ReadTableOp(AgentOperation):
+        """Built-in: read a tabular object in its native schema.
+
+        Data-kind — rows pass through with the table's natural schema (no
+        ``_meta`` column) and errors surface as Spark exceptions. The
+        operation does not enforce a row cap of its own; callers wanting
+        a sample chain ``.limit(N)`` on the resulting DataFrame.
+
+        Override :meth:`produce` to wire to a source-native read path.
+        """
+
+        name = OP_READ_TABLE
+        description = "Read a tabular object. Returns the table's natural schema and rows."
+        kind = KIND_DATA
+        parameters = (
+            Parameter(name=TABLE_NAME, required=True, description="Target object name."),
+            Parameter(
+                name=SCHEMA_NAME,
+                description="Schema within the parent path (source-defined).",
+            ),
+            Parameter(
+                name=CATALOG_NAME,
+                description=(
+                    "Top-level catalog (source-defined). Two-level sources should "
+                    "reject this rather than silently dropping it."
+                ),
+            ),
+        )
+
+        def resolve_schema(self, connector, options):
+            table_name = options[TABLE_NAME]
+            return connector.get_table_schema(table_name, _connector_options(options))
+
+        def pull(self, connector, options):
+            table_name = options[TABLE_NAME]
+            return self.produce(
+                connector,
+                table_name=table_name,
+                table_options=_connector_options(options),
+            )
+
+        def produce(
+            self,
+            connector: LakeflowConnect,
+            *,
+            table_name: str,
+            table_options: Mapping[str, str],
+        ) -> Iterable[Mapping[str, Any]]:
+            """Yield records from ``table_name``.
+
+            Default reads through ``LakeflowConnect.read_table``. Override
+            to bind to a source-native scan.
+            """
+            return _default_read_records(connector, table_name, table_options)
+
+
+    class ValidateConnectionOp(AgentOperation):
+        """Built-in: connection-level health check.
+
+        Returns one row with the standard ``_meta`` struct. Override
+        :meth:`produce` to use a source-native ping; the default attempts
+        ``connector.list_tables()`` and reports any raised exception.
+
+        Sources reporting a failed health check should raise
+        ``AgentError(ErrorCode.CONNECTION_FAILED, ...)`` rather than the
+        generic ``internal_error`` so consumers can dispatch on a dedicated
+        code.
+        """
+
+        name = OP_VALIDATE_CONNECTION
+        description = (
+            "Connection-level health check. Returns one row with _meta only."
+        )
+        kind = KIND_METADATA
+        schema = _VALIDATE_CONNECTION_BASE_SCHEMA
+
+        def pull(self, connector, options):
+            del options
+            return [{"_meta": _normalize_meta(self.produce(connector))}]
+
+        def produce(self, connector: LakeflowConnect) -> Mapping[str, Optional[str]]:
+            """Return ``{status, code, message}`` for the connection.
+
+            Default: try ``list_tables``; report exceptions as
+            ``connection_failed``.
+            """
+            try:
+                connector.list_tables()
+            except Exception as exc:  # pylint: disable=broad-except
+                return _meta(
+                    status="error",
+                    code=ErrorCode.CONNECTION_FAILED,
+                    message=_error_str(exc),
+                )
+            return _meta(status="ok")
+
+
+    class ListOperationsOp(AgentOperation):
+        """Built-in: list operations supported by this connection.
+
+        Framework-owned. Runs even when the connector failed to build —
+        returns the framework's built-in catalog, minus any source-defined
+        operations the connector would have contributed. Each row carries
+        the schema and parameter metadata an agent needs to plan a call.
+        """
+
+        name = OP_LIST_OPERATIONS
+        description = (
+            "List operations supported by this connection, with their "
+            "parameter declarations and result schemas."
+        )
+        kind = KIND_METADATA
+        schema = _LIST_OPERATIONS_BASE_SCHEMA
+
+        def pull(self, connector, options):
+            del options
+            for op in _resolve_operation_catalog(connector).values():
+                yield {
+                    "name": op.name,
+                    "description": op.description,
+                    "kind": op.kind,
+                    "result_schema_json": op.schema.json() if op.schema is not None else None,
+                    "parameters_json": _parameters_to_json(getattr(op, "parameters", ())),
+                }
+
+
+    # Ordered map of built-in operations. Source-defined operations with the same
+    # name replace these (see :func:`_resolve_operation_catalog`).
+    _BUILTIN_OPERATIONS: dict[str, AgentOperation] = {
+        op.name: op
+        for op in (
+            ListObjectsOp(),
+            ReadTableOp(),
+            GetObjectMetadataOp(),
+            ValidateConnectionOp(),
+            ListOperationsOp(),
+        )
+    }
+
+
+    # ---------------------------------------------------------------------------
+    # Dispatcher (plain class, not a DataSource)
+    # ---------------------------------------------------------------------------
+
+    # pylint: disable=invalid-name,missing-function-docstring
+    class IngestionAgentDispatcher:
+        """Dispatches ingestion-agent operations onto a pre-built connector.
+
+        Constructed by :class:`LakeflowSource` when the ``operation`` option
+        is set. The connector is built by ``LakeflowSource`` and passed in
+        — the dispatcher never instantiates it itself.
+
+        - ``schema()`` resolves the operation and asks it for its schema.
+          Metadata-kind ops automatically include a ``_meta`` column;
+          data-kind ops return the schema unchanged.
+        - ``reader()`` returns an :class:`IngestionAgentReader` that
+          applies ``_meta`` defaults and converts errors to a single
+          error row (metadata kind) or lets them propagate (data kind).
+
+        Init-error policy: when the connector failed to build, ``connector``
+        is ``None`` and ``init_error`` holds the exception. The reader uses
+        the operation's :attr:`AgentOperation.requires_connector` flag —
+        ops that don't need a connector (e.g. ``list_operations``) still
+        run; metadata-kind ops that do need one emit an error row;
+        data-kind ops re-raise.
+        """
+
+        def __init__(
+            self,
+            options: Mapping[str, str],
+            connector: Optional[LakeflowConnect],
+            init_error: Optional[BaseException] = None,
+        ) -> None:
+            self.options = dict(options)
+            self.connector = connector
+            self.init_error = init_error
+            self.operation_name = self.options.get(OPERATION)
+            if not self.operation_name:
+                raise ValueError(
+                    f"ingestion-agent dispatch requires an '{OPERATION}' option."
+                )
+            self.operation = _resolve_operation(connector, self.operation_name)
+
+        def schema(self) -> StructType:
+            if self.operation is None:
+                raise ValueError(
+                    f"Unknown ingestion-agent operation: {self.operation_name}"
+                )
+            # If the connector failed to init and the op needs it, we can't
+            # safely call resolve_schema (it may dereference the connector).
+            # Fall back to the op's static `schema` attribute and rely on the
+            # reader to emit an error row. Data-kind ops in this state can't
+            # produce a valid schema at all, so we raise the init error.
+            if self.init_error is not None and _requires_connector(self.operation):
+                if self.operation.kind == KIND_DATA:
+                    raise self.init_error
+                base = self.operation.schema or StructType([])
+            else:
+                # Data-kind ops compute their schema from request options
+                # (e.g. preview_table needs `tableName`). Validate required
+                # parameters now so resolve_schema doesn't trip over missing
+                # keys. Metadata-kind ops use a static schema; their parameter
+                # validation runs at read time and surfaces as an error row.
+                if self.operation.kind == KIND_DATA:
+                    _validate_required_parameters(self.operation, self.options)
+                base = self.operation.resolve_schema(self.connector, self.options)
+            if self.operation.kind == KIND_METADATA:
+                # Metadata-kind ops emit a single error row carrying only _meta
+                # when pull() raises. Relax data-column nullability so that
+                # error row validates against the schema.
+                return _ensure_meta_field(_relax_nullability(base))
+            return base
+
+        def reader(self, schema: StructType) -> "IngestionAgentReader":
+            return IngestionAgentReader(
+                options=self.options,
+                schema=schema,
+                operation=self.operation,
+                operation_name=self.operation_name,
+                connector=self.connector,
+                init_error=self.init_error,
+            )
+
+
+    # ---------------------------------------------------------------------------
+    # Reader
+    # ---------------------------------------------------------------------------
+
+    class IngestionAgentReader(DataSourceReader):
+        def __init__(
+            self,
+            options: Mapping[str, str],
+            schema: StructType,
+            operation: Optional[AgentOperation],
+            operation_name: str,
+            connector: Optional[LakeflowConnect],
+            init_error: Optional[BaseException],
+        ) -> None:
+            self.options = dict(options)
+            self.schema = schema
+            self.operation = operation
+            self.operation_name = operation_name
+            self.connector = connector
+            self.init_error = init_error
+
+        def partitions(self):
+            # All ingestion-agent operations are small, single-partition reads.
+            return [InputPartition(None)]
+
+        def read(self, _partition):
+            if self.operation is None:
+                yield from self._yield_error_rows(
+                    ValueError(
+                        f"Unknown ingestion-agent operation: {self.operation_name}"
+                    )
+                )
+                return
+
+            # If the connector failed and this op needs it, route by kind:
+            # metadata-kind → error row, data-kind → re-raise. validate_connection
+            # treats the init failure as the health-check answer and uses the
+            # canonical CONNECTION_FAILED code.
+            if self.init_error is not None and _requires_connector(self.operation):
+                if self.operation.kind == KIND_DATA:
+                    raise self.init_error
+                if self.operation.name == OP_VALIDATE_CONNECTION:
+                    yield from self._yield_error_rows(
+                        self.init_error, code=ErrorCode.CONNECTION_FAILED
+                    )
+                else:
+                    yield from self._yield_error_rows(self.init_error)
+                return
+
+            request_options = _agent_options(self.options)
+
+            if self.operation.kind == KIND_DATA:
+                # Data-kind ops surface exceptions as Spark exceptions and don't
+                # carry a _meta column.
+                for record in self.operation.pull(self.connector, request_options):
+                    yield parse_value(record, self.schema)
+                return
+
+            # Metadata-kind: framework wraps pull() exceptions into a single
+            # error row and setdefaults _meta on every row to {status: ok}.
+            try:
+                _validate_required_parameters(self.operation, request_options)
+                rows = self.operation.pull(self.connector, request_options)
+                # Materialise so generator-time errors are caught and converted to
+                # a single error row instead of escaping mid-iteration. Acceptable
+                # because all metadata ops produce small results.
+                rows = list(rows) if not isinstance(rows, list) else rows
+            except Exception as exc:  # pylint: disable=broad-except
+                rows = [self._error_row(exc)]
+            for row in rows:
+                yield parse_value(_with_default_meta(row), self.schema)
+
+        def _yield_error_rows(
+            self, exc: BaseException, code: Optional[str] = None
+        ):
+            yield parse_value(
+                _with_default_meta(self._error_row(exc, code=code)), self.schema
+            )
+
+        def _error_row(
+            self, exc: BaseException, code: Optional[str] = None
+        ) -> dict:
+            if code is None:
+                if isinstance(exc, AgentError):
+                    code = exc.code
+                elif isinstance(exc, ValueError):
+                    # Framework-detected input errors (legacy code paths still raise
+                    # ValueError for missing options).
+                    code = ErrorCode.BAD_REQUEST
+                else:
+                    code = ErrorCode.INTERNAL_ERROR
+            if isinstance(exc, (AgentError, ValueError)):
+                message = str(exc)
+            else:
+                message = _error_str(exc)
+            return {"_meta": _meta(status="error", code=code, message=message)}
+
+
+    # ---------------------------------------------------------------------------
+    # Operation catalog
+    # ---------------------------------------------------------------------------
+
+    def _source_operations(
+        connector: Optional[LakeflowConnect],
+    ) -> Mapping[str, AgentOperation]:
+        if not isinstance(connector, SupportsIngestionAgent):
+            return {}
+        try:
+            ops = connector.agent_operations()
+        except Exception:  # pylint: disable=broad-except
+            return {}
+        if not ops:
+            return {}
+        out: dict[str, AgentOperation] = {}
+        for op_name, op in ops.items():
+            if not isinstance(op, AgentOperation):
+                raise TypeError(
+                    f"agent_operations()[{op_name!r}] must be an AgentOperation "
+                    f"instance, got {type(op).__name__}."
+                )
+            out[op_name] = op
+        return out
+
+
+    def _resolve_operation_catalog(
+        connector: Optional[LakeflowConnect],
+    ) -> Mapping[str, AgentOperation]:
+        """Built-ins plus source-defined operations.
+
+        Source-defined entries replace built-ins with the same name. Ordering:
+        built-ins first (canonical order), then any new source-defined
+        operations (sorted by name for determinism).
+        """
+        source_ops = _source_operations(connector)
+        catalog: dict[str, AgentOperation] = {}
+        for name, op in _BUILTIN_OPERATIONS.items():
+            catalog[name] = source_ops.get(name, op)
+        extras = {n: o for n, o in source_ops.items() if n not in _BUILTIN_OPERATIONS}
+        for name in sorted(extras):
+            catalog[name] = extras[name]
+        return catalog
+
+
+    def _resolve_operation(
+        connector: Optional[LakeflowConnect], operation_name: str
+    ) -> Optional[AgentOperation]:
+        return _resolve_operation_catalog(connector).get(operation_name)
+
+
+    # ---------------------------------------------------------------------------
+    # Helpers
+    # ---------------------------------------------------------------------------
+
+    def _required_option(
+        options: Mapping[str, str], key: str, operation: str
+    ) -> str:
+        value = options.get(key)
+        if not value:
+            raise AgentError(
+                ErrorCode.BAD_REQUEST,
+                f"Operation '{operation}' requires option '{key}'.",
+            )
+        return value
+
+
+    def _validate_required_parameters(
+        op: AgentOperation, options: Mapping[str, str]
+    ) -> None:
+        """Reject calls missing a required :class:`Parameter`.
+
+        Raises :class:`AgentError` with ``bad_request`` when a required
+        parameter is absent. Called by the dispatcher before
+        ``resolve_schema`` (data-kind) and before ``pull`` (metadata-kind),
+        so ops can rely on declared required inputs being present.
+        """
+        for param in getattr(op, "parameters", ()):
+            if param.required and not options.get(param.name):
+                raise AgentError(
+                    ErrorCode.BAD_REQUEST,
+                    f"Operation '{op.name}' requires option '{param.name}'.",
+                )
+
+
+    def _parameters_to_json(params: Iterable[Parameter]) -> str:
+        """JSON-serialise a tuple of :class:`Parameter` declarations.
+
+        Surfaced by ``list_operations.parameters_json`` so agents can plan
+        calls. Fields with ``None`` default / enum are kept in the JSON for
+        a stable schema.
+        """
+        return json.dumps(
+            [
+                {
+                    "name": p.name,
+                    "type": p.type,
+                    "description": p.description,
+                    "required": p.required,
+                    "default": p.default,
+                    "enum": list(p.enum) if p.enum else None,
+                }
+                for p in params
+            ]
+        )
+
+
+    def _with_default_meta(row: Mapping[str, Any]) -> dict:
+        out = dict(row)
+        out.setdefault("_meta", _meta(status="ok"))
+        return out
+
+
+    def _normalize_meta(value: Any) -> dict:
+        if value is None:
+            return _meta(status="ok")
+        if isinstance(value, Mapping):
+            return {
+                "status": str(value.get("status", "ok")),
+                "code": _str_or_none(value.get("code")),
+                "message": _str_or_none(value.get("message")),
+            }
+        raise TypeError(
+            f"validate_connection produce() must return a mapping, "
+            f"got {type(value).__name__}."
+        )
+
+
+    def _str_or_none(value: Any) -> Optional[str]:
+        if value is None:
+            return None
+        return str(value)
+
+
+    def _ensure_meta_field(schema: StructType) -> StructType:
+        if any(f.name == "_meta" for f in schema.fields):
+            return schema
+        return StructType(list(schema.fields) + [_meta_field(nullable=True)])
+
+
+    def _relax_nullability(schema: StructType) -> StructType:
+        """Return a copy of ``schema`` with every non-``_meta`` field nullable.
+
+        Used for metadata-kind operations so the framework's error row (which
+        carries only ``_meta``) parses cleanly even when the operation
+        declared its data columns as non-nullable.
+        """
+        return StructType(
+            [
+                StructField(f.name, f.dataType, True, f.metadata)
+                if f.name != "_meta"
+                else f
+                for f in schema.fields
+            ]
+        )
+
+
+    # ---------------------------------------------------------------------------
+    # Default implementations of the built-in operations
+    # ---------------------------------------------------------------------------
+
+    def _default_list_objects(
+        connector: LakeflowConnect,
+        parent: Optional[str],
+        search: Optional[str],
+    ) -> Iterator[dict]:
+        """Flat listing of ``list_tables()`` — every table at the source root."""
+        if parent:
+            # The default connector has no hierarchy. A non-empty parent that
+            # isn't the source root is treated as "no children" rather than an
+            # error so the agent can probe paths without crashing.
+            return iter([])
+        pattern = re.compile(search) if search else None
+        return (
+            {"name": name, "type": "table", "full_path": name}
+            for name in connector.list_tables()
+            if pattern is None or pattern.search(name)
+        )
+
+
+    def _default_get_object_metadata(
+        connector: LakeflowConnect,
+        table_name: str,
+        table_options: Mapping[str, str],
+    ) -> Iterator[dict]:
+        """Flatten ``read_table_metadata`` into ``(key, value)`` rows.
+
+        Maps the connector's metadata keys to the standardised ingestion-agent
+        keys (``primary_key`` from ``primary_keys``, ``cursor_column`` from
+        ``cursor_field``) and preserves the others verbatim. The framework
+        applies the ``metadataKey`` filter case-insensitively above this.
+        """
+        raw = connector.read_table_metadata(table_name, table_options)
+
+        standardized: list[Tuple[str, Any]] = []
+        if "primary_keys" in raw:
+            standardized.append(("primary_key", raw["primary_keys"]))
+        if "cursor_field" in raw:
+            standardized.append(("cursor_column", raw["cursor_field"]))
+        if "ingestion_type" in raw:
+            standardized.append(("ingestion_type", raw["ingestion_type"]))
+        seen = {"primary_keys", "cursor_field", "ingestion_type"}
+        for key, value in raw.items():
+            if key in seen:
+                continue
+            standardized.append((key, value))
+
+        return ({"key": k, "value": _to_str_value(v)} for k, v in standardized)
+
+
+    def _default_read_records(
+        connector: LakeflowConnect,
+        table_name: str,
+        table_options: Mapping[str, str],
+    ) -> Iterator[Mapping[str, Any]]:
+        """Pull all records from ``connector.read_table`` and yield them."""
+        records, _offset = connector.read_table(table_name, None, dict(table_options))
+        return records
+
+
+    def _to_str_value(value: Any) -> Optional[str]:
+        if value is None:
+            return None
+        if isinstance(value, str):
+            return value
+        if isinstance(value, (list, tuple, dict, set)):
+            try:
+                return json.dumps(list(value) if isinstance(value, set) else value)
+            except (TypeError, ValueError):
+                return str(value)
+        return str(value)
+
+
+    ########################################################
     # src/databricks/labs/community_connector/sparkpds/lakeflow_datasource.py
     ########################################################
 
@@ -2059,6 +3934,27 @@ def register_lakeflow_source(spark):
 
         def __init__(self, options):
             self.options = options
+            self._agent_dispatcher: IngestionAgentDispatcher | None = None
+            # Agent-operation mode: ``operation`` option routes through the
+            # ingestion-agent dispatcher instead of the table read path. The
+            # dispatcher owns the option vocabulary and may run even when the
+            # connector failed to init (e.g. list_operations), so we build it
+            # eagerly and capture any init error.
+            if options.get(OPERATION):
+                connector: LakeflowConnect | None = None
+                init_error: BaseException | None = None
+                try:
+                    # TEMPORARY: LakeflowConnectImpl is replaced with the actual
+                    # implementation class during merge.
+                    connector = LakeflowConnectImpl(_connector_options(options))  # pylint: disable=abstract-class-instantiated
+                except Exception as exc:  # pylint: disable=broad-except
+                    init_error = exc
+                self._agent_dispatcher = IngestionAgentDispatcher(
+                    options=options, connector=connector, init_error=init_error
+                )
+                self.lakeflow_connect = connector
+                return
+
             table = options.get(TABLE_NAME)
             # Catch typos against the framework's reserved virtual-table namespace
             # early — falling through to the connector with an unknown
@@ -2079,6 +3975,8 @@ def register_lakeflow_source(spark):
             return "lakeflow_connect"
 
         def schema(self):
+            if self._agent_dispatcher is not None:
+                return self._agent_dispatcher.schema()
             table = self.options[TABLE_NAME]
             if table == METADATA_TABLE:
                 return StructType(
@@ -2105,6 +4003,8 @@ def register_lakeflow_source(spark):
             return self.lakeflow_connect.get_table_schema(table, self.options)
 
         def reader(self, schema: StructType):
+            if self._agent_dispatcher is not None:
+                return self._agent_dispatcher.reader(schema)
             return LakeflowBatchReader(self.options, schema, self.lakeflow_connect)
 
         def streamReader(self, schema: StructType):

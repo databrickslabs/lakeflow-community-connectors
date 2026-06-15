@@ -10,8 +10,10 @@ import pytest
 
 from databricks.labs.community_connector_cli import oauth_flow
 from databricks.labs.community_connector_cli.oauth_flow import (
+    _DEFAULT_U2M_REDIRECT_PORT,
     _generate_pkce,
     _pick_free_port,
+    _resolve_redirect_port,
     run_u2m_authorization_code_flow,
 )
 
@@ -33,6 +35,39 @@ def test_generate_pkce_pair_is_rfc7636_compliant():
 def test_pick_free_port_returns_usable_port():
     port = _pick_free_port()
     assert 1024 <= port <= 65535
+
+
+def test_resolve_redirect_port_prefers_default_when_free():
+    # No explicit port → stable default (assuming 33669 is free in CI).
+    assert _resolve_redirect_port(None) == _DEFAULT_U2M_REDIRECT_PORT
+
+
+def test_resolve_redirect_port_honours_explicit_port():
+    assert _resolve_redirect_port(8123) == 8123
+
+
+def test_resolve_redirect_port_zero_picks_random_free_port():
+    port = _resolve_redirect_port(0)
+    assert port not in (0, _DEFAULT_U2M_REDIRECT_PORT)
+    assert 1024 <= port <= 65535
+
+
+def test_resolve_redirect_port_falls_back_when_default_occupied():
+    import socket
+
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    try:
+        sock.bind(("127.0.0.1", _DEFAULT_U2M_REDIRECT_PORT))
+        sock.listen(1)
+    except OSError:
+        pytest.skip("default port already occupied by another process")
+
+    try:
+        port = _resolve_redirect_port(None)
+        assert port != _DEFAULT_U2M_REDIRECT_PORT
+        assert 1024 <= port <= 65535
+    finally:
+        sock.close()
 
 
 def test_run_u2m_flow_round_trip(monkeypatch):
