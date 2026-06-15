@@ -385,7 +385,12 @@ class HL7V2LakeflowConnect(LakeflowConnect):
 
         since = start_offset.get("cursor") if start_offset is not None else None
         if not since:
-            since = table_options.get("start_timestamp")
+            raw_start = table_options.get("start_timestamp")
+            # start_timestamp is user input and may arrive in a non-canonical
+            # shape (bare date, numeric offset, fractional seconds).  Normalize
+            # it before use, since `since` is compared lexicographically against
+            # self._init_ts and embedded verbatim in the GCP createTime filter.
+            since = self._normalize_timestamp(raw_start) if raw_start else None
         if not since:
             since = self._peek_oldest_create_time()
         if not since:
@@ -418,6 +423,14 @@ class HL7V2LakeflowConnect(LakeflowConnect):
         records = self._parse_api_messages(
             api_messages, segment_type, decode_base64=(self._source_type != "volume")
         )
+
+        # Sort by the cursor field (create_time) for BOTH source modes so the
+        # rewind invariant below holds: "the last row emitted" must also be
+        # "the highest create_time emitted".  GCP fetches ordered by sendTime
+        # (a different timestamp), so without this the capped-batch cursor
+        # could drop or duplicate same/out-of-order create_time rows.  Ties
+        # are broken by source_file for stable, deterministic batches.
+        records.sort(key=lambda r: (r.get("create_time") or "", r.get("source_file") or ""))
 
         # Admission control: cap rows yielded per batch.  Cuts only at
         # message boundaries (one HL7 message can produce many rows when
@@ -514,6 +527,22 @@ class HL7V2LakeflowConnect(LakeflowConnect):
         return messages
 
     @staticmethod
+    def _normalize_timestamp(ts: str) -> str:
+        """Normalize a user-supplied timestamp to the canonical cursor shape.
+
+        Cursors are compared lexicographically and embedded in GCP filter
+        strings, both of which assume the exact ``%Y-%m-%dT%H:%M:%SZ`` UTC
+        shape.  ``start_timestamp`` is user input and may arrive as a bare
+        date (``2024-01-01``), with a numeric offset (``+05:30``), or with
+        fractional seconds; parse it and re-emit in canonical UTC form so the
+        lexicographic compare and filter behave correctly.
+        """
+        dt = datetime.fromisoformat(ts.replace("Z", "+00:00"))
+        if dt.tzinfo is not None:
+            dt = dt.astimezone(timezone.utc).replace(tzinfo=None)
+        return dt.strftime("%Y-%m-%dT%H:%M:%SZ")
+
+    @staticmethod
     def _mtime_to_rfc3339(mtime: float) -> str:
         """Convert a POSIX mtime (seconds, float) to an RFC3339 UTC string.
 
@@ -603,10 +632,9 @@ class HL7V2LakeflowConnect(LakeflowConnect):
                 "sendTime": mtime_iso,
                 "name": entry.path,
             })
-        # Sort deterministically so per-batch ordering matches GCP mode
-        # (which sorts by sendTime asc); ties are broken by path for
-        # stability under same-second mtimes.
-        messages.sort(key=lambda m: (m["createTime"], m["name"]))
+        # Note: final ordering by create_time is applied centrally in
+        # read_table (after parsing) for both GCP and volume modes, so no
+        # mode-specific sort is needed here.
         return messages
 
     def _peek_oldest_create_time_volume(self) -> str | None:
@@ -665,7 +693,14 @@ class HL7V2LakeflowConnect(LakeflowConnect):
                         records.append(meta | _extract_msh(msh) | {"raw_segment": msh.raw_line})
                 else:
                     extractor = _EXTRACTORS.get(segment_type.lower(), _extract_generic)
-                    is_multi_segment = segment_type.lower() not in _SINGLE_SEGMENT_TABLES
+                    # Only inject set_id for KNOWN multi-segment tables.  Unknown/
+                    # Z-segments fall back to GENERIC_SEGMENT_SCHEMA (which has no
+                    # set_id column) and use primary_keys=['message_id'], so adding
+                    # set_id would produce a row shape the schema/PKs don't declare.
+                    is_known = segment_type.lower() in SEGMENT_SCHEMAS
+                    is_multi_segment = (
+                        is_known and segment_type.lower() not in _SINGLE_SEGMENT_TABLES
+                    )
                     for idx, seg in enumerate(msg.get_segments(segment_type), start=1):
                         row = meta | extractor(seg) | {"raw_segment": seg.raw_line}
                         if is_multi_segment and "set_id" not in row:

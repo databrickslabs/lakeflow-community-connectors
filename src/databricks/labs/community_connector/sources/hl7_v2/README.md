@@ -1,6 +1,6 @@
 # Lakeflow HL7 v2 Community Connector
 
-The Lakeflow HL7 v2 Connector parses HL7 v2 pipe-delimited messages and loads each segment type into its own Delta table, enabling structured analytics over clinical data. The connector supports incremental append-only ingestion, automatically tracking new messages by their send time.
+The Lakeflow HL7 v2 Connector parses HL7 v2 pipe-delimited messages and loads each segment type into its own Delta table, enabling structured analytics over clinical data. The connector supports incremental append-only ingestion, automatically tracking new messages by their `createTime` (GCP Healthcare API) or file modification time (Unity Catalog Volume).
 
 ## Supported Source Modes
 
@@ -82,7 +82,11 @@ Standard segments (PID, OBX, MSH, etc.) are auto-matched from `source_table` —
 }
 ```
 
-Z-segments produce a generic schema with columns `field_1` through `field_25` plus standard metadata columns.
+Z-segments produce a generic schema with columns `field_1` through `field_25` plus standard metadata columns. The primary key is `message_id` (no `set_id`).
+
+#### Why a positional `field_N` schema?
+
+Z-segments are site-specific and the HL7 standard leaves their structure undefined, so a generic connector can't know field names or types. We expose them positionally (`field_N` = the Nth HL7 field) because it matches how the HL7 ecosystem reads Z-segments (HAPI `getField(3)`, Mirth `seg['ZPV.3']`) and is easy to query in SQL. Each row also keeps `raw_segment` (the full original line), so anything beyond 25 fields or below the field level (components/repetitions) is still recoverable. Typed, named columns would require per-site structure declarations (e.g. Google Healthcare `ParserConfig`) and are intentionally out of scope. The width is the `_GENERIC_FIELD_COUNT` constant in `hl7_v2_schemas.py` (25, sized like rich standard segments such as `OBX`/`PR1`).
 
 ## Supported Objects
 
