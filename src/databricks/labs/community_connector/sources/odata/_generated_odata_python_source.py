@@ -725,6 +725,82 @@ def register_lakeflow_source(spark):
         return segments
 
 
+    def resolve_segment_filters(
+        table_options: dict[str, str] | None,
+        segments: list[str],
+    ) -> dict[int, str]:
+        """Parse ``filter_at_<segment>`` and ``filter_at_<idx>`` table-option
+        keys into a ``{level: filter_string}`` mapping.
+
+        Per-segment filters let the user push a ``$filter`` to the exact
+        walk level (or ``$expand`` clause) that owns the property. Without
+        this, the table's single ``filter`` option lands at one URL only
+        (leaf for N+1 mode, top for expand mode), leaving intermediate
+        levels unfiltered and forcing a full fan-out.
+
+        Two equivalent key forms are accepted:
+
+        * **By segment name** — ``filter_at_Instances=Id eq 5`` matches the
+          segment literally as it appears in the contained path / URL.
+        * **By zero-based index** — ``filter_at_0=Id eq 5`` matches the
+          level positionally. Useful when nav-property names repeat at
+          different depths.
+
+        Both forms may be set; the **index form wins on conflict**, since
+        it's the more explicit of the two. Unknown segment names and
+        out-of-range indices raise ``ValueError`` immediately so typos
+        don't silently produce a full-fan-out walk.
+        """
+        if not table_options:
+            return {}
+        out: dict[int, str] = {}
+        seg_to_idx = {s: i for i, s in enumerate(segments)}
+        # Pass 1: name-keyed. Index-keyed entries override these on
+        # conflict, so process them after.
+        for key, value in table_options.items():
+            if not key.startswith("filter_at_"):
+                continue
+            suffix = key[len("filter_at_") :]
+            if suffix.isdigit():
+                continue
+            if suffix not in seg_to_idx:
+                raise ValueError(
+                    f"Invalid table option {key}={value!r}: segment "
+                    f"{suffix!r} not in path {segments!r}. Valid "
+                    f"segments: {list(seg_to_idx)}."
+                )
+            out[seg_to_idx[suffix]] = value
+        # Pass 2: index-keyed (overrides name form when both target the
+        # same level).
+        for key, value in table_options.items():
+            if not key.startswith("filter_at_"):
+                continue
+            suffix = key[len("filter_at_") :]
+            if not suffix.isdigit():
+                continue
+            idx = int(suffix)
+            if not 0 <= idx < len(segments):
+                raise ValueError(
+                    f"Invalid table option {key}={value!r}: index {idx} "
+                    f"out of range for path with {len(segments)} segments "
+                    f"(valid: 0..{len(segments) - 1})."
+                )
+            out[idx] = value
+        return out
+
+
+    def combine_filters(*clauses: str | None) -> str | None:
+        """``AND`` non-empty OData ``$filter`` clauses, wrapping each in
+        parens to preserve precedence. Returns ``None`` when nothing is
+        non-empty so callers can omit ``$filter`` entirely."""
+        nonempty = [c for c in clauses if c]
+        if not nonempty:
+            return None
+        if len(nonempty) == 1:
+            return nonempty[0]
+        return " and ".join(f"({c})" for c in nonempty)
+
+
     def contained_nav_props(entity_type: ET.Element) -> list[tuple[str, str]]:
         """``[(nav_name, target_type_ref), ...]`` for ContainsTarget collection
         nav props declared directly on this type; singletons skipped."""
@@ -844,7 +920,7 @@ def register_lakeflow_source(spark):
             cursor_order: str | None = None,
             cursor_select: str | None = None,
         ) -> str:
-            """``A?...&$expand=B($expand=C($expand=D))`` for the full chain.
+            """``A?...&$expand=B($top=N;$expand=C($top=N;$expand=D($top=N)))`` for the full chain.
 
             When ``cursor_level`` is set, ``cursor_filter``/``cursor_order``/
             ``cursor_select`` are injected at the segment that owns the
@@ -854,28 +930,50 @@ def register_lakeflow_source(spark):
             properties from ``$expand`` responses by default; explicitly
             requesting the cursor guarantees the server projects it onto
             the ancestor rows so it can be stamped onto leaf rows. OData
-            v4 §5.1.1.13: inner ``$expand`` options are separated by ``;``."""
+            v4 §5.1.1.13: inner ``$expand`` options are separated by ``;``.
+
+            ``$top`` is emitted at every nested ``$expand`` level so users
+            can tune the inner page size — without it the server picks
+            whatever default it likes (e.g. Hexagon SCApi defaults to 100,
+            which means an 8x request fan-out via ``<NavProp>@odata.nextLink``
+            for a parent with 800 children). ``expand_inner_page_size``
+            overrides; falls back to the top-level ``page_size`` so the
+            single-knob case stays simple. Servers that don't honour
+            ``$top`` inside ``$expand`` ignore it — the wire format is
+            still valid OData v4.
+            """
+            segment_filters = resolve_segment_filters(table_options, segments)
             top, *children = segments
             base = join_url(self.service_url, top)
-            if cursor_level == 0:
-                query = self._format_query_params(table_options, cursor_filter, cursor_order)
-            else:
-                query = self._format_query_params(table_options, None, None)
+            top_extra = combine_filters(
+                cursor_filter if cursor_level == 0 else None,
+                segment_filters.get(0),
+            )
+            query = self._format_query_params(
+                table_options,
+                top_extra,
+                cursor_order if cursor_level == 0 else None,
+            )
             if not children:
                 return f"{base}?{query}"
+            opts = table_options or {}
+            inner_top = opts.get("expand_inner_page_size", opts.get("page_size", "1000"))
             inner = ""
             for i in range(len(children) - 1, -1, -1):
-                parts: list[str] = []
-                if cursor_level == i + 1:
-                    if cursor_select:
-                        parts.append(f"$select={cursor_select}")
-                    if cursor_filter:
-                        parts.append(f"$filter={cursor_filter}")
-                    if cursor_order:
-                        parts.append(f"$orderby={cursor_order}")
+                parts: list[str] = [f"$top={inner_top}"]
+                level_filter = combine_filters(
+                    cursor_filter if cursor_level == i + 1 else None,
+                    segment_filters.get(i + 1),
+                )
+                if cursor_level == i + 1 and cursor_select:
+                    parts.append(f"$select={cursor_select}")
+                if level_filter:
+                    parts.append(f"$filter={level_filter}")
+                if cursor_level == i + 1 and cursor_order:
+                    parts.append(f"$orderby={cursor_order}")
                 if inner:
                     parts.append(f"$expand={inner}")
-                inner = f"{children[i]}({';'.join(parts)})" if parts else children[i]
+                inner = f"{children[i]}({';'.join(parts)})"
             return f"{base}?{query}&$expand={inner}"
 
         # --- read paths --------------------------------------------------------
@@ -994,6 +1092,7 @@ def register_lakeflow_source(spark):
             top-level entity's PKs (and, when ``cursor_level == 0``, the
             cursor value). The supplied subset is consumed in order without
             re-fetching."""
+            segment_filters = resolve_segment_filters(table_options, segments)
 
             def _walk(level: int, chain: list[dict[str, Any]], cur_val: Any):
                 if level == len(segments) - 1:
@@ -1027,6 +1126,8 @@ def register_lakeflow_source(spark):
                         "page_size": (table_options or {}).get("page_size", "1000"),
                         "select": ",".join(select_cols),
                     }
+                    if segment_filters.get(level):
+                        opts["filter"] = segment_filters[level]
                     url = (
                         self._build_url(segments[0], opts, extra_filter=extra_filter, order_by=order_by)
                         if level == 0
@@ -1056,11 +1157,13 @@ def register_lakeflow_source(spark):
         ) -> Iterator[list[dict[str, Any]]]:
             """Yield every ancestor key chain (len = len(segments) - 1) reaching
             the leaf. Each level fetched with ``$select=<pks>``; user ``filter``
-            not forwarded.
+            not forwarded — that string lands at the leaf URL only. To filter
+            an ancestor walk use ``filter_at_<segment>`` / ``filter_at_<idx>``.
 
             ``top_parent_rows`` lets a partitioned caller supply a pre-
             discovered subset of level-0 rows; when provided, the level-0
             HTTP fetch is skipped and the rows are consumed in order."""
+            segment_filters = resolve_segment_filters(table_options, segments)
 
             def _walk(level: int, chain: list[dict[str, Any]]):
                 if level == len(segments) - 1:
@@ -1082,6 +1185,8 @@ def register_lakeflow_source(spark):
                         "page_size": (table_options or {}).get("page_size", "1000"),
                         "select": ",".join(ancestor_pks),
                     }
+                    if segment_filters.get(level):
+                        opts["filter"] = segment_filters[level]
                     url = (
                         self._build_url(segments[0], opts)
                         if level == 0
@@ -1109,10 +1214,14 @@ def register_lakeflow_source(spark):
             segments = parse_contained_path(table_name) or [table_name]
             namespace = (table_options or {}).get("namespace")
             fk_columns = self._resolve_fk_columns(segments, namespace)
+            segment_filters = resolve_segment_filters(table_options, segments)
+            leaf_extra = segment_filters.get(len(segments) - 1)
 
             def _emit() -> Iterator[dict]:
                 for chain in self._iter_parent_key_chains(segments, namespace, table_options):
-                    url = self._build_contained_url(segments, chain, table_options)
+                    url = self._build_contained_url(
+                        segments, chain, table_options, extra_filter=leaf_extra
+                    )
                     for row in self._fetch_pages(url):
                         self._tag_with_ancestor_fks(row, segments, chain, fk_columns)
                         yield row
@@ -1234,12 +1343,24 @@ def register_lakeflow_source(spark):
             threaded down the recursion: when ``level == cursor_level`` the
             captured value snaps to ``row[cursor_field]`` and propagates to
             every leaf row beneath, stamped only when the leaf doesn't
-            already carry the column."""
+            already carry the column.
+
+            OData v4 §11.2.6.1: when an expanded collection is server-paged
+            the response carries a ``<NavProp>@odata.nextLink`` annotation
+            alongside the inline page. The spec requires that link to
+            preserve the original ``$expand`` chain, so following it yields
+            the rest of the children with their grandchildren still
+            expanded. Without this walk, a parent with more children than
+            the server's default page size silently truncates to one page.
+            """
             cur_field, cur_level, cur_val = cursor_ctx or (None, -1, None)
             if cur_field and level == cur_level:
                 cur_val = row.get(cur_field)
             if level == len(segments) - 1:
-                clean = {k: v for k, v in row.items() if not k.startswith("@odata.")}
+                # Drop both top-level (``@odata.foo``) and per-property
+                # (``Foo@odata.nextLink``) annotations from leaf rows; the
+                # framework wouldn't know what to do with either.
+                clean = {k: v for k, v in row.items() if "@odata." not in k}
                 self._tag_with_ancestor_fks(clean, segments, chain, fk_columns)
                 if cur_field and cur_val is not None and clean.get(cur_field) is None:
                     clean[cur_field] = cur_val
@@ -1248,10 +1369,19 @@ def register_lakeflow_source(spark):
             pks = pks_per_level[level]
             chain.append({pk: row.get(pk) for pk in pks})
             next_ctx = (cur_field, cur_level, cur_val) if cur_field else None
-            for child in row.get(segments[level + 1]) or []:
+            next_seg = segments[level + 1]
+            for child in row.get(next_seg) or []:
                 self._flatten_expand_response(
                     level + 1, child, segments, pks_per_level, chain, fk_columns, out, next_ctx
                 )
+            inner_next = row.get(f"{next_seg}@odata.nextLink")
+            if inner_next:
+                resolved = urljoin(self.service_url, inner_next)
+                for page_rows, _ in self._fetch_pages_with_links(resolved):
+                    for child in page_rows:
+                        self._flatten_expand_response(
+                            level + 1, child, segments, pks_per_level, chain, fk_columns, out, next_ctx
+                        )
             chain.pop()
 
         def _leaf_cursor_order_by(
@@ -1277,6 +1407,7 @@ def register_lakeflow_source(spark):
             chain_next_link: str | None,
             max_records: int,
             fk_columns: dict[tuple[str, str], str],
+            leaf_segment_filter: str | None = None,
         ) -> tuple[list[dict], bool, int, int, str | None]:
             """Drive the per-parent fetch loop (leaf-cursor mode).
 
@@ -1335,7 +1466,10 @@ def register_lakeflow_source(spark):
                         segments,
                         chain,
                         table_options,
-                        extra_filter=self._cursor_filter(cursor_field, chain_since),
+                        extra_filter=combine_filters(
+                            self._cursor_filter(cursor_field, chain_since),
+                            leaf_segment_filter,
+                        ),
                         order_by=order_by,
                     )
                 cap_hit_in_page = False
@@ -1436,6 +1570,7 @@ def register_lakeflow_source(spark):
             max_records = int((table_options or {}).get("max_records_per_batch", "100000"))
             order_by = self._leaf_cursor_order_by(table_name, namespace, cursor_field)
             chains_iter = self._iter_parent_key_chains(segments, namespace, table_options)
+            segment_filters = resolve_segment_filters(table_options, segments)
             (
                 emitted,
                 truncated,
@@ -1454,6 +1589,7 @@ def register_lakeflow_source(spark):
                 chain_next_link_in,
                 max_records,
                 self._resolve_fk_columns(segments, namespace),
+                leaf_segment_filter=segment_filters.get(len(segments) - 1),
             )
             if truncated:
                 if chain_next_link_out is not None:
@@ -1515,6 +1651,7 @@ def register_lakeflow_source(spark):
             chains_iter = self._iter_parent_chains_with_cursor(
                 segments, namespace, table_options, cursor_level, cursor_field, since
             )
+            segment_filters = resolve_segment_filters(table_options, segments)
             walk_state = self._walk_ancestor_chains(
                 segments,
                 chains_iter,
@@ -1524,6 +1661,7 @@ def register_lakeflow_source(spark):
                 (start_offset or {}).get("chain_next_link"),
                 int((table_options or {}).get("max_records_per_batch", "100000")),
                 self._resolve_fk_columns(segments, namespace),
+                leaf_segment_filter=segment_filters.get(len(segments) - 1),
             )
             end_offset = self._ancestor_cursor_offset(walk_state, start_offset, since, cursor_field)
             if start_offset and start_offset == end_offset:
@@ -1540,6 +1678,7 @@ def register_lakeflow_source(spark):
             chain_next_link_in: str | None,
             max_records: int,
             fk_columns: dict[tuple[str, str], str],
+            leaf_segment_filter: str | None = None,
         ) -> dict[str, Any]:
             """Walk ancestor chains, fetching each chain's leaf collection
             and stamping rows with the chain's cursor.
@@ -1566,7 +1705,9 @@ def register_lakeflow_source(spark):
                 if parent_idx == parent_idx_start and chain_next_link_in is not None:
                     initial_url = chain_next_link_in
                 else:
-                    initial_url = self._build_contained_url(segments, chain, table_options)
+                    initial_url = self._build_contained_url(
+                        segments, chain, table_options, extra_filter=leaf_segment_filter
+                    )
                 page_next_url: str | None = None
                 for page_rows, page_next_url in self._fetch_pages_with_links(initial_url):
                     for row in page_rows:
@@ -2406,7 +2547,8 @@ def register_lakeflow_source(spark):
             # streamed out before the next page is requested. Materialising
             # the whole result into a list (the prior shape) pinned every
             # row in memory at once on large tables.
-            url = self._build_url(table_name, table_options)
+            segment_filters = _resolve_segment_filters(table_options, [table_name])
+            url = self._build_url(table_name, table_options, extra_filter=segment_filters.get(0))
             return self._fetch_pages(url), {}
 
         def _read_incremental(
@@ -2431,7 +2573,11 @@ def register_lakeflow_source(spark):
             #     literal and the server's column type because we don't
             #     manufacture a timestamp ceiling out of wall-clock time.
             since = start_offset.get("cursor") if start_offset else None
-            extra_filter = self._cursor_filter(cursor_field, since)
+            segment_filters = _resolve_segment_filters(table_options, [table_name])
+            extra_filter = _combine_filters(
+                self._cursor_filter(cursor_field, since),
+                segment_filters.get(0),
+            )
             # Append primary-key columns as $orderby tie-breakers. Without a
             # fully unique sort, OData servers that paginate internally (via
             # `@odata.nextLink` with a value-based skiptoken) can split a
@@ -2628,7 +2774,11 @@ def register_lakeflow_source(spark):
                 return prev_next_link, None
             if prev_delta_link is not None:
                 return prev_delta_link, None
-            return self._build_url(table_name, table_options or {}), {"Prefer": _DELTA_PREFER}
+            segment_filters = _resolve_segment_filters(table_options, [table_name])
+            return (
+                self._build_url(table_name, table_options or {}, extra_filter=segment_filters.get(0)),
+                {"Prefer": _DELTA_PREFER},
+            )
 
         def _delta_walk_pages(
             self,
@@ -2944,7 +3094,16 @@ def register_lakeflow_source(spark):
                 params.append(f"$select={opts['select']}")
             filters = [f for f in (opts.get("filter"), extra_filter) if f]
             if filters:
-                params.append(f"$filter={' and '.join(f'({f})' for f in filters)}")
+                if len(filters) == 1:
+                    # A single clause goes on the wire as-is. Wrapping it
+                    # in parens would compound with any pre-wrapped clause
+                    # passed via ``extra_filter`` (e.g. a multi-source
+                    # ``combine_filters`` result), producing triple-paren
+                    # ``$filter=((A) and (B))`` shapes that are harder to
+                    # eyeball.
+                    params.append(f"$filter={filters[0]}")
+                else:
+                    params.append(f"$filter={' and '.join(f'({f})' for f in filters)}")
             if order_by:
                 params.append(f"$orderby={order_by}")
             return "&".join(params)
@@ -3868,9 +4027,11 @@ def register_lakeflow_source(spark):
     _trim_to_distinct_cursor_boundary = trim_to_distinct_cursor_boundary
     _trim_to_distinct_cursor_boundary = trim_to_distinct_cursor_boundary
     _CONTAINED_PATH_SEP = CONTAINED_PATH_SEP
+    _combine_filters = combine_filters
     _join_url = join_url
     _odata_literal = odata_literal
     _parse_contained_path = parse_contained_path
+    _resolve_segment_filters = resolve_segment_filters
 
 
     ########################################################
