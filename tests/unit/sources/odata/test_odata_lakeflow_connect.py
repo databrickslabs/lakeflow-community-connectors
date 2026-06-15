@@ -2413,6 +2413,160 @@ def test_contained_expand_strips_odata_annotations_on_leaf_rows():
 
 
 @responses.activate
+def test_contained_expand_follows_inner_collection_nextlink():
+    """OData v4 §11.2.6.1: when an inner expanded collection is server-
+    paged, the response carries ``<NavProp>@odata.nextLink`` alongside
+    the inline page. Without following it we silently truncate to one
+    page — the symptom the user reported (got 100 rows when the parent
+    has 735 children)."""
+    _mock_nested_metadata()
+    inner_next = f"{SERVICE_URL}Parents(1)/Children?$skiptoken=p2"
+    responses.get(
+        f"{SERVICE_URL}Parents",
+        json={
+            "value": [
+                {
+                    "Id": 1,
+                    "Name": "P1",
+                    "Children": [
+                        {"Id": 11, "Label": "a", "ModifiedAt": "2024-01-01T00:00:00Z"},
+                        {"Id": 12, "Label": "b", "ModifiedAt": "2024-01-02T00:00:00Z"},
+                    ],
+                    "Children@odata.nextLink": inner_next,
+                }
+            ]
+        },
+    )
+    responses.get(
+        inner_next,
+        json={
+            "value": [
+                {"Id": 13, "Label": "c", "ModifiedAt": "2024-01-03T00:00:00Z"},
+                {"Id": 14, "Label": "d", "ModifiedAt": "2024-01-04T00:00:00Z"},
+            ]
+        },
+    )
+    c = _make()
+    records, _ = c.read_table("Parents__Children", None, {"expand_contained": "true"})
+    rows = list(records)
+    assert [r["Id"] for r in rows] == [11, 12, 13, 14]
+    assert all(r["Parents_Id"] == 1 for r in rows)
+
+
+@responses.activate
+def test_contained_expand_follows_inner_nextlink_chain():
+    """Multi-page inner nextLink: the second page's response also carries
+    a nextLink; the connector must walk the whole chain, not just one
+    follow-up."""
+    _mock_nested_metadata()
+    inner_p2 = f"{SERVICE_URL}Parents(1)/Children?$skiptoken=p2"
+    inner_p3 = f"{SERVICE_URL}Parents(1)/Children?$skiptoken=p3"
+    responses.get(
+        f"{SERVICE_URL}Parents",
+        json={
+            "value": [
+                {
+                    "Id": 1,
+                    "Children": [{"Id": 11, "Label": "a", "ModifiedAt": "2024-01-01T00:00:00Z"}],
+                    "Children@odata.nextLink": inner_p2,
+                }
+            ]
+        },
+    )
+    responses.get(
+        inner_p2,
+        json={
+            "value": [{"Id": 12, "Label": "b", "ModifiedAt": "2024-01-02T00:00:00Z"}],
+            "@odata.nextLink": inner_p3,
+        },
+    )
+    responses.get(
+        inner_p3,
+        json={"value": [{"Id": 13, "Label": "c", "ModifiedAt": "2024-01-03T00:00:00Z"}]},
+    )
+    c = _make()
+    records, _ = c.read_table("Parents__Children", None, {"expand_contained": "true"})
+    rows = list(records)
+    assert [r["Id"] for r in rows] == [11, 12, 13]
+    assert all(r["Parents_Id"] == 1 for r in rows)
+
+
+@responses.activate
+def test_contained_expand_follows_inner_nextlink_at_grandchild_level():
+    """Three-segment path: the grandchild collection under a single
+    child parent is paged. The continuation URL preserves the original
+    request context (per OData spec), so the connector treats it the
+    same as the inline page."""
+    _mock_nested_metadata()
+    notes_next = f"{SERVICE_URL}Parents(1)/Children(10)/Notes?$skiptoken=p2"
+    responses.get(
+        f"{SERVICE_URL}Parents",
+        json={
+            "value": [
+                {
+                    "Id": 1,
+                    "Children": [
+                        {
+                            "Id": 10,
+                            "Notes": [{"Id": 100, "Text": "x"}],
+                            "Notes@odata.nextLink": notes_next,
+                        }
+                    ],
+                }
+            ]
+        },
+    )
+    responses.get(
+        notes_next,
+        json={"value": [{"Id": 101, "Text": "y"}, {"Id": 102, "Text": "z"}]},
+    )
+    c = _make()
+    records, _ = c.read_table("Parents__Children__Notes", None, {"expand_contained": "true"})
+    rows = list(records)
+    assert {r["Id"] for r in rows} == {100, 101, 102}
+    assert all(r["Parents_Id"] == 1 and r["Children_Id"] == 10 for r in rows)
+
+
+@responses.activate
+def test_contained_expand_strips_inner_nextlink_annotation_from_leaf():
+    """When the leaf entity carries a ``<NavProp>@odata.nextLink`` key
+    (e.g. for some further nav collection the connector didn't request),
+    it must not leak as a column on the emitted row — that key contains
+    ``@odata.`` but doesn't start with it, so the prior strip filter
+    missed it."""
+    _mock_nested_metadata()
+    responses.get(
+        f"{SERVICE_URL}Parents",
+        json={
+            "value": [
+                {
+                    "Id": 1,
+                    "Children": [
+                        {
+                            "Id": 11,
+                            "Label": "a",
+                            "ModifiedAt": "2024-01-01T00:00:00Z",
+                            "Notes@odata.nextLink": "ignored",
+                        }
+                    ],
+                }
+            ]
+        },
+    )
+    c = _make()
+    records, _ = c.read_table("Parents__Children", None, {"expand_contained": "true"})
+    rows = list(records)
+    assert rows == [
+        {
+            "Parents_Id": 1,
+            "Id": 11,
+            "Label": "a",
+            "ModifiedAt": "2024-01-01T00:00:00Z",
+        }
+    ]
+
+
+@responses.activate
 def test_contained_expand_invalid_value_raises():
     _mock_nested_metadata()
     c = _make()

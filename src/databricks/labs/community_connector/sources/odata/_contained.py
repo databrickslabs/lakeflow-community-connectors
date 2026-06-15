@@ -18,6 +18,7 @@ against the concrete class.
 from datetime import date, datetime
 from decimal import Decimal
 from typing import Any, Iterator
+from urllib.parse import urljoin
 from xml.etree import ElementTree as ET
 
 from pyspark.sql.types import StructField
@@ -622,12 +623,24 @@ class ContainedNavMixin:
         threaded down the recursion: when ``level == cursor_level`` the
         captured value snaps to ``row[cursor_field]`` and propagates to
         every leaf row beneath, stamped only when the leaf doesn't
-        already carry the column."""
+        already carry the column.
+
+        OData v4 §11.2.6.1: when an expanded collection is server-paged
+        the response carries a ``<NavProp>@odata.nextLink`` annotation
+        alongside the inline page. The spec requires that link to
+        preserve the original ``$expand`` chain, so following it yields
+        the rest of the children with their grandchildren still
+        expanded. Without this walk, a parent with more children than
+        the server's default page size silently truncates to one page.
+        """
         cur_field, cur_level, cur_val = cursor_ctx or (None, -1, None)
         if cur_field and level == cur_level:
             cur_val = row.get(cur_field)
         if level == len(segments) - 1:
-            clean = {k: v for k, v in row.items() if not k.startswith("@odata.")}
+            # Drop both top-level (``@odata.foo``) and per-property
+            # (``Foo@odata.nextLink``) annotations from leaf rows; the
+            # framework wouldn't know what to do with either.
+            clean = {k: v for k, v in row.items() if "@odata." not in k}
             self._tag_with_ancestor_fks(clean, segments, chain, fk_columns)
             if cur_field and cur_val is not None and clean.get(cur_field) is None:
                 clean[cur_field] = cur_val
@@ -636,10 +649,19 @@ class ContainedNavMixin:
         pks = pks_per_level[level]
         chain.append({pk: row.get(pk) for pk in pks})
         next_ctx = (cur_field, cur_level, cur_val) if cur_field else None
-        for child in row.get(segments[level + 1]) or []:
+        next_seg = segments[level + 1]
+        for child in row.get(next_seg) or []:
             self._flatten_expand_response(
                 level + 1, child, segments, pks_per_level, chain, fk_columns, out, next_ctx
             )
+        inner_next = row.get(f"{next_seg}@odata.nextLink")
+        if inner_next:
+            resolved = urljoin(self.service_url, inner_next)
+            for page_rows, _ in self._fetch_pages_with_links(resolved):
+                for child in page_rows:
+                    self._flatten_expand_response(
+                        level + 1, child, segments, pks_per_level, chain, fk_columns, out, next_ctx
+                    )
         chain.pop()
 
     def _leaf_cursor_order_by(
