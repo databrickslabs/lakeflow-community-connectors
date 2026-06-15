@@ -57,8 +57,8 @@ disable = ["too-few-public-methods"]
 # dataclasses shuffles the count from the signature into the
 # dataclass without reducing real complexity. The thresholds below
 # match the actual maxima in the codebase plus a small margin.
-max-args = 12
-max-positional-arguments = 12
+max-args = 13
+max-positional-arguments = 13
 max-locals = 28
 max-branches = 20
 max-statements = 60
@@ -76,4 +76,4 @@ max-attributes = 12
 # refactoring; further splitting fights the mixin layout
 # (``ContainedNavMixin`` already lives in its own file). 1850 is the
 # soft cap.
-max-module-lines = 2000
+max-module-lines = 2050

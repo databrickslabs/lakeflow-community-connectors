@@ -114,6 +114,82 @@ def parse_contained_path(table_name: str) -> list[str] | None:
     return segments
 
 
+def resolve_segment_filters(
+    table_options: dict[str, str] | None,
+    segments: list[str],
+) -> dict[int, str]:
+    """Parse ``filter_at_<segment>`` and ``filter_at_<idx>`` table-option
+    keys into a ``{level: filter_string}`` mapping.
+
+    Per-segment filters let the user push a ``$filter`` to the exact
+    walk level (or ``$expand`` clause) that owns the property. Without
+    this, the table's single ``filter`` option lands at one URL only
+    (leaf for N+1 mode, top for expand mode), leaving intermediate
+    levels unfiltered and forcing a full fan-out.
+
+    Two equivalent key forms are accepted:
+
+    * **By segment name** — ``filter_at_Instances=Id eq 5`` matches the
+      segment literally as it appears in the contained path / URL.
+    * **By zero-based index** — ``filter_at_0=Id eq 5`` matches the
+      level positionally. Useful when nav-property names repeat at
+      different depths.
+
+    Both forms may be set; the **index form wins on conflict**, since
+    it's the more explicit of the two. Unknown segment names and
+    out-of-range indices raise ``ValueError`` immediately so typos
+    don't silently produce a full-fan-out walk.
+    """
+    if not table_options:
+        return {}
+    out: dict[int, str] = {}
+    seg_to_idx = {s: i for i, s in enumerate(segments)}
+    # Pass 1: name-keyed. Index-keyed entries override these on
+    # conflict, so process them after.
+    for key, value in table_options.items():
+        if not key.startswith("filter_at_"):
+            continue
+        suffix = key[len("filter_at_") :]
+        if suffix.isdigit():
+            continue
+        if suffix not in seg_to_idx:
+            raise ValueError(
+                f"Invalid table option {key}={value!r}: segment "
+                f"{suffix!r} not in path {segments!r}. Valid "
+                f"segments: {list(seg_to_idx)}."
+            )
+        out[seg_to_idx[suffix]] = value
+    # Pass 2: index-keyed (overrides name form when both target the
+    # same level).
+    for key, value in table_options.items():
+        if not key.startswith("filter_at_"):
+            continue
+        suffix = key[len("filter_at_") :]
+        if not suffix.isdigit():
+            continue
+        idx = int(suffix)
+        if not 0 <= idx < len(segments):
+            raise ValueError(
+                f"Invalid table option {key}={value!r}: index {idx} "
+                f"out of range for path with {len(segments)} segments "
+                f"(valid: 0..{len(segments) - 1})."
+            )
+        out[idx] = value
+    return out
+
+
+def combine_filters(*clauses: str | None) -> str | None:
+    """``AND`` non-empty OData ``$filter`` clauses, wrapping each in
+    parens to preserve precedence. Returns ``None`` when nothing is
+    non-empty so callers can omit ``$filter`` entirely."""
+    nonempty = [c for c in clauses if c]
+    if not nonempty:
+        return None
+    if len(nonempty) == 1:
+        return nonempty[0]
+    return " and ".join(f"({c})" for c in nonempty)
+
+
 def contained_nav_props(entity_type: ET.Element) -> list[tuple[str, str]]:
     """``[(nav_name, target_type_ref), ...]`` for ContainsTarget collection
     nav props declared directly on this type; singletons skipped."""
@@ -255,12 +331,18 @@ class ContainedNavMixin:
         ``$top`` inside ``$expand`` ignore it — the wire format is
         still valid OData v4.
         """
+        segment_filters = resolve_segment_filters(table_options, segments)
         top, *children = segments
         base = join_url(self.service_url, top)
-        if cursor_level == 0:
-            query = self._format_query_params(table_options, cursor_filter, cursor_order)
-        else:
-            query = self._format_query_params(table_options, None, None)
+        top_extra = combine_filters(
+            cursor_filter if cursor_level == 0 else None,
+            segment_filters.get(0),
+        )
+        query = self._format_query_params(
+            table_options,
+            top_extra,
+            cursor_order if cursor_level == 0 else None,
+        )
         if not children:
             return f"{base}?{query}"
         opts = table_options or {}
@@ -268,13 +350,16 @@ class ContainedNavMixin:
         inner = ""
         for i in range(len(children) - 1, -1, -1):
             parts: list[str] = [f"$top={inner_top}"]
-            if cursor_level == i + 1:
-                if cursor_select:
-                    parts.append(f"$select={cursor_select}")
-                if cursor_filter:
-                    parts.append(f"$filter={cursor_filter}")
-                if cursor_order:
-                    parts.append(f"$orderby={cursor_order}")
+            level_filter = combine_filters(
+                cursor_filter if cursor_level == i + 1 else None,
+                segment_filters.get(i + 1),
+            )
+            if cursor_level == i + 1 and cursor_select:
+                parts.append(f"$select={cursor_select}")
+            if level_filter:
+                parts.append(f"$filter={level_filter}")
+            if cursor_level == i + 1 and cursor_order:
+                parts.append(f"$orderby={cursor_order}")
             if inner:
                 parts.append(f"$expand={inner}")
             inner = f"{children[i]}({';'.join(parts)})"
@@ -396,6 +481,7 @@ class ContainedNavMixin:
         top-level entity's PKs (and, when ``cursor_level == 0``, the
         cursor value). The supplied subset is consumed in order without
         re-fetching."""
+        segment_filters = resolve_segment_filters(table_options, segments)
 
         def _walk(level: int, chain: list[dict[str, Any]], cur_val: Any):
             if level == len(segments) - 1:
@@ -429,6 +515,8 @@ class ContainedNavMixin:
                     "page_size": (table_options or {}).get("page_size", "1000"),
                     "select": ",".join(select_cols),
                 }
+                if segment_filters.get(level):
+                    opts["filter"] = segment_filters[level]
                 url = (
                     self._build_url(segments[0], opts, extra_filter=extra_filter, order_by=order_by)
                     if level == 0
@@ -458,11 +546,13 @@ class ContainedNavMixin:
     ) -> Iterator[list[dict[str, Any]]]:
         """Yield every ancestor key chain (len = len(segments) - 1) reaching
         the leaf. Each level fetched with ``$select=<pks>``; user ``filter``
-        not forwarded.
+        not forwarded — that string lands at the leaf URL only. To filter
+        an ancestor walk use ``filter_at_<segment>`` / ``filter_at_<idx>``.
 
         ``top_parent_rows`` lets a partitioned caller supply a pre-
         discovered subset of level-0 rows; when provided, the level-0
         HTTP fetch is skipped and the rows are consumed in order."""
+        segment_filters = resolve_segment_filters(table_options, segments)
 
         def _walk(level: int, chain: list[dict[str, Any]]):
             if level == len(segments) - 1:
@@ -484,6 +574,8 @@ class ContainedNavMixin:
                     "page_size": (table_options or {}).get("page_size", "1000"),
                     "select": ",".join(ancestor_pks),
                 }
+                if segment_filters.get(level):
+                    opts["filter"] = segment_filters[level]
                 url = (
                     self._build_url(segments[0], opts)
                     if level == 0
@@ -511,10 +603,14 @@ class ContainedNavMixin:
         segments = parse_contained_path(table_name) or [table_name]
         namespace = (table_options or {}).get("namespace")
         fk_columns = self._resolve_fk_columns(segments, namespace)
+        segment_filters = resolve_segment_filters(table_options, segments)
+        leaf_extra = segment_filters.get(len(segments) - 1)
 
         def _emit() -> Iterator[dict]:
             for chain in self._iter_parent_key_chains(segments, namespace, table_options):
-                url = self._build_contained_url(segments, chain, table_options)
+                url = self._build_contained_url(
+                    segments, chain, table_options, extra_filter=leaf_extra
+                )
                 for row in self._fetch_pages(url):
                     self._tag_with_ancestor_fks(row, segments, chain, fk_columns)
                     yield row
@@ -700,6 +796,7 @@ class ContainedNavMixin:
         chain_next_link: str | None,
         max_records: int,
         fk_columns: dict[tuple[str, str], str],
+        leaf_segment_filter: str | None = None,
     ) -> tuple[list[dict], bool, int, int, str | None]:
         """Drive the per-parent fetch loop (leaf-cursor mode).
 
@@ -758,7 +855,10 @@ class ContainedNavMixin:
                     segments,
                     chain,
                     table_options,
-                    extra_filter=self._cursor_filter(cursor_field, chain_since),
+                    extra_filter=combine_filters(
+                        self._cursor_filter(cursor_field, chain_since),
+                        leaf_segment_filter,
+                    ),
                     order_by=order_by,
                 )
             cap_hit_in_page = False
@@ -859,6 +959,7 @@ class ContainedNavMixin:
         max_records = int((table_options or {}).get("max_records_per_batch", "100000"))
         order_by = self._leaf_cursor_order_by(table_name, namespace, cursor_field)
         chains_iter = self._iter_parent_key_chains(segments, namespace, table_options)
+        segment_filters = resolve_segment_filters(table_options, segments)
         (
             emitted,
             truncated,
@@ -877,6 +978,7 @@ class ContainedNavMixin:
             chain_next_link_in,
             max_records,
             self._resolve_fk_columns(segments, namespace),
+            leaf_segment_filter=segment_filters.get(len(segments) - 1),
         )
         if truncated:
             if chain_next_link_out is not None:
@@ -938,6 +1040,7 @@ class ContainedNavMixin:
         chains_iter = self._iter_parent_chains_with_cursor(
             segments, namespace, table_options, cursor_level, cursor_field, since
         )
+        segment_filters = resolve_segment_filters(table_options, segments)
         walk_state = self._walk_ancestor_chains(
             segments,
             chains_iter,
@@ -947,6 +1050,7 @@ class ContainedNavMixin:
             (start_offset or {}).get("chain_next_link"),
             int((table_options or {}).get("max_records_per_batch", "100000")),
             self._resolve_fk_columns(segments, namespace),
+            leaf_segment_filter=segment_filters.get(len(segments) - 1),
         )
         end_offset = self._ancestor_cursor_offset(walk_state, start_offset, since, cursor_field)
         if start_offset and start_offset == end_offset:
@@ -963,6 +1067,7 @@ class ContainedNavMixin:
         chain_next_link_in: str | None,
         max_records: int,
         fk_columns: dict[tuple[str, str], str],
+        leaf_segment_filter: str | None = None,
     ) -> dict[str, Any]:
         """Walk ancestor chains, fetching each chain's leaf collection
         and stamping rows with the chain's cursor.
@@ -989,7 +1094,9 @@ class ContainedNavMixin:
             if parent_idx == parent_idx_start and chain_next_link_in is not None:
                 initial_url = chain_next_link_in
             else:
-                initial_url = self._build_contained_url(segments, chain, table_options)
+                initial_url = self._build_contained_url(
+                    segments, chain, table_options, extra_filter=leaf_segment_filter
+                )
             page_next_url: str | None = None
             for page_rows, page_next_url in self._fetch_pages_with_links(initial_url):
                 for row in page_rows:

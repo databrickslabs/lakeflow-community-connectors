@@ -78,12 +78,14 @@ from databricks.labs.community_connector.sources.odata._contained import (
     CONTAINED_PATH_SEP as _CONTAINED_PATH_SEP,
     MAX_CONTAINED_DEPTH as _MAX_CONTAINED_DEPTH,
     ContainedNavMixin,
+    combine_filters as _combine_filters,
     contained_nav_props as _contained_nav_props,
     fk_column_name as _fk_column_name,
     join_url as _join_url,
     looks_like_iso8601 as _looks_like_iso8601,
     odata_literal as _odata_literal,
     parse_contained_path as _parse_contained_path,
+    resolve_segment_filters as _resolve_segment_filters,
 )
 from databricks.labs.community_connector.sources.odata._partition import (
     PartitionMixin,
@@ -534,7 +536,8 @@ class ODataLakeflowConnect(
         # streamed out before the next page is requested. Materialising
         # the whole result into a list (the prior shape) pinned every
         # row in memory at once on large tables.
-        url = self._build_url(table_name, table_options)
+        segment_filters = _resolve_segment_filters(table_options, [table_name])
+        url = self._build_url(table_name, table_options, extra_filter=segment_filters.get(0))
         return self._fetch_pages(url), {}
 
     def _read_incremental(
@@ -559,7 +562,11 @@ class ODataLakeflowConnect(
         #     literal and the server's column type because we don't
         #     manufacture a timestamp ceiling out of wall-clock time.
         since = start_offset.get("cursor") if start_offset else None
-        extra_filter = self._cursor_filter(cursor_field, since)
+        segment_filters = _resolve_segment_filters(table_options, [table_name])
+        extra_filter = _combine_filters(
+            self._cursor_filter(cursor_field, since),
+            segment_filters.get(0),
+        )
         # Append primary-key columns as $orderby tie-breakers. Without a
         # fully unique sort, OData servers that paginate internally (via
         # `@odata.nextLink` with a value-based skiptoken) can split a
@@ -756,7 +763,11 @@ class ODataLakeflowConnect(
             return prev_next_link, None
         if prev_delta_link is not None:
             return prev_delta_link, None
-        return self._build_url(table_name, table_options or {}), {"Prefer": _DELTA_PREFER}
+        segment_filters = _resolve_segment_filters(table_options, [table_name])
+        return (
+            self._build_url(table_name, table_options or {}, extra_filter=segment_filters.get(0)),
+            {"Prefer": _DELTA_PREFER},
+        )
 
     def _delta_walk_pages(
         self,
@@ -1072,7 +1083,16 @@ class ODataLakeflowConnect(
             params.append(f"$select={opts['select']}")
         filters = [f for f in (opts.get("filter"), extra_filter) if f]
         if filters:
-            params.append(f"$filter={' and '.join(f'({f})' for f in filters)}")
+            if len(filters) == 1:
+                # A single clause goes on the wire as-is. Wrapping it
+                # in parens would compound with any pre-wrapped clause
+                # passed via ``extra_filter`` (e.g. a multi-source
+                # ``combine_filters`` result), producing triple-paren
+                # ``$filter=((A) and (B))`` shapes that are harder to
+                # eyeball.
+                params.append(f"$filter={filters[0]}")
+            else:
+                params.append(f"$filter={' and '.join(f'({f})' for f in filters)}")
         if order_by:
             params.append(f"$orderby={order_by}")
         return "&".join(params)

@@ -2618,6 +2618,464 @@ def test_contained_expand_invalid_value_raises():
         c.read_table("Parents__Children", None, {"expand_contained": "yes"})
 
 
+# --- Per-segment filters (filter_at_<segment>, filter_at_<idx>) ---
+
+
+def test_resolve_segment_filters_name_form():
+    from databricks.labs.community_connector.sources.odata._contained import (
+        resolve_segment_filters,
+    )
+
+    out = resolve_segment_filters(
+        {
+            "filter_at_Parents": "Id eq 5",
+            "filter_at_Children": "Status eq 'active'",
+            "filter_at_Notes": "Text ne null",
+            "filter": "ignored — different key",
+        },
+        ["Parents", "Children", "Notes"],
+    )
+    assert out == {0: "Id eq 5", 1: "Status eq 'active'", 2: "Text ne null"}
+
+
+def test_resolve_segment_filters_index_form():
+    from databricks.labs.community_connector.sources.odata._contained import (
+        resolve_segment_filters,
+    )
+
+    out = resolve_segment_filters(
+        {"filter_at_0": "Id eq 5", "filter_at_2": "Text ne null"},
+        ["Parents", "Children", "Notes"],
+    )
+    assert out == {0: "Id eq 5", 2: "Text ne null"}
+
+
+def test_resolve_segment_filters_index_overrides_name_on_conflict():
+    """Index form is the more explicit of the two — wins when both
+    target the same level."""
+    from databricks.labs.community_connector.sources.odata._contained import (
+        resolve_segment_filters,
+    )
+
+    out = resolve_segment_filters(
+        {"filter_at_Children": "by name", "filter_at_1": "by index"},
+        ["Parents", "Children", "Notes"],
+    )
+    assert out[1] == "by index"
+
+
+def test_resolve_segment_filters_unknown_segment_raises():
+    from databricks.labs.community_connector.sources.odata._contained import (
+        resolve_segment_filters,
+    )
+
+    with pytest.raises(ValueError, match="Bogus"):
+        resolve_segment_filters(
+            {"filter_at_Bogus": "Id eq 5"},
+            ["Parents", "Children", "Notes"],
+        )
+
+
+def test_resolve_segment_filters_out_of_range_index_raises():
+    from databricks.labs.community_connector.sources.odata._contained import (
+        resolve_segment_filters,
+    )
+
+    with pytest.raises(ValueError, match="out of range"):
+        resolve_segment_filters(
+            {"filter_at_5": "Id eq 5"},
+            ["Parents", "Children", "Notes"],
+        )
+
+
+def test_combine_filters():
+    from databricks.labs.community_connector.sources.odata._contained import (
+        combine_filters,
+    )
+
+    assert combine_filters(None, None) is None
+    assert combine_filters("A", None) == "A"
+    assert combine_filters(None, "B") == "B"
+    assert combine_filters("A", "B") == "(A) and (B)"
+    assert combine_filters("A", None, "C") == "(A) and (C)"
+
+
+# --- N+1 mode: filter_at_<seg> applied at each walk level ---
+
+
+@responses.activate
+def test_contained_npp_filter_at_top_prunes_parent_walk():
+    """``filter_at_<top>`` lands on the level-0 walk; only matching
+    parents are then traversed for children. Other parents skipped."""
+    _mock_nested_metadata()
+    responses.get(
+        f"{SERVICE_URL}Parents",
+        json={"value": [{"Id": 5}]},
+        match=[
+            responses.matchers.query_param_matcher(
+                {"$top": "1000", "$select": "Id", "$filter": "Id eq 5"}
+            )
+        ],
+    )
+    responses.get(
+        f"{SERVICE_URL}Parents(5)/Children",
+        json={"value": [{"Id": 11, "Label": "a", "ModifiedAt": "2024-01-01T00:00:00Z"}]},
+    )
+    c = _make()
+    records, _ = c.read_table("Parents__Children", None, {"filter_at_Parents": "Id eq 5"})
+    rows = list(records)
+    assert [r["Id"] for r in rows] == [11]
+    assert all(r["Parents_Id"] == 5 for r in rows)
+
+
+@responses.activate
+def test_contained_npp_filter_at_middle_prunes_middle_walk():
+    """Three-segment path: ``filter_at_<middle>`` prunes the middle
+    walk. Only ``Children`` matching the filter — under each Parent —
+    have their Notes fetched."""
+    _mock_nested_metadata()
+    responses.get(
+        f"{SERVICE_URL}Parents",
+        json={"value": [{"Id": 1}, {"Id": 2}]},
+    )
+    responses.get(
+        f"{SERVICE_URL}Parents(1)/Children",
+        json={"value": [{"Id": 10}]},
+        match=[
+            responses.matchers.query_param_matcher(
+                {"$top": "1000", "$select": "Id", "$filter": "Id eq 10"}
+            )
+        ],
+    )
+    responses.get(
+        f"{SERVICE_URL}Parents(2)/Children",
+        json={"value": []},
+        match=[
+            responses.matchers.query_param_matcher(
+                {"$top": "1000", "$select": "Id", "$filter": "Id eq 10"}
+            )
+        ],
+    )
+    responses.get(
+        f"{SERVICE_URL}Parents(1)/Children(10)/Notes",
+        json={"value": [{"Id": 100, "Text": "x"}, {"Id": 101, "Text": "y"}]},
+    )
+    c = _make()
+    records, _ = c.read_table("Parents__Children__Notes", None, {"filter_at_Children": "Id eq 10"})
+    rows = list(records)
+    assert {r["Id"] for r in rows} == {100, 101}
+    assert all(r["Children_Id"] == 10 and r["Parents_Id"] == 1 for r in rows)
+
+
+@responses.activate
+def test_contained_npp_filter_at_leaf_applies_at_leaf_url():
+    """``filter_at_<leaf>`` lands at the leaf URL (the same place the
+    existing ``filter`` option would land in N+1 mode)."""
+    _mock_nested_metadata()
+    responses.get(f"{SERVICE_URL}Parents", json={"value": [{"Id": 1}]})
+    responses.get(
+        f"{SERVICE_URL}Parents(1)/Children",
+        json={"value": [{"Id": 11, "Label": "a", "ModifiedAt": "2024-01-01T00:00:00Z"}]},
+        match=[responses.matchers.query_param_matcher({"$top": "1000", "$filter": "Label eq 'a'"})],
+    )
+    c = _make()
+    records, _ = c.read_table("Parents__Children", None, {"filter_at_Children": "Label eq 'a'"})
+    rows = list(records)
+    assert [r["Id"] for r in rows] == [11]
+
+
+@responses.activate
+def test_contained_npp_filter_at_all_levels_cascades():
+    """All three segment filters AND'd through the full walk: top prunes
+    parents → middle prunes children → leaf filters notes."""
+    _mock_nested_metadata()
+    responses.get(
+        f"{SERVICE_URL}Parents",
+        json={"value": [{"Id": 5}]},
+        match=[
+            responses.matchers.query_param_matcher(
+                {"$top": "1000", "$select": "Id", "$filter": "Id eq 5"}
+            )
+        ],
+    )
+    responses.get(
+        f"{SERVICE_URL}Parents(5)/Children",
+        json={"value": [{"Id": 10}]},
+        match=[
+            responses.matchers.query_param_matcher(
+                {"$top": "1000", "$select": "Id", "$filter": "Id eq 10"}
+            )
+        ],
+    )
+    responses.get(
+        f"{SERVICE_URL}Parents(5)/Children(10)/Notes",
+        json={"value": [{"Id": 100, "Text": "x"}]},
+        match=[responses.matchers.query_param_matcher({"$top": "1000", "$filter": "Id eq 100"})],
+    )
+    c = _make()
+    records, _ = c.read_table(
+        "Parents__Children__Notes",
+        None,
+        {
+            "filter_at_Parents": "Id eq 5",
+            "filter_at_Children": "Id eq 10",
+            "filter_at_Notes": "Id eq 100",
+        },
+    )
+    assert [r["Id"] for r in list(records)] == [100]
+
+
+@responses.activate
+def test_contained_npp_filter_at_index_form_equivalent():
+    """``filter_at_0`` is equivalent to ``filter_at_<top-segment-name>``."""
+    _mock_nested_metadata()
+    responses.get(
+        f"{SERVICE_URL}Parents",
+        json={"value": [{"Id": 5}]},
+        match=[
+            responses.matchers.query_param_matcher(
+                {"$top": "1000", "$select": "Id", "$filter": "Id eq 5"}
+            )
+        ],
+    )
+    responses.get(
+        f"{SERVICE_URL}Parents(5)/Children",
+        json={"value": [{"Id": 11, "Label": "a", "ModifiedAt": "2024-01-01T00:00:00Z"}]},
+    )
+    c = _make()
+    records, _ = c.read_table("Parents__Children", None, {"filter_at_0": "Id eq 5"})
+    assert [r["Id"] for r in list(records)] == [11]
+
+
+# --- expand_contained=true mode ---
+
+
+@responses.activate
+def test_contained_expand_filter_at_top_lands_on_top_url():
+    _mock_nested_metadata()
+    captured = []
+
+    def callback(req):
+        captured.append(req.url)
+        return (
+            200,
+            {},
+            json.dumps(
+                {
+                    "value": [
+                        {
+                            "Id": 5,
+                            "Children": [
+                                {"Id": 11, "Label": "a", "ModifiedAt": "2024-01-01T00:00:00Z"}
+                            ],
+                        },
+                    ]
+                }
+            ),
+        )
+
+    responses.add_callback(responses.GET, f"{SERVICE_URL}Parents", callback=callback)
+    c = _make()
+    records, _ = c.read_table(
+        "Parents__Children",
+        None,
+        {"expand_contained": "true", "filter_at_Parents": "Id eq 5"},
+    )
+    list(records)
+    from urllib.parse import unquote
+
+    assert "$filter=Id eq 5" in unquote(captured[0])
+
+
+@responses.activate
+def test_contained_expand_filter_at_middle_lands_inside_expand():
+    """``filter_at_<middle>`` is injected inside the matching
+    ``$expand(...)`` clause (OData v4 §5.1.1.6)."""
+    _mock_nested_metadata()
+    captured = []
+
+    def callback(req):
+        captured.append(req.url)
+        return (
+            200,
+            {},
+            json.dumps(
+                {
+                    "value": [
+                        {
+                            "Id": 1,
+                            "Children": [
+                                {"Id": 10, "Notes": [{"Id": 100, "Text": "x"}]},
+                            ],
+                        },
+                    ]
+                }
+            ),
+        )
+
+    responses.add_callback(responses.GET, f"{SERVICE_URL}Parents", callback=callback)
+    c = _make()
+    records, _ = c.read_table(
+        "Parents__Children__Notes",
+        None,
+        {"expand_contained": "true", "filter_at_Children": "Id eq 10"},
+    )
+    list(records)
+    from urllib.parse import unquote
+
+    assert "Children($top=1000;$filter=Id eq 10" in unquote(captured[0])
+
+
+@responses.activate
+def test_contained_expand_filter_at_leaf_lands_in_innermost_expand():
+    _mock_nested_metadata()
+    captured = []
+
+    def callback(req):
+        captured.append(req.url)
+        return (
+            200,
+            {},
+            json.dumps(
+                {
+                    "value": [
+                        {
+                            "Id": 1,
+                            "Children": [
+                                {"Id": 10, "Notes": [{"Id": 100, "Text": "x"}]},
+                            ],
+                        },
+                    ]
+                }
+            ),
+        )
+
+    responses.add_callback(responses.GET, f"{SERVICE_URL}Parents", callback=callback)
+    c = _make()
+    records, _ = c.read_table(
+        "Parents__Children__Notes",
+        None,
+        {"expand_contained": "true", "filter_at_Notes": "Id eq 100"},
+    )
+    list(records)
+    from urllib.parse import unquote
+
+    assert "Notes($top=1000;$filter=Id eq 100" in unquote(captured[0])
+
+
+# --- Composition ---
+
+
+@responses.activate
+def test_contained_npp_filter_at_composes_with_cursor_at_same_level():
+    """Cursor filter at the cursor segment AND-s with that segment's
+    ``filter_at_<seg>``."""
+    _mock_nested_metadata()
+    responses.get(
+        f"{SERVICE_URL}Parents",
+        json={"value": [{"Id": 1}]},
+    )
+    responses.get(
+        f"{SERVICE_URL}Parents(1)/Children",
+        json={"value": [{"Id": 11, "Label": "a", "ModifiedAt": "2024-06-01T00:00:00Z"}]},
+        match=[
+            responses.matchers.query_param_matcher(
+                {
+                    "$top": "1000",
+                    "$filter": "(ModifiedAt gt 2024-01-01T00:00:00Z) and (Label eq 'a')",
+                    "$orderby": "ModifiedAt asc,Id asc",
+                }
+            )
+        ],
+    )
+    c = _make()
+    records, _ = c.read_table(
+        "Parents__Children",
+        {"cursor": "2024-01-01T00:00:00Z"},
+        {
+            "cursor_field": "ModifiedAt",
+            "filter_at_Children": "Label eq 'a'",
+        },
+    )
+    rows = list(records)
+    assert [r["Id"] for r in rows] == [11]
+
+
+@responses.activate
+def test_contained_npp_filter_at_leaf_composes_with_user_filter():
+    """The leaf URL composes ``filter_at_<leaf>`` (sent as extra_filter)
+    with the user's ``filter`` option (sent via opts["filter"]). Both
+    AND together in the final URL."""
+    _mock_nested_metadata()
+    responses.get(f"{SERVICE_URL}Parents", json={"value": [{"Id": 1}]})
+    responses.get(
+        f"{SERVICE_URL}Parents(1)/Children",
+        json={"value": [{"Id": 11, "Label": "a", "ModifiedAt": "2024-01-01T00:00:00Z"}]},
+        match=[
+            responses.matchers.query_param_matcher(
+                {
+                    "$top": "1000",
+                    "$filter": "(Id lt 100) and (Label eq 'a')",
+                }
+            )
+        ],
+    )
+    c = _make()
+    records, _ = c.read_table(
+        "Parents__Children",
+        None,
+        {"filter": "Id lt 100", "filter_at_Children": "Label eq 'a'"},
+    )
+    assert [r["Id"] for r in list(records)] == [11]
+
+
+# --- Flat table ---
+
+
+@responses.activate
+def test_flat_filter_at_segment_applies_to_flat_table_read():
+    """For a flat (non-contained) table, ``filter_at_<table>`` is
+    equivalent to the existing ``filter`` option — both AND into the
+    single URL's ``$filter`` clause."""
+    _mock_metadata()
+    responses.get(
+        f"{SERVICE_URL}Customers",
+        json={"value": [{"CustomerID": "ALFKI", "CompanyName": "Alfreds"}]},
+        match=[
+            responses.matchers.query_param_matcher(
+                {
+                    "$top": "1000",
+                    "$filter": "CustomerID eq 'ALFKI'",
+                }
+            )
+        ],
+    )
+    c = _make()
+    records, _ = c.read_table("Customers", None, {"filter_at_Customers": "CustomerID eq 'ALFKI'"})
+    assert len(list(records)) == 1
+
+
+# --- Errors ---
+
+
+@responses.activate
+def test_filter_at_unknown_segment_raises():
+    _mock_nested_metadata()
+    c = _make()
+    with pytest.raises(ValueError, match="Bogus"):
+        records, _ = c.read_table("Parents__Children", None, {"filter_at_Bogus": "Id eq 5"})
+        list(records)
+
+
+@responses.activate
+def test_filter_at_out_of_range_index_raises():
+    _mock_nested_metadata()
+    c = _make()
+    with pytest.raises(ValueError, match="out of range"):
+        records, _ = c.read_table("Parents__Children", None, {"filter_at_5": "Id eq 5"})
+        list(records)
+
+
 @responses.activate
 def test_contained_expand_with_ancestor_cursor_injects_filter_into_expand():
     """expand_contained + cursor on a middle ancestor injects
