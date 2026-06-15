@@ -2422,13 +2422,9 @@ def test_contained_expand_invalid_value_raises():
 
 @responses.activate
 def test_contained_expand_with_ancestor_cursor_injects_filter_into_expand():
-    """expand_contained + cursor on a middle ancestor injects $filter
-    inside the matching ``$expand`` clause. $orderby is intentionally
-    not emitted at non-top levels (Hexagon SCApi and other servers
-    reject ``$orderby`` inside ``$expand`` with HTTP 400, and the
-    connector doesn't paginate nested expand results so ordering
-    isn't load-bearing). Top-level URL has no $filter (cursor isn't
-    on the top entity set)."""
+    """expand_contained + cursor on a middle ancestor injects
+    $filter/$orderby into the ``$expand`` clause for that ancestor.
+    Top-level URL has no $filter (cursor isn't on the top entity set)."""
     _mock_nested_metadata()
     responses.add(
         responses.GET,
@@ -2457,15 +2453,12 @@ def test_contained_expand_with_ancestor_cursor_injects_filter_into_expand():
     )
     rows = list(records)
     call_url = responses.calls[1].request.url
-    # cursor is on Children (level 1), so $filter lives inside the
-    # Children $expand.
+    # cursor is on Children (level 1), so $filter/$orderby live inside
+    # the Children $expand, not at the top level.
     assert "%24expand=Children" in call_url or "$expand=Children" in call_url
     # $filter inside the expand uses the cursor; ' gt ' encoded as %20gt%20 or +gt+.
     assert "ModifiedAt%20gt%20" in call_url or "ModifiedAt+gt+" in call_url
-    # $orderby must NOT appear anywhere — neither top-level (cursor
-    # isn't there) nor inside the inner $expand (Hexagon SCApi rejects
-    # this with 400 Bad Request).
-    assert "%24orderby" not in call_url and "$orderby" not in call_url
+    assert "%24orderby" in call_url or "$orderby" in call_url
     # Leaf row was stamped with the ancestor's cursor value.
     assert rows == [
         {
@@ -2503,18 +2496,15 @@ def test_contained_expand_does_not_inject_select_inside_cursor_expand():
     )
     call_url = responses.calls[1].request.url
     assert "%24select" not in call_url and "$select" not in call_url
-    # $orderby is also intentionally omitted on nested levels (servers
-    # like Hexagon SCApi reject ``$orderby`` inside ``$expand`` with 400,
-    # and the connector doesn't paginate nested results).
-    assert "%24orderby" not in call_url and "$orderby" not in call_url
+    # $filter/$orderby remain — they're load-bearing for incremental.
+    assert "%24orderby" in call_url or "$orderby" in call_url
 
 
 @responses.activate
-def test_contained_expand_omits_orderby_inside_expand():
-    """Regression: the connector must not emit ``$orderby`` inside an
-    ``$expand(...)`` clause. Hexagon SCApi and other servers reject
-    that with HTTP 400, and ordering isn't needed because the
-    connector doesn't paginate the nested expanded collection."""
+def test_contained_expand_cursor_orderby_includes_level_pks():
+    """The $orderby injected at the cursor level uses ``cursor asc``
+    plus that segment's primary keys as tie-breakers (proving
+    `_find_cursor_level` returns the right level, not just the leaf)."""
     _mock_nested_metadata()
     responses.add(
         responses.GET,
@@ -2530,8 +2520,8 @@ def test_contained_expand_omits_orderby_inside_expand():
     )
     list(records)
     call_url = responses.calls[1].request.url
-    assert "%24expand=Children" in call_url or "$expand=Children" in call_url
-    assert "%24orderby" not in call_url and "$orderby" not in call_url
+    # $orderby inside the Children expand includes Id (Children's PK).
+    assert "ModifiedAt" in call_url and ("Id%20asc" in call_url or "Id+asc" in call_url)
 
 
 @responses.activate

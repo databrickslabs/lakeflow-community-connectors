@@ -234,27 +234,15 @@ class ContainedNavMixin:
     ) -> str:
         """``A?...&$expand=B($expand=C($expand=D))`` for the full chain.
 
-        When ``cursor_level`` is set:
-
-        * ``cursor_level == 0`` (cursor on the top-level entity): emit
-          ``$filter`` and ``$orderby`` at the top URL.
-          ``@odata.nextLink`` pagination of the top set needs the
-          ``$orderby`` for stable page boundaries.
-        * ``cursor_level > 0`` (cursor on a nested level): emit only
-          ``$filter`` inside the matching ``$expand(...)`` clause.
-          ``$orderby`` is deliberately omitted here: (1) we don't
-          paginate nested ``$expand`` results, so ordering serves no
-          functional purpose; (2) the connector picks ``max(cursors)``
-          over the flattened emitted rows for the offset, which is
-          order-independent; (3) some OData servers (Hexagon SCApi,
-          others) reject ``$orderby`` inside ``$expand`` with 400 Bad
-          Request even though OData v4 §5.1.1.6 permits it.
-
-        ``cursor_select`` is currently never set at this layer (see
-        ``_cursor_expand_clause``); the parameter is retained as the
-        landing point if a future server needs explicit nested
-        projection. OData v4 §5.1.1.13: inner ``$expand`` options
-        are separated by ``;``."""
+        When ``cursor_level`` is set, ``cursor_filter``/``cursor_order``/
+        ``cursor_select`` are injected at the segment that owns the
+        cursor — at the top-level URL when ``cursor_level == 0``, or
+        inside the corresponding ``$expand`` clause otherwise. The
+        ``$select`` is necessary because some OData servers omit
+        properties from ``$expand`` responses by default; explicitly
+        requesting the cursor guarantees the server projects it onto
+        the ancestor rows so it can be stamped onto leaf rows. OData
+        v4 §5.1.1.13: inner ``$expand`` options are separated by ``;``."""
         top, *children = segments
         base = join_url(self.service_url, top)
         if cursor_level == 0:
@@ -271,6 +259,8 @@ class ContainedNavMixin:
                     parts.append(f"$select={cursor_select}")
                 if cursor_filter:
                     parts.append(f"$filter={cursor_filter}")
+                if cursor_order:
+                    parts.append(f"$orderby={cursor_order}")
             if inner:
                 parts.append(f"$expand={inner}")
             inner = f"{children[i]}({';'.join(parts)})" if parts else children[i]
@@ -525,12 +515,9 @@ class ContainedNavMixin:
     ) -> tuple[Iterator[dict], dict]:
         """Single GET with nested ``$expand``; flatten the response into
         leaf rows tagged with ancestor FKs. When ``cursor_field`` is
-        set on a nested level, a ``$filter`` is injected inside the
-        matching ``$expand(...)`` clause to restrict the response to
-        changed subtrees. When the cursor lives on the top-level
-        entity, both ``$filter`` and ``$orderby`` are emitted at the
-        top URL (``$orderby`` is required for stable ``@odata.nextLink``
-        pagination of the top set).
+        set, a ``$filter``/``$orderby`` is injected at the closest
+        segment that owns the cursor (top-level query or inner
+        ``$expand``), restricting the response to changed subtrees.
         Emitted leaf rows are stamped with the cursor value from that
         segment when they don't carry it themselves. Server depth caps
         surface as HTTP 4xx — no client-side fallback."""
