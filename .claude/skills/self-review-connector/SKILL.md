@@ -78,7 +78,7 @@ report actionable.
 
 ---
 
-### Section A — Connector implementation (12 checks)
+### Section A — Connector implementation (13 checks)
 
 Source under audit:
 `src/databricks/labs/community_connector/sources/{{source_name}}/{{source_name}}.py`
@@ -97,6 +97,7 @@ Source under audit:
 | A10 | MAJOR | Imports clean — no imports outside `sources/{{source_name}}/`, `interface/`, `libs/`, `requests`, `pyspark`, std-lib | `grep -nE "^(from\\|import) " ...` |
 | A11 | MAJOR | Pylint clean on connector source — same gate as `.github/workflows/pylint.yml` and the `tools/scripts/precommit_pylint.sh` PreToolUse hook | see "Running pylint" below |
 | A12 | MAJOR | Connector does **not** implement the experimental ingestion-agent surface (still in design). | `grep -nE "SupportsIngestionAgent\|AgentOperation\|agent_operations\(\)" src/.../sources/{{source_name}}/` — must be empty |
+| A13 | BLOCKER | Source package exposes a `<Source>DataSource(LakeflowSource)` subclass binding the connector via `_lakeflow_connect_cls`, so it can register via `spark.dataSource.register` / `find_data_source`. Leaves `_format_name` at its default. | `grep -nE "class \\w+DataSource\\(LakeflowSource\\)" src/.../sources/{{source_name}}/__init__.py` and verify `_lakeflow_connect_cls\\s*=` is set |
 
 #### Running pylint (A11)
 
@@ -286,6 +287,7 @@ Run at: 2026-05-06T15:32:00Z
 - ❌ A11. Pylint: 1 finding — `source.py:142: R0912 too-many-branches
        (21/20)`. Same gate as CI; fix before merge.
 - ✅ A12. No ingestion-agent surface implemented (experimental)
+- ✅ A13. `GithubDataSource(LakeflowSource)` exposed — `__init__.py:5`
 
 ## B. Testing & simulator validation — 22 / 26
 - ✅ B1–B7
