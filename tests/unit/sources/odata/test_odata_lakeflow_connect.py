@@ -3581,6 +3581,31 @@ def test_retry_connection_error_exhausted_reraises_same_type(monkeypatch):
 
 
 @responses.activate
+def test_400_error_message_includes_server_body():
+    """4xx that the retry layer doesn't handle (anything other than
+    401/403/429/503) must surface the server's response body in the
+    raised exception — otherwise downstream pipeline logs show a
+    cryptic ``400 Client Error: Bad Request for url ...`` with no
+    indication of *why* the server rejected the request."""
+    import requests as _requests
+
+    _mock_metadata()
+    responses.get(
+        f"{SERVICE_URL}Customers",
+        json={"error": {"code": "BadRequest", "message": "Page size 1000 exceeds maximum 500"}},
+        status=400,
+    )
+    c = _make({"token": "t"})
+    rows, _ = c.read_table("Customers", None, {})
+    with pytest.raises(_requests.HTTPError) as ei:
+        list(rows)
+    msg = str(ei.value)
+    assert "400" in msg
+    assert "Page size 1000 exceeds maximum 500" in msg
+    assert SERVICE_URL in msg
+
+
+@responses.activate
 def test_retry_connection_error_then_throttle_then_success(monkeypatch):
     """ConnectionError -> 429 -> 200 in the same logical request all
     flow through the same retry loop without losing track of the

@@ -2683,7 +2683,7 @@ def register_lakeflow_source(spark):
                 resp = self._http_get(session, current_url, **kwargs)
                 if resp.status_code == 410 and (prev_delta_link or prev_next_link):
                     return [], None, None, True
-                resp.raise_for_status()
+                _raise_for_status_with_body(resp, current_url)
 
                 if not bootstrap_verified:
                     self._verify_delta_bootstrap(resp, table_name)
@@ -2990,7 +2990,7 @@ def register_lakeflow_source(spark):
             next_url: str | None = url
             while next_url:
                 resp = self._http_get(session, next_url)
-                resp.raise_for_status()
+                _raise_for_status_with_body(resp, next_url)
                 payload = resp.json()
                 page_rows = [
                     {k: v for k, v in item.items() if not k.startswith("@odata.")}
@@ -3434,7 +3434,7 @@ def register_lakeflow_source(spark):
             session = self._get_session()
             url = _join_url(self.service_url, "$metadata")
             resp = self._http_get(session, url, headers={"Accept": "application/xml"})
-            resp.raise_for_status()
+            _raise_for_status_with_body(resp, url)
             xml_text = resp.text
             root = ET.fromstring(xml_text)
             index = _build_csdl_index(root)
@@ -3827,6 +3827,32 @@ def register_lakeflow_source(spark):
             dt = dt.replace(tzinfo=timezone.utc)
         delta = (dt - datetime.now(timezone.utc)).total_seconds()
         return max(0.0, delta)
+
+
+    def _raise_for_status_with_body(resp: requests.Response, url: str) -> None:
+        """Like ``resp.raise_for_status()`` but include the response body
+        in the exception message.
+
+        The bare ``requests.HTTPError`` message is just "400 Client Error:
+        Bad Request for url ..." — useless for diagnosing OData services
+        that put the actual error reason in the response body (e.g.
+        ``{"error": {"message": "Page size 1000 exceeds maximum 500"}}``).
+        Without the body, every 4xx from the source is opaque.
+
+        Preserves the original :class:`requests.HTTPError` type so any
+        callers catching that class specifically still match. The
+        enriched message is what gets shown to operators in pipeline
+        logs.
+        """
+        if resp.status_code < 400:
+            return
+        # Mirror requests' own format for the leading line so log filters
+        # keyed off "<status> Client Error" / "Server Error" keep working.
+        reason = resp.reason or ""
+        family = "Client Error" if resp.status_code < 500 else "Server Error"
+        body = _truncate((resp.text or "").strip(), 1000) or "(empty body)"
+        msg = f"{resp.status_code} {family}: {reason} for url: {url}. " f"Server response body: {body}"
+        raise requests.HTTPError(msg, response=resp)
 
 
     def _truncate(text: str, limit: int) -> str:
