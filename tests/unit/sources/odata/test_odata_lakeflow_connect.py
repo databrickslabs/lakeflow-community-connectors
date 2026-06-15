@@ -2650,6 +2650,25 @@ def test_resolve_segment_filters_index_form():
     assert out == {0: "Id eq 5", 2: "Text ne null"}
 
 
+def test_resolve_segment_filters_case_insensitive_segment_name():
+    """Lakeflow Connect lowercases option keys before forwarding them
+    to ``read_table``, so a pipeline-config ``filter_at_Instances``
+    arrives as ``filter_at_instances``. The segment-name match must
+    be case-insensitive."""
+    from databricks.labs.community_connector.sources.odata._contained import (
+        resolve_segment_filters,
+    )
+
+    out = resolve_segment_filters(
+        {
+            "filter_at_instances": "Id eq 1",  # lowercased by framework
+            "filter_at_PROJECTS": "Id eq 2",  # any casing accepted
+        },
+        ["Instances", "Projects", "WorkPackageDetails"],
+    )
+    assert out == {0: "Id eq 1", 1: "Id eq 2"}
+
+
 def test_resolve_segment_filters_index_overrides_name_on_conflict():
     """Index form is the more explicit of the two — wins when both
     target the same level."""

@@ -754,7 +754,14 @@ def register_lakeflow_source(spark):
         if not table_options:
             return {}
         out: dict[int, str] = {}
-        seg_to_idx = {s: i for i, s in enumerate(segments)}
+        # Lakeflow Connect lowercases option keys before forwarding them
+        # to ``read_table``, so a pipeline-config ``filter_at_Instances``
+        # arrives here as ``filter_at_instances``. Match the segment-name
+        # suffix case-insensitively against the discovered path so the
+        # pipeline config doesn't have to special-case the framework's
+        # normalisation rules. Values aren't normalised — only keys — so
+        # the filter expression itself is preserved verbatim.
+        seg_to_idx = {s.lower(): i for i, s in enumerate(segments)}
         # Pass 1: name-keyed. Index-keyed entries override these on
         # conflict, so process them after.
         for key, value in table_options.items():
@@ -763,13 +770,14 @@ def register_lakeflow_source(spark):
             suffix = key[len("filter_at_") :]
             if suffix.isdigit():
                 continue
-            if suffix not in seg_to_idx:
+            idx = seg_to_idx.get(suffix.lower())
+            if idx is None:
                 raise ValueError(
                     f"Invalid table option {key}={value!r}: segment "
                     f"{suffix!r} not in path {segments!r}. Valid "
-                    f"segments: {list(seg_to_idx)}."
+                    f"segments (case-insensitive): {segments}."
                 )
-            out[seg_to_idx[suffix]] = value
+            out[idx] = value
         # Pass 2: index-keyed (overrides name form when both target the
         # same level).
         for key, value in table_options.items():
