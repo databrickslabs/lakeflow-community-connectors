@@ -83,3 +83,25 @@ def test_find_data_source_returns_source_subclass():
 def test_find_data_source_missing_source_raises():
     with pytest.raises(ValueError, match="not found"):
         registry.find_data_source("nonexistent_source_xyz")
+
+
+def test_find_data_source_respects_package_boundary():
+    # A class from a sibling package whose name is a prefix-superset
+    # ("github_enterprise" vs "github") must not satisfy the lookup for the
+    # shorter name, even when it sorts first in getmembers() iteration.
+    import types
+
+    class AaaEnterpriseDataSource(LakeflowSource):  # sorts first
+        _lakeflow_connect_cls = object
+    AaaEnterpriseDataSource.__module__ = f"{registry._BASE_PKG}.github_enterprise.x"
+
+    class ZzzGithubDataSource(LakeflowSource):
+        _lakeflow_connect_cls = object
+    ZzzGithubDataSource.__module__ = f"{registry._BASE_PKG}.github"
+
+    fake_pkg = types.ModuleType("fake_github_pkg")
+    fake_pkg.AaaEnterpriseDataSource = AaaEnterpriseDataSource
+    fake_pkg.ZzzGithubDataSource = ZzzGithubDataSource
+
+    with patch.object(registry.importlib, "import_module", return_value=fake_pkg):
+        assert registry.find_data_source("github") is ZzzGithubDataSource

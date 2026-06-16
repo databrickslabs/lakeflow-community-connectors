@@ -62,11 +62,12 @@ def find_data_source(source_name: str) -> Type[LakeflowSource]:
         ) from exc
 
     for _, obj in inspect.getmembers(package, inspect.isclass):
-        if (
-            issubclass(obj, LakeflowSource)
-            and obj is not LakeflowSource
-            and getattr(obj, "__module__", "").startswith(package_fqn)
-        ):
+        module = getattr(obj, "__module__", "")
+        # Match on the package boundary, not a bare prefix, so a source whose
+        # name is a prefix of another (e.g. "github" vs "github_enterprise")
+        # can't resolve to the wrong package's class.
+        in_package = module == package_fqn or module.startswith(package_fqn + ".")
+        if issubclass(obj, LakeflowSource) and obj is not LakeflowSource and in_package:
             return obj
 
     raise ValueError(
