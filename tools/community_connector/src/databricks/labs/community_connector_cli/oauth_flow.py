@@ -172,6 +172,7 @@ def run_u2m_authorization_code_flow(
     authorization_endpoint: str,
     scope: Optional[str],
     redirect_port: Optional[int] = None,
+    extra_auth_params: Optional[dict] = None,
     open_browser: bool = True,
     timeout_seconds: int = 300,
     echo=print,
@@ -179,6 +180,11 @@ def run_u2m_authorization_code_flow(
     """Drive the OAuth 2.0 authorization-code + PKCE flow against a loopback redirect.
 
     Returns ``(authorization_code, pkce_verifier, redirect_uri)``.
+
+    ``extra_auth_params`` are provider-specific knobs (e.g.
+    ``access_type=offline``, ``prompt=consent``) folded into the authorization
+    request. They never override the flow's own parameters (response_type,
+    client_id, redirect_uri, state, PKCE, scope).
 
     Raises ``RuntimeError`` if the user does not complete the flow within
     ``timeout_seconds`` or the IdP returns an error / mismatched state.
@@ -205,6 +211,12 @@ def run_u2m_authorization_code_flow(
     }
     if scope:
         auth_params["scope"] = scope
+
+    # Fold in provider-specific extras without letting them clobber the
+    # flow-critical params above.
+    if extra_auth_params:
+        for key, value in extra_auth_params.items():
+            auth_params.setdefault(str(key), str(value))
 
     separator = "&" if "?" in authorization_endpoint else "?"
     auth_url = f"{authorization_endpoint}{separator}{urllib.parse.urlencode(auth_params)}"
