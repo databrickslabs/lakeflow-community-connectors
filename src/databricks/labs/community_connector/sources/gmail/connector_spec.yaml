@@ -1,28 +1,10 @@
 # Gmail Community Connector Spec
 #
-# This connector is designed for the Unity Catalog COMMUNITY connection
-# with one of the U2M OAuth flows (single-user or per-end-user). The
-# connection layer owns the OAuth dance (authorization code + PKCE,
-# token exchange, per-user refresh in u2m_per_user mode) and injects a
-# valid bearer ``access_token`` into the connector's options at query
-# time. The connector treats the token as opaque.
-#
-# Required oauth_scope on the connection:
-#   - https://www.googleapis.com/auth/gmail.readonly
-#
-# Recommended connection creation (via the community-connector CLI):
-#
-#   community-connector create-connection \
-#     --name gmail_connector \
-#     --source-name gmail \
-#     --auth-type u2m \
-#     --options '{
-#       "client_id": "<oauth-client-id>.apps.googleusercontent.com",
-#       "client_secret": "<oauth-client-secret>",
-#       "authorization_endpoint": "https://accounts.google.com/o/oauth2/v2/auth",
-#       "token_endpoint": "https://oauth2.googleapis.com/token",
-#       "oauth_scope": "https://www.googleapis.com/auth/gmail.readonly"
-#     }'
+# Gmail authenticates via the OAuth 2.0 authorization-code flow. The
+# connection layer (Unity Catalog COMMUNITY connection, or the labs
+# authenticate tool for local dev) runs the browser-based flow, so the
+# user only supplies their OAuth app's client_id + client_secret; the
+# token is obtained from Google by the flow rather than entered by hand.
 #
 # Provides 100% Gmail API coverage with 10 tables:
 # - messages, threads, labels, drafts (core email data)
@@ -31,40 +13,52 @@
 
 # ============================================================================
 # Connection Parameters
-# These are provided when creating the Unity Catalog connection.
+# These are the options the user supplies when creating the Unity Catalog
+# connection. The OAuth-issued token is NOT listed here — it is obtained by
+# the OAuth flow (and, for UC, refreshed server-side) rather than entered.
 # ============================================================================
 display_name: Gmail
 connection:
   parameters:
-    - name: access_token
+    - name: client_id
       type: string
       required: true
       secret: true
       description: >
-        OAuth 2.0 bearer access token for the Gmail API. Supplied
-        automatically by the Unity Catalog COMMUNITY connection's u2m or
-        u2m_per_user OAuth flow — do not set this manually unless you
-        know the upstream connection has already exchanged the user's
-        authorization grant for a token.
+        OAuth 2.0 client ID from Google Cloud Console (APIs & Services →
+        Credentials → OAuth 2.0 Client IDs, Web application type).
+
+    - name: client_secret
+      type: string
+      required: true
+      secret: true
+      description: >
+        OAuth 2.0 client secret issued alongside the client_id.
 
     - name: user_id
       type: string
       required: false
       description: >
         Gmail user identifier the connector reads against. Defaults to
-        'me' (the user the access_token was issued to). Service-account
-        workflows with domain-wide delegation can specify a target user
-        email here.
+        'me' (the authorizing user). Service-account workflows with
+        domain-wide delegation can specify a target user email here.
 
-  # OAuth defaults: standard RFC 6749 fields that are fixed for Google's
-  # identity provider. The community-connector CLI auto-fills these when
-  # --auth-type is u2m / u2m_per_user, so the user only needs to supply
-  # client_id and client_secret (their app registration). Override any of
-  # these via --options if needed (e.g. a narrower oauth_scope).
+  # OAuth 2.0 authorization-code flow definition (see PR #218 for the shape).
+  #   flow   — u2m: a single human authorizes once at connection creation.
+  #            Maps to UC's community_oauth_flow.
+  #   pkce   — false: Google's Web-application client is a confidential
+  #            client (authenticates with client_secret) and does not
+  #            require PKCE. The labs authenticate CLI does not implement
+  #            PKCE yet, so this must stay false there.
   oauth:
-    authorization_endpoint: https://accounts.google.com/o/oauth2/v2/auth
-    token_endpoint: https://oauth2.googleapis.com/token
-    oauth_scope: https://www.googleapis.com/auth/gmail.readonly
+    flow: u2m
+    pkce: false
+    scopes: https://www.googleapis.com/auth/gmail.readonly
+    authorization_url: https://accounts.google.com/o/oauth2/v2/auth
+    token_url: https://oauth2.googleapis.com/token
+    extra_auth_params:
+      access_type: offline
+      prompt: consent
 
 # ============================================================================
 # External Options Allowlist
