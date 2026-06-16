@@ -1,16 +1,11 @@
 # Gmail API v1 (uses ``requests`` directly, not the Google SDK).
 #
-# Two hosts:
-# * https://oauth2.googleapis.com/token — OAuth refresh
-# * https://gmail.googleapis.com/gmail/v1/...
+# The connector receives a pre-issued access_token from the COMMUNITY
+# connection's u2m / u2m_per_user OAuth flow, so it never hits Google's
+# /token endpoint at runtime — no oauth2.googleapis.com entry needed.
+# Single host: https://gmail.googleapis.com/gmail/v1/...
 
 endpoints:
-  # ---- OAuth refresh (lazy; first API call triggers it) ----
-  - path: /token
-    method: POST
-    corpus: oauth_token
-    response: {single_entity: true, pagination_style: none}
-
   # ---- Batch endpoint — force fallback to sequential ----
   - path: /batch/gmail/v1
     method: POST

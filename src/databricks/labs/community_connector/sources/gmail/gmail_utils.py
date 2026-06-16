@@ -1,5 +1,12 @@
 # Gmail API Client Utilities
-# Handles OAuth authentication, HTTP requests, batch operations, and parallel fetching.
+# Handles HTTP requests, batch operations, and parallel fetching against the
+# Gmail API using a pre-issued bearer access token.
+#
+# The Unity Catalog COMMUNITY connection (u2m / u2m_per_user OAuth flow)
+# performs the OAuth dance and hands the connector a fresh access_token at
+# query time. The client below treats it as opaque — no refresh, no token
+# endpoint, no client_id/secret. If the token is expired / revoked the API
+# call surfaces as 401, and the user re-authorizes through the connection.
 
 import json
 import time
@@ -15,55 +22,27 @@ MAX_WORKERS = 3  # Concurrent workers for parallel fetching
 
 
 class GmailApiClient:
-    """Handles Gmail API communication: auth, requests, batch, and parallel fetching."""
+    """Gmail HTTP client using a pre-issued OAuth access token.
+
+    The COMMUNITY connection's u2m / u2m_per_user flow owns the OAuth dance
+    and hands the connector a valid bearer token on each query. This client
+    treats it as opaque — no refresh, no caching, no client_id/secret. A 401
+    means the token is expired or revoked; the user re-authorizes through the
+    connection.
+    """
 
     BASE_URL = "https://gmail.googleapis.com/gmail/v1"
     BATCH_URL = "https://gmail.googleapis.com/batch/gmail/v1"
 
-    def __init__(
-        self,
-        client_id: str,
-        client_secret: str,
-        refresh_token: str,
-        user_id: str = "me",
-    ) -> None:
-        self.client_id = client_id
-        self.client_secret = client_secret
-        self.refresh_token = refresh_token
+    def __init__(self, access_token: str, user_id: str = "me") -> None:
+        self.access_token = access_token
         self.user_id = user_id
-
-        self._access_token = None
-        self._token_expires_at = 0
         self._session = requests.Session()
 
-    def get_access_token(self) -> str:
-        """Exchange refresh token for access token with caching."""
-        # Return cached token if still valid (with 60s buffer)
-        if self._access_token and time.time() < self._token_expires_at - 60:
-            return self._access_token
-
-        response = requests.post(
-            "https://oauth2.googleapis.com/token",
-            data={
-                "client_id": self.client_id,
-                "client_secret": self.client_secret,
-                "refresh_token": self.refresh_token,
-                "grant_type": "refresh_token",
-            },
-            timeout=30,
-        )
-        response.raise_for_status()
-        data = response.json()
-
-        self._access_token = data["access_token"]
-        self._token_expires_at = time.time() + data.get("expires_in", 3600)
-
-        return self._access_token
-
     def get_headers(self) -> Dict[str, str]:
-        """Get headers with valid access token."""
+        """Bearer-token headers for Gmail API calls."""
         return {
-            "Authorization": f"Bearer {self.get_access_token()}",
+            "Authorization": f"Bearer {self.access_token}",
             "Accept": "application/json",
         }
 
