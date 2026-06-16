@@ -1952,6 +1952,29 @@ def create_connection(
     help='Connection options as JSON string (e.g., \'{"key": "value"}\')',
 )
 @click.option(
+    "--auth-type",
+    "auth_type",
+    type=click.Choice(list(AUTH_TYPE_CHOICES), case_sensitive=False),
+    default=AUTH_TYPE_STATIC,
+    show_default=True,
+    help=(
+        "Authentication mode for the COMMUNITY connection. Must match the "
+        "mode the connection was created with — the auth mode itself can't "
+        "be switched on update. Pass '--auth-type=u2m' to re-run the "
+        "browser authorization-code flow and refresh the stored OAuth grant."
+    ),
+)
+@click.option(
+    "--redirect-port",
+    "redirect_port",
+    type=int,
+    default=None,
+    help=(
+        "Loopback port for the OAuth U2M redirect (only used with "
+        "--auth-type=u2m). Defaults to an OS-assigned free port."
+    ),
+)
+@click.option(
     "--spec",
     "-s",
     "spec_path",
@@ -1966,6 +1989,8 @@ def update_connection(
     source_name: str,
     connection_name: str,
     options: str,
+    auth_type: str,
+    redirect_port: Optional[int],
     spec_path: Optional[str],
 ):
     """
@@ -1977,7 +2002,12 @@ def update_connection(
 
     The connection's auth mode (community_oauth_flow) is fixed at creation
     time and cannot be changed here — recreate the connection to switch
-    between static, m2m, u2m, and u2m_per_user modes.
+    between static, m2m, u2m, and u2m_per_user modes. Pass the SAME
+    --auth-type the connection was created with so the update preserves it.
+    For --auth-type=u2m this re-runs the browser authorization-code + PKCE
+    flow and writes a fresh authorization_code / pkce_verifier /
+    oauth_redirect_uri, which is how you refresh an expired or revoked OAuth
+    grant without recreating the connection.
 
     Connection options are validated against the connector spec (connector_spec.yaml).
     The externalOptionsAllowList is automatically added from the spec.
@@ -1986,6 +2016,14 @@ def update_connection(
     Example:
         community-connector update_connection github my_github_conn \\
             -o '{"token": "ghp_xxxx"}'
+
+        # Refresh an expired U2M OAuth grant (re-runs the browser flow):
+        community-connector update_connection github my_github_conn \\
+            --auth-type u2m \\
+            -o '{"client_id":"...","client_secret":"...",
+                 "authorization_endpoint":"https://idp/authorize",
+                 "token_endpoint":"https://idp/token",
+                 "oauth_scope":"repo"}'
 
         # With custom spec file:
         community-connector update_connection github my_github_conn \\
@@ -1996,11 +2034,15 @@ def update_connection(
             -o '{"token": "ghp_xxxx"}' --spec https://github.com/myorg/myrepo
     """
     debug = ctx.obj.get("debug", False)
+    auth_type = auth_type.lower()
 
     click.echo(f"Updating connection for source: {source_name}")
     click.echo(f"Connection name: {connection_name}")
+    click.echo(f"Auth type: {auth_type}")
 
-    options_dict = _prepare_connection_options(source_name, options, spec_path, debug)
+    options_dict = _prepare_connection_options(
+        source_name, options, spec_path, debug, auth_type, redirect_port
+    )
 
     workspace_client = _make_workspace_client()
     body = {"name": connection_name, "options": options_dict}

@@ -1050,6 +1050,95 @@ class TestCreateConnectionConnectionType:
         assert opts["oauth_redirect_uri"] == "http://localhost:54321/callback"
 
 
+class TestUpdateConnectionCommand:
+    """update_connection must support the same auth modes as create_connection
+    so a U2M OAuth grant can be refreshed without recreating the connection."""
+
+    @patch(
+        "databricks.labs.community_connector_cli.cli.run_u2m_authorization_code_flow"
+    )
+    @patch("databricks.labs.community_connector_cli.cli._load_connector_spec")
+    @patch("databricks.labs.community_connector_cli.cli.WorkspaceClient")
+    def test_update_connection_u2m_refreshes_oauth_grant(
+        self, mock_workspace_client, mock_load_spec, mock_oauth
+    ):
+        """--auth-type=u2m re-runs the loopback flow and PATCHes a fresh
+        authorization code / verifier / redirect into the connection."""
+        runner = CliRunner()
+
+        mock_load_spec.return_value = None
+        mock_ws = MagicMock()
+        mock_workspace_client.return_value = mock_ws
+        mock_ws.api_client.do.return_value = {"name": "my_conn", "connection_id": "123"}
+        mock_oauth.return_value = (
+            "NEWCODE",
+            "NEWVERIFIER",
+            "http://localhost:54321/callback",
+        )
+
+        result = runner.invoke(
+            main,
+            [
+                "update_connection",
+                "github",
+                "my_conn",
+                "--auth-type",
+                "u2m",
+                "-o",
+                json.dumps(
+                    {
+                        "client_id": "cid",
+                        "client_secret": "csecret",
+                        "authorization_endpoint": "https://example.com/authorize",
+                        "token_endpoint": "https://example.com/token",
+                        "oauth_scope": "repo",
+                    }
+                ),
+            ],
+        )
+
+        assert result.exit_code == 0, result.output
+        mock_oauth.assert_called_once()
+
+        method, path = mock_ws.api_client.do.call_args.args[:2]
+        assert method == "PATCH"
+        assert path.endswith("/connections/my_conn")
+
+        opts = mock_ws.api_client.do.call_args.kwargs["body"]["options"]
+        assert opts["community_oauth_flow"] == "u2m"
+        assert opts["authorization_code"] == "NEWCODE"
+        assert opts["pkce_verifier"] == "NEWVERIFIER"
+        assert opts["oauth_redirect_uri"] == "http://localhost:54321/callback"
+
+    @patch("databricks.labs.community_connector_cli.cli._load_connector_spec")
+    @patch("databricks.labs.community_connector_cli.cli.WorkspaceClient")
+    def test_update_connection_defaults_to_static_no_oauth_flow(
+        self, mock_workspace_client, mock_load_spec
+    ):
+        """Without --auth-type the update stays static and runs no OAuth flow."""
+        runner = CliRunner()
+
+        mock_load_spec.return_value = None
+        mock_ws = MagicMock()
+        mock_workspace_client.return_value = mock_ws
+        mock_ws.api_client.do.return_value = {"name": "my_conn", "connection_id": "123"}
+
+        result = runner.invoke(
+            main,
+            [
+                "update_connection",
+                "github",
+                "my_conn",
+                "-o",
+                '{"token": "ghp_xxxx"}',
+            ],
+        )
+
+        assert result.exit_code == 0, result.output
+        opts = mock_ws.api_client.do.call_args.kwargs["body"]["options"]
+        assert "community_oauth_flow" not in opts
+
+
 class TestOAuthDefaultsAutoFill:
     """Tests for auto-populating OAuth options from connector_spec.yaml."""
 
