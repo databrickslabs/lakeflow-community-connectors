@@ -2206,13 +2206,34 @@ def test_build_contained_url_three_level():
     assert url.startswith(f"{SERVICE_URL}Parents(7)/Children(9)/Notes?")
 
 
+def test_compute_dynamic_tops():
+    """``compute_dynamic_tops`` distributes ``page_size`` across all
+    levels with triangular weights so the cross-product fits in the
+    budget. Top gets the largest share; minimum per level is 5."""
+    from databricks.labs.community_connector.sources.odata._contained import (
+        compute_dynamic_tops,
+    )
+
+    assert compute_dynamic_tops(1000, 1) == [1000]
+    # 100 × 10 = 1000 (exactly fits)
+    assert compute_dynamic_tops(1000, 2) == [100, 10]
+    # 31 × 10 × 5 — third level clamped to MIN_DYNAMIC_TOP=5
+    assert compute_dynamic_tops(1000, 3) == [31, 10, 5]
+    # Top still > min, deeper levels clamped to 5
+    tops4 = compute_dynamic_tops(1000, 4)
+    assert tops4[0] >= 15 and all(t >= 5 for t in tops4)
+    # Small budget: every level clamps to minimum
+    assert compute_dynamic_tops(10, 3) == [5, 5, 5]
+
+
 @responses.activate
 def test_build_expand_url_three_level():
     _mock_nested_metadata()
     c = _make()
     url = c._build_expand_url(["Parents", "Children", "Notes"], {})
-    assert "$expand=Children($top=300;$expand=Notes($top=300))" in url
-    assert url.startswith(f"{SERVICE_URL}Parents?")
+    # Dynamic distribution for N=3, page_size=1000: [31, 10, 5].
+    assert "Parents?$top=31" in url
+    assert "$expand=Children($top=10;$expand=Notes($top=5))" in url
 
 
 @responses.activate
@@ -2220,35 +2241,33 @@ def test_build_expand_url_four_level_nests_correctly():
     _mock_nested_metadata()
     c = _make()
     url = c._build_expand_url(["A", "B", "C", "D"], {})
-    assert "$expand=B($top=300;$expand=C($top=300;$expand=D($top=300)))" in url
+    # Dynamic distribution for N=4, page_size=1000: [15, 7, 5, 5].
+    assert "A?$top=15" in url
+    assert "$expand=B($top=7;$expand=C($top=5;$expand=D($top=5)))" in url
 
 
 @responses.activate
-def test_build_expand_url_inner_top_defaults_to_300_independent_of_page_size():
-    """Inner ``$top`` defaults to 300, independent of the top-level
-    ``page_size``. The two knobs are intentionally decoupled because
-    the inner cross-product grows multiplicatively with the expand
-    chain; ``page_size=1000`` at every level would be unreasonable."""
+def test_build_expand_url_dynamic_tops_for_two_level():
+    """User's stated rule: for a 2-segment expand with page_size=1000,
+    the top URL gets ``$top=100`` and the single inner expand gets
+    ``$top=10`` — product equals the budget exactly."""
     _mock_nested_metadata()
     c = _make()
-    url = c._build_expand_url(["Parents", "Children"], {"page_size": "250"})
-    assert "Parents?$top=250" in url
-    assert "$expand=Children($top=300)" in url
-
-
-@responses.activate
-def test_build_expand_url_inner_top_override():
-    """``expand_inner_page_size`` overrides the 300 default for the
-    inner ``$expand`` clauses only; the top-level ``$top`` keeps
-    using ``page_size``."""
-    _mock_nested_metadata()
-    c = _make()
-    url = c._build_expand_url(
-        ["Parents", "Children", "Notes"],
-        {"page_size": "100", "expand_inner_page_size": "2000"},
-    )
+    url = c._build_expand_url(["Parents", "Children"], {})
     assert "Parents?$top=100" in url
-    assert "$expand=Children($top=2000;$expand=Notes($top=2000))" in url
+    assert "$expand=Children($top=10)" in url
+
+
+@responses.activate
+def test_build_expand_url_page_size_scales_dynamic_tops():
+    """Reducing ``page_size`` scales every level proportionally."""
+    _mock_nested_metadata()
+    c = _make()
+    url = c._build_expand_url(["Parents", "Children"], {"page_size": "100"})
+    # sqrt(100*10) ≈ 31.6 → 31, /10 → ~3 → clamped to 5
+    # Actually for N=2: top = 100^(2/3) ≈ 21.5 → 21, inner = 100^(1/3) ≈ 4.6 → 5 (clamped).
+    assert "Parents?$top=21" in url
+    assert "$expand=Children($top=5)" in url
 
 
 @responses.activate
@@ -2264,9 +2283,10 @@ def test_build_expand_url_inner_top_with_cursor_clause():
         cursor_filter="ModifiedAt gt 2024-01-01T00:00:00Z",
         cursor_order="ModifiedAt asc,Id asc",
     )
-    # Inner $top defaults to 300 (the new expand-mode default); $filter
-    # and $orderby compose with it at the cursor's level.
-    assert "$expand=Children($top=300" in url
+    # Dynamic distribution for N=2, page_size=500: [62, 7]. $filter and
+    # $orderby compose with the inner $top at the cursor's level.
+    assert "Parents?$top=62" in url
+    assert "$expand=Children($top=7" in url
     assert "$filter=ModifiedAt gt 2024-01-01T00:00:00Z" in url
     assert "$orderby=ModifiedAt asc,Id asc" in url
 
@@ -2905,8 +2925,9 @@ def test_contained_expand_user_filter_lands_in_leaf_expand_not_top():
     url = unquote(captured[0])
     # filter_at_Parents lands at the top URL; user `filter` lands
     # inside $expand=Children(...).
-    assert "Parents?$top=1000&$filter=Id eq 1" in url
-    assert "$expand=Children($top=300;$filter=Id eq 3" in url
+    # Dynamic tops for N=2 page_size=1000: [100, 10].
+    assert "Parents?$top=100&$filter=Id eq 1" in url
+    assert "$expand=Children($top=10;$filter=Id eq 3" in url
     # User filter must NOT be at the top URL.
     assert "(Id eq 1) and (Id eq 3)" not in url
     assert "(Id eq 3) and (Id eq 1)" not in url
@@ -2985,7 +3006,8 @@ def test_contained_expand_filter_at_middle_lands_inside_expand():
     list(records)
     from urllib.parse import unquote
 
-    assert "Children($top=300;$filter=Id eq 10" in unquote(captured[0])
+    # Dynamic tops for N=3 page_size=1000: [31, 10, 5]. Middle level = 10.
+    assert "Children($top=10;$filter=Id eq 10" in unquote(captured[0])
 
 
 @responses.activate
@@ -3022,7 +3044,8 @@ def test_contained_expand_filter_at_leaf_lands_in_innermost_expand():
     list(records)
     from urllib.parse import unquote
 
-    assert "Notes($top=300;$filter=Id eq 100" in unquote(captured[0])
+    # Dynamic tops for N=3 page_size=1000: [31, 10, 5]. Leaf level = 5.
+    assert "Notes($top=5;$filter=Id eq 100" in unquote(captured[0])
 
 
 # --- Composition ---

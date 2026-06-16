@@ -143,7 +143,7 @@ w.api_client.do(
             # "oauth2_access_token": "<optional-pre-issued-access-token>",
             "externalOptionsAllowList": (
                 "namespace,cursor_field,select,filter,"
-                "filter_at_*,page_size,expand_inner_page_size,"
+                "filter_at_*,page_size,"
                 "max_records_per_batch,delta_tracking,expand_contained,"
                 "num_partitions"
             ),
@@ -207,7 +207,7 @@ w.api_client.do(
             "token": "<bearer-token>",
             "externalOptionsAllowList": (
                 "namespace,cursor_field,select,filter,"
-                "filter_at_*,page_size,expand_inner_page_size,"
+                "filter_at_*,page_size,"
                 "max_records_per_batch,delta_tracking,expand_contained,"
                 "num_partitions"
             ),
@@ -301,8 +301,7 @@ build_pipeline(
 | `select`                | all     | Comma-separated `$select` projection. |
 | `filter`                |         | Extra OData `$filter` expression. Applied to the **leaf segment** in both modes — leaf URL in N+1 mode (`expand_contained=false`), innermost `$expand(...)` clause in expand mode. Equivalent to `filter_at_<leaf-segment>`; AND-composes with it if both are set. For per-segment placement on intermediate ancestors of contained paths, use `filter_at_<segment>` below. |
 | `filter_at_<segment>` <br/> `filter_at_<idx>` | | Per-segment `$filter` for contained-path tables. Each entry is applied to the matching walk level — in N+1 mode the ancestor walks at each level get pruned to matching rows, cascading the savings down the children; in `expand_contained=true` mode the filter is injected inside the corresponding `$expand(...)` clause per OData v4 §5.1.1.6. Two equivalent forms: by segment name (`filter_at_Instances=Id eq 5` — must match a segment in the contained path) or by zero-based index (`filter_at_0=Id eq 5`). Index wins on conflict. Composes with cursor filters (AND-ed at the cursor's segment) and with the existing `filter` option (AND-ed at the leaf in N+1 mode, AND-ed at the top in expand mode). Unknown segment names and out-of-range indices raise `ValueError` at read time. |
-| `page_size`             | 1000    | `$top` per HTTP request at the top-level URL. |
-| `expand_inner_page_size`| 300     | `$top` injected *inside* every nested `$expand(...)` clause when `expand_contained=true`. Decoupled from `page_size` because the inner cross-product grows multiplicatively with the chain — `$top=1000` at every level of a 3-segment `$expand` asks the server to compose up to 1B leaf rows in a single response, which tips most servers over their request timeout. 300 keeps per-response work to ~27M rows worst-case. Override per table when the server caps lower (e.g. Hexagon SCApi defaults to 100 inside `$expand` regardless of what you request) or when you want fewer follow-up `<NavProp>@odata.nextLink` round trips. Servers that don't honour `$top` inside `$expand` ignore it — the wire format is still valid OData v4. |
+| `page_size`             | 1000    | Maximum per-response row budget. For flat tables it's the `$top` at the single URL. For `expand_contained=true` paths it's distributed across all `$top` points (top URL + every nested `$expand(...)`) with triangular weights — top gets the largest share, each deeper level proportionally less — so the cross-product `top × inner_1 × inner_2 × …` fits in the budget. Examples with `page_size=1000`: depth 2 → `[100, 10]`, depth 3 → `[31, 10, 5]`, depth 4 → `[15, 7, 5, 5]`. Each per-level `$top` is floored at 5 (very small pages amplify the `@odata.nextLink` chase at every level). When the floor kicks in the cross-product can exceed `page_size`; raise `page_size` to restore the cap, or switch to `expand_contained=false` so the chain becomes N+1 single-segment fetches. |
 | `max_records_per_batch` | 100000  | Per-call upper bound on rows returned. The connector has **no wall-clock ceiling** — `max_records_per_batch` is the only cap on a single batch. Each batch fetches `cursor gt <last>` and pulls up to this many rows, then commits the offset. Smaller values give continuous-mode pipelines lower latency per micro-batch at the cost of more round trips; larger values amortize HTTP overhead. The default of 100000 fits roughly 100 `$top=1000` pages per batch and prioritises throughput; lower it (e.g. to 5000) if you want tighter per-batch latency in a continuous pipeline. |
 | `delta_tracking`        | disabled | Opt-in OData v4 delta queries. Values: `disabled` (default — no behavior change), `auto` (probe once, fall back to cursor/snapshot if the server doesn't acknowledge), `enabled` (require support; error if the server doesn't acknowledge). See [Delta tracking](#delta-tracking) below. |
 | `expand_contained`      | false   | For contained-collection tables (`Parent__Child__...` paths). When `true`, the connector issues a single `GET Parent?$expand=Child($expand=...)` per pipeline trigger instead of the default N+1 traversal (one parent fetch + one per-parent leaf fetch). See [Contained navigation properties](#contained-navigation-properties) below. |

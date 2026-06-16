@@ -15,6 +15,7 @@ so the mixin requires no abstract-method declarations — it duck-types
 against the concrete class.
 """
 
+import math
 from datetime import date, datetime
 from decimal import Decimal
 from typing import Any, Iterator
@@ -43,6 +44,57 @@ _URL_SEGMENT_SEP = "/"
 # with cyclic containment graphs; cycles within the cap are also
 # detected via target-type tracking.
 MAX_CONTAINED_DEPTH = 10
+
+# Floor for any per-level ``$top`` computed by the dynamic
+# distribution. Below this the page is so small that per-request
+# overhead dominates; smaller chunks also amplify the
+# ``@odata.nextLink`` chase at every level.
+MIN_DYNAMIC_TOP = 5
+
+
+def compute_dynamic_tops(page_size: int, num_levels: int) -> list[int]:
+    """Distribute ``page_size`` budget across ``num_levels`` levels of
+    nested ``$expand`` ``$top`` values so the cross-product
+    ``$top_0 × $top_1 × … × $top_{N-1}`` stays within ``page_size`` —
+    the maximum number of leaf rows a single HTTP response can carry.
+
+    Triangular-weighted distribution: level ``i`` (0-indexed from
+    the top) gets weight ``N - i`` out of ``N(N+1)/2`` total weight.
+    The top URL gets the largest share since it's the outermost
+    multiplier; deeper levels get progressively less. Each level is
+    raised to ``MIN_DYNAMIC_TOP`` (5) so the page is never smaller
+    than a useful chunk.
+
+    Examples with ``page_size = 1000``:
+
+    * ``N=1`` (flat read): ``[1000]``
+    * ``N=2`` (e.g. ``Parents__Children``): ``[100, 10]``
+      → ``100 × 10 = 1000``
+    * ``N=3`` (e.g. ``A__B__C``): ``[31, 10, 5]``
+      → last clamped from 3 by the minimum
+    * ``N=4``: ``[15, 7, 5, 5]`` — last two clamped
+
+    When the minimum clamp kicks in (deep chains, small budget),
+    the actual cross-product may exceed ``page_size``. Raise
+    ``page_size`` to restore the cap, or use ``expand_contained=false``
+    so the chain becomes N+1 fetches instead of a single big request.
+    """
+    if num_levels <= 0:
+        return []
+    if num_levels == 1:
+        return [page_size]
+    total_weight = num_levels * (num_levels + 1) // 2
+    tops: list[int] = []
+    for i in range(num_levels):
+        weight = num_levels - i
+        exact = page_size ** (weight / total_weight)
+        # Floating-point quirk: ``1000 ** (2/3)`` is ``99.999…`` in
+        # IEEE-754. Snap to the rounded integer when it's effectively
+        # exact, otherwise floor so we never overshoot the budget.
+        rounded = round(exact)
+        value = rounded if math.isclose(exact, rounded, rel_tol=1e-9) else math.floor(exact)
+        tops.append(max(MIN_DYNAMIC_TOP, int(value)))
+    return tops
 
 
 def join_url(base: str, suffix: str) -> str:
@@ -329,21 +381,22 @@ class ContainedNavMixin:
         the ancestor rows so it can be stamped onto leaf rows. OData
         v4 §5.1.1.13: inner ``$expand`` options are separated by ``;``.
 
-        ``$top`` is emitted at every nested ``$expand`` level so users
-        can tune the inner page size — without it the server picks
-        whatever default it likes (e.g. Hexagon SCApi defaults to 100,
-        which means an 8x request fan-out via ``<NavProp>@odata.nextLink``
-        for a parent with 800 children). ``expand_inner_page_size``
-        overrides; defaults to ``300``. The default is decoupled from
-        the top-level ``page_size`` (which defaults to 1000) because
-        the inner cross-product grows multiplicatively with the chain:
-        ``$top=1000`` at every level of a 3-segment ``$expand`` asks
-        the server to compose up to 1B leaf rows in a single response,
-        which tips most servers over their request timeout. 300 keeps
-        per-response work to ~27M rows worst-case while still being
-        large enough to amortise per-request overhead. Servers that
-        don't honour ``$top`` inside ``$expand`` ignore it — the wire
-        format is still valid OData v4.
+        ``$top`` is emitted at every nested ``$expand`` level so the
+        server's default doesn't surprise us (Hexagon SCApi for example
+        caps inner expansions at 100 regardless of the request) and so
+        the connector controls the per-response row count.
+
+        Per-level ``$top`` values are computed dynamically by
+        :func:`compute_dynamic_tops`: the ``page_size`` budget is
+        distributed across all ``$top`` points with triangular weights
+        — the top URL gets the largest share, each deeper level
+        proportionally less — so the worst-case cross-product stays
+        within ``page_size``. ``$top=1000`` at every level of a
+        3-segment expand would ask for up to 1B rows in one response
+        and times out every real server; the dynamic distribution
+        keeps it bounded (e.g. ``[31, 10, 5]`` for depth 3 with
+        ``page_size=1000``). Servers that don't honour ``$top`` inside
+        ``$expand`` ignore it — the wire format stays valid OData v4.
         """
         segment_filters = resolve_segment_filters(table_options, segments)
         top, *children = segments
@@ -356,6 +409,13 @@ class ContainedNavMixin:
         # would land at Instances (wrong segment) and 400 the server.
         opts = table_options or {}
         top_opts = {k: v for k, v in opts.items() if k != "filter"} if children else opts
+        per_level_tops = compute_dynamic_tops(int(opts.get("page_size", "1000")), len(segments))
+        if children:
+            # Override page_size in the opts dict ``_format_query_params``
+            # reads from, so the top-URL ``$top`` reflects the dynamic
+            # allocation instead of the unscaled budget.
+            top_opts = dict(top_opts)
+            top_opts["page_size"] = str(per_level_tops[0])
         top_extra = combine_filters(
             cursor_filter if cursor_level == 0 else None,
             segment_filters.get(0),
@@ -367,12 +427,13 @@ class ContainedNavMixin:
         )
         if not children:
             return f"{base}?{query}"
-        inner_top = opts.get("expand_inner_page_size", "300")
         user_leaf_filter = opts.get("filter")
         inner = ""
         for i in range(len(children) - 1, -1, -1):
             is_leaf = i == len(children) - 1
-            parts: list[str] = [f"$top={inner_top}"]
+            # ``per_level_tops`` is indexed by segment (0 = top,
+            # 1 = first child, …). ``children[i]`` is segment i+1.
+            parts: list[str] = [f"$top={per_level_tops[i + 1]}"]
             level_filter = combine_filters(
                 cursor_filter if cursor_level == i + 1 else None,
                 segment_filters.get(i + 1),
