@@ -1,0 +1,89 @@
+# Amplitude Analytics API endpoints exercised by the connector.
+#
+# Auth is HTTP Basic and ignored by the simulator. All time-range params
+# (start / end) use API-specific string formats (YYYYMMDDTHH for export,
+# YYYYMMDD for the dashboard series) that don't line up with the corpus's
+# ISO timestamps / dates, so they're marked ``ignore``: the simulator
+# returns the full corpus and the connector's init-time cap drives
+# termination. Each ``corpus`` name matches a table so connector-tester
+# can bootstrap it from the table schema.
+#
+# Response-shape notes:
+# * /api/2/export — real API returns a ZIP of gzipped NDJSON; the simulator
+#   serves a bare JSON array and the connector's parser falls back to it.
+# * /api/2/users and /api/2/sessions/average — real API returns a nested
+#   {series, xValues} time series; the simulator serves the already-flat
+#   rows wrapped under ``data`` and the connector accepts that list form.
+
+endpoints:
+  # ---- events (Export API, append) ----
+  - path: /api/2/export
+    method: GET
+    corpus: events
+    response:
+      pagination_style: none
+    params:
+      start: {role: ignore}
+      end: {role: ignore}
+
+  # ---- events_list (Dashboard REST API, snapshot) ----
+  - path: /api/2/events/list
+    method: GET
+    corpus: events_list
+    response:
+      pagination_style: none
+      wrapper:
+        records_key: data
+
+  # ---- active_users_counts (Dashboard REST API, cdc) ----
+  - path: /api/2/users
+    method: GET
+    corpus: active_users_counts
+    response:
+      pagination_style: none
+      wrapper:
+        records_key: data
+    params:
+      start: {role: ignore}
+      end: {role: ignore}
+      m: {role: ignore}
+      i: {role: ignore}
+      s: {role: ignore}
+      g: {role: ignore}
+
+  # ---- average_session_length (Dashboard REST API, cdc) ----
+  - path: /api/2/sessions/average
+    method: GET
+    corpus: average_session_length
+    response:
+      pagination_style: none
+      wrapper:
+        records_key: data
+    params:
+      start: {role: ignore}
+      end: {role: ignore}
+
+  # ---- cohorts (Behavioral Cohorts API, snapshot) ----
+  - path: /api/3/cohorts
+    method: GET
+    corpus: cohorts
+    response:
+      pagination_style: none
+      wrapper:
+        records_key: cohorts
+    params:
+      includeSyncInfo: {role: ignore}
+
+  # ---- annotations (Chart Annotations API, snapshot) ----
+  - path: /api/3/annotations
+    method: GET
+    corpus: annotations
+    response:
+      pagination_style: none
+      wrapper:
+        records_key: data
+    params:
+      category: {role: ignore}
+      chart_id: {role: ignore}
+      start: {role: ignore}
+      end: {role: ignore}

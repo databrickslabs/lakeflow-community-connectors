@@ -1,0 +1,42 @@
+[
+  {
+    "date": "2024-01--pk0",
+    "count": 79250,
+    "segment": "india-166"
+  },
+  {
+    "date": "2024-01--pk1",
+    "count": 73886,
+    "segment": "lima-702"
+  },
+  {
+    "date": "2024-01--pk2",
+    "count": 10676,
+    "segment": "alpha-220"
+  },
+  {
+    "date": "2024-01--pk3",
+    "count": 53146,
+    "segment": "victor-726"
+  },
+  {
+    "date": "2024-01--pk4",
+    "count": 49251,
+    "segment": "november-244"
+  },
+  {
+    "date": "2024-01--pk5",
+    "count": 33550,
+    "segment": "november-308"
+  },
+  {
+    "date": "2024-01--pk6",
+    "count": 7301,
+    "segment": "quebec-475"
+  },
+  {
+    "date": "2024-01--pk7",
+    "count": 88620,
+    "segment": "alpha-136"
+  }
+]
