@@ -2249,12 +2249,22 @@ def test_compute_dynamic_tops():
     assert compute_dynamic_tops(1000, 1) == [1000]
     # 100 × 10 = 1000 (exactly fits)
     assert compute_dynamic_tops(1000, 2) == [100, 10]
-    # 31 × 10 × 5 — third level clamped to MIN_DYNAMIC_TOP=5
-    assert compute_dynamic_tops(1000, 3) == [31, 10, 5]
-    # Top still > min, deeper levels clamped to 5
-    tops4 = compute_dynamic_tops(1000, 4)
-    assert tops4[0] >= 15 and all(t >= 5 for t in tops4)
-    # Small budget: every level clamps to minimum
+    # 34 × 5 × 5 = 850. Bottom clamps to MIN, remaining 200-budget split
+    # across the upper two levels: 200^(2/3) ≈ 34, 200^(1/3) ≈ 5.
+    assert compute_dynamic_tops(1000, 3) == [34, 5, 5]
+    # 8 × 5 × 5 × 5 = 1000. Bottom three clamp to MIN, top gets the
+    # remaining 1000 / 125 = 8.
+    assert compute_dynamic_tops(1000, 4) == [8, 5, 5, 5]
+    # Cross-product never exceeds page_size when it's mathematically
+    # possible (i.e. MIN ** N <= page_size).
+    for n in (2, 3, 4):
+        tops = compute_dynamic_tops(1000, n)
+        product = 1
+        for t in tops:
+            product *= t
+        assert product <= 1000, f"N={n} product={product} exceeds budget"
+        assert all(t >= 5 for t in tops)
+    # Small budget: every level clamps to minimum (5**3 = 125 > 10).
     assert compute_dynamic_tops(10, 3) == [5, 5, 5]
 
 
@@ -2263,9 +2273,9 @@ def test_build_expand_url_three_level():
     _mock_nested_metadata()
     c = _make()
     url = c._build_expand_url(["Parents", "Children", "Notes"], {})
-    # Dynamic distribution for N=3, page_size=1000: [31, 10, 5].
-    assert "Parents?$top=31" in url
-    assert "$expand=Children($top=10;$expand=Notes($top=5))" in url
+    # Dynamic distribution for N=3, page_size=1000: [34, 5, 5] (product 850).
+    assert "Parents?$top=34" in url
+    assert "$expand=Children($top=5;$expand=Notes($top=5))" in url
 
 
 @responses.activate
@@ -2273,9 +2283,9 @@ def test_build_expand_url_four_level_nests_correctly():
     _mock_nested_metadata()
     c = _make()
     url = c._build_expand_url(["A", "B", "C", "D"], {})
-    # Dynamic distribution for N=4, page_size=1000: [15, 7, 5, 5].
-    assert "A?$top=15" in url
-    assert "$expand=B($top=7;$expand=C($top=5;$expand=D($top=5)))" in url
+    # Dynamic distribution for N=4, page_size=1000: [8, 5, 5, 5] (product 1000).
+    assert "A?$top=8" in url
+    assert "$expand=B($top=5;$expand=C($top=5;$expand=D($top=5)))" in url
 
 
 @responses.activate
@@ -2296,9 +2306,10 @@ def test_build_expand_url_page_size_scales_dynamic_tops():
     _mock_nested_metadata()
     c = _make()
     url = c._build_expand_url(["Parents", "Children"], {"page_size": "100"})
-    # sqrt(100*10) ≈ 31.6 → 31, /10 → ~3 → clamped to 5
-    # Actually for N=2: top = 100^(2/3) ≈ 21.5 → 21, inner = 100^(1/3) ≈ 4.6 → 5 (clamped).
-    assert "Parents?$top=21" in url
+    # For N=2 page_size=100: inner = 100^(1/3) ≈ 4.6 → clamped to 5,
+    # then upper level absorbs remaining budget = 100 // 5 = 20.
+    # Product 20 × 5 = 100 (exact).
+    assert "Parents?$top=20" in url
     assert "$expand=Children($top=5)" in url
 
 
@@ -3094,8 +3105,8 @@ def test_contained_expand_filter_at_middle_lands_inside_expand():
     list(records)
     from urllib.parse import unquote
 
-    # Dynamic tops for N=3 page_size=1000: [31, 10, 5]. Middle level = 10.
-    assert "Children($top=10;$filter=Id eq 10" in unquote(captured[0])
+    # Dynamic tops for N=3 page_size=1000: [34, 5, 5]. Middle level = 5.
+    assert "Children($top=5;$filter=Id eq 10" in unquote(captured[0])
 
 
 @responses.activate
@@ -3132,7 +3143,7 @@ def test_contained_expand_filter_at_leaf_lands_in_innermost_expand():
     list(records)
     from urllib.parse import unquote
 
-    # Dynamic tops for N=3 page_size=1000: [31, 10, 5]. Leaf level = 5.
+    # Dynamic tops for N=3 page_size=1000: [34, 5, 5]. Leaf level = 5.
     assert "Notes($top=5;$filter=Id eq 100" in unquote(captured[0])
 
 

@@ -697,35 +697,62 @@ def register_lakeflow_source(spark):
         raised to ``MIN_DYNAMIC_TOP`` (5) so the page is never smaller
         than a useful chunk.
 
+        When the geometric distribution would put a deep level below the
+        minimum, that level is clamped to ``MIN_DYNAMIC_TOP`` and the
+        *remaining* budget for upper levels is divided down accordingly,
+        so the cross-product stays at-or-under ``page_size`` whenever
+        that's mathematically possible.
+
         Examples with ``page_size = 1000``:
 
         * ``N=1`` (flat read): ``[1000]``
         * ``N=2`` (e.g. ``Parents__Children``): ``[100, 10]``
           → ``100 × 10 = 1000``
-        * ``N=3`` (e.g. ``A__B__C``): ``[31, 10, 5]``
-          → last clamped from 3 by the minimum
-        * ``N=4``: ``[15, 7, 5, 5]`` — last two clamped
+        * ``N=3``: ``[34, 5, 5]`` → ``850`` (under budget; bottom clamped)
+        * ``N=4``: ``[8, 5, 5, 5]`` → ``1000`` exactly
 
-        When the minimum clamp kicks in (deep chains, small budget),
-        the actual cross-product may exceed ``page_size``. Raise
+        If the chain is so deep that ``MIN_DYNAMIC_TOP ** num_levels``
+        already exceeds ``page_size`` (e.g. ``5**5 = 3125`` for
+        ``page_size=1000``, ``N=5``), every level falls to the minimum and
+        the cross-product unavoidably exceeds the budget — raise
         ``page_size`` to restore the cap, or use ``expand_contained=false``
         so the chain becomes N+1 fetches instead of a single big request.
         """
         if num_levels <= 0:
             return []
-        if num_levels == 1:
-            return [page_size]
-        total_weight = num_levels * (num_levels + 1) // 2
-        tops: list[int] = []
-        for i in range(num_levels):
-            weight = num_levels - i
-            exact = page_size ** (weight / total_weight)
-            # Floating-point quirk: ``1000 ** (2/3)`` is ``99.999…`` in
-            # IEEE-754. Snap to the rounded integer when it's effectively
-            # exact, otherwise floor so we never overshoot the budget.
-            rounded = round(exact)
-            value = rounded if math.isclose(exact, rounded, rel_tol=1e-9) else math.floor(exact)
-            tops.append(max(MIN_DYNAMIC_TOP, int(value)))
+        tops = [MIN_DYNAMIC_TOP] * num_levels
+        # ``remaining`` counts the *upper* levels still being distributed.
+        # Anything at index ``>= remaining`` is already pinned to the minimum.
+        remaining = num_levels
+        budget = page_size
+        while remaining > 0:
+            if remaining == 1:
+                tops[0] = max(MIN_DYNAMIC_TOP, int(budget))
+                break
+            total_weight = remaining * (remaining + 1) // 2
+            candidate: list[int] = []
+            any_below_min = False
+            for i in range(remaining):
+                weight = remaining - i
+                exact = budget ** (weight / total_weight)
+                # Floating-point quirk: ``1000 ** (2/3)`` is ``99.999…`` in
+                # IEEE-754. Snap to the rounded integer when it's effectively
+                # exact, otherwise floor so we never overshoot the budget.
+                rounded = round(exact)
+                value = rounded if math.isclose(exact, rounded, rel_tol=1e-9) else math.floor(exact)
+                if value < MIN_DYNAMIC_TOP:
+                    any_below_min = True
+                candidate.append(int(value))
+            if not any_below_min:
+                for i, v in enumerate(candidate):
+                    tops[i] = max(MIN_DYNAMIC_TOP, v)
+                break
+            # Bottom of the active range can't honour the geometric share
+            # without dropping below ``MIN_DYNAMIC_TOP``. Pin it to the minimum
+            # and redistribute what's left of the budget across the upper levels.
+            tops[remaining - 1] = MIN_DYNAMIC_TOP
+            budget = max(1, budget // MIN_DYNAMIC_TOP)
+            remaining -= 1
         return tops
 
 
