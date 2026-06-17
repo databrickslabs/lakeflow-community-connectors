@@ -568,10 +568,14 @@ entity set name appears in two schemas, set the `namespace` table option:
   caps, lower `page_size` (shrinks the per-level `$top` cross-product
   and therefore each response's row count) or switch to
   `expand_contained=false` which commits at every parent-walk boundary.
-- Batch reads (Trigger.Once / non-streaming) use the framework's
-  `DataSourceReader.read()` which consumes the connector's iterator
-  exactly once and discards the returned end-offset. If the connector
-  truncates (returns `chain_next_link`) under that codepath, only the
-  first chunk lands. Use a streaming trigger (default for SDP) so the
-  framework re-invokes `read()` with the parked offset until the chain
-  drains — which is what the connector relies on.
+- Batch reads (`LakeflowBatchReader`, used by
+  `spark.read.format("lakeflow_connect")`) call `read_table` with
+  `start_offset=None` and discard the returned end-offset. The
+  connector detects that signal and **auto-disables the cap** when
+  `max_records_per_batch` is not explicitly set, so the chain drains
+  in one call instead of silently truncating at the default. If the
+  user passes `max_records_per_batch` explicitly the override is
+  skipped — same-cursor-cohort overflow detection and any other
+  cap-driven behaviour stay intact, at the cost of accepting that the
+  batch reader may drop continuation state. Streaming triggers
+  (default for SDP) always pass a dict and are unaffected.

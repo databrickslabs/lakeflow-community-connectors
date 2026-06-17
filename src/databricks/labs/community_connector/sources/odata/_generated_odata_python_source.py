@@ -2607,6 +2607,12 @@ def register_lakeflow_source(spark):
     _DELTA_PREFER = "odata.track-changes"
     _DELETED_COL = "_deleted"
     _SEQUENCE_COL = "_lc_sequence"
+    # Effectively-unlimited value for ``max_records_per_batch`` when the
+    # framework's batch reader is detected (``start_offset is None``).
+    # A bare ``sys.maxsize`` is unnecessary — the per-fetch cap arithmetic
+    # only ever compares ``<= len(emitted)``; any value larger than what a
+    # single ingestion could plausibly buffer works.
+    _BATCH_UNCAPPED = 10**12
     # Monotonic across the whole process — guarantees each emitted record
     # has a strictly increasing sequence value, so apply_changes can pick a
     # deterministic winner when the same primary key appears multiple times
@@ -2973,7 +2979,23 @@ def register_lakeflow_source(spark):
         def read_table(
             self, table_name: str, start_offset: dict, table_options: dict[str, str]
         ) -> tuple[Iterator[dict], dict]:
-            opts = table_options or {}
+            # The Spark Python Data Source batch reader
+            # (``LakeflowBatchReader``) passes ``start_offset=None`` and
+            # discards the returned end-offset — so any continuation state
+            # the connector would normally park in the offset (e.g.
+            # ``pending_fetches`` on the ``expand_contained=true`` path,
+            # ``chain_next_link`` on the leaf-cursor N+1 path) would be
+            # silently dropped, truncating the read at the default
+            # ``max_records_per_batch``. Both streaming readers always
+            # pass a dict (``{}`` or the parked offset). Treat ``None``
+            # plus an *unset* cap as the batch-mode signal and force the
+            # cap effectively-infinite so the chain drains fully in one
+            # call. When the user passes ``max_records_per_batch``
+            # themselves we still honour it — same-cursor-cohort overflow
+            # detection and any other cap-driven behaviour stays intact.
+            opts = dict(table_options or {})
+            if start_offset is None and "max_records_per_batch" not in opts:
+                opts["max_records_per_batch"] = str(_BATCH_UNCAPPED)
             offset = start_offset or {}
             if _parse_contained_path(table_name) is not None:
                 if self._delta_setting(opts) == "enabled":

@@ -2609,9 +2609,11 @@ def test_contained_expand_truncates_mid_page_and_parks_pending_fetches():
 
     responses.add_callback(responses.GET, f"{SERVICE_URL}Parents", callback=_initial)
     c = _make()
+    # Pass an empty dict, not None — None signals batch mode and
+    # disables the cap. Streaming readers always pass {} on first call.
     records, offset = c.read_table(
         "Parents__Children",
-        None,
+        {},
         {"expand_contained": "true", "max_records_per_batch": "1"},
     )
     rows = list(records)
@@ -2654,7 +2656,7 @@ def test_contained_expand_truncates_at_page_boundary_queues_only_next_page():
     c = _make()
     records, offset = c.read_table(
         "Parents__Children",
-        None,
+        {},
         {"expand_contained": "true", "max_records_per_batch": "2"},
     )
     rows = list(records)
@@ -2662,6 +2664,66 @@ def test_contained_expand_truncates_at_page_boundary_queues_only_next_page():
     pending = offset.get("pending_fetches")
     assert pending == [{"url": next_link, "level": 0, "chain": [], "cur_val": None, "skip": 0}]
     assert "cursor" not in offset
+
+
+def test_read_table_disables_cap_when_start_offset_none_and_cap_unset():
+    """Spark's batch reader (``LakeflowBatchReader``) calls
+    ``read_table`` with ``start_offset=None`` and discards the
+    returned end-offset. ``read_table`` detects that signal and
+    raises ``max_records_per_batch`` to a near-infinite sentinel so
+    the cap can't fire and the chain drains fully in one call —
+    parked ``pending_fetches`` would otherwise be silently dropped.
+
+    Streaming readers always pass a dict (``{}`` initial or parked
+    offset), so this override does not touch the streaming path.
+
+    If the user passes ``max_records_per_batch`` themselves, the
+    override is skipped — same-cursor-cohort overflow detection and
+    any other cap-driven behaviour stays intact."""
+    _mock_nested_metadata()
+    captured: list[dict] = []
+
+    def _spy(self_, table_name, start_offset, table_options):
+        captured.append(dict(table_options))
+        return iter([]), {}
+
+    c = _make()
+    # start_offset=None, cap unset → override applies.
+    from databricks.labs.community_connector.sources.odata.odata import (
+        ODataLakeflowConnect,
+        _BATCH_UNCAPPED,
+    )
+
+    original = ODataLakeflowConnect._read_contained_expand
+    ODataLakeflowConnect._read_contained_expand = _spy  # type: ignore[assignment]
+    try:
+        c.read_table("Parents__Children", None, {"expand_contained": "true"})
+    finally:
+        ODataLakeflowConnect._read_contained_expand = original  # type: ignore[assignment]
+
+    assert captured[0]["max_records_per_batch"] == str(_BATCH_UNCAPPED)
+
+    # start_offset=None BUT cap explicitly set → user's value wins.
+    captured.clear()
+    ODataLakeflowConnect._read_contained_expand = _spy  # type: ignore[assignment]
+    try:
+        c.read_table(
+            "Parents__Children",
+            None,
+            {"expand_contained": "true", "max_records_per_batch": "50"},
+        )
+    finally:
+        ODataLakeflowConnect._read_contained_expand = original  # type: ignore[assignment]
+    assert captured[0]["max_records_per_batch"] == "50"
+
+    # start_offset={} (streaming) → override never applies.
+    captured.clear()
+    ODataLakeflowConnect._read_contained_expand = _spy  # type: ignore[assignment]
+    try:
+        c.read_table("Parents__Children", {}, {"expand_contained": "true"})
+    finally:
+        ODataLakeflowConnect._read_contained_expand = original  # type: ignore[assignment]
+    assert "max_records_per_batch" not in captured[0]
 
 
 @responses.activate
@@ -2874,7 +2936,7 @@ def test_contained_expand_caps_within_top_row_subtree():
     c = _make()
     records, offset = c.read_table(
         "Parents__Children",
-        None,
+        {},
         # Cap = 2: after the top-page is processed, emitted has 2
         # rows (the two inline Children). The inner nextLink for this
         # parent is queued but NOT followed in this batch.
