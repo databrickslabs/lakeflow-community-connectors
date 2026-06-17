@@ -364,6 +364,17 @@ _OAUTH_FLOW_CONTROL_KEYS = frozenset({"flow", "pkce", "extra_auth_params"})
 _RUNTIME_INJECTED_KEYS = frozenset({"access_token", "refresh_token"})
 
 
+def _flag_enabled(value, default: bool) -> bool:
+    """Interpret an oauth-block boolean flag that may be a real bool or a string
+    (spec parsing stringifies scalars, so ``pkce: false`` arrives as "False").
+    Returns ``default`` when the value is absent."""
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    return str(value).strip().lower() not in ("false", "0", "no", "off", "")
+
+
 def _resolve_oauth_block(oauth_defaults: dict) -> Tuple[dict, dict]:
     """Split the connector-spec oauth block into connection options and flow controls.
 
@@ -463,19 +474,27 @@ def _apply_auth_type(
     options_dict["community_oauth_flow"] = AUTH_TYPE_OAUTH_FLOW_VALUE[auth_type]
 
     if auth_type == AUTH_TYPE_U2M:
-        extra_auth_params = (flow_controls or {}).get("extra_auth_params")
-        click.echo("Running OAuth 2.0 authorization-code flow (PKCE) ...")
+        controls = flow_controls or {}
+        extra_auth_params = controls.get("extra_auth_params")
+        use_pkce = _flag_enabled(controls.get("pkce"), default=True)
+        click.echo(
+            "Running OAuth 2.0 authorization-code flow"
+            f"{' (PKCE)' if use_pkce else ''} ..."
+        )
         code, verifier, redirect_uri = run_u2m_authorization_code_flow(
             client_id=options_dict["client_id"],
             authorization_endpoint=options_dict["authorization_endpoint"],
             scope=options_dict.get("oauth_scope"),
             redirect_port=redirect_port,
             extra_auth_params=extra_auth_params,
+            use_pkce=use_pkce,
             echo=lambda msg: click.echo(msg),
         )
         options_dict["authorization_code"] = code
-        options_dict["pkce_verifier"] = verifier
         options_dict["oauth_redirect_uri"] = redirect_uri
+        # Only store a verifier when PKCE was actually used.
+        if verifier:
+            options_dict["pkce_verifier"] = verifier
         click.echo("  ✓ Captured authorization code from loopback redirect.")
 
 

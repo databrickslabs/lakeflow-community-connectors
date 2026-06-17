@@ -494,10 +494,11 @@ def validate_connection_options(
         unknown_params = provided_params - all_known
 
         if unknown_params:
+            known_hint = parsed_spec.get_all_known_params() | additional_known_keys
             result.errors.append(
                 f"Unknown connection parameters for '{source_name}': "
                 f"{', '.join(sorted(unknown_params))}. "
-                f"Known parameters are: {', '.join(sorted(parsed_spec.get_all_known_params()))}"
+                f"Known parameters are: {', '.join(sorted(known_hint))}"
             )
     else:
         # Option A: flat parameters structure
@@ -515,11 +516,15 @@ def validate_connection_options(
         unknown_params = provided_params - all_known
 
         if unknown_params:
+            known_hint = (
+                parsed_spec.required_params
+                | parsed_spec.optional_params
+                | additional_known_keys
+            )
             result.errors.append(
                 f"Unknown connection parameters for '{source_name}': "
                 f"{', '.join(sorted(unknown_params))}. "
-                f"Known parameters are: "
-                f"{', '.join(sorted(parsed_spec.required_params | parsed_spec.optional_params))}"
+                f"Known parameters are: {', '.join(sorted(known_hint))}"
             )
 
     return result
