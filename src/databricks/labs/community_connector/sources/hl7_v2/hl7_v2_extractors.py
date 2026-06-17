@@ -77,6 +77,16 @@ _SINGLE_SEGMENT_TABLES = frozenset(
 _BATCH_ENVELOPE_SEGMENTS = frozenset({"FHS", "BHS", "BTS", "FTS"})
 
 
+def _set_id(seg: HL7Segment) -> int:
+    """Return the segment's 1-based set-id, defaulting to 1 when absent.
+
+    Uses an explicit ``None`` check rather than ``... or 1`` so a literal
+    set-id of ``0`` is preserved as ``0`` instead of being rewritten to ``1``.
+    """
+    parsed = _i(seg.get_field(1))
+    return 1 if parsed is None else parsed
+
+
 # ---------------------------------------------------------------------------
 # Metadata builder (from MSH segment, added to every row)
 # ---------------------------------------------------------------------------
@@ -258,7 +268,7 @@ def _extract_pv1(seg: HL7Segment) -> dict:
 
 def _extract_obr(seg: HL7Segment) -> dict:
     return {
-        "set_id": _i(seg.get_field(1)) or 1,
+        "set_id": _set_id(seg),
         **_ei_fields(seg, 2, "placer_order_number", repeating=False),
         **_ei_fields(seg, 3, "filler_order_number", repeating=False),
         **_cwe_fields(seg, 4, "service", repeating=False),
@@ -318,7 +328,7 @@ def _extract_obr(seg: HL7Segment) -> dict:
 
 def _extract_obx(seg: HL7Segment) -> dict:
     return {
-        "set_id": _i(seg.get_field(1)) or 1,
+        "set_id": _set_id(seg),
         "value_type": _v(seg.get_field(2)),
         **_cwe_fields(seg, 3, "observation_id", repeating=False),
         **_og_fields(seg, 4, "observation_sub_id"),
@@ -356,7 +366,7 @@ def _extract_obx(seg: HL7Segment) -> dict:
 
 def _extract_al1(seg: HL7Segment) -> dict:
     return {
-        "set_id": _i(seg.get_field(1)) or 1,
+        "set_id": _set_id(seg),
         **_cwe_fields(seg, 2, "allergen_type_code", repeating=False),
         **_cwe_fields(seg, 3, "allergen_code", repeating=False),
         **_cwe_fields(seg, 4, "allergy_severity_code", repeating=False),
@@ -372,7 +382,7 @@ def _extract_al1(seg: HL7Segment) -> dict:
 
 def _extract_dg1(seg: HL7Segment) -> dict:
     return {
-        "set_id": _i(seg.get_field(1)) or 1,
+        "set_id": _set_id(seg),
         "diagnosis_coding_method": _v(seg.get_field(2)),
         **_cwe_fields(seg, 3, "diagnosis_code", repeating=False),
         "diagnosis_description": _v(seg.get_field(4)),
@@ -403,7 +413,7 @@ def _extract_dg1(seg: HL7Segment) -> dict:
 
 def _extract_nk1(seg: HL7Segment) -> dict:
     return {
-        "set_id": _i(seg.get_field(1)) or 1,
+        "set_id": _set_id(seg),
         **_xpn_array_fields(seg, 2, "names"),
         **_cwe_fields(seg, 3, "relationship", repeating=False),
         **_xad_array_fields(seg, 4, "address"),
@@ -556,7 +566,7 @@ def _extract_mrg(seg: HL7Segment) -> dict:
 
 def _extract_iam(seg: HL7Segment) -> dict:
     return {
-        "set_id": _i(seg.get_field(1)) or 1,
+        "set_id": _set_id(seg),
         **_cwe_fields(seg, 2, "allergen_type_code", repeating=False),
         **_cwe_fields(seg, 3, "allergen_code", repeating=False),
         **_cwe_fields(seg, 4, "allergy_severity_code", repeating=False),
@@ -592,7 +602,7 @@ def _extract_iam(seg: HL7Segment) -> dict:
 
 def _extract_pr1(seg: HL7Segment) -> dict:
     return {
-        "set_id": _i(seg.get_field(1)) or 1,
+        "set_id": _set_id(seg),
         "procedure_coding_method": _v(seg.get_field(2)),
         **_cwe_fields(seg, 3, "procedure_code", repeating=False),
         "procedure_description": _v(seg.get_field(4)),
@@ -666,7 +676,7 @@ def _extract_orc(seg: HL7Segment) -> dict:
 
 def _extract_nte(seg: HL7Segment) -> dict:
     return {
-        "set_id": _i(seg.get_field(1)) or 1,
+        "set_id": _set_id(seg),
         "source_of_comment": _v(seg.get_field(2)),
         **_s_array_fields(seg, 3, "comment"),
         **_cwe_fields(seg, 4, "comment_type", repeating=False),
@@ -680,7 +690,7 @@ def _extract_nte(seg: HL7Segment) -> dict:
 
 def _extract_spm(seg: HL7Segment) -> dict:
     return {
-        "set_id": _i(seg.get_field(1)) or 1,
+        "set_id": _set_id(seg),
         **_eip_fields(seg, 2, "specimen_id"),
         **_eip_array_fields(seg, 3, "specimen_parent_ids"),
         **_cwe_fields(seg, 4, "specimen_type", repeating=False),
@@ -721,7 +731,7 @@ def _extract_spm(seg: HL7Segment) -> dict:
 
 def _extract_in1(seg: HL7Segment) -> dict:
     return {
-        "set_id": _i(seg.get_field(1)) or 1,
+        "set_id": _set_id(seg),
         **_cwe_fields(seg, 2, "insurance_plan", repeating=False),
         **_cx_array_fields(seg, 3, "insurance_company"),
         **_xon_array_fields(seg, 4, "insurance_company_name"),
@@ -781,7 +791,7 @@ def _extract_in1(seg: HL7Segment) -> dict:
 
 def _extract_gt1(seg: HL7Segment) -> dict:
     return {
-        "set_id": _i(seg.get_field(1)) or 1,
+        "set_id": _set_id(seg),
         **_cx_array_fields(seg, 2, "guarantor_number"),
         **_xpn_array_fields(seg, 3, "guarantor_names"),
         **_xpn_array_fields(seg, 4, "guarantor_spouse_names"),
@@ -843,7 +853,7 @@ def _extract_gt1(seg: HL7Segment) -> dict:
 
 def _extract_ft1(seg: HL7Segment) -> dict:
     return {
-        "set_id": _i(seg.get_field(1)) or 1,
+        "set_id": _set_id(seg),
         **_cx_fields(seg, 2, "transaction_id", repeating=False),
         "transaction_batch_id": _v(seg.get_field(3)),
         "transaction_date_start": _parse_dtm(seg.get_component(4, 1)),
@@ -906,7 +916,7 @@ def _extract_ft1(seg: HL7Segment) -> dict:
 
 def _extract_rxa(seg: HL7Segment) -> dict:
     return {
-        "set_id": _i(seg.get_field(1)) or 1,
+        "set_id": _set_id(seg),
         "administration_sub_id_counter": _i(seg.get_field(2)),
         "datetime_start_of_administration": _parse_dtm(seg.get_field(3)),
         "datetime_end_of_administration": _parse_dtm(seg.get_field(4)),
@@ -973,7 +983,7 @@ def _extract_sch(seg: HL7Segment) -> dict:
 
 def _extract_txa(seg: HL7Segment) -> dict:
     return {
-        "set_id": _i(seg.get_field(1)) or 1,
+        "set_id": _set_id(seg),
         **_cwe_fields(seg, 2, "document_type", repeating=False),
         "document_content_presentation": _v(seg.get_field(3)),
         "activity_datetime": _parse_dtm(seg.get_field(4)),

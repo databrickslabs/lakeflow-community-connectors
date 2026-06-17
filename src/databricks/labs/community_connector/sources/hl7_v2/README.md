@@ -365,21 +365,21 @@ Non-repeating composite fields (single occurrence) remain flattened into separat
 
 ### Debugging tools
 
-`gcpreader.py` is a standalone CLI for fetching and pretty-printing HL7 v2 messages directly from a GCP Healthcare API HL7v2 store — useful when you want to sanity-check credentials, inspect raw message structure, or verify what the connector will see, without spinning up Spark.
+`gcpreader.py` is a standalone CLI for fetching and pretty-printing HL7 v2 messages directly from a GCP Healthcare API HL7v2 store — useful when you want to sanity-check credentials, inspect raw message structure, or verify what the connector will see, without spinning up Spark. It lives under the test tree (`tests/unit/sources/hl7_v2/gcpreader.py`) and is **not** part of the connector package.
 
 ```bash
 # With a config file (same format as connector connection options)
-python src/databricks/labs/community_connector/sources/hl7_v2/gcpreader.py \
+python tests/unit/sources/hl7_v2/gcpreader.py \
     --config /path/to/dev_config_gcp.json --limit 5
 
 # With individual arguments
-python src/databricks/labs/community_connector/sources/hl7_v2/gcpreader.py \
+python tests/unit/sources/hl7_v2/gcpreader.py \
     --project-id my-project --location us-central1 \
     --dataset-id my-dataset --hl7v2-store-id my-store \
     --service-account-json /path/to/sa-key.json --limit 5
 ```
 
-It's intentionally not part of the connector runtime (excluded from the bundled `_generated_*` source) and is purely a developer convenience.
+It's intentionally not part of the connector runtime (not shipped in the package, not in the bundled `_generated_*` source) and is purely a developer convenience.
 
 ## UI Setup Guide
 

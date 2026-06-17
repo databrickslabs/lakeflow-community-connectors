@@ -4,6 +4,9 @@ Run directly to fetch and inspect HL7 v2 messages from a Google Cloud
 Healthcare API HL7v2 store.  Accepts parameters via command-line arguments
 or a JSON config file (same format as dev_config_gcp.json).
 
+This is a development / debugging helper only — it is not imported by the
+connector and is not part of the shipped package.
+
 Usage:
     # With a config file
     python gcpreader.py --config /path/to/dev_config_gcp.json
