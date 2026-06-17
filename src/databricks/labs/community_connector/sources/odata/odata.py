@@ -19,7 +19,7 @@ Per-table options (allowlisted via externalOptionsAllowList):
     select                comma-separated $select projection
     filter                additional $filter expression
     page_size             $top per request (default 1000)
-    max_records_per_batch cap rows returned per read_table call (default 100000)
+    max_records_per_batch cap rows returned per read_table call (default 10000)
     delta_tracking        disabled (default) | auto | enabled. Opt-in.
                           When the source honours ``Prefer: odata.track-changes``
                           (MS Graph, Dataverse, SAP S/4HANA Cloud …), the
@@ -590,7 +590,7 @@ class ODataLakeflowConnect(
             extra_filter=extra_filter,
             order_by=",".join(order_terms),
         )
-        max_records = int(table_options.get("max_records_per_batch", "100000"))
+        max_records = int(table_options.get("max_records_per_batch", "10000"))
 
         records: list[dict] = []
         truncated = False
@@ -679,7 +679,7 @@ class ODataLakeflowConnect(
 
         namespace = (table_options or {}).get("namespace")
         primary_keys = self._primary_keys_for(table_name, namespace)
-        max_records = int((table_options or {}).get("max_records_per_batch", "100000"))
+        max_records = int((table_options or {}).get("max_records_per_batch", "10000"))
 
         records, new_delta_link, carry_next_link, rebootstrap = self._delta_walk_pages(
             url=url,

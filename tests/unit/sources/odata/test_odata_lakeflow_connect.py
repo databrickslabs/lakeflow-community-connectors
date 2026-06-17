@@ -2580,6 +2580,368 @@ def test_contained_expand_inner_nextlink_rewrites_top_for_continuation():
 
 
 @responses.activate
+def test_contained_expand_truncates_mid_page_and_parks_pending_fetches():
+    """``_read_contained_expand`` checks the cap after each top_row;
+    on overflow the current page URL is re-queued at the front of
+    ``pending_fetches`` with ``skip`` advanced past the drained rows
+    and the server's next-page URL appears later in the queue. On
+    resume the connector re-fetches the same page and skips the
+    parked count — wasting one HTTP round trip's worth of data but
+    no inner-nextLink work."""
+    _mock_nested_metadata()
+    next_link = f"{SERVICE_URL}Parents?$skiptoken=p2"
+
+    def _initial(_req):
+        return (
+            200,
+            {},
+            json.dumps(
+                {
+                    "value": [
+                        {"Id": 1, "Children": [{"Id": 11, "Label": "a"}]},
+                        {"Id": 2, "Children": [{"Id": 22, "Label": "b"}]},
+                        {"Id": 3, "Children": [{"Id": 33, "Label": "c"}]},
+                    ],
+                    "@odata.nextLink": next_link,
+                }
+            ),
+        )
+
+    responses.add_callback(responses.GET, f"{SERVICE_URL}Parents", callback=_initial)
+    c = _make()
+    records, offset = c.read_table(
+        "Parents__Children",
+        None,
+        {"expand_contained": "true", "max_records_per_batch": "1"},
+    )
+    rows = list(records)
+    assert len(rows) == 1, "cap fires after the first top_row, not after the full page"
+    pending = offset.get("pending_fetches")
+    assert pending, "in-flight chain must park pending_fetches"
+    # Front of queue: re-fetch the SAME page, skip the row we drained.
+    assert pending[0]["url"].startswith(f"{SERVICE_URL}Parents?")
+    assert "$skiptoken=p2" not in pending[0]["url"]
+    assert pending[0]["skip"] == 1
+    assert pending[0]["level"] == 0
+    # Snapshot mode: no cursor key in the resume offset.
+    assert "cursor" not in offset
+
+
+@responses.activate
+def test_contained_expand_truncates_at_page_boundary_queues_only_next_page():
+    """When the cap happens to fire exactly at a page's last top_row,
+    the current page item is NOT re-queued (it's fully drained); only
+    the server's next-page URL stays in ``pending_fetches``."""
+    _mock_nested_metadata()
+    next_link = f"{SERVICE_URL}Parents?$skiptoken=p2"
+
+    def _initial(_req):
+        return (
+            200,
+            {},
+            json.dumps(
+                {
+                    "value": [
+                        {"Id": 1, "Children": [{"Id": 11, "Label": "a"}]},
+                        {"Id": 2, "Children": [{"Id": 22, "Label": "b"}]},
+                    ],
+                    "@odata.nextLink": next_link,
+                }
+            ),
+        )
+
+    responses.add_callback(responses.GET, f"{SERVICE_URL}Parents", callback=_initial)
+    c = _make()
+    records, offset = c.read_table(
+        "Parents__Children",
+        None,
+        {"expand_contained": "true", "max_records_per_batch": "2"},
+    )
+    rows = list(records)
+    assert len(rows) == 2
+    pending = offset.get("pending_fetches")
+    assert pending == [{"url": next_link, "level": 0, "chain": [], "cur_val": None, "skip": 0}]
+    assert "cursor" not in offset
+
+
+@responses.activate
+def test_contained_expand_resumes_from_pending_fetches_skip():
+    """When the start offset's ``pending_fetches[0]`` has ``skip > 0``,
+    the connector re-fetches that page and skips the parked rows."""
+    _mock_nested_metadata()
+    page_url = f"{SERVICE_URL}Parents?$skiptoken=p1"
+    captured = []
+
+    def _resume(req):
+        captured.append(req.url)
+        return (
+            200,
+            {},
+            json.dumps(
+                {
+                    "value": [
+                        {"Id": 1, "Children": [{"Id": 11, "Label": "a"}]},
+                        {"Id": 2, "Children": [{"Id": 22, "Label": "b"}]},
+                        {"Id": 3, "Children": [{"Id": 33, "Label": "c"}]},
+                    ],
+                }
+            ),
+        )
+
+    responses.add_callback(responses.GET, page_url, callback=_resume, match_querystring=True)
+    c = _make()
+    records, offset = c.read_table(
+        "Parents__Children",
+        {
+            "pending_fetches": [
+                {"url": page_url, "level": 0, "chain": [], "cur_val": None, "skip": 2}
+            ]
+        },
+        {"expand_contained": "true"},
+    )
+    rows = list(records)
+    assert [r["Id"] for r in rows] == [33]
+    # Page exhausted, no next_url → terminal snapshot offset.
+    assert offset == {}
+
+
+@responses.activate
+def test_contained_expand_resumes_from_pending_fetches_url():
+    """When ``pending_fetches`` is set in the start offset, the
+    connector hands the queued URL back to the server and does NOT
+    rebuild / re-fetch the top-level entity set."""
+    _mock_nested_metadata()
+    resume_url = f"{SERVICE_URL}Parents?$skiptoken=p2"
+    captured = []
+
+    def _resume(req):
+        captured.append(req.url)
+        return (200, {}, json.dumps({"value": [{"Id": 3, "Children": [{"Id": 33, "Label": "c"}]}]}))
+
+    def _bare_top(_req):
+        raise AssertionError("connector must not refetch /Parents on resume")
+
+    responses.add_callback(responses.GET, resume_url, callback=_resume, match_querystring=True)
+    responses.add_callback(
+        responses.GET, f"{SERVICE_URL}Parents", callback=_bare_top, match_querystring=True
+    )
+    c = _make()
+    records, offset = c.read_table(
+        "Parents__Children",
+        {
+            "pending_fetches": [
+                {"url": resume_url, "level": 0, "chain": [], "cur_val": None, "skip": 0}
+            ]
+        },
+        {"expand_contained": "true"},
+    )
+    rows = list(records)
+    assert len(rows) == 1 and rows[0]["Id"] == 33
+    assert captured == [resume_url]
+    assert offset == {}
+
+
+@responses.activate
+def test_contained_expand_cursor_mid_chain_holds_watermark_steady():
+    """While a chain is in flight (``pending_fetches`` non-empty) the
+    ``cursor`` watermark must not advance — mid-chain advance would
+    skip rows still pending under the same ``since`` predicate. The
+    running max lives at ``running_max_cursor`` and only becomes
+    ``cursor`` on chain completion."""
+    _mock_nested_metadata()
+    next_link = f"{SERVICE_URL}Parents?$skiptoken=p2"
+
+    def _initial(_req):
+        return (
+            200,
+            {},
+            json.dumps(
+                {
+                    "value": [
+                        {
+                            "Id": 1,
+                            "Children": [
+                                {"Id": 11, "Label": "a", "ModifiedAt": "2024-06-05T00:00:00Z"}
+                            ],
+                        },
+                    ],
+                    "@odata.nextLink": next_link,
+                }
+            ),
+        )
+
+    responses.add_callback(responses.GET, f"{SERVICE_URL}Parents", callback=_initial)
+    c = _make()
+    records, offset = c.read_table(
+        "Parents__Children",
+        {"cursor": "2024-01-01T00:00:00Z"},
+        {
+            "expand_contained": "true",
+            "cursor_field": "ModifiedAt",
+            "max_records_per_batch": "1",
+        },
+    )
+    list(records)
+    pending = offset.get("pending_fetches")
+    assert pending and any(item["url"] == next_link for item in pending)
+    assert offset.get("cursor") == "2024-01-01T00:00:00Z"
+    assert offset.get("running_max_cursor") == "2024-06-05T00:00:00Z"
+
+
+@responses.activate
+def test_contained_expand_cursor_chain_completion_advances_watermark():
+    """On chain exhaustion (empty queue after drain) the running max
+    becomes the new ``cursor`` watermark."""
+    _mock_nested_metadata()
+
+    def _final(_req):
+        return (
+            200,
+            {},
+            json.dumps(
+                {
+                    "value": [
+                        {
+                            "Id": 2,
+                            "Children": [
+                                {"Id": 22, "Label": "b", "ModifiedAt": "2024-07-10T00:00:00Z"}
+                            ],
+                        },
+                    ],
+                }
+            ),
+        )
+
+    resume_url = f"{SERVICE_URL}Parents?$skiptoken=last"
+    responses.add_callback(responses.GET, resume_url, callback=_final, match_querystring=True)
+    c = _make()
+    records, offset = c.read_table(
+        "Parents__Children",
+        {
+            "pending_fetches": [
+                {"url": resume_url, "level": 0, "chain": [], "cur_val": None, "skip": 0}
+            ],
+            "cursor": "2024-01-01T00:00:00Z",
+            "running_max_cursor": "2024-06-05T00:00:00Z",
+        },
+        {"expand_contained": "true", "cursor_field": "ModifiedAt"},
+    )
+    list(records)
+    assert offset == {"cursor": "2024-07-10T00:00:00Z"}
+
+
+@responses.activate
+def test_contained_expand_caps_within_top_row_subtree():
+    """Per-fetch cap: a single top_row whose inner-collection paginates
+    must NOT blow past the cap by its whole subtree. The connector
+    queues each inner @odata.nextLink and checks the cap between
+    fetches, so the very first parent with many Children commits its
+    inline rows + one inner page, then parks the rest in
+    ``pending_fetches``."""
+    _mock_nested_metadata()
+    inner_next = f"{SERVICE_URL}Parents(1)/Children?$skiptoken=k2"
+    captured = []
+
+    def _initial(_req):
+        captured.append("initial")
+        return (
+            200,
+            {},
+            json.dumps(
+                {
+                    "value": [
+                        {
+                            "Id": 1,
+                            "Children": [
+                                {"Id": 11, "Label": "a"},
+                                {"Id": 12, "Label": "b"},
+                            ],
+                            "Children@odata.nextLink": inner_next,
+                        },
+                    ]
+                }
+            ),
+        )
+
+    def _inner_unused(_req):
+        captured.append("inner")
+        return (200, {}, json.dumps({"value": [{"Id": 21, "Label": "c"}]}))
+
+    responses.add_callback(responses.GET, f"{SERVICE_URL}Parents", callback=_initial)
+    responses.add_callback(
+        responses.GET, inner_next, callback=_inner_unused, match_querystring=True
+    )
+    c = _make()
+    records, offset = c.read_table(
+        "Parents__Children",
+        None,
+        # Cap = 2: after the top-page is processed, emitted has 2
+        # rows (the two inline Children). The inner nextLink for this
+        # parent is queued but NOT followed in this batch.
+        {"expand_contained": "true", "max_records_per_batch": "2"},
+    )
+    rows = list(records)
+    assert len(rows) == 2
+    # Inner nextLink fetch must NOT happen in this batch.
+    assert "inner" not in captured
+    pending = offset.get("pending_fetches")
+    assert pending, "inner-nextLink fetch must be parked, not followed"
+    # The queued inner fetch is at level 1 (Children under Parent 1)
+    # with the parent's PK chain captured.
+    assert any(
+        item["url"].startswith(inner_next.split("?")[0])
+        and item["level"] == 1
+        and item["chain"] == [{"Id": 1}]
+        for item in pending
+    )
+
+
+@responses.activate
+def test_contained_expand_resolves_inner_nextlink_against_response_url():
+    """OData v4 §11.2.5.7 / RFC 3986: relative ``@odata.nextLink``
+    values resolve against the URL of the response they came from.
+    Servers commonly emit query-only relative links (``?$skiptoken=...``)
+    inside expanded collections; resolving them against the connector's
+    base service URL drops the entity-set path and routes the request
+    at the wrong endpoint. The fix scopes resolution to the response
+    URL (here, the ``Parents`` collection)."""
+    _mock_nested_metadata()
+    captured = []
+
+    def _initial(_req):
+        return (
+            200,
+            {},
+            json.dumps(
+                {
+                    "value": [
+                        {
+                            "Id": 1,
+                            "Children": [{"Id": 11, "Label": "a"}],
+                            # Query-only relative — must resolve against
+                            # the response URL, not service_url.
+                            "Children@odata.nextLink": "Parents(1)/Children?$skiptoken=x",
+                        }
+                    ]
+                }
+            ),
+        )
+
+    def _follow(req):
+        captured.append(req.url)
+        return (200, {}, json.dumps({"value": []}))
+
+    responses.add_callback(responses.GET, f"{SERVICE_URL}Parents", callback=_initial)
+    responses.add_callback(responses.GET, f"{SERVICE_URL}Parents(1)/Children", callback=_follow)
+    c = _make()
+    list(c.read_table("Parents__Children", None, {"expand_contained": "true"})[0])
+    assert captured, "inner nextLink not fetched"
+    # Must be scoped to /Parents(1)/Children, not /?$skiptoken=...
+    assert captured[0].startswith(f"{SERVICE_URL}Parents(1)/Children?")
+    assert "$skiptoken=x" in captured[0]
+
+
+@responses.activate
 def test_contained_expand_follows_inner_collection_nextlink():
     """OData v4 §11.2.6.1: when an inner expanded collection is server-
     paged, the response carries ``<NavProp>@odata.nextLink`` alongside

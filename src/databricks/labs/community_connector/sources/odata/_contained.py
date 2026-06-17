@@ -763,7 +763,20 @@ class ContainedNavMixin:
         ``$expand``), restricting the response to changed subtrees.
         Emitted leaf rows are stamped with the cursor value from that
         segment when they don't carry it themselves. Server depth caps
-        surface as HTTP 4xx — no client-side fallback."""
+        surface as HTTP 4xx — no client-side fallback.
+
+        The pull is capped at ``max_records_per_batch`` rows (default
+        100k). When the cap fires and the server has more top-level
+        pages, the server's top-level ``@odata.nextLink`` is parked in
+        the resume offset as ``chain_next_link`` so the next ``read()``
+        call hands it straight back to the server (opaque skiptoken;
+        no URL rebuild). For cursor mode the watermark only advances
+        once the chain fully drains — mid-chain advance would skip
+        unread rows under the same ``since``. While a chain is in
+        flight the running max cursor lives at
+        ``running_max_cursor`` in the offset; on chain completion it
+        becomes the new ``cursor`` value.
+        """
         segments = parse_contained_path(table_name) or [table_name]
         if len(segments) < 2:
             raise ValueError(f"expand_contained requires a contained path; {table_name!r} is flat.")
@@ -788,14 +801,33 @@ class ContainedNavMixin:
                 )
             pks_per_level.append(pks)
         fk_columns = self._resolve_fk_columns(segments, namespace)
-        url = self._build_expand_url(
-            segments,
-            table_options,
-            cursor_level=cursor_level if cursor_field else None,
-            cursor_filter=cursor_filter,
-            cursor_order=cursor_order,
-            cursor_select=cursor_select,
-        )
+        max_records = int((table_options or {}).get("max_records_per_batch", "10000"))
+        # Either resume from a parked work queue or seed it with the
+        # top-level URL. Each queue item is self-contained (URL +
+        # level + ancestor chain + captured cursor) so resume needs
+        # no URL rebuild.
+        pending_in = (start_offset or {}).get("pending_fetches")
+        if pending_in:
+            initial_queue = list(pending_in)
+            resuming = True
+        else:
+            initial_queue = [
+                {
+                    "url": self._build_expand_url(
+                        segments,
+                        table_options,
+                        cursor_level=cursor_level if cursor_field else None,
+                        cursor_filter=cursor_filter,
+                        cursor_order=cursor_order,
+                        cursor_select=cursor_select,
+                    ),
+                    "level": 0,
+                    "chain": [],
+                    "cur_val": None,
+                    "skip": 0,
+                }
+            ]
+            resuming = False
         emitted: list[dict] = []
         ctx = (cursor_field, cursor_level, None) if cursor_field else None
         # Per-level $top values from the initial dynamic distribution.
@@ -805,27 +837,210 @@ class ContainedNavMixin:
         per_level_tops = compute_dynamic_tops(
             int((table_options or {}).get("page_size", "1000")), len(segments)
         )
-        for top_row in self._fetch_pages(url):
-            self._flatten_expand_response(
-                0,
-                top_row,
-                segments,
-                pks_per_level,
-                [],
-                fk_columns,
-                emitted,
-                ctx,
-                per_level_tops,
-            )
+        remaining_queue = self._drain_expand_pages(
+            initial_queue,
+            max_records,
+            segments,
+            pks_per_level,
+            fk_columns,
+            emitted,
+            ctx,
+            per_level_tops,
+        )
+        end_offset = self._build_expand_end_offset(
+            emitted, cursor_field, start_offset, remaining_queue
+        )
         if not cursor_field:
-            return iter(emitted), {}
-        if not emitted:
+            return iter(emitted), end_offset
+        if not emitted and not resuming:
             return iter([]), start_offset or {}
-        cursors = [r.get(cursor_field) for r in emitted if r.get(cursor_field) is not None]
-        end_offset: dict = {"cursor": max(cursors)} if cursors else dict(start_offset or {})
         if start_offset and start_offset == end_offset:
+            if emitted:
+                # Rows emitted but offset didn't advance — happens
+                # when every row in this batch has a null cursor and
+                # ``running_max_cursor`` couldn't update. Returning
+                # the rows would loop forever (Spark calls again with
+                # the same offset); dropping them silently would lose
+                # data. Surface the problem instead.
+                raise RuntimeError(
+                    f"emitted {len(emitted)} rows from {table_name!r} but cursor_field="
+                    f"{cursor_field!r} did not advance — every row in this batch "
+                    f"has a null {cursor_field}. Make the cursor non-nullable in "
+                    f"the source, filter out null-cursor rows with "
+                    f"`filter`/`filter_at_<segment>=<field> ne null`, or pick a "
+                    f"cursor that is always populated."
+                )
             return iter([]), start_offset
         return iter(emitted), end_offset
+
+    # pylint: disable=too-many-arguments,too-many-positional-arguments,too-many-locals
+    def _drain_expand_pages(
+        self,
+        initial_queue: list[dict],
+        max_records: int,
+        segments: list[str],
+        pks_per_level: list[list[str]],
+        fk_columns: dict[str, str],
+        emitted: list[dict],
+        ctx: tuple | None,
+        per_level_tops: list[int],
+    ) -> list[dict]:
+        """Iterative work-queue processor.
+
+        Each queue item is a self-contained "fetch this URL and
+        process the rows it returns" task::
+
+            {
+                "url":     str,              # HTTP URL to GET (one page)
+                "level":   int,              # level the URL's rows live at
+                "chain":   list[dict],       # ancestor PK chain (snapshot)
+                "cur_val": Any | None,       # captured cursor value
+                "skip":    int,              # top_row index to start at
+            }
+
+        Items are popped FIFO; each pop performs ONE HTTP fetch and
+        processes its top_rows starting from ``skip``. Inner-collection
+        ``@odata.nextLink`` values discovered during a row's inline
+        descent are APPENDED to the queue (via
+        ``_flatten_expand_response``'s ``pending_fetches`` arg) rather
+        than followed inline. After each fully-processed top_row the
+        ``max_records`` cap is checked: when exceeded, the current
+        item is re-queued at the front with ``skip`` advanced past the
+        rows just emitted, and the loop exits. The returned queue is
+        the work left to do — non-empty means "continuation pending",
+        empty means "chain drained".
+
+        Cap deviation per batch is bounded by ONE HTTP response's
+        worth of leaf rows (≤ ``page_size``), not by the size of a
+        single top_row's subtree as in the previous design.
+        """
+        # Take ownership: mutated in-place by appends from
+        # ``_flatten_expand_response`` and by our own front re-queues.
+        queue: list[dict] = list(initial_queue)
+        cur_field, cur_level, _ = ctx or (None, -1, None)
+        while queue and len(emitted) < max_records:
+            item = queue.pop(0)
+            url = item["url"]
+            level = item["level"]
+            chain = [dict(p) for p in item.get("chain") or []]
+            cur_val = item.get("cur_val")
+            skip = int(item.get("skip", 0) or 0)
+            item_ctx = (cur_field, cur_level, cur_val) if cur_field else None
+            # Fetch one page only — pulling further pages of THIS
+            # collection waits until the next dequeue so we can check
+            # the cap between them.
+            page_rows, page_next_url = self._fetch_one_expand_page(url)
+            if not page_rows:
+                if page_next_url:
+                    queue.append(
+                        {
+                            "url": page_next_url,
+                            "level": level,
+                            "chain": [dict(p) for p in chain],
+                            "cur_val": cur_val,
+                            "skip": 0,
+                        }
+                    )
+                continue
+            truncated = False
+            for row_idx in range(skip, len(page_rows)):
+                self._flatten_expand_response(
+                    level,
+                    page_rows[row_idx],
+                    segments,
+                    pks_per_level,
+                    chain,
+                    fk_columns,
+                    emitted,
+                    item_ctx,
+                    per_level_tops,
+                    response_url=url,
+                    pending_fetches=queue,
+                )
+                if len(emitted) >= max_records and row_idx + 1 < len(page_rows):
+                    # Mid-page: re-queue the SAME URL at the front so
+                    # the next batch resumes here without scrambling
+                    # depth ordering.
+                    queue.insert(
+                        0,
+                        {
+                            "url": url,
+                            "level": level,
+                            "chain": [dict(p) for p in chain],
+                            "cur_val": cur_val,
+                            "skip": row_idx + 1,
+                        },
+                    )
+                    truncated = True
+                    break
+            if not truncated and page_next_url:
+                queue.append(
+                    {
+                        "url": page_next_url,
+                        "level": level,
+                        "chain": [dict(p) for p in chain],
+                        "cur_val": cur_val,
+                        "skip": 0,
+                    }
+                )
+        return queue
+
+    def _fetch_one_expand_page(self, url: str) -> tuple[list[dict], str | None]:
+        """One HTTP GET; returns ``(page_rows, next_url)``. Thin wrapper
+        over :meth:`_fetch_pages_with_links` that consumes a single
+        iteration so the caller can check the cap between fetches."""
+        for page_rows, page_next_url in self._fetch_pages_with_links(url):
+            return page_rows, page_next_url
+        return [], None
+
+    def _build_expand_end_offset(
+        self,
+        emitted: list[dict],
+        cursor_field: str | None,
+        start_offset: dict | None,
+        pending_queue: list[dict],
+    ) -> dict:
+        """Compose the resume offset for ``_read_contained_expand``.
+
+        Three modes:
+
+        * **Snapshot, chain in flight** → ``{pending_fetches: [...]}``.
+        * **Snapshot, chain done** → ``{}`` (framework treats as
+          terminal).
+        * **Cursor mode** → the watermark stays at the original
+          ``since`` while a chain is in flight, with the running max
+          parked at ``running_max_cursor``. On chain exhaustion the
+          running max becomes the new ``cursor`` value.
+
+        ``pending_fetches`` is the work queue parked for the next
+        batch — each entry is a self-contained
+        ``{url, level, chain, cur_val, skip}`` (see
+        :meth:`_drain_expand_pages`).
+        """
+        in_flight = bool(pending_queue)
+        if not cursor_field:
+            return {"pending_fetches": list(pending_queue)} if in_flight else {}
+        prior_running = (start_offset or {}).get("running_max_cursor")
+        batch_cursors = [r.get(cursor_field) for r in emitted if r.get(cursor_field) is not None]
+        if batch_cursors and prior_running is not None:
+            new_running = max([*batch_cursors, prior_running])
+        elif batch_cursors:
+            new_running = max(batch_cursors)
+        else:
+            new_running = prior_running
+        since = (start_offset or {}).get("cursor")
+        if in_flight:
+            offset: dict = {"pending_fetches": list(pending_queue)}
+            if since is not None:
+                offset["cursor"] = since
+            if new_running is not None:
+                offset["running_max_cursor"] = new_running
+            return offset
+        if new_running is not None:
+            return {"cursor": new_running}
+        if since is not None:
+            return {"cursor": since}
+        return dict(start_offset or {})
 
     def _cursor_expand_clause(
         self,
@@ -864,6 +1079,7 @@ class ContainedNavMixin:
             None,
         )
 
+    # pylint: disable=too-many-arguments,too-many-positional-arguments,too-many-locals
     def _flatten_expand_response(
         self,
         level: int,
@@ -875,6 +1091,8 @@ class ContainedNavMixin:
         out: list[dict],
         cursor_ctx: tuple[str | None, int, Any] | None = None,
         per_level_tops: list[int] | None = None,
+        response_url: str | None = None,
+        pending_fetches: list[dict] | None = None,
     ) -> None:
         """Recurse into the nested $expand payload; tag and emit leaf rows.
         ``cursor_ctx`` is ``(cursor_field, cursor_level, captured_value)``
@@ -888,16 +1106,31 @@ class ContainedNavMixin:
         alongside the inline page. The spec requires that link to
         preserve the original ``$expand`` chain, so following it yields
         the rest of the children with their grandchildren still
-        expanded. Without this walk, a parent with more children than
-        the server's default page size silently truncates to one page.
+        expanded.
 
         ``per_level_tops`` is the per-level ``$top`` distribution from
         the initial request (see :func:`compute_dynamic_tops`). When
-        following an inner-collection nextLink, the connector rewrites
-        the URL's ``$top`` to a value sized for that continuation's
-        smaller cross-product, so wide inner collections don't take
-        100s of round trips paging at the original per-level ``$top``.
+        deferring an inner-collection nextLink to the work queue, the
+        connector rewrites the URL's ``$top`` to a value sized for
+        that continuation's smaller cross-product, so wide inner
+        collections don't take 100s of round trips paging at the
+        original per-level ``$top``.
+
+        ``response_url`` is the URL of the HTTP response that yielded
+        ``row``. Used to resolve any relative ``<NavProp>@odata.nextLink``
+        per OData v4 §11.2.5.7 / RFC 3986 (relative-reference
+        resolution against the document's base URL). Falls back to
+        ``service_url`` when not provided (only the unit tests do that).
+
+        ``pending_fetches`` is the per-batch work queue used by
+        :meth:`_drain_expand_pages`. Inner-collection nextLinks are
+        APPENDED to it instead of followed inline — that lets the
+        outer drainer check ``max_records_per_batch`` between fetches
+        (at any level) rather than only after a full top-row subtree.
+        The append captures the chain snapshot + captured cursor so
+        the work item is self-contained for cross-batch resume.
         """
+        base_url = response_url or self.service_url
         cur_field, cur_level, cur_val = cursor_ctx or (None, -1, None)
         if cur_field and level == cur_level:
             cur_val = row.get(cur_field)
@@ -926,10 +1159,12 @@ class ContainedNavMixin:
                 out,
                 next_ctx,
                 per_level_tops,
+                response_url=base_url,
+                pending_fetches=pending_fetches,
             )
         inner_next = row.get(f"{next_seg}@odata.nextLink")
         if inner_next:
-            resolved = urljoin(self.service_url, inner_next)
+            resolved = urljoin(base_url, inner_next)
             if per_level_tops:
                 # Continuation pages the collection at ``level + 1``
                 # under one specific parent at ``level``. The original
@@ -950,7 +1185,26 @@ class ContainedNavMixin:
                     page_budget *= t
                 new_top = max(MIN_DYNAMIC_TOP, page_budget // max(1, inner_product))
                 resolved = rewrite_top_in_url(resolved, new_top)
-            for page_rows, _ in self._fetch_pages_with_links(resolved):
+            if pending_fetches is not None:
+                # Defer the follow: the outer drainer pops one fetch
+                # at a time and checks the cap between them. Snapshot
+                # the ancestor chain so the work item is self-contained
+                # for cross-batch resume.
+                pending_fetches.append(
+                    {
+                        "url": resolved,
+                        "level": level + 1,
+                        "chain": [dict(p) for p in chain],
+                        "cur_val": cur_val,
+                        "skip": 0,
+                    }
+                )
+                chain.pop()
+                return
+            # Track the URL that fetched each follow-up page so its
+            # children resolve THEIR relative nextLinks correctly.
+            inner_current = resolved
+            for page_rows, page_next in self._fetch_pages_with_links(resolved):
                 for child in page_rows:
                     self._flatten_expand_response(
                         level + 1,
@@ -962,7 +1216,9 @@ class ContainedNavMixin:
                         out,
                         next_ctx,
                         per_level_tops,
+                        response_url=inner_current,
                     )
+                inner_current = page_next or inner_current
         chain.pop()
 
     def _leaf_cursor_order_by(
@@ -1148,7 +1404,7 @@ class ContainedNavMixin:
         since = (start_offset or {}).get("cursor")
         truncated_chain_cursor_in = (start_offset or {}).get("truncated_chain_cursor")
         chain_next_link_in = (start_offset or {}).get("chain_next_link")
-        max_records = int((table_options or {}).get("max_records_per_batch", "100000"))
+        max_records = int((table_options or {}).get("max_records_per_batch", "10000"))
         order_by = self._leaf_cursor_order_by(table_name, namespace, cursor_field)
         chains_iter = self._iter_parent_key_chains(segments, namespace, table_options)
         segment_filters = resolve_segment_filters(table_options, segments)
@@ -1240,7 +1496,7 @@ class ContainedNavMixin:
             cursor_field,
             int((start_offset or {}).get("parent_idx", 0)),
             (start_offset or {}).get("chain_next_link"),
-            int((table_options or {}).get("max_records_per_batch", "100000")),
+            int((table_options or {}).get("max_records_per_batch", "10000")),
             self._resolve_fk_columns(segments, namespace),
             leaf_segment_filter=segment_filters.get(len(segments) - 1),
         )
