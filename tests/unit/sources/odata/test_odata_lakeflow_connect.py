@@ -2206,6 +2206,38 @@ def test_build_contained_url_three_level():
     assert url.startswith(f"{SERVICE_URL}Parents(7)/Children(9)/Notes?")
 
 
+def test_rewrite_top_in_url():
+    """Inner-collection nextLink continuations inherit the small
+    per-level ``$top`` from the original ``$expand`` clause. The
+    rewrite helper bumps that ``$top`` so paging through a wide inner
+    collection doesn't take 100s of round trips at the dynamic per-
+    level value."""
+    from databricks.labs.community_connector.sources.odata._contained import (
+        rewrite_top_in_url,
+    )
+
+    # Bare $top
+    assert (
+        rewrite_top_in_url("https://x.com/A?$top=10&$skip=100", 1000)
+        == "https://x.com/A?$top=1000&$skip=100"
+    )
+    # URL-encoded %24top
+    assert (
+        rewrite_top_in_url("https://x.com/A?%24top=10&%24skip=100", 500)
+        == "https://x.com/A?%24top=500&%24skip=100"
+    )
+    # Preserves other params verbatim
+    assert (
+        rewrite_top_in_url("https://x.com/A?$filter=Id+eq+5&$top=10&$skip=20", 200)
+        == "https://x.com/A?$filter=Id+eq+5&$top=200&$skip=20"
+    )
+    # No $top → unchanged
+    assert (
+        rewrite_top_in_url("https://x.com/A?$skiptoken=abc", 1000)
+        == "https://x.com/A?$skiptoken=abc"
+    )
+
+
 def test_compute_dynamic_tops():
     """``compute_dynamic_tops`` distributes ``page_size`` across all
     levels with triangular weights so the cross-product fits in the
@@ -2478,6 +2510,62 @@ def test_contained_expand_strips_odata_annotations_on_leaf_rows():
             "ModifiedAt": "2024-01-01T00:00:00Z",
         }
     ]
+
+
+@responses.activate
+def test_contained_expand_inner_nextlink_rewrites_top_for_continuation():
+    """When following ``<NavProp>@odata.nextLink``, the connector
+    rewrites the URL's ``$top`` so the continuation can use the full
+    page_size budget. Without this, a wide inner collection would
+    take ``N / inner_top`` round trips at the small dynamic per-level
+    ``$top`` (10 for depth-2)."""
+    _mock_nested_metadata()
+    captured = []
+
+    def _initial(_req):
+        # Initial request: Children inline + nextLink (server preserves
+        # the original $top=10 from $expand=Children($top=10)).
+        return (
+            200,
+            {},
+            json.dumps(
+                {
+                    "value": [
+                        {
+                            "Id": 1,
+                            "Children": [
+                                {"Id": 11, "Label": "a", "ModifiedAt": "2024-01-01T00:00:00Z"}
+                            ],
+                            "Children@odata.nextLink": (
+                                f"{SERVICE_URL}Parents(1)/Children?$top=10&$skip=10"
+                            ),
+                        }
+                    ]
+                }
+            ),
+        )
+
+    def _continuation(req):
+        captured.append(req.url)
+        return (200, {}, json.dumps({"value": []}))
+
+    responses.add_callback(responses.GET, f"{SERVICE_URL}Parents", callback=_initial)
+    responses.add_callback(
+        responses.GET, f"{SERVICE_URL}Parents(1)/Children", callback=_continuation
+    )
+    c = _make()
+    records, _ = c.read_table("Parents__Children", None, {"expand_contained": "true"})
+    list(records)
+    from urllib.parse import unquote
+
+    # Depth 2, page_size=1000 → per_level_tops=[100, 10]. Continuation
+    # at level 1 has no inner expansion, so $top is rewritten to the
+    # full budget (1000).
+    assert captured, "continuation URL not fetched"
+    cont_url = unquote(captured[0])
+    assert "$top=1000" in cont_url
+    # Make sure the original tiny $top=10 was replaced, not appended.
+    assert "$top=10&" not in cont_url
 
 
 @responses.activate

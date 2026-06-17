@@ -16,6 +16,7 @@ against the concrete class.
 """
 
 import math
+import re
 from datetime import date, datetime
 from decimal import Decimal
 from typing import Any, Iterator
@@ -50,6 +51,26 @@ MAX_CONTAINED_DEPTH = 10
 # overhead dominates; smaller chunks also amplify the
 # ``@odata.nextLink`` chase at every level.
 MIN_DYNAMIC_TOP = 5
+
+
+_TOP_PARAM_RE = re.compile(r"(?<=[?&])(\$top=|%24top=)\d+", re.IGNORECASE)
+
+
+def rewrite_top_in_url(url: str, new_top: int) -> str:
+    """Rewrite the ``$top=<N>`` (or url-encoded ``%24top=<N>``) parameter
+    in a URL's query string. Returns the URL unchanged if no ``$top``
+    parameter is present.
+
+    Used when following an inner-collection ``<NavProp>@odata.nextLink``
+    continuation: the server's link inherits the small per-level
+    ``$top`` from the original ``$expand($top=N;...)`` clause, but the
+    continuation is one level shallower than the original
+    cross-product, so a larger ``$top`` is safe and saves round trips
+    when paging through a wide inner collection. OData v4 §11.2.5.7
+    says clients SHOULD use the nextLink as-is — we're consciously
+    rewriting only the literal ``$top`` request hint, leaving any
+    skiptoken/skip parameters untouched."""
+    return _TOP_PARAM_RE.sub(lambda m: m.group(1) + str(new_top), url)
 
 
 def compute_dynamic_tops(page_size: int, num_levels: int) -> list[int]:
@@ -750,9 +771,24 @@ class ContainedNavMixin:
         )
         emitted: list[dict] = []
         ctx = (cursor_field, cursor_level, None) if cursor_field else None
+        # Per-level $top values from the initial dynamic distribution.
+        # Passed into the flatten recursion so inner-collection nextLink
+        # follows can rewrite their $top to a larger value without
+        # blowing the page_size budget.
+        per_level_tops = compute_dynamic_tops(
+            int((table_options or {}).get("page_size", "1000")), len(segments)
+        )
         for top_row in self._fetch_pages(url):
             self._flatten_expand_response(
-                0, top_row, segments, pks_per_level, [], fk_columns, emitted, ctx
+                0,
+                top_row,
+                segments,
+                pks_per_level,
+                [],
+                fk_columns,
+                emitted,
+                ctx,
+                per_level_tops,
             )
         if not cursor_field:
             return iter(emitted), {}
@@ -811,6 +847,7 @@ class ContainedNavMixin:
         fk_columns: dict[tuple[str, str], str],
         out: list[dict],
         cursor_ctx: tuple[str | None, int, Any] | None = None,
+        per_level_tops: list[int] | None = None,
     ) -> None:
         """Recurse into the nested $expand payload; tag and emit leaf rows.
         ``cursor_ctx`` is ``(cursor_field, cursor_level, captured_value)``
@@ -826,6 +863,13 @@ class ContainedNavMixin:
         the rest of the children with their grandchildren still
         expanded. Without this walk, a parent with more children than
         the server's default page size silently truncates to one page.
+
+        ``per_level_tops`` is the per-level ``$top`` distribution from
+        the initial request (see :func:`compute_dynamic_tops`). When
+        following an inner-collection nextLink, the connector rewrites
+        the URL's ``$top`` to a value sized for that continuation's
+        smaller cross-product, so wide inner collections don't take
+        100s of round trips paging at the original per-level ``$top``.
         """
         cur_field, cur_level, cur_val = cursor_ctx or (None, -1, None)
         if cur_field and level == cur_level:
@@ -846,15 +890,51 @@ class ContainedNavMixin:
         next_seg = segments[level + 1]
         for child in row.get(next_seg) or []:
             self._flatten_expand_response(
-                level + 1, child, segments, pks_per_level, chain, fk_columns, out, next_ctx
+                level + 1,
+                child,
+                segments,
+                pks_per_level,
+                chain,
+                fk_columns,
+                out,
+                next_ctx,
+                per_level_tops,
             )
         inner_next = row.get(f"{next_seg}@odata.nextLink")
         if inner_next:
             resolved = urljoin(self.service_url, inner_next)
+            if per_level_tops:
+                # Continuation pages the collection at ``level + 1``
+                # under one specific parent at ``level``. The original
+                # ``$top`` for that level was sized against the FULL
+                # cross-product budget (top × inner × …); the
+                # continuation is one outer level shallower, so we
+                # have more budget to spend per response. New $top is
+                # ``page_size_budget / inner_product`` where
+                # ``inner_product`` is the cross-product of all levels
+                # deeper than ``level + 1`` (which the server-side
+                # ``$expand`` chain in the nextLink still applies).
+                continuation_level = level + 1
+                inner_product = 1
+                for t in per_level_tops[continuation_level + 1 :]:
+                    inner_product *= t
+                page_budget = 1
+                for t in per_level_tops:
+                    page_budget *= t
+                new_top = max(MIN_DYNAMIC_TOP, page_budget // max(1, inner_product))
+                resolved = rewrite_top_in_url(resolved, new_top)
             for page_rows, _ in self._fetch_pages_with_links(resolved):
                 for child in page_rows:
                     self._flatten_expand_response(
-                        level + 1, child, segments, pks_per_level, chain, fk_columns, out, next_ctx
+                        level + 1,
+                        child,
+                        segments,
+                        pks_per_level,
+                        chain,
+                        fk_columns,
+                        out,
+                        next_ctx,
+                        per_level_tops,
                     )
         chain.pop()
 
