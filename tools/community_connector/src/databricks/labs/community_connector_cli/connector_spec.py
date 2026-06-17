@@ -307,14 +307,20 @@ def parse_connector_spec(spec: dict) -> ParsedConnectorSpec:
         external_options_allowlist = ""
     parsed.external_options_allowlist = external_options_allowlist
 
-    # Parse OAuth defaults: connection.oauth maps standard RFC 6749 option
-    # names (authorization_endpoint, token_endpoint, oauth_scope, etc.) to
-    # provider-specific values. Used to auto-populate options the user
-    # shouldn't have to retype per connection.
+    # Parse OAuth defaults: connection.oauth maps OAuth-flow attributes
+    # (flow, scopes, authorization_url/token_url or their RFC 6749 aliases,
+    # pkce, extra_auth_params, …) to provider-specific values. Used to
+    # auto-populate options the user shouldn't have to retype per connection.
     oauth_block = connection.get("oauth")
     if isinstance(oauth_block, dict):
+        # Scalars are stringified for the option map; nested values
+        # (e.g. ``extra_auth_params``) are preserved as-is so the caller can
+        # fold them into the authorization request rather than storing a
+        # stringified dict as a connection option.
         parsed.oauth_defaults = {
-            str(k): str(v) for k, v in oauth_block.items() if v is not None
+            str(k): (v if isinstance(v, dict) else str(v))
+            for k, v in oauth_block.items()
+            if v is not None
         }
 
     return parsed
@@ -414,6 +420,8 @@ def validate_connection_options(
     source_name: str,
     options_dict: dict,
     parsed_spec: ParsedConnectorSpec,
+    additional_known_keys: Optional[Set[str]] = None,
+    skip_required: Optional[Set[str]] = None,
 ) -> ValidationResult:
     """
     Validate connection options against the parsed connector spec.
@@ -424,17 +432,28 @@ def validate_connection_options(
         source_name: Name of the connector source.
         options_dict: The connection options dictionary.
         parsed_spec: The parsed connector spec.
+        additional_known_keys: Extra option keys to treat as known (exempt from
+            the unknown-parameter check). Used by OAuth modes where the OAuth
+            layer / UC supply keys (client_id, endpoints, tokens, …) that the
+            connector spec does not list as connection parameters.
+        skip_required: Spec-declared required params to NOT enforce here. Used
+            by OAuth modes for keys the OAuth layer / UC supply rather than the
+            user (e.g. the OAuth fields and UC-injected tokens).
 
     Returns:
         ValidationResult with errors, warnings, and detected auth method.
     """
     result = ValidationResult()
     provided_params = set(options_dict.keys())
+    additional_known_keys = additional_known_keys or set()
+    skip_required = skip_required or set()
 
     if parsed_spec.has_auth_methods():
         # Option B: auth_methods structure
         # First, check common required parameters
-        missing_common = parsed_spec.common_required_params - provided_params
+        missing_common = (
+            parsed_spec.common_required_params - skip_required - provided_params
+        )
         if missing_common:
             result.errors.append(
                 f"Missing required common parameters: {', '.join(sorted(missing_common))}"
@@ -446,7 +465,9 @@ def validate_connection_options(
         if detected_method:
             result.detected_auth_method = detected_method.name
             # Validate all required params for the detected method
-            missing_method_params = detected_method.required_params - provided_params
+            missing_method_params = (
+                detected_method.required_params - skip_required - provided_params
+            )
             if missing_method_params:
                 result.errors.append(
                     f"Missing required parameters for '{detected_method.name}' auth method: "
@@ -469,17 +490,19 @@ def validate_connection_options(
         all_known = parsed_spec.get_all_known_params()
         all_known.add("sourceName")
         all_known.add("externalOptionsAllowList")
+        all_known |= additional_known_keys
         unknown_params = provided_params - all_known
 
         if unknown_params:
+            known_hint = parsed_spec.get_all_known_params() | additional_known_keys
             result.errors.append(
                 f"Unknown connection parameters for '{source_name}': "
                 f"{', '.join(sorted(unknown_params))}. "
-                f"Known parameters are: {', '.join(sorted(parsed_spec.get_all_known_params()))}"
+                f"Known parameters are: {', '.join(sorted(known_hint))}"
             )
     else:
         # Option A: flat parameters structure
-        missing_required = parsed_spec.required_params - provided_params
+        missing_required = parsed_spec.required_params - skip_required - provided_params
         if missing_required:
             result.errors.append(
                 f"Missing required connection parameters: {', '.join(sorted(missing_required))}"
@@ -489,14 +512,19 @@ def validate_connection_options(
         all_known = parsed_spec.required_params | parsed_spec.optional_params
         all_known.add("sourceName")
         all_known.add("externalOptionsAllowList")
+        all_known |= additional_known_keys
         unknown_params = provided_params - all_known
 
         if unknown_params:
+            known_hint = (
+                parsed_spec.required_params
+                | parsed_spec.optional_params
+                | additional_known_keys
+            )
             result.errors.append(
                 f"Unknown connection parameters for '{source_name}': "
                 f"{', '.join(sorted(unknown_params))}. "
-                f"Known parameters are: "
-                f"{', '.join(sorted(parsed_spec.required_params | parsed_spec.optional_params))}"
+                f"Known parameters are: {', '.join(sorted(known_hint))}"
             )
 
     return result

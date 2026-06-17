@@ -203,10 +203,20 @@ def _get_constant_external_options_allowlist() -> str:
 
 
 def _validate_connection_options_with_spec(
-    source_name: str, options_dict: dict, parsed_spec: ParsedConnectorSpec
+    source_name: str,
+    options_dict: dict,
+    parsed_spec: ParsedConnectorSpec,
+    additional_known_keys: Optional[Set[str]] = None,
+    skip_required: Optional[Set[str]] = None,
 ) -> List[str]:
     """Validate connection options against spec. Returns list of error messages."""
-    result = validate_connection_options(source_name, options_dict, parsed_spec)
+    result = validate_connection_options(
+        source_name,
+        options_dict,
+        parsed_spec,
+        additional_known_keys=additional_known_keys,
+        skip_required=skip_required,
+    )
 
     # Print detected auth method
     if result.detected_auth_method:
@@ -239,21 +249,24 @@ def _prepare_connection_options(  # pylint: disable=too-many-arguments,too-many-
     options: str,
     spec_path: Optional[str],
     debug: bool,
-    auth_type: str = AUTH_TYPE_STATIC,
+    auth_type: Optional[str] = None,
     redirect_port: Optional[int] = None,
 ) -> dict:
     """Parse, validate, and enrich connection options. Raises ClickException on failure.
 
-    For ``auth_type != static``:
-      - Validates that the user-supplied ``--options`` JSON contains the fixed
-        set of OAuth fields required by the chosen flow.
-      - Sets ``community_oauth_flow`` on the options dict so the connection
-        resolves to the correct CONNECTION_COMMUNITY_OAUTH_* securable kind.
+    ``auth_type`` may be ``None``; when omitted it is taken from the spec's
+    ``oauth.flow`` (or ``static`` if the spec has no oauth block), so the user
+    no longer has to pass ``--auth-type`` for connectors that declare their
+    flow in the spec.
+
+    For OAuth auth types:
+      - Validates that ``--options`` plus the spec's oauth defaults provide the
+        fixed set of OAuth fields required by the flow.
+      - Sets ``community_oauth_flow`` so the connection resolves to the correct
+        CONNECTION_COMMUNITY_OAUTH_* securable kind.
       - For ``u2m``, runs an in-process authorization-code + PKCE flow against
         a loopback redirect and injects ``authorization_code``,
         ``pkce_verifier``, and ``oauth_redirect_uri``.
-      - OAuth keys are exempted from connector-spec parameter validation
-        (connector specs only describe runtime/source-side options).
     """
     # Parse options JSON
     try:
@@ -269,32 +282,46 @@ def _prepare_connection_options(  # pylint: disable=too-many-arguments,too-many-
     connector_spec = _load_connector_spec(source_name, spec_path)
     parsed_spec = _parse_connector_spec(connector_spec) if connector_spec else None
 
+    # Resolve the auth type: an explicit --auth-type wins; otherwise take the
+    # spec's oauth.flow; otherwise static.
+    auth_type = _resolve_auth_type(auth_type, parsed_spec)
+    click.echo(f"Auth type: {auth_type}")
+
     # Merge OAuth defaults from the spec BEFORE auth-type validation, so the
     # required-field check sees the auto-populated values. User-supplied
     # values in --options win over spec defaults.
+    flow_controls: dict = {}
     if parsed_spec and auth_type != AUTH_TYPE_STATIC and parsed_spec.oauth_defaults:
-        _apply_oauth_defaults(options_dict, parsed_spec.oauth_defaults)
+        conn_oauth, flow_controls = _resolve_oauth_block(parsed_spec.oauth_defaults)
+        _apply_oauth_defaults(options_dict, conn_oauth)
 
-    _apply_auth_type(options_dict, auth_type, redirect_port)
-
+    # Validate the connector-spec connection parameters BEFORE running any
+    # browser flow, for every auth type. OAuth modes still enforce the
+    # connector-specific required params (just like static mode); they only
+    # exempt the keys the OAuth layer / UC supply — the OAuth fields
+    # (client_id, endpoints, …) and the UC-injected runtime tokens — from the
+    # required and unknown-parameter checks.
     if parsed_spec:
         _debug_print_spec(parsed_spec, constant_allowlist, debug)
 
         if auth_type == AUTH_TYPE_STATIC:
-            # Static credentials: the user supplies all connector-runtime
-            # parameters listed in the spec; validate them.
             errors = _validate_connection_options_with_spec(
                 source_name, options_dict, parsed_spec
             )
-            if errors:
-                raise click.ClickException("\n".join(errors))
-        # For non-static auth modes the connector spec's parameters describe
-        # what the connector reads at *runtime* (typically OAuth-issued tokens
-        # like access_token / refresh_token that UC injects after the OAuth
-        # dance). Those are not user-supplied at create-connection time, so
-        # we skip parameter validation. The OAuth field set is already
-        # validated by _apply_auth_type.
+        else:
+            errors = _validate_connection_options_with_spec(
+                source_name,
+                options_dict,
+                parsed_spec,
+                additional_known_keys=OAUTH_OPTION_KEYS,
+                skip_required=OAUTH_OPTION_KEYS | _RUNTIME_INJECTED_KEYS,
+            )
+        if errors:
+            raise click.ClickException("\n".join(errors))
 
+    _apply_auth_type(options_dict, auth_type, redirect_port, flow_controls)
+
+    if parsed_spec:
         # Auto-add externalOptionsAllowList
         _add_external_options_allowlist(
             options_dict, parsed_spec.external_options_allowlist, constant_allowlist
@@ -317,6 +344,82 @@ def _prepare_connection_options(  # pylint: disable=too-many-arguments,too-many-
     return options_dict
 
 
+# The connector-spec oauth block (PR #218 shape) uses human-friendly key
+# names; the connection layer and run_u2m_authorization_code_flow expect the
+# RFC 6749 names. Translate on the way in. Specs that already use the RFC
+# names pass through unchanged (the aliased name wins only if present).
+_OAUTH_SPEC_KEY_ALIASES = {
+    "authorization_url": "authorization_endpoint",
+    "token_url": "token_endpoint",
+    "scopes": "oauth_scope",
+}
+
+# oauth-block keys that steer the local OAuth flow but are NOT stored as
+# connection options (they describe how to obtain the grant, not the grant).
+_OAUTH_FLOW_CONTROL_KEYS = frozenset({"flow", "pkce", "extra_auth_params"})
+
+# Tokens UC mints/injects into the connector at query time — never supplied by
+# the user at connection-creation time, so they are not required by the CLI
+# even if a connector spec happens to list them as parameters.
+_RUNTIME_INJECTED_KEYS = frozenset({"access_token", "refresh_token"})
+
+
+def _flag_enabled(value, default: bool) -> bool:
+    """Interpret an oauth-block boolean flag that may be a real bool or a string
+    (spec parsing stringifies scalars, so ``pkce: false`` arrives as "False").
+    Returns ``default`` when the value is absent."""
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    return str(value).strip().lower() not in ("false", "0", "no", "off", "")
+
+
+def _resolve_oauth_block(oauth_defaults: dict) -> Tuple[dict, dict]:
+    """Split the connector-spec oauth block into connection options and flow controls.
+
+    Returns ``(connection_oauth_options, flow_controls)``:
+
+    - ``connection_oauth_options`` uses RFC 6749 names (``authorization_endpoint``,
+      ``token_endpoint``, ``oauth_scope``, …), ready to merge into the connection
+      options the user submits.
+    - ``flow_controls`` carries ``flow`` / ``pkce`` / ``extra_auth_params``, which
+      steer the loopback U2M flow but are never stored on the connection.
+    """
+    conn_options: dict = {}
+    flow_controls: dict = {}
+    for key, value in oauth_defaults.items():
+        if key in _OAUTH_FLOW_CONTROL_KEYS:
+            flow_controls[key] = value
+            continue
+        conn_options[_OAUTH_SPEC_KEY_ALIASES.get(key, key)] = value
+    return conn_options, flow_controls
+
+
+def _resolve_auth_type(explicit: Optional[str], parsed_spec) -> str:
+    """Resolve the connection auth type.
+
+    An explicit ``--auth-type`` wins. Otherwise fall back to the connector
+    spec's ``oauth.flow`` (so specs that declare their flow don't need
+    ``--auth-type`` on the command line), and finally to ``static`` for specs
+    with no oauth block.
+    """
+    if explicit:
+        resolved = explicit.lower()
+    else:
+        spec_flow = None
+        if parsed_spec and parsed_spec.oauth_defaults:
+            spec_flow = parsed_spec.oauth_defaults.get("flow")
+        resolved = str(spec_flow).lower() if spec_flow else AUTH_TYPE_STATIC
+
+    if resolved not in AUTH_TYPE_CHOICES:
+        raise click.ClickException(
+            f"Unknown auth type '{resolved}'. Expected one of: "
+            f"{', '.join(AUTH_TYPE_CHOICES)}."
+        )
+    return resolved
+
+
 def _apply_oauth_defaults(options_dict: dict, oauth_defaults: dict) -> None:
     """Fill in standard OAuth options from the connector spec, only when
     the user did not already supply a value for that key."""
@@ -333,12 +436,18 @@ def _apply_oauth_defaults(options_dict: dict, oauth_defaults: dict) -> None:
 
 
 def _apply_auth_type(
-    options_dict: dict, auth_type: str, redirect_port: Optional[int]
+    options_dict: dict,
+    auth_type: str,
+    redirect_port: Optional[int],
+    flow_controls: Optional[dict] = None,
 ) -> None:
     """Validate auth-type-specific required options and stamp the flow value.
 
     For ``u2m`` this also runs the loopback authorization-code flow and writes
     the resulting code / verifier / redirect URI back into ``options_dict``.
+    ``flow_controls`` carries spec-supplied ``extra_auth_params`` folded into
+    the authorization request (e.g. ``access_type=offline`` so the provider
+    returns a refreshable grant).
     """
     if auth_type == AUTH_TYPE_STATIC:
         # Static credentials: user-supplied option set is arbitrary; the
@@ -365,17 +474,27 @@ def _apply_auth_type(
     options_dict["community_oauth_flow"] = AUTH_TYPE_OAUTH_FLOW_VALUE[auth_type]
 
     if auth_type == AUTH_TYPE_U2M:
-        click.echo("Running OAuth 2.0 authorization-code flow (PKCE) ...")
+        controls = flow_controls or {}
+        extra_auth_params = controls.get("extra_auth_params")
+        use_pkce = _flag_enabled(controls.get("pkce"), default=True)
+        click.echo(
+            "Running OAuth 2.0 authorization-code flow"
+            f"{' (PKCE)' if use_pkce else ''} ..."
+        )
         code, verifier, redirect_uri = run_u2m_authorization_code_flow(
             client_id=options_dict["client_id"],
             authorization_endpoint=options_dict["authorization_endpoint"],
             scope=options_dict.get("oauth_scope"),
             redirect_port=redirect_port,
+            extra_auth_params=extra_auth_params,
+            use_pkce=use_pkce,
             echo=lambda msg: click.echo(msg),
         )
         options_dict["authorization_code"] = code
-        options_dict["pkce_verifier"] = verifier
         options_dict["oauth_redirect_uri"] = redirect_uri
+        # Only store a verifier when PKCE was actually used.
+        if verifier:
+            options_dict["pkce_verifier"] = verifier
         click.echo("  ✓ Captured authorization code from loopback redirect.")
 
 
@@ -1815,13 +1934,13 @@ def show_pipeline(ctx: click.Context, pipeline_name: str):
     "--auth-type",
     "auth_type",
     type=click.Choice(list(AUTH_TYPE_CHOICES), case_sensitive=False),
-    default=AUTH_TYPE_STATIC,
-    show_default=True,
+    default=None,
     help=(
-        "Authentication mode for the COMMUNITY connection. "
-        "'static' (default) accepts arbitrary key/value options; other modes "
-        "require a fixed set of OAuth options and set 'community_oauth_flow' "
-        "automatically."
+        "Authentication mode for the COMMUNITY connection. If omitted, it is "
+        "taken from the connector spec's oauth.flow, or 'static' when the spec "
+        "has no oauth block. 'static' accepts arbitrary key/value options; "
+        "OAuth modes require a fixed set of OAuth options and set "
+        "'community_oauth_flow' automatically."
     ),
 )
 @click.option(
@@ -1830,8 +1949,8 @@ def show_pipeline(ctx: click.Context, pipeline_name: str):
     type=int,
     default=None,
     help=(
-        "Loopback port for the OAuth U2M redirect (only used with "
-        "--auth-type=u2m). Defaults to an OS-assigned free port."
+        "Loopback port for the OAuth U2M redirect (only used with the u2m "
+        "flow). Defaults to an OS-assigned free port."
     ),
 )
 @click.option(
@@ -1849,7 +1968,7 @@ def create_connection(
     source_name: str,
     connection_name: str,
     options: str,
-    auth_type: str,
+    auth_type: Optional[str],
     redirect_port: Optional[int],
     spec_path: Optional[str],
 ):
@@ -1860,11 +1979,12 @@ def create_connection(
 
     CONNECTION_NAME is the name for the new connection.
 
-    The connection type is set to COMMUNITY. The --auth-type flag selects the
-    auth mode:
+    The connection type is set to COMMUNITY. The auth mode is taken from the
+    connector spec's oauth.flow when --auth-type is omitted (or 'static' if the
+    spec has no oauth block); pass --auth-type only to override:
 
     \b
-      - static       (default) arbitrary key/value options; no OAuth flow.
+      - static       arbitrary key/value options; no OAuth flow.
       - m2m          requires client_id, client_secret, token_endpoint.
       - u2m          requires client_id, client_secret, authorization_endpoint,
                      token_endpoint. The CLI opens a browser, runs the OAuth
@@ -1875,6 +1995,9 @@ def create_connection(
                      token_endpoint. The per-user OAuth happens at runtime per
                      end-user; the connection only stores app config.
 
+    For OAuth modes the spec's oauth block supplies the endpoints and scope, so
+    the user typically only passes client_id + client_secret.
+
     Connection options are validated against the connector spec (connector_spec.yaml).
     The externalOptionsAllowList is automatically added from the spec.
 
@@ -1883,19 +2006,15 @@ def create_connection(
         community-connector create_connection github my_github_conn \\
             -o '{"token": "ghp_xxxx"}'
 
-        # OAuth M2M:
+        # OAuth connector whose spec declares oauth.flow (no --auth-type needed):
+        community-connector create_connection gmail my_gmail_conn \\
+            -o '{"client_id":"...","client_secret":"..."}'
+
+        # Override the auth type explicitly:
         community-connector create_connection github my_github_conn \\
             --auth-type m2m \\
             -o '{"client_id":"...","client_secret":"...",
                  "token_endpoint":"https://idp/token"}'
-
-        # OAuth U2M (browser-based authorization-code flow against localhost):
-        community-connector create_connection github my_github_conn \\
-            --auth-type u2m \\
-            -o '{"client_id":"...","client_secret":"...",
-                 "authorization_endpoint":"https://idp/authorize",
-                 "token_endpoint":"https://idp/token",
-                 "oauth_scope":"repo"}'
 
         # With custom spec file:
         community-connector create_connection github my_github_conn \\
@@ -1906,11 +2025,10 @@ def create_connection(
             -o '{"token": "ghp_xxxx"}' --spec https://github.com/myorg/myrepo
     """
     debug = ctx.obj.get("debug", False)
-    auth_type = auth_type.lower()
 
     click.echo(f"Creating connection for source: {source_name}")
     click.echo(f"Connection name: {connection_name}")
-    click.echo(f"Connection type: {CONNECTION_TYPE} (auth_type={auth_type})")
+    click.echo(f"Connection type: {CONNECTION_TYPE}")
 
     options_dict = _prepare_connection_options(
         source_name, options, spec_path, debug, auth_type, redirect_port
@@ -1955,13 +2073,13 @@ def create_connection(
     "--auth-type",
     "auth_type",
     type=click.Choice(list(AUTH_TYPE_CHOICES), case_sensitive=False),
-    default=AUTH_TYPE_STATIC,
-    show_default=True,
+    default=None,
     help=(
-        "Authentication mode for the COMMUNITY connection. Must match the "
-        "mode the connection was created with — the auth mode itself can't "
-        "be switched on update. Pass '--auth-type=u2m' to re-run the "
-        "browser authorization-code flow and refresh the stored OAuth grant."
+        "Authentication mode for the COMMUNITY connection. If omitted, it is "
+        "taken from the connector spec's oauth.flow (or 'static'). Must match "
+        "the mode the connection was created with — the auth mode itself can't "
+        "be switched on update. For the u2m flow this re-runs the browser "
+        "authorization-code flow and refreshes the stored OAuth grant."
     ),
 )
 @click.option(
@@ -1970,8 +2088,8 @@ def create_connection(
     type=int,
     default=None,
     help=(
-        "Loopback port for the OAuth U2M redirect (only used with "
-        "--auth-type=u2m). Defaults to an OS-assigned free port."
+        "Loopback port for the OAuth U2M redirect (only used with the u2m "
+        "flow). Defaults to an OS-assigned free port."
     ),
 )
 @click.option(
@@ -1989,7 +2107,7 @@ def update_connection(
     source_name: str,
     connection_name: str,
     options: str,
-    auth_type: str,
+    auth_type: Optional[str],
     redirect_port: Optional[int],
     spec_path: Optional[str],
 ):
@@ -2000,14 +2118,13 @@ def update_connection(
 
     CONNECTION_NAME is the name of the existing connection to update.
 
-    The connection's auth mode (community_oauth_flow) is fixed at creation
-    time and cannot be changed here — recreate the connection to switch
-    between static, m2m, u2m, and u2m_per_user modes. Pass the SAME
-    --auth-type the connection was created with so the update preserves it.
-    For --auth-type=u2m this re-runs the browser authorization-code + PKCE
-    flow and writes a fresh authorization_code / pkce_verifier /
-    oauth_redirect_uri, which is how you refresh an expired or revoked OAuth
-    grant without recreating the connection.
+    The auth mode is taken from the connector spec's oauth.flow when
+    --auth-type is omitted (or 'static'). The mode is fixed at creation time
+    and cannot be changed here — recreate the connection to switch between
+    static, m2m, u2m, and u2m_per_user modes. For the u2m flow the update
+    re-runs the browser authorization-code + PKCE flow and writes a fresh
+    authorization_code / pkce_verifier / oauth_redirect_uri, which is how you
+    refresh an expired or revoked OAuth grant without recreating the connection.
 
     Connection options are validated against the connector spec (connector_spec.yaml).
     The externalOptionsAllowList is automatically added from the spec.
@@ -2017,13 +2134,9 @@ def update_connection(
         community-connector update_connection github my_github_conn \\
             -o '{"token": "ghp_xxxx"}'
 
-        # Refresh an expired U2M OAuth grant (re-runs the browser flow):
-        community-connector update_connection github my_github_conn \\
-            --auth-type u2m \\
-            -o '{"client_id":"...","client_secret":"...",
-                 "authorization_endpoint":"https://idp/authorize",
-                 "token_endpoint":"https://idp/token",
-                 "oauth_scope":"repo"}'
+        # Refresh a U2M OAuth grant (spec declares oauth.flow; re-runs the flow):
+        community-connector update_connection gmail my_gmail_conn \\
+            -o '{"client_id":"...","client_secret":"..."}'
 
         # With custom spec file:
         community-connector update_connection github my_github_conn \\
@@ -2034,11 +2147,9 @@ def update_connection(
             -o '{"token": "ghp_xxxx"}' --spec https://github.com/myorg/myrepo
     """
     debug = ctx.obj.get("debug", False)
-    auth_type = auth_type.lower()
 
     click.echo(f"Updating connection for source: {source_name}")
     click.echo(f"Connection name: {connection_name}")
-    click.echo(f"Auth type: {auth_type}")
 
     options_dict = _prepare_connection_options(
         source_name, options, spec_path, debug, auth_type, redirect_port

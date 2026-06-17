@@ -1259,6 +1259,346 @@ class TestOAuthDefaultsAutoFill:
         assert "community_oauth_flow" not in opts
 
 
+class TestOAuthSpecBlockShape:
+    """With the connector spec declaring its OAuth flow (PR #218 shape), the
+    user no longer passes --auth-type: the CLI takes the auth type from
+    oauth.flow and resolves the spec's human-friendly oauth keys
+    (authorization_url / token_url / scopes / extra_auth_params) into the
+    option names the existing flow uses."""
+
+    _SPEC = {
+        "connection": {
+            "parameters": [
+                {"name": "client_id", "type": "string", "required": True},
+                {"name": "client_secret", "type": "string", "required": True},
+                {"name": "user_id", "type": "string", "required": False},
+            ],
+            "oauth": {
+                "flow": "u2m",
+                "pkce": False,
+                "scopes": "https://www.googleapis.com/auth/gmail.readonly",
+                "authorization_url": "https://accounts.google.com/o/oauth2/v2/auth",
+                "token_url": "https://oauth2.googleapis.com/token",
+                "extra_auth_params": {"access_type": "offline", "prompt": "consent"},
+            },
+        },
+        "external_options_allowlist": "",
+    }
+
+    @patch(
+        "databricks.labs.community_connector_cli.cli.run_u2m_authorization_code_flow"
+    )
+    @patch("databricks.labs.community_connector_cli.cli._load_connector_spec")
+    @patch("databricks.labs.community_connector_cli.cli.WorkspaceClient")
+    def test_auth_type_derived_from_spec_flow_no_flag_needed(
+        self, mock_workspace_client, mock_load_spec, mock_oauth
+    ):
+        """No --auth-type: the u2m flow runs (from oauth.flow), spec keys map to
+        the RFC names, extra_auth_params reach the flow, and flow-control keys
+        are not stored on the connection."""
+        runner = CliRunner()
+        mock_load_spec.return_value = self._SPEC
+        mock_ws = MagicMock()
+        mock_workspace_client.return_value = mock_ws
+        mock_ws.api_client.do.return_value = {"name": "test", "connection_id": "123"}
+        mock_oauth.return_value = ("CODE", "VERIFIER", "http://127.0.0.1:5/callback")
+
+        result = runner.invoke(
+            main,
+            [
+                "create_connection",
+                "gmail",
+                "my_conn",
+                "-o",
+                '{"client_id":"cid","client_secret":"csecret"}',
+            ],
+        )
+
+        assert result.exit_code == 0, result.output
+
+        # The u2m flow ran even though --auth-type was not passed.
+        mock_oauth.assert_called_once()
+        kwargs = mock_oauth.call_args.kwargs
+        assert kwargs["authorization_endpoint"] == (
+            "https://accounts.google.com/o/oauth2/v2/auth"
+        )
+        assert kwargs["scope"] == "https://www.googleapis.com/auth/gmail.readonly"
+        assert kwargs["extra_auth_params"] == {
+            "access_type": "offline",
+            "prompt": "consent",
+        }
+
+        opts = mock_ws.api_client.do.call_args.kwargs["body"]["options"]
+        assert opts["authorization_endpoint"] == (
+            "https://accounts.google.com/o/oauth2/v2/auth"
+        )
+        assert opts["token_endpoint"] == "https://oauth2.googleapis.com/token"
+        assert opts["oauth_scope"] == "https://www.googleapis.com/auth/gmail.readonly"
+        assert opts["community_oauth_flow"] == "u2m"
+        # Flow-control keys must never be stored on the connection.
+        for leaked in ("flow", "pkce", "extra_auth_params", "scopes",
+                       "authorization_url", "token_url"):
+            assert leaked not in opts
+
+    @patch(
+        "databricks.labs.community_connector_cli.cli.run_u2m_authorization_code_flow"
+    )
+    @patch("databricks.labs.community_connector_cli.cli._load_connector_spec")
+    @patch("databricks.labs.community_connector_cli.cli.WorkspaceClient")
+    def test_oauth_mode_enforces_connector_required_params(
+        self, mock_workspace_client, mock_load_spec, mock_oauth
+    ):
+        """A connector-specific required param missing errors out (like static
+        mode) before the browser flow runs — the OAuth fields are exempt, but
+        connector params are not."""
+        runner = CliRunner()
+        spec = {
+            "connection": {
+                "parameters": [
+                    {"name": "client_id", "type": "string", "required": True},
+                    {"name": "client_secret", "type": "string", "required": True},
+                    # A connector-specific required option, not an OAuth field.
+                    {"name": "region", "type": "string", "required": True},
+                ],
+                "oauth": {
+                    "flow": "u2m",
+                    "scopes": "read",
+                    "authorization_url": "https://idp/authorize",
+                    "token_url": "https://idp/token",
+                },
+            },
+            "external_options_allowlist": "",
+        }
+        mock_load_spec.return_value = spec
+        mock_ws = MagicMock()
+        mock_workspace_client.return_value = mock_ws
+
+        result = runner.invoke(
+            main,
+            [
+                "create_connection",
+                "demo",
+                "my_conn",
+                "-o",
+                '{"client_id":"cid","client_secret":"csecret"}',
+            ],
+        )
+
+        assert result.exit_code != 0
+        assert "region" in result.output
+        # The browser flow must not run when required options are missing.
+        mock_oauth.assert_not_called()
+        mock_ws.api_client.do.assert_not_called()
+
+    @patch("databricks.labs.community_connector_cli.cli._load_connector_spec")
+    @patch("databricks.labs.community_connector_cli.cli.WorkspaceClient")
+    def test_explicit_auth_type_overrides_spec_flow(
+        self, mock_workspace_client, mock_load_spec
+    ):
+        """An explicit --auth-type wins over the spec's oauth.flow."""
+        runner = CliRunner()
+        mock_load_spec.return_value = self._SPEC
+        mock_ws = MagicMock()
+        mock_workspace_client.return_value = mock_ws
+        mock_ws.api_client.do.return_value = {"name": "test", "connection_id": "123"}
+
+        result = runner.invoke(
+            main,
+            [
+                "create_connection",
+                "gmail",
+                "my_conn",
+                "--auth-type",
+                "static",
+                "-o",
+                '{"client_id":"cid","client_secret":"csecret"}',
+            ],
+        )
+
+        assert result.exit_code == 0, result.output
+        opts = mock_ws.api_client.do.call_args.kwargs["body"]["options"]
+        # static wins: no OAuth flow stamped, oauth defaults not applied.
+        assert "community_oauth_flow" not in opts
+        assert "authorization_endpoint" not in opts
+
+    @patch(
+        "databricks.labs.community_connector_cli.cli.run_u2m_authorization_code_flow"
+    )
+    @patch("databricks.labs.community_connector_cli.cli._load_connector_spec")
+    @patch("databricks.labs.community_connector_cli.cli.WorkspaceClient")
+    def test_oauth_mode_still_rejects_truly_unknown_key(
+        self, mock_workspace_client, mock_load_spec, mock_oauth
+    ):
+        """OAuth keys are exempt, but a genuinely unknown key is still rejected
+        (the exemption must not become a blanket pass-through)."""
+        runner = CliRunner()
+        mock_load_spec.return_value = self._SPEC
+        mock_ws = MagicMock()
+        mock_workspace_client.return_value = mock_ws
+
+        result = runner.invoke(
+            main,
+            [
+                "create_connection",
+                "gmail",
+                "my_conn",
+                "-o",
+                '{"client_id":"cid","client_secret":"csecret","bogus_param":"x"}',
+            ],
+        )
+
+        assert result.exit_code != 0
+        assert "bogus_param" in result.output
+        mock_oauth.assert_not_called()
+
+    @pytest.mark.parametrize("flow", ["m2m", "u2m_per_user"])
+    @patch(
+        "databricks.labs.community_connector_cli.cli.run_u2m_authorization_code_flow"
+    )
+    @patch("databricks.labs.community_connector_cli.cli._load_connector_spec")
+    @patch("databricks.labs.community_connector_cli.cli.WorkspaceClient")
+    def test_non_u2m_flows_derived_from_spec_no_browser(
+        self, mock_workspace_client, mock_load_spec, mock_oauth, flow
+    ):
+        """m2m / u2m_per_user are derived from oauth.flow and stamp
+        community_oauth_flow without opening a browser."""
+        runner = CliRunner()
+        mock_load_spec.return_value = {
+            "connection": {
+                "parameters": [
+                    {"name": "client_id", "type": "string", "required": True},
+                    {"name": "client_secret", "type": "string", "required": True},
+                ],
+                "oauth": {
+                    "flow": flow,
+                    "scopes": "read",
+                    "authorization_url": "https://idp/authorize",
+                    "token_url": "https://idp/token",
+                },
+            },
+            "external_options_allowlist": "",
+        }
+        mock_ws = MagicMock()
+        mock_workspace_client.return_value = mock_ws
+        mock_ws.api_client.do.return_value = {"name": "test", "connection_id": "123"}
+
+        result = runner.invoke(
+            main,
+            [
+                "create_connection",
+                "demo",
+                "my_conn",
+                "-o",
+                '{"client_id":"cid","client_secret":"csecret"}',
+            ],
+        )
+
+        assert result.exit_code == 0, result.output
+        opts = mock_ws.api_client.do.call_args.kwargs["body"]["options"]
+        assert opts["community_oauth_flow"] == flow
+        mock_oauth.assert_not_called()  # only u2m opens the browser
+
+    @patch("databricks.labs.community_connector_cli.cli._load_connector_spec")
+    @patch("databricks.labs.community_connector_cli.cli.WorkspaceClient")
+    def test_invalid_spec_flow_errors(self, mock_workspace_client, mock_load_spec):
+        """An unrecognized oauth.flow value is rejected with a clear error."""
+        runner = CliRunner()
+        mock_load_spec.return_value = {
+            "connection": {"parameters": [], "oauth": {"flow": "bogus"}},
+            "external_options_allowlist": "",
+        }
+        mock_ws = MagicMock()
+        mock_workspace_client.return_value = mock_ws
+
+        result = runner.invoke(
+            main, ["create_connection", "demo", "my_conn", "-o", "{}"]
+        )
+
+        assert result.exit_code != 0
+        assert "Unknown auth type" in result.output
+        assert "bogus" in result.output
+
+    @patch(
+        "databricks.labs.community_connector_cli.cli.run_u2m_authorization_code_flow"
+    )
+    @patch("databricks.labs.community_connector_cli.cli._load_connector_spec")
+    @patch("databricks.labs.community_connector_cli.cli.WorkspaceClient")
+    def test_pkce_false_skips_pkce(
+        self, mock_workspace_client, mock_load_spec, mock_oauth
+    ):
+        """oauth.pkce: false runs the flow with use_pkce=False and stores no
+        pkce_verifier."""
+        runner = CliRunner()
+        mock_load_spec.return_value = self._SPEC  # has pkce: False
+        mock_ws = MagicMock()
+        mock_workspace_client.return_value = mock_ws
+        mock_ws.api_client.do.return_value = {"name": "test", "connection_id": "123"}
+        # No-PKCE flow returns an empty verifier.
+        mock_oauth.return_value = ("CODE", "", "http://127.0.0.1:5/callback")
+
+        result = runner.invoke(
+            main,
+            [
+                "create_connection",
+                "gmail",
+                "my_conn",
+                "-o",
+                '{"client_id":"cid","client_secret":"csecret"}',
+            ],
+        )
+
+        assert result.exit_code == 0, result.output
+        assert mock_oauth.call_args.kwargs["use_pkce"] is False
+        opts = mock_ws.api_client.do.call_args.kwargs["body"]["options"]
+        assert "pkce_verifier" not in opts
+
+    @patch(
+        "databricks.labs.community_connector_cli.cli.run_u2m_authorization_code_flow"
+    )
+    @patch("databricks.labs.community_connector_cli.cli._load_connector_spec")
+    @patch("databricks.labs.community_connector_cli.cli.WorkspaceClient")
+    def test_pkce_defaults_on_when_absent(
+        self, mock_workspace_client, mock_load_spec, mock_oauth
+    ):
+        """No pkce key in the spec -> PKCE stays on (the secure default)."""
+        runner = CliRunner()
+        mock_load_spec.return_value = {
+            "connection": {
+                "parameters": [
+                    {"name": "client_id", "type": "string", "required": True},
+                    {"name": "client_secret", "type": "string", "required": True},
+                ],
+                "oauth": {
+                    "flow": "u2m",
+                    "scopes": "read",
+                    "authorization_url": "https://idp/authorize",
+                    "token_url": "https://idp/token",
+                },
+            },
+            "external_options_allowlist": "",
+        }
+        mock_ws = MagicMock()
+        mock_workspace_client.return_value = mock_ws
+        mock_ws.api_client.do.return_value = {"name": "test", "connection_id": "123"}
+        mock_oauth.return_value = ("CODE", "VER", "http://127.0.0.1:5/callback")
+
+        result = runner.invoke(
+            main,
+            [
+                "create_connection",
+                "demo",
+                "my_conn",
+                "-o",
+                '{"client_id":"cid","client_secret":"csecret"}',
+            ],
+        )
+
+        assert result.exit_code == 0, result.output
+        assert mock_oauth.call_args.kwargs["use_pkce"] is True
+        opts = mock_ws.api_client.do.call_args.kwargs["body"]["options"]
+        assert opts["pkce_verifier"] == "VER"
+
+
 class TestMakeWorkspaceClient:
     """Tests for the WorkspaceClient profile-resolution helper."""
 
