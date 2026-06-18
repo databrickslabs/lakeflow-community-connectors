@@ -6,9 +6,12 @@
 # Connection Parameters
 # These are provided when creating the Unity Catalog connection.
 #
-# This connector uses OAuth2 authentication with Zoho API. A single
-# authentication method is supported using client credentials and a
-# refresh token obtained through the OAuth flow.
+# This connector uses OAuth 2.0 (authorization code flow) with Zoho. The user
+# supplies their own OAuth app credentials (client_id + client_secret created
+# in https://api-console.zoho.com/) and a data center region. The OAuth flow
+# itself — exchange of authorization_code for access_token + refresh_token —
+# is performed by the consumer of this spec (the labs CLI for local dev, or
+# Unity Catalog for production connections).
 # ============================================================================
 display_name: Zoho CRM
 connection:
@@ -17,34 +20,27 @@ connection:
       type: string
       required: true
       description: >
-        OAuth Client ID from Zoho API Console. Obtain this by creating a
-        Server-based Application at https://api-console.zoho.com/
+        OAuth Client ID from Zoho API Console. Create a Server-based
+        Application at https://api-console.zoho.com/ to obtain this.
 
     - name: client_secret
       type: string
       required: true
       secret: true
       description: >
-        OAuth Client Secret from Zoho API Console. This is the secret
-        associated with your Client ID.
+        OAuth Client Secret from Zoho API Console — paired with the Client ID
+        above.
 
-    - name: refresh_token
+    - name: region
       type: string
       required: true
-      secret: true
+      default: US
+      enum: [US, EU, IN, AU, CN, JP]
       description: >
-        OAuth Refresh Token obtained from the authorization flow. This is a
-        long-lived token that never expires and is used to obtain access tokens.
-        Follow the OAuth setup guide in the README to generate this token.
-
-    - name: base_url
-      type: string
-      required: false
-      description: >
-        Zoho accounts URL for OAuth authentication. Defaults to
-        https://accounts.zoho.com (US data center). Use region-specific URLs
-        for other data centers: accounts.zoho.eu (EU), accounts.zoho.in (IN),
-        accounts.zoho.com.au (AU), accounts.zoho.com.cn (CN), accounts.zoho.jp (JP).
+        Zoho data center region for your account. Selects the OAuth endpoints
+        used during authorization. US = accounts.zoho.com, EU = accounts.zoho.eu,
+        IN = accounts.zoho.in, AU = accounts.zoho.com.au, CN = accounts.zoho.com.cn,
+        JP = accounts.zoho.jp.
 
     - name: initial_load_start_date
       type: string
@@ -56,19 +52,53 @@ connection:
 
   # ---------------------------------------------------------------------------
   # OAuth 2.0 Authorization Code Flow
-  # The authenticate tool uses this section to run the OAuth flow
-  # automatically — the user only needs to provide client_id and
-  # client_secret, and the refresh_token is obtained via browser redirect.
-  # The authorization_url, token_url, and scopes shown below are defaults
-  # that the user can override at runtime.
+  #
+  # `flow`               — community OAuth subtype: u2m | m2m | u2m_per_user.
+  #                        u2m (default) = single shared refresh_token, used by
+  #                        UC to mint access tokens on the connector's behalf.
+  # `pkce`               — whether to use PKCE during authorization. Zoho does
+  #                        not require PKCE for confidential clients.
+  # `scopes`             — OAuth scope string sent on the authorization URL.
+  # `extra_auth_params`  — provider-specific knobs folded into the authorization
+  #                        URL. For Zoho: access_type=offline + prompt=consent
+  #                        are required to obtain a refresh_token.
+  #
+  # Endpoints — declare exactly one of:
+  # * flat `authorization_url` + `token_url` for single-region providers
+  #   (Gmail, GitHub, etc.), OR
+  # * `endpoints_by_region` for providers hosted in multiple data centers.
+  #   The `parameter` field names a connection param (must be `enum`-typed);
+  #   `values` keys must match that param's `enum` exactly. Zoho hosts six
+  #   data centers, so it uses this form.
   # ---------------------------------------------------------------------------
   oauth:
-    authorization_url: "https://accounts.zoho.com/oauth/v2/auth"
-    token_url: "https://accounts.zoho.com/oauth/v2/token"
+    flow: u2m
+    pkce: false
     scopes: "ZohoCRM.modules.ALL,ZohoCRM.settings.ALL"
     extra_auth_params:
-      access_type: "offline"
-      prompt: "consent"
+      access_type: offline
+      prompt: consent
+    endpoints_by_region:
+      parameter: region
+      values:
+        US:
+          authorization_url: "https://accounts.zoho.com/oauth/v2/auth"
+          token_url: "https://accounts.zoho.com/oauth/v2/token"
+        EU:
+          authorization_url: "https://accounts.zoho.eu/oauth/v2/auth"
+          token_url: "https://accounts.zoho.eu/oauth/v2/token"
+        IN:
+          authorization_url: "https://accounts.zoho.in/oauth/v2/auth"
+          token_url: "https://accounts.zoho.in/oauth/v2/token"
+        AU:
+          authorization_url: "https://accounts.zoho.com.au/oauth/v2/auth"
+          token_url: "https://accounts.zoho.com.au/oauth/v2/token"
+        CN:
+          authorization_url: "https://accounts.zoho.com.cn/oauth/v2/auth"
+          token_url: "https://accounts.zoho.com.cn/oauth/v2/token"
+        JP:
+          authorization_url: "https://accounts.zoho.jp/oauth/v2/auth"
+          token_url: "https://accounts.zoho.jp/oauth/v2/token"
 
 # ============================================================================
 # External Options Allowlist

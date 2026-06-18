@@ -23,6 +23,36 @@ from databricks.labs.community_connector.sources.zoho_crm.handlers import (
 
 logger = logging.getLogger(__name__)
 
+# Zoho accounts URL per data center region. Keep in sync with the
+# `endpoints_by_region` block in connector_spec.yaml.
+_ACCOUNTS_URL_BY_REGION = {
+    "US": "https://accounts.zoho.com",
+    "EU": "https://accounts.zoho.eu",
+    "IN": "https://accounts.zoho.in",
+    "AU": "https://accounts.zoho.com.au",
+    "CN": "https://accounts.zoho.com.cn",
+    "JP": "https://accounts.zoho.jp",
+}
+_DEFAULT_REGION = "US"
+
+
+def _resolve_accounts_url(options: dict[str, str]) -> str:
+    """Resolve the Zoho accounts URL from options.
+
+    Prefer `region` (current spec); fall back to `base_url` for connections
+    created against the previous spec shape so existing dev configs still load.
+    """
+    region = options.get("region")
+    if region:
+        url = _ACCOUNTS_URL_BY_REGION.get(region.upper())
+        if not url:
+            raise ValueError(
+                f"Unknown Zoho region '{region}'. "
+                f"Expected one of: {', '.join(_ACCOUNTS_URL_BY_REGION)}"
+            )
+        return url
+    return options.get("base_url", _ACCOUNTS_URL_BY_REGION[_DEFAULT_REGION])
+
 
 class ZohoCRMLakeflowConnect(LakeflowConnect):
     """
@@ -37,32 +67,34 @@ class ZohoCRMLakeflowConnect(LakeflowConnect):
         Initialize the Zoho CRM connector with connection-level options.
 
         Expected options:
-            - client_id: OAuth Client ID from Zoho API Console
-            - client_secret: OAuth Client Secret from Zoho API Console
-            - refresh_token: Long-lived refresh token obtained from OAuth flow
-            - base_url (optional): Zoho accounts URL for OAuth.
-              Defaults to https://accounts.zoho.com
-            - initial_load_start_date (optional): Starting point for the first sync.
+            - region: Zoho data center — US, EU, IN, AU, CN, JP. Defaults to
+              US. Accepts legacy ``base_url`` as a fallback.
+            - access_token: pre-issued Zoho OAuth access token (UC-managed path).
+            - client_id / client_secret / refresh_token: local-dev path used
+              by ``authenticate.py``; the connector mints access tokens itself.
+            - initial_load_start_date (optional): starting point for first sync.
         """
-        client_id = options.get("client_id")
-        client_secret = options.get("client_secret")
-        refresh_token = options.get("refresh_token")
-
-        if not all([client_id, client_secret, refresh_token]):
-            raise ValueError(
-                "Zoho CRM connector requires 'client_id', 'client_secret', "
-                "and 'refresh_token' in the UC connection"
-            )
-
         self.initial_load_start_date = options.get("initial_load_start_date")
-        accounts_url = options.get("base_url", "https://accounts.zoho.com")
+        accounts_url = _resolve_accounts_url(options)
 
-        self._client = ZohoAPIClient(
-            client_id=client_id,
-            client_secret=client_secret,
-            refresh_token=refresh_token,
-            accounts_url=accounts_url,
-        )
+        access_token = options.get("access_token")
+        if access_token:
+            self._client = ZohoAPIClient(accounts_url=accounts_url, access_token=access_token)
+        else:
+            client_id = options.get("client_id")
+            client_secret = options.get("client_secret")
+            refresh_token = options.get("refresh_token")
+            if not all([client_id, client_secret, refresh_token]):
+                raise ValueError(
+                    "Zoho CRM connector requires either 'access_token' (UC-managed) or "
+                    "'client_id' + 'client_secret' + 'refresh_token' (local dev) in the options."
+                )
+            self._client = ZohoAPIClient(
+                accounts_url=accounts_url,
+                client_id=client_id,
+                client_secret=client_secret,
+                refresh_token=refresh_token,
+            )
 
         self._module_handler = ModuleHandler(self._client)
         self._settings_handler = SettingsHandler(self._client)
