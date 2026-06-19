@@ -34,6 +34,8 @@ Check if `src/databricks/labs/community_connector/sources/{{source_name}}/connec
 Run this step directly — not as a subagent.
 This step is **interactive** — the script blocks until the user submits the browser form.
 
+> **OAuth connectors**: when `connector_spec.yaml` declares a `connection.oauth` block, the script runs the OAuth 2.0 authorization-code flow — the user supplies `client_id` + `client_secret`, then logs in and authorizes in the browser, and the token is obtained automatically (the source's OAuth app must have the redirect URI registered). The steps below are otherwise unchanged.
+
 2a. Ensure venv:
    ```bash
    python3.10 -m venv .venv && source .venv/bin/activate && pip install -e ".[dev]"

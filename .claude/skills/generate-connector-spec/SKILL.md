@@ -70,6 +70,45 @@ connection:
 - If the connector accepts multiple authentication approaches, use Option B with `auth_methods`.
 - If there's only one way to authenticate, use Option A with flat `parameters`.
 
+### OAuth 2.0 Connections (the `oauth` block)
+
+If the source authenticates via OAuth 2.0, add a `connection.oauth` block. This makes the connector use a Unity Catalog **COMMUNITY** connection in an OAuth auth mode instead of static credentials. The connection layer (UC, or the labs authenticate tool for local dev) runs the OAuth flow and **injects a bearer token into the connector's options at query time** — the user only supplies their OAuth app's `client_id` + `client_secret`, never a token.
+
+```yaml
+connection:
+  parameters:
+    - name: client_id
+      type: string
+      required: true
+      secret: true
+      description: OAuth 2.0 client ID for the provider app.
+    - name: client_secret
+      type: string
+      required: true
+      secret: true
+      description: OAuth 2.0 client secret issued alongside the client_id.
+
+  oauth:
+    flow: u2m                  # m2m | u2m | u2m_per_user — maps to the connection auth mode
+    pkce: true                 # set false for a confidential client that doesn't need PKCE
+    scopes: "read"             # space-separated scopes requested at consent
+    authorization_url: "https://provider/oauth/authorize"   # u2m / u2m_per_user
+    token_url: "https://provider/oauth/token"
+    extra_auth_params:         # provider knobs folded into the authorize request (optional)
+      access_type: offline
+      prompt: consent
+```
+
+Guidance:
+- **`flow`** selects the auth mode and maps to the CLI's `--auth-type` / UC's `community_oauth_flow`. When present, the CLI derives the auth type from it (so `--auth-type` is optional):
+  - `m2m` — client-credentials (no human); requires `token_url`.
+  - `u2m` — one human authorizes once at connection creation via a browser flow.
+  - `u2m_per_user` — each end user authorizes separately; UC resolves the right token per query.
+- **Do NOT list the OAuth-issued tokens** (`access_token` / `refresh_token`) as required connection parameters — UC/the flow supplies them at runtime. List only the user-supplied app identity (`client_id`, `client_secret`) and any connector-specific options (e.g. `user_id`).
+- The `authorization_url` / `token_url` / `scopes` are defaults baked into the spec so the user does not retype them; they can be overridden via `--options` at connection creation.
+- The connector implementation should read the injected token (typically `options["access_token"]`) and treat it as opaque.
+- Use this block in addition to Option A's flat `parameters` (it is not a substitute for the `parameters` list). Determine the OAuth details (endpoints, scopes, flow type, PKCE) from the source API doc and the connector's `__init__`.
+
 ### Parameter Documentation
 For each parameter, document:
 - `name`: The parameter name as used in the options dict

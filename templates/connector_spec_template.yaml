@@ -80,19 +80,48 @@ connection:
   #       Base URL for the API. Override if using a custom instance.
 
   # ---------------------------------------------------------------------------
-  # OAuth 2.0 Authorization Code Flow (optional)
-  # Uncomment this section if the source uses OAuth 2.0 for authentication.
-  # The authenticate tool will run the browser-based OAuth flow automatically
-  # so the user only needs to provide client_id and client_secret; the
-  # refresh_token is obtained via the redirect.  These three parameter names
-  # are the standard OAuth 2.0 names and are expected in the parameters list.
-  # The authorization_url, token_url, and scopes are defaults that the user
-  # can override at runtime.
+  # OAuth 2.0 (optional) — for sources that authenticate via OAuth 2.0.
+  #
+  # Add this block to make the connector use a Unity Catalog COMMUNITY
+  # connection in one of the OAuth auth modes instead of static credentials.
+  # The connection layer (UC, or the labs authenticate tool for local dev)
+  # runs the OAuth flow and injects a bearer token into the connector's
+  # options at query time — the user only supplies their OAuth app's
+  # `client_id` + `client_secret`, never a token.
+  #
+  # Because of that, the `parameters` list above should declare `client_id`
+  # and `client_secret` (the user-supplied app identity). Do NOT list the
+  # OAuth-issued tokens (`access_token` / `refresh_token`) as required
+  # parameters — UC/the flow supplies them at runtime.
+  #
+  # Keys:
+  #   flow               — which OAuth mode the connection uses. Maps to the
+  #                        CLI's `--auth-type` / UC's `community_oauth_flow`.
+  #                        When set, the CLI derives the auth type from here,
+  #                        so `--auth-type` is optional on the command line.
+  #                          m2m          — client-credentials (no user).
+  #                          u2m          — one human authorizes once at
+  #                                         connection creation (browser flow).
+  #                          u2m_per_user — each end user authorizes; UC
+  #                                         resolves the right token per query.
+  #   pkce               — true (default) to use PKCE in the u2m flow; set
+  #                        false for a confidential client that doesn't need it
+  #                        (e.g. a Google "Web application" client).
+  #   scopes             — space-separated OAuth scopes to request at consent.
+  #   authorization_url  — provider authorization endpoint (u2m / u2m_per_user).
+  #   token_url          — provider token endpoint.
+  #   extra_auth_params  — provider-specific knobs folded into the
+  #                        authorization request (e.g. access_type=offline,
+  #                        prompt=consent so the provider returns a
+  #                        refreshable grant). Never stored as a connection
+  #                        option.
   # ---------------------------------------------------------------------------
   # oauth:
+  #   flow: u2m
+  #   pkce: true
+  #   scopes: "read write"
   #   authorization_url: "https://example.com/oauth/authorize"
   #   token_url: "https://example.com/oauth/token"
-  #   scopes: "read write"
   #   extra_auth_params:
   #     access_type: "offline"
   #     prompt: "consent"
