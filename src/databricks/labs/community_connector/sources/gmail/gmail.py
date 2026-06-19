@@ -7,6 +7,12 @@ from concurrent.futures import ThreadPoolExecutor
 from pyspark.sql.types import StructType
 
 from databricks.labs.community_connector.interface.lakeflow_connect import LakeflowConnect
+from databricks.labs.community_connector.interface.supports_ingestion_agent import (
+    SupportsIngestionAgent,
+)
+from databricks.labs.community_connector.sources.gmail.gmail_agent_ops import (
+    build_gmail_agent_operations,
+)
 from databricks.labs.community_connector.sources.gmail.gmail_schemas import (
     TABLE_SCHEMAS,
     TABLE_METADATA,
@@ -32,7 +38,39 @@ def _parse_max_per_batch(table_options: Dict[str, str] | None) -> int:
     return value if value > 0 else 0
 
 
-class GmailLakeflowConnect(LakeflowConnect):
+# Gmail API caps maxResults at 500 per page; anything larger is clipped silently.
+_GMAIL_API_PAGE_MAX = 500
+
+
+def _parse_max_results(table_options: Dict[str, str] | None) -> tuple[int | None, int]:
+    """Parse ``maxResults`` as the total-result cap for streaming readers.
+
+    Returns ``(total_cap, page_size)`` where:
+
+    - ``total_cap = None`` means no cap — read every matching record.
+      Used when ``maxResults`` is absent or set to a negative value
+      (``-1`` as a documented "unlimited" sentinel).
+    - ``total_cap = <positive int>`` stops pagination once accumulated.
+    - ``page_size`` is the value to send to Gmail's API as its own
+      ``maxResults`` query parameter — bounded by Gmail's 500-row page max.
+    """
+    raw = table_options.get("maxResults") if table_options else None
+    if raw is None:
+        return None, 100
+    try:
+        cap = int(raw)
+    except (TypeError, ValueError):
+        return None, 100
+    if cap < 0:
+        return None, _GMAIL_API_PAGE_MAX
+    if cap == 0:
+        # Treat zero as "no records" — page size doesn't matter, but pick
+        # something valid so the API call doesn't reject the request.
+        return 0, 100
+    return cap, min(cap, _GMAIL_API_PAGE_MAX)
+
+
+class GmailLakeflowConnect(LakeflowConnect, SupportsIngestionAgent):
     """Gmail connector implementing the LakeflowConnect interface with 100% API coverage."""
 
     def __init__(self, options: dict[str, str]) -> None:
@@ -103,6 +141,15 @@ class GmailLakeflowConnect(LakeflowConnect):
     def list_tables(self) -> list[str]:
         """Return the list of available Gmail tables."""
         return SUPPORTED_TABLES.copy()
+
+    def agent_operations(self):
+        """Expose Gmail-specific agent operations on top of the framework built-ins.
+
+        Replaces ``read_table`` with a filter-aware variant and adds
+        ``search_messages``, ``get_message``, ``list_attachments``,
+        ``download_attachment``. See ``gmail_agent_ops`` for details.
+        """
+        return build_gmail_agent_operations()
 
     def get_table_schema(self, table_name: str, table_options: Dict[str, str]) -> StructType:
         """Fetch the schema of a table."""
@@ -272,12 +319,12 @@ class GmailLakeflowConnect(LakeflowConnect):
         table_options: Dict[str, str],
     ) -> (Iterator[dict], dict):
         """Stream messages with sequential fetching for reliability."""
-        max_results = int(table_options.get("maxResults", "100"))
+        total_cap, page_size = _parse_max_results(table_options)
         query = table_options.get("q")
         label_ids = table_options.get("labelIds")
         include_spam_trash = table_options.get("includeSpamTrash", "false").lower() == "true"
 
-        params = {"maxResults": min(max_results, 500)}
+        params = {"maxResults": page_size}
         if query:
             params["q"] = query
         if label_ids:
@@ -299,6 +346,8 @@ class GmailLakeflowConnect(LakeflowConnect):
         page_token = None
 
         while True:
+            if total_cap is not None and len(all_messages) >= total_cap:
+                break
             if page_token:
                 params["pageToken"] = page_token
 
@@ -324,11 +373,15 @@ class GmailLakeflowConnect(LakeflowConnect):
                         ):
                             state["latest_history_id"] = msg_detail["historyId"]
                     all_messages.append(msg_detail)
+                    if total_cap is not None and len(all_messages) >= total_cap:
+                        break
 
             page_token = response.get("nextPageToken")
             if not page_token:
                 break
 
+        if total_cap is not None:
+            all_messages = all_messages[:total_cap]
         return iter(all_messages), self._pin_to_init_offset(state["latest_history_id"])
 
     def _read_messages_incremental(
@@ -419,12 +472,12 @@ class GmailLakeflowConnect(LakeflowConnect):
         table_options: Dict[str, str],
     ) -> (Iterator[dict], dict):
         """Stream threads with parallel fetching for performance."""
-        max_results = int(table_options.get("maxResults", "100"))
+        total_cap, page_size = _parse_max_results(table_options)
         query = table_options.get("q")
         label_ids = table_options.get("labelIds")
         include_spam_trash = table_options.get("includeSpamTrash", "false").lower() == "true"
 
-        params = {"maxResults": min(max_results, 500)}
+        params = {"maxResults": page_size}
         if query:
             params["q"] = query
         if label_ids:
@@ -445,6 +498,8 @@ class GmailLakeflowConnect(LakeflowConnect):
             )
 
         while True:
+            if total_cap is not None and len(all_threads) >= total_cap:
+                break
             if page_token:
                 params["pageToken"] = page_token
 
@@ -468,11 +523,15 @@ class GmailLakeflowConnect(LakeflowConnect):
                         ):
                             state["latest_history_id"] = thread_detail["historyId"]
                     all_threads.append(thread_detail)
+                    if total_cap is not None and len(all_threads) >= total_cap:
+                        break
 
             page_token = response.get("nextPageToken")
             if not page_token:
                 break
 
+        if total_cap is not None:
+            all_threads = all_threads[:total_cap]
         return iter(all_threads), self._pin_to_init_offset(state["latest_history_id"])
 
     def _read_threads_incremental(
@@ -575,13 +634,16 @@ class GmailLakeflowConnect(LakeflowConnect):
         self, start_offset: dict, table_options: Dict[str, str]
     ) -> (Iterator[dict], dict):
         """Read all drafts (snapshot mode) with parallel fetching."""
-        params = {"maxResults": int(table_options.get("maxResults", "100"))}
+        total_cap, page_size = _parse_max_results(table_options)
+        params = {"maxResults": page_size}
 
         all_drafts = []
         page_token = None
         format_type = table_options.get("format", "full")
 
         while True:
+            if total_cap is not None and len(all_drafts) >= total_cap:
+                break
             if page_token:
                 params["pageToken"] = page_token
 
@@ -602,12 +664,18 @@ class GmailLakeflowConnect(LakeflowConnect):
 
             with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
                 results = list(executor.map(fetch_draft, draft_ids))
-                all_drafts.extend([r for r in results if r])
+                for draft in results:
+                    if draft:
+                        all_drafts.append(draft)
+                        if total_cap is not None and len(all_drafts) >= total_cap:
+                            break
 
             page_token = response.get("nextPageToken")
             if not page_token:
                 break
 
+        if total_cap is not None:
+            all_drafts = all_drafts[:total_cap]
         return iter(all_drafts), {}
 
     def _read_profile(

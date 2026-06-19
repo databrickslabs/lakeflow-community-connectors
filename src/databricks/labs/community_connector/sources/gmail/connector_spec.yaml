@@ -65,8 +65,14 @@ connection:
 # These table-specific options must be included in the externalOptionsAllowList
 # parameter of the UC connection to allow them to be passed through.
 # Use a comma-separated string of option names.
+#
+# The first group is table-read options; the rest are the ingestion-agent
+# operation parameters: typed read_table/search_messages filters
+# (after_date..query) and the get_message/list_attachments/download_attachment
+# inputs (message_id, attachment_id, drive_file_id, volume_path,
+# export_mime_type).
 # ============================================================================
-external_options_allowlist: "q,labelIds,maxResults,includeSpamTrash,format,max_records_per_batch"
+external_options_allowlist: "q,labelIds,maxResults,includeSpamTrash,format,max_records_per_batch,after_date,before_date,newer_than,subject,from_address,to_address,label,has_attachment,is_unread,query,message_id,attachment_id,drive_file_id,volume_path,export_mime_type"
 
 # ============================================================================
 # Supported Tables (10 tables - 100% Gmail API coverage)

@@ -5,6 +5,7 @@
 # Do not edit manually. Make changes to the source files instead.
 # ==============================================================================
 
+from __future__ import annotations
 from abc import ABC, abstractmethod
 from datetime import datetime
 from decimal import Decimal
@@ -12,12 +13,16 @@ from typing import (
     Any,
     Dict,
     Generator,
+    Iterable,
     Iterator,
     List,
+    Mapping,
     Optional,
     Sequence,
+    Tuple,
 )
 import json
+import re
 import time
 
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -599,6 +604,77 @@ def register_lakeflow_source(spark):
 
 
     ########################################################
+    # src/databricks/labs/community_connector/interface/supports_ingestion_agent.py
+    ########################################################
+
+    _VALID_KINDS = frozenset({"metadata", "data"})
+
+
+    class AgentOperation(ABC):
+        """One operation the ingestion agent can dispatch.
+
+        Set :attr:`name`, :attr:`description`, :attr:`kind`, and either
+        :attr:`schema` or :meth:`resolve_schema`; implement :meth:`pull`.
+
+        ``kind = "metadata"`` auto-appends a ``_meta`` column and converts
+        ``pull`` exceptions into a single error row. ``kind = "data"``
+        passes rows through unchanged and lets exceptions propagate.
+        """
+
+        name: str = ""
+        description: str = ""
+        kind: str = "metadata"
+        schema: Optional[StructType] = None
+        #: Typed declaration of accepted input options. Exposed via
+        #: ``list_operations.parameters_json`` so agents can plan calls.
+        #: The framework validates required parameters before invoking
+        #: ``pull``; undeclared options pass through untouched.
+        parameters: Tuple[Parameter, ...] = ()
+
+        def __init_subclass__(cls, **kwargs):
+            super().__init_subclass__(**kwargs)
+            if getattr(cls, "__abstractmethods__", None):
+                return
+            if not isinstance(cls.name, str) or not cls.name:
+                raise TypeError(f"{cls.__name__} must set a non-empty `name`.")
+            if cls.kind not in _VALID_KINDS:
+                raise TypeError(
+                    f"{cls.__name__}.kind must be one of "
+                    f"{sorted(_VALID_KINDS)}, got {cls.kind!r}."
+                )
+
+        def resolve_schema(
+            self, connector: Any, options: Mapping[str, str]
+        ) -> StructType:
+            """Return the result schema. Override for option-dependent schemas."""
+            del connector, options
+            if self.schema is None:
+                raise NotImplementedError(
+                    f"{type(self).__name__} must set `schema` or override "
+                    f"`resolve_schema`."
+                )
+            return self.schema
+
+        @abstractmethod
+        def pull(
+            self, connector: Any, options: Mapping[str, str]
+        ) -> Iterable[Mapping[str, Any]]:
+            """Yield result rows as dicts."""
+
+
+    class SupportsIngestionAgent:
+        """Connector mixin: contribute :class:`AgentOperation` instances."""
+
+        def agent_operations(self) -> Mapping[str, AgentOperation]:
+            """Return ``{name: AgentOperation}``.
+
+            Entries whose name matches a built-in replace the framework
+            default for this connector.
+            """
+            return {}
+
+
+    ########################################################
     # src/databricks/labs/community_connector/sources/gmail/gmail_schemas.py
     ########################################################
 
@@ -939,6 +1015,63 @@ def register_lakeflow_source(spark):
     BATCH_SIZE = 50  # Gmail batch API supports up to 100, using 50 for safety
     MAX_WORKERS = 3  # Concurrent workers for parallel fetching
 
+    # Drive API endpoints. The Gmail connector calls these whenever a message
+    # carries a Drive-hosted attachment (>25 MB or shared via Drive). Requires
+    # the OAuth grant to include ``drive.readonly`` alongside ``gmail.readonly``
+    # at consent time.
+    DRIVE_API_BASE = "https://www.googleapis.com/drive/v3"
+    GOOGLE_NATIVE_MIME_PREFIX = "application/vnd.google-apps."
+
+    # Regex catches the common Drive / Docs / Sheets / Slides URL shapes Gmail
+    # inlines into HTML bodies. The file ID is 25+ chars of [A-Za-z0-9_-].
+    _DRIVE_ID_PATTERN = re.compile(
+        r"(?:drive\.google\.com/(?:file/d/|open\?id=|uc\?[^\"'\s]*?id=)|"
+        r"docs\.google\.com/(?:document|spreadsheets|presentation|drawings)/d/)"
+        r"([A-Za-z0-9_-]{25,})"
+    )
+
+
+    def b64url_decode(data: str) -> bytes:
+        """Decode a base64url string, padding-tolerant.
+
+        Gmail/Drive responses strip ``=`` padding on base64url data; the stdlib
+        decoder rejects unpadded input. Re-pad before calling it.
+        """
+        if not data:
+            return b""
+        padded = data + "=" * (-len(data) % 4)
+        return base64.urlsafe_b64decode(padded)
+
+
+    def extract_drive_file_ids(text: str) -> List[str]:
+        """Extract Drive file IDs from a message body (HTML or plain text).
+
+        Returns IDs in insertion order, deduplicated. Empty list if no Drive
+        URLs are present. Caller is responsible for choosing the right
+        download path (binary via ``alt=media`` vs export for native types).
+        """
+        if not text:
+            return []
+        seen: dict[str, None] = {}
+        for match in _DRIVE_ID_PATTERN.finditer(text):
+            seen.setdefault(match.group(1), None)
+        return list(seen.keys())
+
+
+    class GmailApiError(Exception):
+        """Typed Gmail/Drive API failure carrying the HTTP status.
+
+        Agent ops translate ``status`` to ErrorCode (404→not_found, 403→
+        permission_denied, 401→auth_failed). Plain ``make_request`` callers
+        that previously swallowed 403/404 as ``None`` are unaffected — this
+        type is only raised by paths that opt in (Drive downloads, attachment
+        fetches when ``raise_on_error=True``).
+        """
+
+        def __init__(self, status: int, message: str) -> None:
+            self.status = status
+            super().__init__(f"HTTP {status}: {message}")
+
 
     class GmailApiClient:
         """Gmail HTTP client supporting two OAuth modes.
@@ -953,6 +1086,7 @@ def register_lakeflow_source(spark):
         BASE_URL = "https://gmail.googleapis.com/gmail/v1"
         BATCH_URL = "https://gmail.googleapis.com/batch/gmail/v1"
         TOKEN_URL = "https://oauth2.googleapis.com/token"
+        DRIVE_BASE_URL = DRIVE_API_BASE
 
         def __init__(
             self,
@@ -1136,6 +1270,91 @@ def register_lakeflow_source(spark):
                         # Skip failed fetches, continue with others
                         continue
 
+        # ─── Attachment / Drive download ──────────────────────────────────────
+
+        def get_attachment(
+            self, message_id: str, attachment_id: str
+        ) -> bytes:
+            """Fetch a Gmail attachment by ID and return decoded bytes.
+
+            Calls ``users.messages.attachments.get`` and base64url-decodes the
+            response. Raises :class:`GmailApiError` on 4xx/5xx so callers can
+            map status codes to typed errors.
+            """
+            url = (
+                f"{self.BASE_URL}/users/{self.user_id}"
+                f"/messages/{message_id}/attachments/{attachment_id}"
+            )
+            response = self._session.get(url, headers=self.get_headers(), timeout=120)
+            if response.status_code != 200:
+                raise GmailApiError(response.status_code, response.text)
+            payload = response.json()
+            return b64url_decode(payload.get("data", ""))
+
+        def get_drive_file_metadata(self, file_id: str) -> Dict:
+            """Fetch Drive file metadata (id, name, mimeType, size).
+
+            Needed before downloading to pick between binary download
+            (``alt=media``) and export (Docs/Sheets/Slides). Same access token
+            as Gmail — but only works if the user consented to the
+            ``drive.readonly`` scope at OAuth time.
+            """
+            url = f"{self.DRIVE_BASE_URL}/files/{file_id}"
+            response = self._session.get(
+                url,
+                headers=self.get_headers(),
+                params={"fields": "id,name,mimeType,size"},
+                timeout=60,
+            )
+            if response.status_code != 200:
+                raise GmailApiError(response.status_code, response.text)
+            return response.json()
+
+        def download_drive_file(
+            self,
+            file_id: str,
+            dest_path: str,
+            export_mime_type: Optional[str] = None,
+            chunk_size: int = 1024 * 1024,
+        ) -> Tuple[int, str, str]:
+            """Stream a Drive file to ``dest_path`` and return ``(size, name, mime)``.
+
+            Binary files are fetched via ``files.get?alt=media``. Google-native
+            formats (Docs/Sheets/Slides) require ``files.export`` with a
+            target ``export_mime_type`` — picks ``application/pdf`` if the
+            caller didn't supply one.
+
+            Caller pre-creates the parent directory. Raises
+            :class:`GmailApiError` on 4xx/5xx (use ``status == 403`` to detect
+            the recipient-not-shared case).
+            """
+            metadata = self.get_drive_file_metadata(file_id)
+            mime_type = metadata.get("mimeType", "application/octet-stream")
+            name = metadata.get("name", file_id)
+
+            if mime_type.startswith(GOOGLE_NATIVE_MIME_PREFIX):
+                export_mime = export_mime_type or "application/pdf"
+                url = f"{self.DRIVE_BASE_URL}/files/{file_id}/export"
+                params = {"mimeType": export_mime}
+                effective_mime = export_mime
+            else:
+                url = f"{self.DRIVE_BASE_URL}/files/{file_id}"
+                params = {"alt": "media"}
+                effective_mime = mime_type
+
+            bytes_written = 0
+            with self._session.get(
+                url, headers=self.get_headers(), params=params, timeout=300, stream=True
+            ) as response:
+                if response.status_code != 200:
+                    raise GmailApiError(response.status_code, response.text)
+                with open(dest_path, "wb") as fh:
+                    for chunk in response.iter_content(chunk_size=chunk_size):
+                        if chunk:
+                            fh.write(chunk)
+                            bytes_written += len(chunk)
+            return bytes_written, name, effective_mime
+
 
     ########################################################
     # src/databricks/labs/community_connector/sources/gmail/gmail.py
@@ -1154,7 +1373,39 @@ def register_lakeflow_source(spark):
         return value if value > 0 else 0
 
 
-    class GmailLakeflowConnect(LakeflowConnect):
+    # Gmail API caps maxResults at 500 per page; anything larger is clipped silently.
+    _GMAIL_API_PAGE_MAX = 500
+
+
+    def _parse_max_results(table_options: Dict[str, str] | None) -> tuple[int | None, int]:
+        """Parse ``maxResults`` as the total-result cap for streaming readers.
+
+        Returns ``(total_cap, page_size)`` where:
+
+        - ``total_cap = None`` means no cap — read every matching record.
+          Used when ``maxResults`` is absent or set to a negative value
+          (``-1`` as a documented "unlimited" sentinel).
+        - ``total_cap = <positive int>`` stops pagination once accumulated.
+        - ``page_size`` is the value to send to Gmail's API as its own
+          ``maxResults`` query parameter — bounded by Gmail's 500-row page max.
+        """
+        raw = table_options.get("maxResults") if table_options else None
+        if raw is None:
+            return None, 100
+        try:
+            cap = int(raw)
+        except (TypeError, ValueError):
+            return None, 100
+        if cap < 0:
+            return None, _GMAIL_API_PAGE_MAX
+        if cap == 0:
+            # Treat zero as "no records" — page size doesn't matter, but pick
+            # something valid so the API call doesn't reject the request.
+            return 0, 100
+        return cap, min(cap, _GMAIL_API_PAGE_MAX)
+
+
+    class GmailLakeflowConnect(LakeflowConnect, SupportsIngestionAgent):
         """Gmail connector implementing the LakeflowConnect interface with 100% API coverage."""
 
         def __init__(self, options: dict[str, str]) -> None:
@@ -1225,6 +1476,15 @@ def register_lakeflow_source(spark):
         def list_tables(self) -> list[str]:
             """Return the list of available Gmail tables."""
             return SUPPORTED_TABLES.copy()
+
+        def agent_operations(self):
+            """Expose Gmail-specific agent operations on top of the framework built-ins.
+
+            Replaces ``read_table`` with a filter-aware variant and adds
+            ``search_messages``, ``get_message``, ``list_attachments``,
+            ``download_attachment``. See ``gmail_agent_ops`` for details.
+            """
+            return build_gmail_agent_operations()
 
         def get_table_schema(self, table_name: str, table_options: Dict[str, str]) -> StructType:
             """Fetch the schema of a table."""
@@ -1394,12 +1654,12 @@ def register_lakeflow_source(spark):
             table_options: Dict[str, str],
         ) -> (Iterator[dict], dict):
             """Stream messages with sequential fetching for reliability."""
-            max_results = int(table_options.get("maxResults", "100"))
+            total_cap, page_size = _parse_max_results(table_options)
             query = table_options.get("q")
             label_ids = table_options.get("labelIds")
             include_spam_trash = table_options.get("includeSpamTrash", "false").lower() == "true"
 
-            params = {"maxResults": min(max_results, 500)}
+            params = {"maxResults": page_size}
             if query:
                 params["q"] = query
             if label_ids:
@@ -1421,6 +1681,8 @@ def register_lakeflow_source(spark):
             page_token = None
 
             while True:
+                if total_cap is not None and len(all_messages) >= total_cap:
+                    break
                 if page_token:
                     params["pageToken"] = page_token
 
@@ -1446,11 +1708,15 @@ def register_lakeflow_source(spark):
                             ):
                                 state["latest_history_id"] = msg_detail["historyId"]
                         all_messages.append(msg_detail)
+                        if total_cap is not None and len(all_messages) >= total_cap:
+                            break
 
                 page_token = response.get("nextPageToken")
                 if not page_token:
                     break
 
+            if total_cap is not None:
+                all_messages = all_messages[:total_cap]
             return iter(all_messages), self._pin_to_init_offset(state["latest_history_id"])
 
         def _read_messages_incremental(
@@ -1541,12 +1807,12 @@ def register_lakeflow_source(spark):
             table_options: Dict[str, str],
         ) -> (Iterator[dict], dict):
             """Stream threads with parallel fetching for performance."""
-            max_results = int(table_options.get("maxResults", "100"))
+            total_cap, page_size = _parse_max_results(table_options)
             query = table_options.get("q")
             label_ids = table_options.get("labelIds")
             include_spam_trash = table_options.get("includeSpamTrash", "false").lower() == "true"
 
-            params = {"maxResults": min(max_results, 500)}
+            params = {"maxResults": page_size}
             if query:
                 params["q"] = query
             if label_ids:
@@ -1567,6 +1833,8 @@ def register_lakeflow_source(spark):
                 )
 
             while True:
+                if total_cap is not None and len(all_threads) >= total_cap:
+                    break
                 if page_token:
                     params["pageToken"] = page_token
 
@@ -1590,11 +1858,15 @@ def register_lakeflow_source(spark):
                             ):
                                 state["latest_history_id"] = thread_detail["historyId"]
                         all_threads.append(thread_detail)
+                        if total_cap is not None and len(all_threads) >= total_cap:
+                            break
 
                 page_token = response.get("nextPageToken")
                 if not page_token:
                     break
 
+            if total_cap is not None:
+                all_threads = all_threads[:total_cap]
             return iter(all_threads), self._pin_to_init_offset(state["latest_history_id"])
 
         def _read_threads_incremental(
@@ -1697,13 +1969,16 @@ def register_lakeflow_source(spark):
             self, start_offset: dict, table_options: Dict[str, str]
         ) -> (Iterator[dict], dict):
             """Read all drafts (snapshot mode) with parallel fetching."""
-            params = {"maxResults": int(table_options.get("maxResults", "100"))}
+            total_cap, page_size = _parse_max_results(table_options)
+            params = {"maxResults": page_size}
 
             all_drafts = []
             page_token = None
             format_type = table_options.get("format", "full")
 
             while True:
+                if total_cap is not None and len(all_drafts) >= total_cap:
+                    break
                 if page_token:
                     params["pageToken"] = page_token
 
@@ -1724,12 +1999,18 @@ def register_lakeflow_source(spark):
 
                 with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
                     results = list(executor.map(fetch_draft, draft_ids))
-                    all_drafts.extend([r for r in results if r])
+                    for draft in results:
+                        if draft:
+                            all_drafts.append(draft)
+                            if total_cap is not None and len(all_drafts) >= total_cap:
+                                break
 
                 page_token = response.get("nextPageToken")
                 if not page_token:
                     break
 
+            if total_cap is not None:
+                all_drafts = all_drafts[:total_cap]
             return iter(all_drafts), {}
 
         def _read_profile(
