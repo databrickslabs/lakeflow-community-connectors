@@ -83,30 +83,19 @@ The connection can also be created using the standard Unity Catalog API.
 
 #### Option B — `community-connector` CLI
 
-Run the `community-connector` CLI. The `--auth-type u2m` flag triggers an in-process loopback authorization-code + PKCE flow against Google; your browser opens, you sign in and grant consent, and the CLI captures the authorization code and registers it with the Databricks connection. You only supply the OAuth app identity (`client_id` + `client_secret`):
+Run the `community-connector` CLI. The connector spec declares `flow: u2m`, so the CLI runs an in-process loopback authorization-code flow against Google automatically (no `--auth-type` needed); your browser opens, you sign in and grant consent, and the CLI captures the authorization code and registers it with the Databricks connection. You only supply the OAuth app identity (`client_id` + `client_secret`):
 
 ```bash
-community-connector create-connection \
-  --name gmail_connector \
-  --source-name gmail \
-  --auth-type u2m \
-  --options '{
-    "client_id": "<YOUR_CLIENT_ID>",
-    "client_secret": "<YOUR_CLIENT_SECRET>"
-  }'
+community-connector create_connection gmail gmail_connector \
+  -o '{"client_id": "<YOUR_CLIENT_ID>", "client_secret": "<YOUR_CLIENT_SECRET>"}'
 ```
 
-For per-user authorization (one Databricks connection serving many end users, each consenting independently):
+For per-user authorization (one Databricks connection serving many end users, each consenting independently), override the spec's flow with `--auth-type u2m_per_user`:
 
 ```bash
-community-connector create-connection \
-  --name gmail_connector_per_user \
-  --source-name gmail \
+community-connector create_connection gmail gmail_connector_per_user \
   --auth-type u2m_per_user \
-  --options '{
-    "client_id": "<YOUR_CLIENT_ID>",
-    "client_secret": "<YOUR_CLIENT_SECRET>"
-  }'
+  -o '{"client_id": "<YOUR_CLIENT_ID>", "client_secret": "<YOUR_CLIENT_SECRET>"}'
 ```
 
 What ends up in the connection vs the connector:

@@ -148,6 +148,6 @@ Debug if authentication fails and report the issue clearly.
 
 ## Edge Cases
 
-- **OAuth 2.0**: The supplied config may contain `refresh_token`, `client_id`, `client_secret`. The auth test may need to exchange the refresh token for an access token first.
+- **OAuth 2.0**: When the spec declares a `connection.oauth` block, the credentials collected by the authenticate flow typically contain `client_id`, `client_secret`, and a `refresh_token` (or an `access_token`). The auth test may need to exchange the refresh token for an access token first, then call the API with the bearer token.
 - **Subdomain-based URLs**: Build the base URL from the `subdomain` field in config.
 - **Multiple auth methods**: Use whichever method's credentials are present in the supplied config.
