@@ -1,0 +1,18 @@
+MSH|^~\&|ADT_SYS|GENERAL_HOSPITAL|EHR|EHR|20240301153000||ADT^A01^ADT_A01|MSGADT100|P|2.5.1
+EVN|A01|20240301153000|||ADM001^Garcia^Maria^^^Dr
+PID|1||MRN88001^^^HOSP^MR~SSN123456^^^SSA^SS||Martinez^Sofia^Elena^^Mrs||19850722|F||2106-3^White^HL70005|789 Elm St^^Chicago^IL^60614^US||(312)555-0198^^PH|||M^Married^HL70002|CHR^Christian^HL70006|ACCT88001|987-65-4321|||D^Declared^HL70189||||||N
+PD1|||CHICAGO PRIMARY CARE^^6001234|8877665^Wilson^Thomas^^^Dr^MD
+NK1|1|Martinez^Carlos^Juan|SPO^Spouse^HL70063|321 Pine Rd^^Chicago^IL^60614^US|(312)555-0299||||||||||||||||||||||||EMC^Emergency Contact^HL70131|||||||Y
+NK1|2|Martinez^Rosa^Ana|MTH^Mother^HL70063|100 Oak Ln^^Chicago^IL^60610^US|(312)555-0301
+PV1|1|I|ICU^201^B^HOSP||||ATT001^Johnson^Robert^^^Dr^MD|||CCU|||||||ATT001^Johnson^Robert^^^Dr^MD|IP|VN20240301001|||||||||||||||||||||||||20240301153000
+PV2||||||||20240303153000|20240301160000|||Medical assessment required|||||||||||N||||AI
+MRG|MRN77001^^^HOSP^MR||MRN66001
+AL1|1|DA|ASPIRIN^Aspirin^L|SV|ANAPHYLAXIS|20220101
+AL1|2|FA|SHELLFISH^Shellfish^L|MO|HIVES
+IAM|1|DA|SULFA^Sulfonamides^L|SV||20230615|||||||20230615153000|PRN001^Patel^Raj^^^Dr
+DG1|1|ICD10|I21.0^Acute transmural MI of anterior wall^ICD10CM||20240301153000|A|||||||||1
+DG1|2|ICD10|I50.9^Heart failure unspecified^ICD10CM||20240301160000|W
+PR1|1|ICD10PCS|02703ZZ^Dilation of Coronary Artery, Percutaneous Approach^ICD10PCS||20240301170000|A|45|ANE001^Lee^Susan^^^Dr|BLOCK||ATT001^Johnson^Robert|||1
+IN1|1|BCBS001^Blue Cross Blue Shield^L|INS55001^^^BCBS^NI|Blue Cross Blue Shield of Illinois|225 N Michigan Ave^^Chicago^IL^60601^US|Smith^John^Q||GRP7700|CHICAGO MUNICIPAL EMPLOYEES||||||PPO|Martinez^Sofia^Elena|SEL|19850722|789 Elm St^^Chicago^IL^60614^US|Y||1|||Y|||||||||||POL556677
+GT1|1|GTR001^^^HOSP^GN|Martinez^Carlos^Juan|Martinez^Rosa|321 Pine Rd^^Chicago^IL^60614^US|(312)555-0299||(19830115)|M||SPO||||1|ACME Corp^^100 Industry Way^^Chicago^IL^60610
+FT1|1|TXN20240301001||20240301|20240301153000|CG|99285^Emergency dept visit, high severity^CPT4|Emergency Department Visit||1|150.00^USD||ED|BCBS001|||||ICD10^I21.0|ATT001^Johnson^Robert||50.00
