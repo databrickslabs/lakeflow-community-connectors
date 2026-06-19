@@ -345,6 +345,36 @@ def _safe_int(value: Any) -> Optional[int]:
         return None
 
 
+def _int_option(options: Mapping[str, str], name: str, default: int) -> int:
+    """Parse an integer option, raising ``bad_request`` on a non-integer."""
+    raw = options.get(name)
+    if raw is None or raw == "":
+        return default
+    try:
+        return int(raw)
+    except (TypeError, ValueError) as exc:
+        raise AgentError(
+            ErrorCode.BAD_REQUEST,
+            f"Option {name!r} must be an integer, got {raw!r}.",
+        ) from exc
+
+
+def _thread_participants_and_labels(messages):
+    """Return (participants, label_ids) deduped in first-seen order across
+    every message in a thread."""
+    participants: dict = {}
+    labels: dict = {}
+    for msg in messages:
+        payload = msg.get("payload") or {}
+        for header_name in ("From", "To", "Cc"):
+            value = _header_value(payload, header_name)
+            if value:
+                participants.setdefault(value, None)
+        for label_id in msg.get("labelIds") or []:
+            labels.setdefault(label_id, None)
+    return list(participants.keys()), list(labels.keys())
+
+
 # ---------------------------------------------------------------------------
 # read_table override: apply typed filters to messages / threads
 # ---------------------------------------------------------------------------
@@ -888,6 +918,277 @@ class DownloadAttachmentOp(AgentOperation):
         }
 
 
+# ---------------------------------------------------------------------------
+# get_thread: fetch a full conversation with decoded message bodies
+# ---------------------------------------------------------------------------
+
+_THREAD_MESSAGE_STRUCT = StructType(
+    [
+        StructField("id", StringType(), True),
+        StructField("from_address", StringType(), True),
+        StructField("to_address", StringType(), True),
+        StructField("cc_address", StringType(), True),
+        StructField("subject", StringType(), True),
+        StructField("date", StringType(), True),
+        StructField("snippet", StringType(), True),
+        StructField("body_text", StringType(), True),
+        StructField("labelIds", ArrayType(StringType()), True),
+        StructField("size_estimate", LongType(), True),
+    ]
+)
+
+_GET_THREAD_SCHEMA = StructType(
+    [
+        StructField("thread_id", StringType(), False),
+        StructField("history_id", StringType(), True),
+        StructField("subject", StringType(), True),
+        StructField("message_count", LongType(), True),
+        StructField("participants", ArrayType(StringType()), True),
+        StructField("labelIds", ArrayType(StringType()), True),
+        StructField("messages", ArrayType(_THREAD_MESSAGE_STRUCT), True),
+    ]
+)
+
+
+class GetThreadOp(AgentOperation):
+    """Fetch a full conversation thread by id with decoded message bodies.
+
+    Returns one row: the thread, with a ``messages`` array in Gmail's
+    chronological order. Each message carries decoded ``body_text`` (plain
+    text — call ``get_message`` for HTML or attachment IDs).
+    ``participants`` is the de-duplicated set of From/To/Cc addresses across
+    the thread. The conversation is the natural unit for analysis, so this
+    pairs with ``search_threads`` (find threads) the way ``get_message``
+    pairs with ``search_messages``.
+    """
+
+    name = "get_thread"
+    description = (
+        "Fetch one conversation thread by thread_id: every message in order "
+        "with decoded body_text, plus the thread's subject, participants, "
+        "message_count, and labels."
+    )
+    kind = "data"
+    schema = _GET_THREAD_SCHEMA
+    parameters = (
+        Parameter(
+            name="thread_id",
+            required=True,
+            description="Gmail thread id to fetch (e.g. from search_threads).",
+        ),
+    )
+
+    def pull(self, connector, options):
+        thread_id = options["thread_id"]
+        api = connector.api
+        user_id = connector.user_id
+
+        thread = api.make_request(
+            "GET", f"/users/{user_id}/threads/{thread_id}", {"format": "full"}
+        )
+        if not thread:
+            raise AgentError(
+                ErrorCode.NOT_FOUND,
+                f"Thread '{thread_id}' not found or inaccessible.",
+            )
+
+        messages = thread.get("messages") or []
+        participants, labels = _thread_participants_and_labels(messages)
+
+        message_rows = []
+        for msg in messages:
+            payload = msg.get("payload") or {}
+            message_rows.append(
+                {
+                    "id": msg.get("id"),
+                    "from_address": _header_value(payload, "From"),
+                    "to_address": _header_value(payload, "To"),
+                    "cc_address": _header_value(payload, "Cc"),
+                    "subject": _header_value(payload, "Subject"),
+                    "date": _header_value(payload, "Date"),
+                    "snippet": msg.get("snippet"),
+                    "body_text": _decode_body_text(payload, "text/plain"),
+                    "labelIds": msg.get("labelIds") or [],
+                    "size_estimate": _safe_int(msg.get("sizeEstimate")),
+                }
+            )
+
+        first_payload = (messages[0].get("payload") if messages else {}) or {}
+        return iter(
+            [
+                {
+                    "thread_id": thread.get("id") or thread_id,
+                    "history_id": thread.get("historyId"),
+                    "subject": _header_value(first_payload, "Subject"),
+                    "message_count": len(message_rows),
+                    "participants": participants,
+                    "labelIds": labels,
+                    "messages": message_rows,
+                }
+            ]
+        )
+
+
+# ---------------------------------------------------------------------------
+# search_threads: thread-level triage (one row per conversation)
+# ---------------------------------------------------------------------------
+
+_SEARCH_THREADS_SCHEMA = StructType(
+    [
+        StructField("id", StringType(), False),
+        StructField("subject", StringType(), True),
+        StructField("snippet", StringType(), True),
+        StructField("message_count", LongType(), True),
+        StructField("participants", ArrayType(StringType()), True),
+        StructField("last_date", StringType(), True),
+        StructField("labelIds", ArrayType(StringType()), True),
+        StructField("history_id", StringType(), True),
+    ]
+)
+
+
+class SearchThreadsOp(AgentOperation):
+    """Search conversations and return one row per thread.
+
+    The thread-level companion to ``search_messages`` — use it when the
+    unit of analysis is the conversation, not the individual message.
+    Composes the same typed filters into Gmail ``q`` syntax, lists matching
+    threads, then fetches each (``format=metadata``, header-only) to derive
+    subject, participants, message_count, last activity, and labels.
+    Bounded by ``limit``.
+    """
+
+    name = "search_threads"
+    description = (
+        "Search conversation threads and return one row per thread with id, "
+        "subject, snippet, message_count, participants, last_date, labels. "
+        "Accepts the same typed filters as search_messages."
+    )
+    kind = "data"
+    schema = _SEARCH_THREADS_SCHEMA
+    parameters = (
+        Parameter(
+            name="limit",
+            type="integer",
+            default=50,
+            description="Maximum threads to return (default 50, max 500).",
+        ),
+    ) + _FILTER_PARAMETERS
+
+    def pull(self, connector, options):
+        api = connector.api
+        user_id = connector.user_id
+
+        limit = _int_option(options, "limit", 50)
+        composed_q = _compose_query(options)
+        params: dict = {"maxResults": min(max(limit, 1), 500)}
+        if composed_q:
+            params["q"] = composed_q
+
+        listing = api.make_request("GET", f"/users/{user_id}/threads", params=params)
+        if not listing or "threads" not in listing:
+            return iter([])
+
+        threads = listing.get("threads", [])[:limit]
+        snippet_by_id = {t["id"]: t.get("snippet") for t in threads}
+        thread_ids = [t["id"] for t in threads]
+        endpoints = [f"/users/{user_id}/threads/{tid}" for tid in thread_ids]
+        meta_params = [{"format": "metadata"}] * len(thread_ids)
+        results = api.make_batch_request(endpoints, meta_params)
+
+        rows = []
+        for thread in results:
+            if not thread:
+                continue
+            messages = thread.get("messages") or []
+            participants, labels = _thread_participants_and_labels(messages)
+            first_payload = (messages[0].get("payload") if messages else {}) or {}
+            last_payload = (messages[-1].get("payload") if messages else {}) or {}
+            tid = thread.get("id")
+            rows.append(
+                {
+                    "id": tid,
+                    "subject": _header_value(first_payload, "Subject"),
+                    "snippet": snippet_by_id.get(tid),
+                    "message_count": len(messages),
+                    "participants": participants,
+                    "last_date": _header_value(last_payload, "Date"),
+                    "labelIds": labels,
+                    "history_id": thread.get("historyId"),
+                }
+            )
+        return iter(rows)
+
+
+# ---------------------------------------------------------------------------
+# mailbox_overview: per-label message/thread counts for orientation
+# ---------------------------------------------------------------------------
+
+_MAILBOX_OVERVIEW_SCHEMA = StructType(
+    [
+        StructField("label_id", StringType(), False),
+        StructField("name", StringType(), True),
+        StructField("type", StringType(), True),
+        StructField("messages_total", LongType(), True),
+        StructField("messages_unread", LongType(), True),
+        StructField("threads_total", LongType(), True),
+        StructField("threads_unread", LongType(), True),
+    ]
+)
+
+
+class MailboxOverviewOp(AgentOperation):
+    """Per-label message/thread counts, so the agent can see the mailbox's
+    shape before drilling in.
+
+    Lists every label and fetches each one's counts (``users.labels.get``
+    returns messagesTotal / messagesUnread / threadsTotal / threadsUnread).
+    One row per label — system labels (INBOX, SENT, SPAM, ...) alongside
+    user labels — useful for "where is the volume?" orientation before a
+    targeted ``search_messages`` / ``read_table``.
+    """
+
+    name = "mailbox_overview"
+    description = (
+        "List every Gmail label with its message and thread counts (total "
+        "and unread). One row per label; orientation before querying."
+    )
+    kind = "data"
+    schema = _MAILBOX_OVERVIEW_SCHEMA
+    parameters = ()
+
+    def pull(self, connector, options):
+        del options
+        api = connector.api
+        user_id = connector.user_id
+
+        listing = api.make_request("GET", f"/users/{user_id}/labels")
+        labels = (listing or {}).get("labels", [])
+        if not labels:
+            return iter([])
+
+        label_ids = [lb["id"] for lb in labels if lb.get("id")]
+        endpoints = [f"/users/{user_id}/labels/{lid}" for lid in label_ids]
+        details = api.make_batch_request(endpoints)
+
+        rows = []
+        for detail in details:
+            if not detail:
+                continue
+            rows.append(
+                {
+                    "label_id": detail.get("id"),
+                    "name": detail.get("name"),
+                    "type": detail.get("type"),
+                    "messages_total": _safe_int(detail.get("messagesTotal")),
+                    "messages_unread": _safe_int(detail.get("messagesUnread")),
+                    "threads_total": _safe_int(detail.get("threadsTotal")),
+                    "threads_unread": _safe_int(detail.get("threadsUnread")),
+                }
+            )
+        return iter(rows)
+
+
 def _agent_error_from_status(exc: GmailApiError) -> AgentError:
     """Map HTTP status to a canonical agent ErrorCode."""
     if exc.status == 401:
@@ -920,8 +1221,11 @@ def build_gmail_agent_operations() -> dict:
     ops = [
         GmailReadTableOp(),
         SearchMessagesOp(),
+        SearchThreadsOp(),
         GetMessageOp(),
+        GetThreadOp(),
         ListAttachmentsOp(),
         DownloadAttachmentOp(),
+        MailboxOverviewOp(),
     ]
     return {op.name: op for op in ops}

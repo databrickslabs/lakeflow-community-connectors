@@ -1,13 +1,16 @@
 """Unit tests for the Gmail ingestion-agent operations.
 
-Covers the five Gmail-specific operations dispatched through
+Covers the Gmail-specific operations dispatched through
 ``IngestionAgentDispatcher``:
 
   - read_table (override): typed filters compose into Gmail q syntax
   - search_messages: triage view, metadata-format messages
+  - search_threads: thread-level triage, one row per conversation
   - get_message: single-message fetch with decoded bodies + drive IDs
+  - get_thread: full conversation with decoded message bodies
   - list_attachments: gmail-native + Drive-hosted enumeration
   - download_attachment: Volume-path writes for both kinds
+  - mailbox_overview: per-label message/thread counts
 
 Mocks ``GmailApiClient`` so tests stay offline.
 """
@@ -718,3 +721,191 @@ def test_read_table_respects_explicit_max_results(monkeypatch):
     rows = _dispatch("read_table", connector, tableName="messages", maxResults="10")
     assert len(rows) == 10
     assert counters["detail_calls"] == 10
+
+
+# ---------------------------------------------------------------------------
+# get_thread: full conversation with decoded message bodies
+# ---------------------------------------------------------------------------
+
+def _thread_msg(msg_id, sender, subject, body_text, date, to="me@example.com", labels=None):
+    return {
+        "id": msg_id,
+        "threadId": "t1",
+        "labelIds": labels if labels is not None else ["INBOX"],
+        "snippet": f"snip {msg_id}",
+        "sizeEstimate": 100,
+        "payload": {
+            "mimeType": "multipart/alternative",
+            "headers": [
+                {"name": "From", "value": sender},
+                {"name": "To", "value": to},
+                {"name": "Subject", "value": subject},
+                {"name": "Date", "value": date},
+            ],
+            "parts": [{"mimeType": "text/plain", "body": {"data": _b64u(body_text)}}],
+        },
+    }
+
+
+def test_get_thread_returns_one_row_with_decoded_messages(connector, monkeypatch):
+    thread = {
+        "id": "t1",
+        "historyId": "555",
+        "messages": [
+            _thread_msg("m1", "alice@example.com", "Kickoff", "first body",
+                        "Wed, 1 Jan 2024 00:00:00 +0000"),
+            _thread_msg("m2", "bob@example.com", "Re: Kickoff", "second body",
+                        "Thu, 2 Jan 2024 00:00:00 +0000", labels=["INBOX", "IMPORTANT"]),
+        ],
+    }
+
+    def fake_make_request(self, method, path, params=None, **_):
+        assert path.endswith("/threads/t1")
+        assert (params or {}).get("format") == "full"
+        return thread
+
+    monkeypatch.setattr(
+        "databricks.labs.community_connector.sources.gmail.gmail_utils."
+        "GmailApiClient.make_request",
+        fake_make_request,
+    )
+
+    rows = _dispatch("get_thread", connector, thread_id="t1")
+    assert len(rows) == 1
+    row = rows[0]
+    assert row["thread_id"] == "t1"
+    assert row["history_id"] == "555"
+    assert row["subject"] == "Kickoff"          # first message's subject
+    assert row["message_count"] == 2
+    assert set(row["participants"]) == {
+        "alice@example.com", "bob@example.com", "me@example.com",
+    }
+    assert set(row["labelIds"]) == {"INBOX", "IMPORTANT"}
+    assert [m["id"] for m in row["messages"]] == ["m1", "m2"]
+    assert row["messages"][0]["body_text"] == "first body"
+    assert row["messages"][1]["from_address"] == "bob@example.com"
+
+
+def test_get_thread_not_found_raises(connector, monkeypatch):
+    monkeypatch.setattr(
+        "databricks.labs.community_connector.sources.gmail.gmail_utils."
+        "GmailApiClient.make_request",
+        lambda self, *a, **kw: None,
+    )
+    with pytest.raises(AgentError) as info:
+        _dispatch("get_thread", connector, thread_id="missing")
+    assert info.value.code == ErrorCode.NOT_FOUND
+
+
+# ---------------------------------------------------------------------------
+# search_threads: one row per conversation, typed filters compose into q
+# ---------------------------------------------------------------------------
+
+def test_search_threads_returns_one_row_per_thread(connector, monkeypatch):
+    requests_log: list = []
+
+    def fake_make_request(self, method, path, params=None, **_):
+        requests_log.append((method, path, dict(params or {})))
+        if path.endswith("/threads"):
+            return {"threads": [
+                {"id": "t1", "snippet": "snippet one"},
+                {"id": "t2", "snippet": "snippet two"},
+            ]}
+        return None
+
+    def fake_batch(self, endpoints, params_list=None):
+        return [
+            {"id": "t1", "historyId": "10", "messages": [
+                _thread_msg("m1", "alice@example.com", "Kickoff", "b1",
+                            "Wed, 1 Jan 2024 00:00:00 +0000"),
+                _thread_msg("m2", "bob@example.com", "Re: Kickoff", "b2",
+                            "Thu, 2 Jan 2024 00:00:00 +0000"),
+            ]},
+            {"id": "t2", "historyId": "11", "messages": [
+                _thread_msg("m3", "carol@example.com", "Lunch?", "b3",
+                            "Fri, 3 Jan 2024 00:00:00 +0000"),
+            ]},
+        ]
+
+    monkeypatch.setattr(
+        "databricks.labs.community_connector.sources.gmail.gmail_utils."
+        "GmailApiClient.make_request",
+        fake_make_request,
+    )
+    monkeypatch.setattr(
+        "databricks.labs.community_connector.sources.gmail.gmail_utils."
+        "GmailApiClient.make_batch_request",
+        fake_batch,
+    )
+
+    rows = _dispatch("search_threads", connector, from_address="alice@example.com",
+                     newer_than="30d", limit=10)
+    assert len(rows) == 2
+    by_id = {r["id"]: r for r in rows}
+    assert by_id["t1"]["subject"] == "Kickoff"
+    assert by_id["t1"]["snippet"] == "snippet one"
+    assert by_id["t1"]["message_count"] == 2
+    assert by_id["t1"]["last_date"] == "Thu, 2 Jan 2024 00:00:00 +0000"
+    assert "alice@example.com" in by_id["t1"]["participants"]
+    assert by_id["t2"]["message_count"] == 1
+
+    listing = next(c for c in requests_log if c[1].endswith("/threads"))
+    q = listing[2].get("q")
+    assert "from:alice@example.com" in q
+    assert "newer_than:30d" in q
+
+
+def test_search_threads_empty_when_no_matches(connector, monkeypatch):
+    monkeypatch.setattr(
+        "databricks.labs.community_connector.sources.gmail.gmail_utils."
+        "GmailApiClient.make_request",
+        lambda self, *a, **kw: {"resultSizeEstimate": 0},
+    )
+    monkeypatch.setattr(
+        "databricks.labs.community_connector.sources.gmail.gmail_utils."
+        "GmailApiClient.make_batch_request",
+        lambda self, *a, **kw: [],
+    )
+    rows = _dispatch("search_threads", connector, query="from:nobody")
+    assert rows == []
+
+
+# ---------------------------------------------------------------------------
+# mailbox_overview: per-label counts
+# ---------------------------------------------------------------------------
+
+def test_mailbox_overview_returns_per_label_counts(connector, monkeypatch):
+    def fake_make_request(self, method, path, params=None, **_):
+        if path.endswith("/labels"):
+            return {"labels": [{"id": "INBOX"}, {"id": "Label_1"}]}
+        return None
+
+    def fake_batch(self, endpoints, params_list=None):
+        return [
+            {"id": "INBOX", "name": "INBOX", "type": "system",
+             "messagesTotal": 120, "messagesUnread": 4,
+             "threadsTotal": 100, "threadsUnread": 3},
+            {"id": "Label_1", "name": "Work", "type": "user",
+             "messagesTotal": 30, "messagesUnread": 0,
+             "threadsTotal": 25, "threadsUnread": 0},
+        ]
+
+    monkeypatch.setattr(
+        "databricks.labs.community_connector.sources.gmail.gmail_utils."
+        "GmailApiClient.make_request",
+        fake_make_request,
+    )
+    monkeypatch.setattr(
+        "databricks.labs.community_connector.sources.gmail.gmail_utils."
+        "GmailApiClient.make_batch_request",
+        fake_batch,
+    )
+
+    rows = _dispatch("mailbox_overview", connector)
+    assert len(rows) == 2
+    by_id = {r["label_id"]: r for r in rows}
+    assert by_id["INBOX"]["messages_total"] == 120
+    assert by_id["INBOX"]["messages_unread"] == 4
+    assert by_id["Label_1"]["name"] == "Work"
+    assert by_id["Label_1"]["type"] == "user"
+    assert by_id["Label_1"]["threads_total"] == 25
