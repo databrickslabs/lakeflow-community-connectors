@@ -1364,27 +1364,30 @@ def register_lakeflow_source(spark):
         def _read_contained_expand(
             self,
             table_name: str,
-            start_offset: dict,
+            start_offset: dict | None,
             table_options: dict[str, str],
         ) -> tuple[Iterator[dict], dict]:
-            """Single GET with nested ``$expand``; flatten the response into
-            leaf rows tagged with ancestor FKs. When ``cursor_field`` is
-            set, a ``$filter``/``$orderby`` is injected at the closest
-            segment that owns the cursor (top-level query or inner
-            ``$expand``), restricting the response to changed subtrees.
-            Emitted leaf rows are stamped with the cursor value from that
-            segment when they don't carry it themselves. Server depth caps
-            surface as HTTP 4xx — no client-side fallback.
+            """Iterative work-queue pull driven by nested ``$expand``;
+            flatten each response into leaf rows tagged with ancestor FKs.
+            When ``cursor_field`` is set, a ``$filter``/``$orderby`` is
+            injected at the closest segment that owns the cursor (top-level
+            query or inner ``$expand``), restricting the response to
+            changed subtrees. Emitted leaf rows are stamped with the cursor
+            value from that segment when they don't carry it themselves.
+            Server depth caps surface as HTTP 4xx — no client-side
+            fallback.
 
             The pull is capped at ``max_records_per_batch`` rows (default
-            100k). When the cap fires and the server has more top-level
-            pages, the server's top-level ``@odata.nextLink`` is parked in
-            the resume offset as ``chain_next_link`` so the next ``read()``
-            call hands it straight back to the server (opaque skiptoken;
-            no URL rebuild). For cursor mode the watermark only advances
-            once the chain fully drains — mid-chain advance would skip
-            unread rows under the same ``since``. While a chain is in
-            flight the running max cursor lives at
+            10000). When the cap fires, the remaining work queue — a list
+            of self-contained ``{url, level, chain, cur_val, skip}`` fetch
+            tasks (see ``_drain_expand_pages``) — is parked in the resume
+            offset as ``pending_fetches`` so the next ``read()`` call
+            resumes exactly where it left off: top-level pagination,
+            inner-collection ``@odata.nextLink`` follows, and mid-page row
+            positions all live in the queue. For cursor mode the watermark
+            only advances once the chain fully drains — mid-chain advance
+            would skip unread rows under the same ``since``. While a chain
+            is in flight the running max cursor lives at
             ``running_max_cursor`` in the offset; on chain completion it
             becomes the new ``cursor`` value.
             """
@@ -1465,24 +1468,9 @@ def register_lakeflow_source(spark):
                 return iter(emitted), end_offset
             if not emitted and not resuming:
                 return iter([]), start_offset or {}
-            if start_offset and start_offset == end_offset:
-                if emitted:
-                    # Rows emitted but offset didn't advance — happens
-                    # when every row in this batch has a null cursor and
-                    # ``running_max_cursor`` couldn't update. Returning
-                    # the rows would loop forever (Spark calls again with
-                    # the same offset); dropping them silently would lose
-                    # data. Surface the problem instead.
-                    raise RuntimeError(
-                        f"emitted {len(emitted)} rows from {table_name!r} but cursor_field="
-                        f"{cursor_field!r} did not advance — every row in this batch "
-                        f"has a null {cursor_field}. Make the cursor non-nullable in "
-                        f"the source, filter out null-cursor rows with "
-                        f"`filter`/`filter_at_<segment>=<field> ne null`, or pick a "
-                        f"cursor that is always populated."
-                    )
-                return iter([]), start_offset
-            return iter(emitted), end_offset
+            return self._finalize_cursor_read(
+                start_offset, end_offset, emitted, table_name, cursor_field
+            )
 
         # pylint: disable=too-many-arguments,too-many-positional-arguments,too-many-locals
         def _drain_expand_pages(
@@ -1651,7 +1639,15 @@ def register_lakeflow_source(spark):
                 return {"cursor": new_running}
             if since is not None:
                 return {"cursor": since}
-            return dict(start_offset or {})
+            # Chain drained AND no watermark to park (no prior ``since``, no
+            # ``running_max_cursor``, no new cursor values this batch).
+            # Returning ``dict(start_offset or {})`` would echo a resume
+            # input like ``{"pending_fetches": [...]}`` back unchanged —
+            # ``_read_contained_expand`` then sees ``start_offset ==
+            # end_offset`` with ``emitted`` empty and returns the same
+            # offset, and the framework re-issues it forever. Return ``{}``
+            # so the offset advances and the chain terminates cleanly.
+            return {}
 
         def _cursor_expand_clause(
             self,
@@ -1950,10 +1946,62 @@ def register_lakeflow_source(spark):
                 parent_idx += 1
             return emitted, truncated, parent_idx, chain_start_idx, chain_next_link_out
 
+        def _no_progress_cursor_error(
+            self, table_name: str, cursor_field: str, n_emitted: int
+        ) -> RuntimeError:
+            """Build the RuntimeError the caller raises when a cursor-mode
+            batch emitted rows but the offset did not advance. Two causes
+            share this symptom: every row's cursor is null (so
+            ``running_max`` can't update), or the source returned rows whose
+            cursor equals the prior ``since`` (server did not honor
+            ``cursor gt``). Committing the rows would loop forever — the
+            framework re-issues the same offset; dropping them silently
+            would lose data. The caller raises this error so the operator
+            sees the cause."""
+            return RuntimeError(
+                f"emitted {n_emitted} rows from {table_name!r} but cursor_field="
+                f"{cursor_field!r} did not advance. Either every row in this "
+                f"batch has a null {cursor_field}, or the source returned rows "
+                f"whose {cursor_field} equals the prior offset (server did not "
+                f"honor `{cursor_field} gt <since>`). Fix the cursor at the "
+                f"source (non-nullable, strictly monotonic), exclude offending "
+                f"rows with `filter`/`filter_at_<segment>`, or pick a different "
+                f"cursor."
+            )
+
+        def _finalize_cursor_read(
+            self,
+            start_offset: dict | None,
+            end_offset: dict,
+            emitted: list[dict],
+            table_name: str,
+            cursor_field: str,
+        ) -> tuple[Iterator[dict], dict]:
+            """Apply the no-progress guard shared by every cursor-mode read
+            path. Returns ``(iter(emitted), end_offset)`` on the happy path;
+            raises when rows were emitted but the offset did not advance;
+            returns ``(iter([]), start_offset)`` when nothing was emitted on
+            a no-progress batch (terminal/empty). ``start_offset is None``
+            is the batch-reader signal (``LakeflowBatchReader`` passes
+            ``None`` and discards the returned offset) — no-progress can't
+            loop in that mode, so the guard is skipped and rows are emitted
+            as-is. Streaming first batch passes ``{}`` (see
+            ``LakeflowStreamReader.initialOffset``); the plain ``==`` then
+            catches both ``{}`` and populated equal-offsets. See
+            ``_no_progress_cursor_error`` for the two causes that land in
+            the raise branch."""
+            if start_offset is None:
+                return iter(emitted), end_offset
+            if start_offset == end_offset:
+                if emitted:
+                    raise self._no_progress_cursor_error(table_name, cursor_field, len(emitted))
+                return iter([]), start_offset
+            return iter(emitted), end_offset
+
         def _read_contained_incremental(
             self,
             table_name: str,
-            start_offset: dict,
+            start_offset: dict | None,
             table_options: dict[str, str],
             cursor_field: str,
         ) -> tuple[Iterator[dict], dict]:
@@ -1973,16 +2021,17 @@ def register_lakeflow_source(spark):
                 )
             if cursor_level == len(segments) - 1:
                 return self._read_contained_incremental_leaf_cursor(
-                    segments, start_offset, table_options, cursor_field
+                    table_name, segments, start_offset, table_options, cursor_field
                 )
             return self._read_contained_incremental_ancestor_cursor(
-                segments, start_offset, table_options, cursor_field, cursor_level
+                table_name, segments, start_offset, table_options, cursor_field, cursor_level
             )
 
         def _read_contained_incremental_leaf_cursor(
             self,
+            table_name: str,
             segments: list[str],
-            start_offset: dict,
+            start_offset: dict | None,
             table_options: dict[str, str],
             cursor_field: str,
         ) -> tuple[Iterator[dict], dict]:
@@ -2011,7 +2060,6 @@ def register_lakeflow_source(spark):
               flat-path failure mode.
             """
             namespace = (table_options or {}).get("namespace")
-            table_name = CONTAINED_PATH_SEP.join(segments)
             since = (start_offset or {}).get("cursor")
             truncated_chain_cursor_in = (start_offset or {}).get("truncated_chain_cursor")
             chain_next_link_in = (start_offset or {}).get("chain_next_link")
@@ -2070,15 +2118,28 @@ def register_lakeflow_source(spark):
                 if not emitted:
                     return iter([]), start_offset or {}
                 cursors = [r.get(cursor_field) for r in emitted if r.get(cursor_field) is not None]
-                end_offset = {"cursor": max(cursors) if cursors else since}
-            if start_offset and start_offset == end_offset:
-                return iter([]), start_offset
-            return iter(emitted), end_offset
+                # Mirror ``_build_expand_end_offset`` /
+                # ``_ancestor_cursor_offset``: when there's no cursor data
+                # this batch and no prior ``since`` to carry, the offset is
+                # ``{}`` — not ``{"cursor": None}``. The latter would advance
+                # ``{}`` → ``{"cursor": None}`` on first-batch null-cursor
+                # rows, silently committing one bad batch before the second
+                # trigger (where ``start_offset == end_offset``) raises.
+                if cursors:
+                    end_offset = {"cursor": max(cursors)}
+                elif since is not None:
+                    end_offset = {"cursor": since}
+                else:
+                    end_offset = {}
+            return self._finalize_cursor_read(
+                start_offset, end_offset, emitted, table_name, cursor_field
+            )
 
         def _read_contained_incremental_ancestor_cursor(
             self,
+            table_name: str,
             segments: list[str],
-            start_offset: dict,
+            start_offset: dict | None,
             table_options: dict[str, str],
             cursor_field: str,
             cursor_level: int,
@@ -2112,9 +2173,9 @@ def register_lakeflow_source(spark):
                 leaf_segment_filter=segment_filters.get(len(segments) - 1),
             )
             end_offset = self._ancestor_cursor_offset(walk_state, start_offset, since, cursor_field)
-            if start_offset and start_offset == end_offset:
-                return iter([]), start_offset
-            return iter(walk_state["emitted"]), end_offset
+            return self._finalize_cursor_read(
+                start_offset, end_offset, walk_state["emitted"], table_name, cursor_field
+            )
 
         def _walk_ancestor_chains(
             self,
@@ -2996,6 +3057,12 @@ def register_lakeflow_source(spark):
             opts = dict(table_options or {})
             if start_offset is None and "max_records_per_batch" not in opts:
                 opts["max_records_per_batch"] = str(_BATCH_UNCAPPED)
+            # ``offset`` is a local view used for shape checks below.
+            # The original ``start_offset`` (``None`` for batch reader,
+            # ``{}`` or populated dict for streaming) is passed through to
+            # the read methods so ``_finalize_cursor_read`` can distinguish
+            # batch from streaming and skip the no-progress raise when the
+            # framework will discard the returned offset anyway.
             offset = start_offset or {}
             if _parse_contained_path(table_name) is not None:
                 if self._delta_setting(opts) == "enabled":
@@ -3006,10 +3073,10 @@ def register_lakeflow_source(spark):
                         "or ingest the parent set directly."
                     )
                 if self._expand_contained_active(opts):
-                    return self._read_contained_expand(table_name, offset, opts)
+                    return self._read_contained_expand(table_name, start_offset, opts)
                 if opts.get("cursor_field"):
                     return self._read_contained_incremental(
-                        table_name, offset, opts, opts["cursor_field"]
+                        table_name, start_offset, opts, opts["cursor_field"]
                     )
                 return self._read_contained_snapshot(table_name, opts)
             # Offset-shape check ahead of the delta predicate so a resumed
@@ -3022,7 +3089,7 @@ def register_lakeflow_source(spark):
             ):
                 return self._read_incremental_delta(table_name, offset, opts)
             if opts.get("cursor_field"):
-                return self._read_incremental(table_name, offset, opts, opts["cursor_field"])
+                return self._read_incremental(table_name, start_offset, opts, opts["cursor_field"])
             return self._read_snapshot(table_name, opts)
 
         # ------------------------------------------------------------------
@@ -3045,7 +3112,7 @@ def register_lakeflow_source(spark):
         def _read_incremental(
             self,
             table_name: str,
-            start_offset: dict,
+            start_offset: dict | None,
             table_options: dict[str, str],
             cursor_field: str,
         ) -> tuple[Iterator[dict], dict]:
@@ -3129,12 +3196,26 @@ def register_lakeflow_source(spark):
             else:
                 records = trimmed
 
-            # OData responses ordered by the cursor — last record carries the max.
-            last_cursor = records[-1].get(cursor_field)
-            end_offset = {"cursor": last_cursor}
-            if start_offset and start_offset == end_offset:
-                return iter([]), start_offset
-            return iter(records), end_offset
+            # OData responses ordered by the cursor — the trailing distinct
+            # cursor carries the watermark in the common case. But a nullable
+            # cursor with server-dependent null-ordering can produce records
+            # with null cursor values, and the cohort fall-through above
+            # keeps records as-is when every value is null. Compute ``max``
+            # over the non-null cursors and fall back to ``since`` / ``{}``
+            # — mirrors ``_read_contained_incremental_leaf_cursor``'s
+            # normalization. The shared no-progress guard then fires on
+            # null-only batches (committing ``{"cursor": None}`` would loop
+            # because every subsequent trigger re-emits the same nulls).
+            cursors = [r.get(cursor_field) for r in records if r.get(cursor_field) is not None]
+            if cursors:
+                end_offset = {"cursor": max(cursors)}
+            elif since is not None:
+                end_offset = {"cursor": since}
+            else:
+                end_offset = {}
+            return self._finalize_cursor_read(
+                start_offset, end_offset, records, table_name, cursor_field
+            )
 
         def _read_incremental_delta(
             self,
@@ -4804,8 +4885,33 @@ def register_lakeflow_source(spark):
 
     class LakeflowSource(DataSource):
         """
-        PySpark DataSource implementation for Lakeflow Connect.
+        PySpark DataSource base for Lakeflow Connect.
+
+        Two ways the connector implementation is bound:
+
+        - Per-source subclass (wheel / multi-file deployment): subclass and set
+          ``_lakeflow_connect_cls``::
+
+              class GmailDataSource(LakeflowSource):
+                  _lakeflow_connect_cls = GmailLakeflowConnect
+
+              spark.dataSource.register(GmailDataSource)
+
+        - Merged single-file deployment (SDP): ``_lakeflow_connect_cls`` is left
+          ``None`` and the connector is taken from the module-level
+          ``LakeflowConnectImpl`` placeholder, which the merge script substitutes
+          with the actual implementation class.
         """
+
+        # Per-source subclasses set this. Left ``None`` on the base so the merged
+        # single-file path falls back to the ``LakeflowConnectImpl`` placeholder.
+        _lakeflow_connect_cls = None
+
+        # Spark format name. Defaults to "lakeflow_connect" because Unity Catalog
+        # connection-option injection looks for that exact string. A per-source
+        # subclass may override this with its source name once it no longer relies
+        # on UC injection (see the commented override in each source's __init__.py).
+        _format_name = "lakeflow_connect"
 
         def __init__(self, options):
             self.options = options
@@ -4820,13 +4926,15 @@ def register_lakeflow_source(spark):
                     f"For a regular source table, use a name that does not start "
                     f"with '_community_'."
                 )
-            # TEMPORARY: LakeflowConnectImpl is replaced with the actual implementation
-            # class during merge. See the placeholder comment at the top of this file.
-            self.lakeflow_connect = LakeflowConnectImpl(options)  # pylint: disable=abstract-class-instantiated
+            # Per-source subclasses bind the implementation via _lakeflow_connect_cls.
+            # The merged single-file path leaves it None and relies on the
+            # LakeflowConnectImpl placeholder (substituted by the merge script).
+            connect_cls = type(self)._lakeflow_connect_cls or LakeflowConnectImpl
+            self.lakeflow_connect = connect_cls(options)  # pylint: disable=abstract-class-instantiated
 
         @classmethod
         def name(cls):
-            return "lakeflow_connect"
+            return cls._format_name
 
         def schema(self):
             table = self.options[TABLE_NAME]

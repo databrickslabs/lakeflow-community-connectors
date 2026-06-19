@@ -522,6 +522,12 @@ class ODataLakeflowConnect(
         opts = dict(table_options or {})
         if start_offset is None and "max_records_per_batch" not in opts:
             opts["max_records_per_batch"] = str(_BATCH_UNCAPPED)
+        # ``offset`` is a local view used for shape checks below.
+        # The original ``start_offset`` (``None`` for batch reader,
+        # ``{}`` or populated dict for streaming) is passed through to
+        # the read methods so ``_finalize_cursor_read`` can distinguish
+        # batch from streaming and skip the no-progress raise when the
+        # framework will discard the returned offset anyway.
         offset = start_offset or {}
         if _parse_contained_path(table_name) is not None:
             if self._delta_setting(opts) == "enabled":
@@ -532,10 +538,10 @@ class ODataLakeflowConnect(
                     "or ingest the parent set directly."
                 )
             if self._expand_contained_active(opts):
-                return self._read_contained_expand(table_name, offset, opts)
+                return self._read_contained_expand(table_name, start_offset, opts)
             if opts.get("cursor_field"):
                 return self._read_contained_incremental(
-                    table_name, offset, opts, opts["cursor_field"]
+                    table_name, start_offset, opts, opts["cursor_field"]
                 )
             return self._read_contained_snapshot(table_name, opts)
         # Offset-shape check ahead of the delta predicate so a resumed
@@ -548,7 +554,7 @@ class ODataLakeflowConnect(
         ):
             return self._read_incremental_delta(table_name, offset, opts)
         if opts.get("cursor_field"):
-            return self._read_incremental(table_name, offset, opts, opts["cursor_field"])
+            return self._read_incremental(table_name, start_offset, opts, opts["cursor_field"])
         return self._read_snapshot(table_name, opts)
 
     # ------------------------------------------------------------------
@@ -571,7 +577,7 @@ class ODataLakeflowConnect(
     def _read_incremental(
         self,
         table_name: str,
-        start_offset: dict,
+        start_offset: dict | None,
         table_options: dict[str, str],
         cursor_field: str,
     ) -> tuple[Iterator[dict], dict]:
@@ -655,12 +661,26 @@ class ODataLakeflowConnect(
         else:
             records = trimmed
 
-        # OData responses ordered by the cursor — last record carries the max.
-        last_cursor = records[-1].get(cursor_field)
-        end_offset = {"cursor": last_cursor}
-        if start_offset and start_offset == end_offset:
-            return iter([]), start_offset
-        return iter(records), end_offset
+        # OData responses ordered by the cursor — the trailing distinct
+        # cursor carries the watermark in the common case. But a nullable
+        # cursor with server-dependent null-ordering can produce records
+        # with null cursor values, and the cohort fall-through above
+        # keeps records as-is when every value is null. Compute ``max``
+        # over the non-null cursors and fall back to ``since`` / ``{}``
+        # — mirrors ``_read_contained_incremental_leaf_cursor``'s
+        # normalization. The shared no-progress guard then fires on
+        # null-only batches (committing ``{"cursor": None}`` would loop
+        # because every subsequent trigger re-emits the same nulls).
+        cursors = [r.get(cursor_field) for r in records if r.get(cursor_field) is not None]
+        if cursors:
+            end_offset = {"cursor": max(cursors)}
+        elif since is not None:
+            end_offset = {"cursor": since}
+        else:
+            end_offset = {}
+        return self._finalize_cursor_read(
+            start_offset, end_offset, records, table_name, cursor_field
+        )
 
     def _read_incremental_delta(
         self,

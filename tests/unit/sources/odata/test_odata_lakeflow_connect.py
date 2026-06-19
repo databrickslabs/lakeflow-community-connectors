@@ -539,6 +539,78 @@ def test_incremental_all_same_cursor_natural_exhaustion_emits_as_is():
 
 
 @responses.activate
+def test_incremental_first_batch_null_cursor_rows_raises():
+    """Regression: flat incremental path used to build
+    ``end_offset = {"cursor": records[-1].get(cursor_field)}``,
+    which becomes ``{"cursor": None}`` when the trailing record carries
+    a null cursor (and the same-cohort fall-through keeps the rows).
+    Combined with the old truthy guard ``if start_offset and
+    start_offset == end_offset``, the first streaming batch
+    (``start_offset = {}``) bypassed the guard and committed null-cursor
+    rows with the offset advancing to ``{"cursor": None}`` — subsequent
+    triggers re-emit the same rows. The fix normalizes the
+    no-cursor-data case to ``{}`` and routes through
+    ``_finalize_cursor_read``, which raises so the operator sees the
+    cause."""
+    _mock_metadata()
+    responses.add(
+        responses.GET,
+        f"{SERVICE_URL}Customers",
+        json={
+            "value": [
+                {"Id": 1, "ModifiedAt": None},
+                {"Id": 2, "ModifiedAt": None},
+            ]
+        },
+        match_querystring=False,
+    )
+
+    c = _make()
+    with pytest.raises(RuntimeError, match="did not advance"):
+        records, _ = c.read_table(
+            "Customers",
+            {},
+            {"cursor_field": "ModifiedAt", "max_records_per_batch": "100"},
+        )
+        list(records)
+
+
+@responses.activate
+def test_incremental_batch_mode_null_cursor_rows_emit_without_raise():
+    """Batch reader (`LakeflowBatchReader`) passes ``start_offset=None``
+    and discards the returned offset. The no-progress guard is a
+    streaming concern — without an offset that the framework re-issues,
+    null-cursor data can't loop. ``_finalize_cursor_read`` treats
+    ``start_offset is None`` as the batch-reader signal and emits rows
+    as-is. The companion streaming test
+    (``test_incremental_first_batch_null_cursor_rows_raises``) shows
+    the same data raises when ``start_offset={}`` — this test locks
+    the batch/streaming split so a future refactor that re-normalizes
+    None to {} (re-introducing the bug class) breaks loudly."""
+    _mock_metadata()
+    responses.add(
+        responses.GET,
+        f"{SERVICE_URL}Customers",
+        json={
+            "value": [
+                {"Id": 1, "ModifiedAt": None},
+                {"Id": 2, "ModifiedAt": None},
+            ]
+        },
+        match_querystring=False,
+    )
+
+    c = _make()
+    records, _ = c.read_table(
+        "Customers",
+        None,
+        {"cursor_field": "ModifiedAt", "max_records_per_batch": "100"},
+    )
+    rows = list(records)
+    assert [r["Id"] for r in rows] == [1, 2]
+
+
+@responses.activate
 def test_incremental_orderby_appends_primary_key_tiebreaker():
     """`$orderby` must be a total order, not just by cursor.
 
@@ -2893,6 +2965,136 @@ def test_contained_expand_cursor_chain_completion_advances_watermark():
 
 
 @responses.activate
+def test_contained_expand_cursor_resume_with_empty_chain_advances_offset():
+    """Regression: when cursor-mode resume parks ``pending_fetches``
+    only (no ``cursor`` / ``running_max_cursor`` yet because the prior
+    batch's rows all had null cursors or the chain hadn't produced any
+    cursor-bearing rows), and this batch drains the queue without
+    emitting any cursor-bearing rows either, the end-offset must still
+    advance. Previously the fallback echoed ``start_offset`` back
+    unchanged, the caller saw ``start_offset == end_offset`` with
+    ``emitted`` empty, and returned the same offset — the framework
+    re-issued it forever."""
+    _mock_nested_metadata()
+    resume_url = f"{SERVICE_URL}Parents?$skiptoken=last"
+
+    def _empty(_req):
+        return (200, {}, json.dumps({"value": []}))
+
+    responses.add_callback(responses.GET, resume_url, callback=_empty, match_querystring=True)
+    c = _make()
+    records, offset = c.read_table(
+        "Parents__Children",
+        {
+            "pending_fetches": [
+                {"url": resume_url, "level": 0, "chain": [], "cur_val": None, "skip": 0}
+            ]
+        },
+        {"expand_contained": "true", "cursor_field": "ModifiedAt"},
+    )
+    rows = list(records)
+    assert rows == []
+    # Offset MUST advance — empty dict signals chain terminal so the
+    # framework stops re-issuing the same resume offset.
+    assert offset == {}
+    # Follow-up trigger with the new (empty) offset must not loop: a
+    # fresh top-level fetch returns whatever the table has now and
+    # the connector goes through the first-call path without a
+    # silent re-issue. Mock the top-level Parents fetch as empty so
+    # the second trigger terminates cleanly.
+    responses.get(f"{SERVICE_URL}Parents", json={"value": []})
+    records2, offset2 = c.read_table(
+        "Parents__Children",
+        offset,
+        {"expand_contained": "true", "cursor_field": "ModifiedAt"},
+    )
+    assert list(records2) == []
+    assert offset2 == {}
+
+
+@responses.activate
+def test_contained_expand_first_batch_null_cursor_rows_raises():
+    """Regression: streaming first batch passes ``start_offset = {}``
+    (``LakeflowStreamReader.initialOffset``). The no-progress guard
+    used to be ``if start_offset and start_offset == end_offset`` —
+    ``bool({}) is False`` so the guard was bypassed on the first
+    trigger, letting null-cursor rows commit with the offset stuck at
+    ``{}`` and looping every subsequent trigger. The guard now uses
+    bare ``==`` (safe because ``_finalize_cursor_read`` handles
+    ``None`` — the batch-reader signal — explicitly before the
+    equality check, and the streaming framework never passes ``None``)
+    and raises so the operator sees the cause."""
+    _mock_nested_metadata()
+
+    def _initial(_req):
+        return (
+            200,
+            {},
+            json.dumps(
+                {
+                    "value": [
+                        {
+                            "Id": 1,
+                            "Children": [
+                                {"Id": 11, "Label": "a", "ModifiedAt": None},
+                            ],
+                        },
+                    ],
+                }
+            ),
+        )
+
+    responses.add_callback(responses.GET, f"{SERVICE_URL}Parents", callback=_initial)
+    c = _make()
+    with pytest.raises(RuntimeError, match="did not advance"):
+        records, _ = c.read_table(
+            "Parents__Children",
+            {},
+            {"expand_contained": "true", "cursor_field": "ModifiedAt"},
+        )
+        list(records)
+
+
+@responses.activate
+def test_contained_expand_batch_mode_null_cursor_rows_emit_without_raise():
+    """Batch reader passes ``start_offset=None`` and discards the
+    returned offset; the no-progress guard is streaming-only. Mirrors
+    ``test_incremental_batch_mode_null_cursor_rows_emit_without_raise``
+    for the expand path so a future refactor that re-normalizes None
+    to {} inside ``_read_contained_expand`` (or its dispatch in
+    ``read_table``) breaks loudly."""
+    _mock_nested_metadata()
+
+    def _initial(_req):
+        return (
+            200,
+            {},
+            json.dumps(
+                {
+                    "value": [
+                        {
+                            "Id": 1,
+                            "Children": [
+                                {"Id": 11, "Label": "a", "ModifiedAt": None},
+                            ],
+                        },
+                    ],
+                }
+            ),
+        )
+
+    responses.add_callback(responses.GET, f"{SERVICE_URL}Parents", callback=_initial)
+    c = _make()
+    records, _ = c.read_table(
+        "Parents__Children",
+        None,
+        {"expand_contained": "true", "cursor_field": "ModifiedAt"},
+    )
+    rows = list(records)
+    assert [r["Id"] for r in rows] == [11]
+
+
+@responses.activate
 def test_contained_expand_caps_within_top_row_subtree():
     """Per-fetch cap: a single top_row whose inner-collection paginates
     must NOT blow past the cap by its whole subtree. The connector
@@ -3876,6 +4078,102 @@ def test_contained_incremental_terminates_when_offset_unchanged():
 
 
 @responses.activate
+def test_contained_incremental_leaf_cursor_first_batch_null_rows_raises():
+    """Regression: first streaming batch passes ``start_offset = {}``.
+    With null leaf cursors and ``since=None``, the leaf path used to
+    compose ``end_offset = {'cursor': None}`` (via
+    ``max(cursors) if cursors else since``) — distinct from ``{}`` so
+    the no-progress guard didn't fire on batch 1 and one batch of
+    null-cursor rows committed downstream before batch 2 raised. The
+    fix normalizes the no-cursor-data + no-since case to ``{}``,
+    mirroring the expand path's behavior so the first trigger surfaces
+    the cause."""
+    _mock_nested_metadata()
+    responses.get(f"{SERVICE_URL}Parents", json={"value": [{"Id": 1}]})
+    responses.add(
+        responses.GET,
+        f"{SERVICE_URL}Parents(1)/Children",
+        json={
+            "value": [
+                {"Id": 10, "Label": "a", "ModifiedAt": None},
+            ]
+        },
+        match_querystring=False,
+    )
+    c = _make()
+    with pytest.raises(RuntimeError, match="did not advance"):
+        records, _ = c.read_table(
+            "Parents__Children",
+            {},
+            {"cursor_field": "ModifiedAt"},
+        )
+        list(records)
+
+
+@responses.activate
+def test_contained_incremental_leaf_cursor_batch_mode_null_rows_emit_without_raise():
+    """Batch reader passes ``start_offset=None`` and discards the
+    returned offset; the no-progress guard is streaming-only. Mirrors
+    ``test_incremental_batch_mode_null_cursor_rows_emit_without_raise``
+    for the contained leaf-cursor path so a future refactor that
+    re-normalizes None to {} inside
+    ``_read_contained_incremental_leaf_cursor`` (or its dispatch in
+    ``_read_contained_incremental``) breaks loudly."""
+    _mock_nested_metadata()
+    responses.get(f"{SERVICE_URL}Parents", json={"value": [{"Id": 1}]})
+    responses.add(
+        responses.GET,
+        f"{SERVICE_URL}Parents(1)/Children",
+        json={
+            "value": [
+                {"Id": 10, "Label": "a", "ModifiedAt": None},
+            ]
+        },
+        match_querystring=False,
+    )
+    c = _make()
+    records, _ = c.read_table(
+        "Parents__Children",
+        None,
+        {"cursor_field": "ModifiedAt"},
+    )
+    rows = list(records)
+    assert [r["Id"] for r in rows] == [10]
+
+
+@responses.activate
+def test_contained_incremental_leaf_cursor_null_rows_raises():
+    """Regression: the leaf-cursor path in
+    ``_read_contained_incremental_leaf_cursor`` previously silently
+    dropped rows when ``start_offset == end_offset`` — same data-loss
+    class the PR fixed in the expand and ancestor paths. Streaming
+    resume with ``{cursor: 'X'}`` and leaf rows whose cursor is null
+    (``cursors=[]`` → ``end_offset = {cursor: since} = start_offset``);
+    rows must surface a loud RuntimeError rather than vanish from the
+    stream."""
+    _mock_nested_metadata()
+    responses.get(f"{SERVICE_URL}Parents", json={"value": [{"Id": 1}]})
+    responses.add(
+        responses.GET,
+        f"{SERVICE_URL}Parents(1)/Children",
+        json={
+            "value": [
+                {"Id": 10, "Label": "a", "ModifiedAt": None},
+            ]
+        },
+        match_querystring=False,
+    )
+    c = _make()
+    with pytest.raises(RuntimeError, match="did not advance"):
+        records, _ = c.read_table(
+            "Parents__Children",
+            {"cursor": "2024-01-02T00:00:00Z"},
+            {"cursor_field": "ModifiedAt"},
+        )
+        list(records)
+
+
+@responses.activate
 def test_contained_incremental_truncation_trims_boundary_cohort():
     """When the per-parent walk truncates, the trailing same-cursor cohort
     of the truncated chain is trimmed and the offset carries a
@@ -4252,6 +4550,72 @@ def test_ancestor_cursor_incremental_resume_filters_with_since():
     # Cursor filter present on the Children call (call index 2).
     children_call = responses.calls[2].request.url
     assert "ModifiedAt%20gt%20" in children_call or "ModifiedAt+gt+" in children_call
+
+
+@responses.activate
+def test_ancestor_cursor_first_batch_null_cursor_rows_raises():
+    """Regression: streaming first batch passes ``start_offset = {}``.
+    The ancestor-cursor no-progress guard used to be
+    ``if start_offset and start_offset == end_offset`` — ``bool({})``
+    is False so the guard was bypassed on the first trigger; rows
+    stamped with a null ancestor cursor would commit, the offset would
+    stay ``{}``, and every subsequent trigger would silently drop the
+    same rows. The guard now uses bare ``==`` (safe because
+    ``_finalize_cursor_read`` handles ``None`` — the batch-reader
+    signal — explicitly before the equality check, and the streaming
+    framework never passes ``None``) and raises so the operator sees
+    the cause."""
+    _mock_nested_metadata()
+    responses.get(f"{SERVICE_URL}Parents", json={"value": [{"Id": 1}]})
+    responses.add(
+        responses.GET,
+        f"{SERVICE_URL}Parents(1)/Children",
+        json={"value": [{"Id": 10, "ModifiedAt": None}]},
+        match_querystring=False,
+    )
+    responses.get(
+        f"{SERVICE_URL}Parents(1)/Children(10)/Notes",
+        json={"value": [{"Id": 100, "Text": "a"}]},
+    )
+    c = _make()
+    with pytest.raises(RuntimeError, match="did not advance"):
+        records, _ = c.read_table(
+            "Parents__Children__Notes",
+            {},
+            {"cursor_field": "ModifiedAt"},
+        )
+        list(records)
+
+
+@responses.activate
+def test_ancestor_cursor_batch_mode_null_cursor_rows_emit_without_raise():
+    """Batch reader passes ``start_offset=None`` and discards the
+    returned offset; the no-progress guard is streaming-only. Mirrors
+    ``test_incremental_batch_mode_null_cursor_rows_emit_without_raise``
+    for the ancestor-cursor path so a future refactor that
+    re-normalizes None to {} inside
+    ``_read_contained_incremental_ancestor_cursor`` (or its dispatch
+    in ``_read_contained_incremental``) breaks loudly."""
+    _mock_nested_metadata()
+    responses.get(f"{SERVICE_URL}Parents", json={"value": [{"Id": 1}]})
+    responses.add(
+        responses.GET,
+        f"{SERVICE_URL}Parents(1)/Children",
+        json={"value": [{"Id": 10, "ModifiedAt": None}]},
+        match_querystring=False,
+    )
+    responses.get(
+        f"{SERVICE_URL}Parents(1)/Children(10)/Notes",
+        json={"value": [{"Id": 100, "Text": "a"}]},
+    )
+    c = _make()
+    records, _ = c.read_table(
+        "Parents__Children__Notes",
+        None,
+        {"cursor_field": "ModifiedAt"},
+    )
+    rows = list(records)
+    assert [r["Id"] for r in rows] == [100]
 
 
 @responses.activate
