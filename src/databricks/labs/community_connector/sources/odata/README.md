@@ -6,14 +6,22 @@ automatically from the service's `$metadata` endpoint.
 
 ## Capabilities
 
-- Discovers all entity sets via `$metadata`.
+- Discovers all entity sets via `$metadata`. No table-list config needed.
 - Maps EDM primitive types (`Edm.String`, `Edm.Int32`, `Edm.DateTimeOffset`,
   `Edm.Decimal`, etc.) to Spark types.
-- Snapshot ingest when no cursor is configured.
-- Incremental CDC ingest when a per-table `cursor_field` is set
-  (`field gt <last> and field le <now>`).
-- Four auth methods: bearer, basic, api_key, oauth2 (client credentials
-  *and* authorization-code / user flow with refresh-token rotation).
+- **Three read modes**: full-table snapshot (default), cursor-based
+  incremental (per-table `cursor_field` → each batch fetches
+  `cursor gt <last>`), and server-driven delta tracking (`Prefer:
+  odata.track-changes` with in-band tombstones).
+- **Contained navigation properties** addressed as
+  double-underscore-pathed tables (`Parents__Children__Notes`) with
+  ancestor FK columns synthesized for global uniqueness. Read via
+  default N+1 traversal or a single nested `$expand`.
+- **Four auth methods**: bearer, basic, api_key, oauth2 (client
+  credentials *and* authorization-code with refresh-token rotation).
+- **Parallel reads** for contained tables via
+  `SupportsPartitionedStream` (bin-packed top-level parents across
+  Spark tasks).
 
 ## Setting up the connection (UC)
 
@@ -114,73 +122,8 @@ Notes:
   Most providers accept the same refresh token repeatedly until it's
   explicitly revoked or expires.
 
-#### Python SDK form (any OAuth2 variant)
-
-```python
-from databricks.sdk import WorkspaceClient
-
-w = WorkspaceClient()
-
-service_url = "https://your-host/odata/v4/"
-
-w.api_client.do(
-    "POST",
-    "/api/2.1/unity-catalog/connections",
-    body={
-        "name": "odata_connection",
-        "connection_type": "COMMUNITY",
-        "comment": f"service_url={service_url}",
-        "options": {
-            "sourceName": "odata",
-            "service_url": service_url,
-            "auth_type": "oauth2",
-            "oauth2_token_url": "https://login.example.com/oauth/token",
-            "oauth2_client_id": "<client-id>",
-            "oauth2_client_secret": "<client-secret>",
-            "oauth2_scope": "read:everything",
-            # For authorization-code flow, add:
-            # "oauth2_refresh_token": "<refresh-token>",
-            # "oauth2_access_token": "<optional-pre-issued-access-token>",
-            "externalOptionsAllowList": (
-                "namespace,cursor_field,select,filter,"
-                "filter_at_*,page_size,"
-                "max_records_per_batch,delta_tracking,expand_contained,"
-                "num_partitions"
-            ),
-        },
-    },
-)
-```
-
-Auth error handling:
-
-- **Token-endpoint 4xx during the OAuth refresh-token grant** raises a
-  `ValueError` naming `oauth2_refresh_token` + `oauth2_client_id` as
-  the fields to check, with the OAuth `error` + `error_description`
-  echoed verbatim from the server.
-- **Source 401 *after* a successful OAuth refresh** raises a
-  `PermissionError` — the access token isn't the problem; check
-  `oauth2_scope`, principal permissions, and any tenant/instance
-  identifier in `service_url` or `extra_headers`.
-- **Source 401 or 403 with no automatic refresh path available**
-  raises a `PermissionError` with auth-mode-specific remediation
-  hints, naming the exact connection options to check. The server
-  response body is echoed truncated so high-privilege error codes
-  (`InvalidAuthenticationToken`, `Forbidden`, scope-related errors)
-  come through. Behavior per auth mode:
-  - `bearer` — pre-acquired tokens have no refresh path; the error
-    suggests replacing `token` with a fresh value or upgrading to
-    `auth_type=oauth2` with `oauth2_client_id` + `oauth2_client_secret`
-    so the connector mints and refreshes tokens automatically.
-  - `basic` — names `username` / `password` and the principal's
-    permissions at the source.
-  - `api_key` — names `api_key` (may have been rotated) and
-    `api_key_header` (some services expect a non-default header).
-  - `oauth2` without `oauth2_client_id`/`secret` and without
-    `oauth2_refresh_token` — names the missing parameter pairs that
-    would enable auto-refresh, plus `oauth2_scope`.
-  - No `auth_type` set — names the four valid `auth_type` values so
-    the operator can pick the right one for the source.
+For the Python SDK form of any OAuth2 variant, see
+[Option B](#option-b--python-sdk) below.
 
 ### Option B — Python SDK
 
@@ -216,6 +159,30 @@ w.api_client.do(
 )
 ```
 
+For OAuth2, replace the `"token": "<bearer-token>"` line above with
+the matching OAuth2 keys. Client credentials:
+
+```python
+"options": {
+    "sourceName": "odata",
+    "service_url": service_url,
+    "auth_type": "oauth2",
+    "oauth2_token_url": "https://login.example.com/oauth/token",
+    "oauth2_client_id": "<client-id>",
+    "oauth2_client_secret": "<client-secret>",
+    "oauth2_scope": "read:everything",
+    "externalOptionsAllowList": (
+        "namespace,cursor_field,select,filter,"
+        "filter_at_*,page_size,"
+        "max_records_per_batch,delta_tracking,expand_contained,"
+        "num_partitions"
+    ),
+}
+```
+
+For the authorization-code variant, add `oauth2_refresh_token` (and
+optionally `oauth2_access_token`) to the block above.
+
 The `externalOptionsAllowList` must match the connector spec's
 `external_options_allowlist`. The CLI in Option A reads the spec and
 sets this automatically; with the SDK you set it explicitly — keep
@@ -238,11 +205,38 @@ The response must show `connection_type: COMMUNITY` and `options.sourceName: oda
 If either is missing, the UI won't list the connection under the OData tile —
 delete it and re-create.
 
+### Auth error handling
+
+Failures surface as Python exceptions with the offending connection
+option named in the message and the server's response body echoed
+verbatim (truncated to keep the trace readable). Three classes:
+
+| Symptom | Exception | Remediation hint in the message |
+|---|---|---|
+| Token-endpoint 4xx during the OAuth refresh-token grant | `ValueError` | Re-check `oauth2_refresh_token` + `oauth2_client_id`; the OAuth `error` / `error_description` is echoed verbatim. |
+| Source 401 *after* a successful OAuth refresh | `PermissionError` | The access token isn't the problem — check `oauth2_scope`, the principal's permissions, and any tenant/instance identifier in `service_url`. |
+| Source 401/403 with no refresh path available | `PermissionError` | Per auth mode (see below). |
+
+The third row's remediation depends on the configured auth mode:
+
+- **`bearer`** — pre-acquired tokens have no refresh path. The error
+  suggests replacing `token` with a fresh value, or upgrading to
+  `auth_type=oauth2` with `oauth2_client_id` + `oauth2_client_secret`
+  so the connector mints and refreshes tokens automatically.
+- **`basic`** — names `username` / `password` and the principal's
+  permissions at the source.
+- **`api_key`** — names `api_key` (may have been rotated) and
+  `api_key_header` (some services expect a non-default header).
+- **`oauth2`** with no client credentials and no refresh token —
+  names the missing parameter pairs that would enable auto-refresh,
+  plus `oauth2_scope`.
+- **No `auth_type` set** — names the four valid `auth_type` values.
+
 ### Optional connection options
 
 | Option                        | Default | Description |
 | ----------------------------- | ------- | ----------- |
-| `metadata_cache_ttl_seconds`  | 60      | TTL for the on-disk pickle cache of the parsed CSDL (`$metadata`) document at `${TMPDIR}/odata_csdl_<sha256(service_url)>.pickle`. Shared across the forked `pyspark.daemon` workers that SDP spawns for schema inference, so the connector pays the fetch + parse cost once per pipeline init instead of once per `.load()`. Set to `0` to disable file-backed caching (process and instance caches still apply). |
+| `metadata_cache_ttl_seconds`  | 60      | TTL (seconds) for the on-disk cache of the parsed `$metadata` document, shared across forked workers so the fetch + parse cost is paid once per pipeline init. Set to `0` to disable. |
 | `max_retries`                 | 5       | Retry budget for transient failures. Two classes covered: (1) **HTTP 429 / 503** — throttling or service unavailable; honours the server's `Retry-After` header when present (integer seconds or HTTP-date), otherwise exponential backoff (1, 2, 4, 8, 16 s …). (2) **Connection-level exceptions** — TCP reset / remote disconnect, read or connect timeout, mid-body chunked-encoding error (the server returned no HTTP response at all); always exponential backoff. After `max_retries` consecutive failures the batch raises — `RuntimeError` for 429/503, the original exception type (`ConnectionError`/`Timeout`/`ChunkedEncodingError`) for network failures. Set to `0` to opt out. |
 | `retry_max_delay_seconds`     | 60      | Per-retry sleep cap (seconds). Applied to both server-supplied `Retry-After` values and the exponential-backoff fallback, so a misbehaving source emitting an hour-long `Retry-After` can't pin a Spark task. |
 
@@ -347,7 +341,7 @@ Other services (e.g. Northwind, generic SAP NetWeaver Gateway
 deployments) typically ignore the prefer header — `delta_tracking=auto`
 detects this and falls back to whatever cursor/snapshot config is set.
 
-### Limitations
+### Delta-tracking caveats
 
 - **Sparse property updates are rejected.** OData v4 §11.4 lets the
   server return only the *changed* properties on an update. Applying
@@ -425,6 +419,22 @@ full chain: ``[Parents_Id, Children_Id, Id]``. If the leaf had its
 own property named ``Children_Id``, the FK would be emitted as
 ``_Children_Id`` and the leaf property would keep its original name.
 
+Concretely, a row emitted from ``Parents__Children__Notes`` looks like:
+
+```json
+{
+  "Parents_Id":  42,
+  "Children_Id": 7,
+  "Id":          1003,
+  "Text":        "Follow up next week"
+}
+```
+
+`Parents_Id` and `Children_Id` are populated from each ancestor's
+primary key as the connector walks the chain; downstream Delta tables
+get these columns as ordinary columns and the destination MERGE keys
+on the composite PK.
+
 ### Read modes
 
 Two modes via the ``expand_contained`` table option:
@@ -443,64 +453,68 @@ verbatim. Use only against servers known to honor the depth you need
 
 ### Cursor-based incremental on contained tables
 
-Set ``cursor_field`` on the leaf entity's column. The connector walks
-every parent tuple per trigger, filters each leaf fetch with
-``$filter=<cursor> gt <since>``, and tracks the global max cursor in
-the offset. Mid-batch ``max_records_per_batch`` truncation parks a
-``parent_idx`` in the offset so the next call resumes at the same
-parent.
+Set ``cursor_field`` to a column the leaf entity (or one of its
+ancestors) declares. Each trigger walks the parent chain and filters
+the relevant fetch with ``cursor gt <since>``; the global max cursor
+seen is committed to the offset for next time.
 
-If the leaf entity doesn't declare ``cursor_field`` as a property,
-the connector walks leaf → root looking for the closest ancestor
-that does have it, filters at that ancestor level instead, and
-stamps the ancestor's cursor value onto every emitted leaf row.
-``get_table_schema`` adds the cursor column to the leaf schema with
-the ancestor's declared type. Set ``cursor_field`` to a column name
-that isn't anywhere on the path → ``ValueError``.
+Two sub-modes are picked automatically based on where the cursor
+lives:
 
-Truncation handling: when a per-parent walk hits the
-``max_records_per_batch`` cap, the connector prefers a **nextLink-based
-mid-chain resume**. The server's @odata.nextLink for the partially-paged
-chain is parked in the offset as ``chain_next_link``; the resumed call
-hands that link back to the server, which picks up exactly where it
-stopped without reconstructing ``$filter``/``$orderby``/``$select`` state.
-Subsequent parents in the same resume keep using the original ``cursor``
-``since``. After the resumed walk completes naturally, the offset
-collapses back to ``{"cursor": <max>}``; ``apply_changes`` dedupes any
-cross-batch repeats.
+- **Leaf cursor** — `cursor_field` is a property on the leaf entity.
+  The filter is applied to every leaf fetch.
+- **Ancestor cursor** — `cursor_field` is on a non-leaf ancestor. The
+  filter is applied at that ancestor's fetch (pruning entire
+  subtrees), and the ancestor's cursor value is stamped onto every
+  emitted leaf row. `get_table_schema` adds the cursor column to the
+  leaf schema with the ancestor's declared type.
 
-In leaf-cursor mode, when the chain ended on the truncating page (no
-nextLink available), the connector falls back to **Option A trim**: the
-trailing same-cursor cohort within that chain's emit is dropped and a
-``truncated_chain_cursor`` is parked. The resumed call rebuilds the URL
-with ``cursor gt truncated_chain_cursor`` for that one parent. If even
-one parent's same-cursor cohort exceeds ``max_records_per_batch``, the
-connector raises ``RuntimeError`` — raise the cap, or pick a
-higher-cardinality cursor.
+A `cursor_field` that's not declared anywhere along the path raises
+`ValueError` at read time.
 
-In ancestor-cursor mode there is no Option A fallback (every leaf under
-a chain shares the chain's stamped cursor by construction, so a
-within-chain ``cursor gt`` rebuild can't split it). The mode relies
-solely on ``chain_next_link``; if a server doesn't return durable
-@odata.nextLink values, raise ``max_records_per_batch`` above the
-largest per-chain leaf count.
+#### Truncation handling
 
-Cross-chain interleaving: ancestor-cursor mode walks chains depth-first
-by top-level parent, so ancestor cursors interleave across top-level
-parents (sibling chains under one parent are cursor-ordered, but
-Parent 2's lowest cursor can be below Parent 1's highest). On
-truncation the connector therefore preserves the **original** ``since``
-in the offset rather than advancing to the global max emitted, so the
-resumed call's rebuild of ``chains_with_cursor`` includes every chain
-that batch 1 saw — including any lower-cursor chains under later
-parents that hadn't been reached yet. A ``running_max`` is accumulated
-across resume batches so when the resume completes naturally the
-next regular trigger gets the actual highest cursor seen as its filter
-floor (a fresh first-ever resume that originated from ``since=None``
-would otherwise drop the cursor entirely on completion and re-walk
-the table on the next trigger). Cross-batch re-emission of
-already-seen chains is deduped by ``apply_changes`` on the composite
+When a per-parent walk hits `max_records_per_batch` mid-chain, the
+connector tries the cheapest resume that won't lose rows:
+
+1. **`@odata.nextLink` resume (preferred)** — if the server returned a
+   nextLink on the truncating page, it's parked in the offset as
+   `chain_next_link`. The resumed call hands the link back to the
+   server, which picks up exactly where it stopped (no
+   `$filter`/`$orderby`/`$select` reconstruction). Subsequent parents
+   in the resume re-use the original `since`.
+2. **Leaf-cursor fallback (Option A trim)** — if no nextLink is
+   available, the connector drops the trailing same-cursor cohort
+   within that one chain's emit and parks
+   `truncated_chain_cursor`. The resumed call rebuilds the URL with
+   `cursor gt truncated_chain_cursor` for that parent. If a single
+   parent's same-cursor cohort exceeds the cap, `RuntimeError` —
+   raise the cap or pick a higher-cardinality cursor.
+3. **Ancestor-cursor fallback** — none. Every leaf under a chain
+   shares the chain's stamped cursor by construction, so a
+   within-chain `cursor gt` rebuild can't split it. Ancestor mode
+   relies entirely on `chain_next_link`; if your server doesn't
+   return durable nextLinks, raise `max_records_per_batch` above the
+   largest per-chain leaf count.
+
+After the resumed walk completes naturally, the offset collapses back
+to `{"cursor": <max>}`. Cross-batch repeats from any of these
+fallbacks are deduplicated by `apply_changes` on the composite
 primary key.
+
+#### Watermark behavior on ancestor-cursor mode
+
+Ancestor cursors interleave across top-level parents (sibling chains
+under one parent are cursor-ordered, but Parent 2's lowest cursor can
+be below Parent 1's highest). To avoid skipping lower-cursor chains
+under later parents during resume, the connector:
+
+- **Preserves the original `since`** in the offset on truncation —
+  not the global max emitted — so the resumed walk re-enumerates
+  every chain that the initial batch saw.
+- **Accumulates `running_max`** across resume batches so a resume
+  that started from `since=None` doesn't drop the cursor on natural
+  completion and re-walk the table on the next trigger.
 
 ### Disallowed combinations
 
@@ -526,6 +540,34 @@ primary key.
 }
 ```
 
+### Filtering individual segments
+
+When a contained path's intermediate segments carry filterable
+properties (status flags, region codes, soft-delete columns), use
+`filter_at_<segment>` to prune the walk before the leaf fetch — this
+cascades the savings down to every child.
+
+```python
+# Read only Notes under archived=false Children of EMEA Parents.
+{
+    "table": {
+        "source_table": "Parents__Children__Notes",
+        "table_configuration": {
+            "filter_at_Parents": "Region eq 'EMEA'",
+            "filter_at_Children": "Archived eq false",
+            "filter": "Pinned eq true",  # equivalent to filter_at_Notes
+        },
+    }
+}
+```
+
+In N+1 mode this turns three coarse walks into three filtered walks
+(the connector only enumerates Parents matching `Region eq 'EMEA'`,
+only fetches Children where `Archived eq false`, etc.). In
+`expand_contained=true` mode each `filter_at_<segment>` becomes a
+filter inside the corresponding `$expand(...)` clause per OData v4
+§5.1.1.6.
+
 ## Multi-tenant / multi-schema services
 
 Services like SAP S/4HANA OData publish more than one `<Schema>` block in
@@ -540,34 +582,30 @@ entity set name appears in two schemas, set the `namespace` table option:
 
 ## Limitations
 
-- Contained-collection tables parallelize reads across Spark executors
-  via `SupportsPartitionedStream`: the connector enumerates top-level
-  parent rows once, bin-packs them into `num_partitions` contiguous
-  slices (default 4), and each task walks only its assigned subtrees.
-  Activation is gated to contained paths with `expand_contained=false`
-  and `delta_tracking=disabled`; configs outside that envelope fall
-  back to a single-task read. Top-level / flat tables stay
-  single-partition because `@odata.nextLink` skiptokens are opaque and
-  can't be safely split. Throughput on a flat table is bounded by the
-  source.
+- Top-level / flat tables stay single-partition because `@odata.nextLink`
+  skiptokens are opaque and can't be safely split — throughput on a flat
+  table is bounded by the source. See the `num_partitions` row in
+  [Per-table options](#per-table-options) for the contained-table
+  parallel-read envelope.
 - Delete tombstones are synthesized only when `delta_tracking` is active.
   In snapshot and cursor-based modes, the connector never returns
   `cdc_with_deletes`. OData services without delta-query support don't
   expose deletions uniformly.
 - Cursor field (when used) is assumed to be monotonically non-decreasing
   and naturally orderable by `$orderby`. Timestamps and monotonic IDs
-  work; arbitrary fields don't. Cursor values must be non-null: if every
-  row in a batch has a null cursor the connector raises `RuntimeError`
-  rather than silently dropping the rows. Add a server-side `filter`
-  to exclude null-cursor rows when the source allows them.
-- `max_records_per_batch` on the `expand_contained=true` path is
-  enforced **per HTTP fetch**, not per row. Cap deviation per batch
-  is bounded by one response's worth of leaf rows (≤ `page_size`);
-  the connector cannot interrupt mid-response because the in-flight
-  HTTP response body can't be serialized across batches. For tight
-  caps, lower `page_size` (shrinks the per-level `$top` cross-product
-  and therefore each response's row count) or switch to
-  `expand_contained=false` which commits at every parent-walk boundary.
+  work; arbitrary fields don't. In streaming mode, if every row in a
+  batch has a null cursor the connector raises `RuntimeError` rather
+  than silently committing rows whose offset can't advance (batch reads
+  / `spark.read.format(...)` are tolerated — the offset is discarded
+  anyway). Add a server-side `filter` to exclude null-cursor rows when
+  the source allows them.
+- The `expand_contained=true` per-HTTP-fetch cap (see the
+  `max_records_per_batch` row in [Per-table options](#per-table-options))
+  cannot interrupt mid-response because the in-flight HTTP response body
+  can't be serialized across batches. For tight caps, lower `page_size`
+  (shrinks the per-level `$top` cross-product and therefore each
+  response's row count) or switch to `expand_contained=false` which
+  commits at every parent-walk boundary.
 - Batch reads (`LakeflowBatchReader`, used by
   `spark.read.format("lakeflow_connect")`) call `read_table` with
   `start_offset=None` and discard the returned end-offset. The
