@@ -37,6 +37,31 @@ class TestGmailConnectorUnit:
         # connection's OAuth flow, not a local credential to set.
         assert "COMMUNITY" in str(info.value)
 
+    def test_unit_initialization_with_refresh_token(self, monkeypatch):
+        """Backward-compat: a connection with refresh_token + client creds
+        uses the in-code refresh path instead of an injected access_token."""
+        monkeypatch.setattr(
+            "databricks.labs.community_connector.sources.gmail.gmail_utils."
+            "GmailApiClient.make_request",
+            lambda self, method, path, **kwargs: {"historyId": "1"},
+        )
+        connector = GmailLakeflowConnect(
+            {
+                "client_id": "cid",
+                "client_secret": "secret",
+                "refresh_token": "refresh",
+            }
+        )
+        assert connector.access_token is None
+        assert connector.refresh_token == "refresh"
+        assert connector.api.client_id == "cid"
+        assert connector.api.refresh_token == "refresh"
+
+    def test_unit_refresh_token_requires_client_credentials(self):
+        """refresh_token without client_id/client_secret fails fast."""
+        with pytest.raises(ValueError, match="client_id"):
+            GmailLakeflowConnect({"refresh_token": "refresh"})
+
     def test_unit_schemas_use_long_type_not_integer(self, connector):
         """Test all numeric fields use LongType instead of IntegerType."""
         for table_name in connector.list_tables():

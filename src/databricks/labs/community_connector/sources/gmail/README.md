@@ -24,6 +24,12 @@ Databricks owns the OAuth dance — authorization-code + PKCE exchange, refresh,
 
 If a token expires or is revoked mid-query, Gmail returns 401; re-run the connection setup to re-consent.
 
+> **Backward compatibility.** Connections created before the u2m migration that
+> still supply `client_id` + `client_secret` + `refresh_token` keep working: the
+> connector detects the absence of an injected `access_token` and refreshes the
+> token in code itself (exchanging the `refresh_token` at Google's token
+> endpoint). New connections should use the `access_token` (u2m) flow above.
+
 ## Setup
 
 ### Step 1 — Create a Google Cloud project + enable the Gmail API

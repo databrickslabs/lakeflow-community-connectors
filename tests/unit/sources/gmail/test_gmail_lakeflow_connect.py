@@ -26,6 +26,27 @@ class TestGmailConnector(LakeflowConnectTests):
         assert "emailAddress" in records_list[0]
         assert "@" in records_list[0]["emailAddress"]
 
+    def test_refresh_token_path_reads_via_token_exchange(self):
+        """Backward-compat: a connection supplying refresh_token + client
+        creds (instead of an injected access_token) drives the in-code token
+        exchange against the simulator's /token endpoint and reads normally.
+
+        The simulator installed in setup_class intercepts both the /token
+        exchange and the Gmail API calls, so building a fresh connector here
+        exercises the full refresh path end-to-end.
+        """
+        refresh_connector = GmailLakeflowConnect(
+            {
+                "client_id": "sim-client-id",
+                "client_secret": "sim-client-secret",
+                "refresh_token": "sim-refresh-token",
+            }
+        )
+        records, _offset = refresh_connector.read_table("profile", {}, {})
+        records_list = list(records)
+        assert len(records_list) == 1
+        assert "emailAddress" in records_list[0]
+
     def test_read_labels_has_inbox(self):
         """Test reading labels includes INBOX."""
         records, offset = self.connector.read_table("labels", {}, {})
