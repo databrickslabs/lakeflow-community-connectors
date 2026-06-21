@@ -32,6 +32,7 @@ from typing import Iterator
 
 import requests
 from requests.auth import HTTPBasicAuth
+from requests.exceptions import RequestException
 from pyspark.sql.types import StructType
 
 from databricks.labs.community_connector.interface import LakeflowConnect
@@ -95,13 +96,31 @@ class AmplitudeLakeflowConnect(LakeflowConnect):
         kwargs.setdefault("timeout", DEFAULT_TIMEOUT)
         backoff = INITIAL_BACKOFF
         resp = None
+        last_exc: RequestException | None = None
         for attempt in range(MAX_RETRIES):
-            resp = requests.get(url, auth=self._auth, **kwargs)
-            if resp.status_code not in RETRIABLE_STATUS_CODES:
-                return resp
+            try:
+                resp = requests.get(url, auth=self._auth, **kwargs)
+            except RequestException as exc:
+                last_exc = exc
+            else:
+                if resp.status_code not in RETRIABLE_STATUS_CODES:
+                    return resp
             if attempt < MAX_RETRIES - 1:
-                time.sleep(backoff)
+                # Respect server throttling hints when available.
+                sleep_for = backoff
+                if resp is not None:
+                    retry_after = resp.headers.get("Retry-After", "").strip()
+                    if retry_after:
+                        try:
+                            sleep_for = max(sleep_for, float(retry_after))
+                        except ValueError:
+                            pass
+                time.sleep(sleep_for)
                 backoff *= 2
+        if resp is None and last_exc is not None:
+            raise RuntimeError(
+                f"Amplitude request failed after {MAX_RETRIES} attempts for {path}: {last_exc}"
+            ) from last_exc
         return resp
 
     # ----- interface ------------------------------------------------------
@@ -188,14 +207,16 @@ class AmplitudeLakeflowConnect(LakeflowConnect):
         else:
             # Default backfill: only the most recent window.  Set ``start_date``
             # (connection option) for deeper history.
-            window_hours_default = int(table_options.get("window_hours", "24"))
+            window_hours_default = self._positive_int_option(
+                table_options, "window_hours", 24
+            )
             since_dt = init_dt - timedelta(hours=window_hours_default)
 
         # Caught up to the init-time cap — signal "no more data".
         if since_dt >= init_dt:
             return iter([]), start_offset
 
-        window_hours = int(table_options.get("window_hours", "24"))
+        window_hours = self._positive_int_option(table_options, "window_hours", 24)
         window_end_dt = min(since_dt + timedelta(hours=window_hours), init_dt)
 
         params = {
@@ -309,7 +330,7 @@ class AmplitudeLakeflowConnect(LakeflowConnect):
         if since_date >= self._init_date:
             return iter([]), start_offset
 
-        window_days = int(table_options.get("window_days", "30"))
+        window_days = self._positive_int_option(table_options, "window_days", 30)
         since_dt = datetime.strptime(since_date, "%Y-%m-%d")
         window_end_dt = min(
             since_dt + timedelta(days=window_days),
@@ -339,9 +360,53 @@ class AmplitudeLakeflowConnect(LakeflowConnect):
 
     def _default_metric_start(self, table_options: dict[str, str]) -> str:
         """Default lower bound for date-series tables: one window back."""
-        window_days = int(table_options.get("window_days", "30"))
+        window_days = self._positive_int_option(table_options, "window_days", 30)
         init_dt = datetime.strptime(self._init_date, "%Y-%m-%d")
         return (init_dt - timedelta(days=window_days)).strftime("%Y-%m-%d")
+
+    @staticmethod
+    def _positive_int_option(
+        table_options: dict[str, str], key: str, default_value: int
+    ) -> int:
+        """Parse a positive integer option and fail fast on invalid values."""
+        raw_value = table_options.get(key, str(default_value))
+        try:
+            value = int(raw_value)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(
+                f"Amplitude option '{key}' must be a positive integer; got {raw_value!r}"
+            ) from exc
+        if value <= 0:
+            raise ValueError(
+                f"Amplitude option '{key}' must be a positive integer; got {raw_value!r}"
+            )
+        return value
+
+    @staticmethod
+    def _coerce_int(value) -> int | None:
+        if value is None:
+            return None
+        if isinstance(value, bool):
+            return int(value)
+        if isinstance(value, (int, float)):
+            return int(value)
+        try:
+            return int(str(value).strip())
+        except (TypeError, ValueError):
+            return None
+
+    @staticmethod
+    def _coerce_float(value) -> float | None:
+        if value is None:
+            return None
+        if isinstance(value, bool):
+            return float(value)
+        if isinstance(value, (int, float)):
+            return float(value)
+        try:
+            return float(str(value).strip())
+        except (TypeError, ValueError):
+            return None
 
     @staticmethod
     def _series_payload(body):
@@ -371,7 +436,7 @@ class AmplitudeLakeflowConnect(LakeflowConnect):
                     rows.append(
                         {
                             "date": date,
-                            "count": segment_series[d_idx],
+                            "count": cls._coerce_int(segment_series[d_idx]),
                             "segment": segment,
                         }
                     )
@@ -394,7 +459,9 @@ class AmplitudeLakeflowConnect(LakeflowConnect):
         rows: list[dict] = []
         for d_idx, date in enumerate(x_values):
             if d_idx < len(first_series):
-                rows.append({"date": date, "length": first_series[d_idx]})
+                rows.append(
+                    {"date": date, "length": cls._coerce_float(first_series[d_idx])}
+                )
         return rows
 
     @staticmethod
