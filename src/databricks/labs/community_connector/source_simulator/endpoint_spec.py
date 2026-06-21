@@ -116,6 +116,13 @@ class ResponseShape:
     default_sort: Optional[Tuple[str, str]] = None  # (field, "asc"|"desc")
     single_entity: bool = False
     wrapper: Optional[ResponseWrapper] = None
+    # When a live endpoint can legitimately return several different status
+    # codes (e.g. Amplitude's Export API returns 200 on data and 404 when the
+    # requested window contains no events), list them here.  The validator
+    # skips the status-code diff when the live code is in this set.
+    # The spec's own response (always 200 from corpus) is still served to the
+    # connector — only the *validation check* is relaxed.
+    expected_status_codes: List[int] = field(default_factory=list)
 
 
 @dataclass
@@ -294,11 +301,15 @@ def _parse_response(raw: dict) -> ResponseShape:
             ignore_extra_keys=bool(raw_wrapper.get("ignore_extra_keys", False)),
         )
 
+    raw_expected = raw.get("expected_status_codes", [])
+    expected_status_codes = [int(c) for c in raw_expected] if raw_expected else []
+
     return ResponseShape(
         pagination_style=str(raw.get("pagination_style", "none")),
         default_sort=default_sort,
         single_entity=bool(raw.get("single_entity", False)),
         wrapper=wrapper,
+        expected_status_codes=expected_status_codes,
     )
 
 

@@ -22,6 +22,12 @@ endpoints:
     corpus: events
     response:
       pagination_style: none
+      # Amplitude returns 404 (not an error — just "no data") when the
+      # requested hourly window contains no events.  This is normal for
+      # newly-provisioned or low-traffic accounts and is handled explicitly
+      # by the connector (records = []).  Declaring 404 here prevents the
+      # LiveValidator from flagging it as a structural mismatch.
+      expected_status_codes: [200, 404]
     params:
       start: {role: ignore}
       end: {role: ignore}

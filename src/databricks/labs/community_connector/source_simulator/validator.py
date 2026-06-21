@@ -230,10 +230,22 @@ def _diff(
     """Return a list of issue strings; empty means responses match."""
     issues: List[str] = []
 
-    if live.status_code != spec_response.status_code:
+    _allowed_codes = spec.response.expected_status_codes or []
+    _is_alternative_code = (
+        live.status_code != spec_response.status_code
+        and live.status_code in _allowed_codes
+    )
+    _status_ok = live.status_code == spec_response.status_code or _is_alternative_code
+    if not _status_ok:
         issues.append(
             f"status_code: live={live.status_code} spec={spec_response.status_code}"
         )
+
+    # When the live endpoint returned an explicitly-accepted alternative status
+    # code (e.g. 404 for "no data"), body diffing is meaningless — the response
+    # shape will differ from the success corpus by design.  Skip it.
+    if _is_alternative_code:
+        return issues
 
     live_body = _try_json(live)
     spec_body = _try_json(spec_response)
