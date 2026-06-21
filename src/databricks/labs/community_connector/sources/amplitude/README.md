@@ -1,6 +1,6 @@
 # Lakeflow Amplitude Community Connector
 
-This documentation describes how to configure and use the **Amplitude** Lakeflow community connector to ingest product analytics data from Amplitude's Analytics APIs (Export API, Dashboard REST API, Behavioral Cohorts API, and Chart Annotations API) into Databricks.
+This documentation describes how to configure and use the **Amplitude** Lakeflow community connector to ingest product analytics data from Amplitude's Analytics APIs (Export API, Dashboard REST API, Behavioral Cohorts API, Chart Annotations API, and Taxonomy API) into Databricks.
 
 ## Prerequisites
 
@@ -23,7 +23,7 @@ Provide the following **connection-level** options when configuring the connecto
 | `api_key`   | string | Yes      | Amplitude project API Key used for HTTP Basic authentication.                                         | `1234567890abcdef...`        |
 | `secret_key`| string | Yes      | Amplitude project Secret Key used for HTTP Basic authentication.                                      | `abcdef1234567890...`        |
 | `data_region` | string | No     | Data-residency region. One of `standard` (default, US host) or `eu` (EU host). Case-insensitive.      | `eu`                         |
-| `start_date`  | string | No     | ISO-8601 datetime lower bound for the initial backfill of incremental tables (`events`, `active_users_counts`, `average_session_length`). If omitted, the connector defaults to a single recent window. | `2024-01-01T00:00:00Z` |
+| `start_date`  | string | No     | ISO-8601 datetime lower bound for the initial backfill of incremental tables (`events`, `active_users_counts`, `average_session_length`, `sessions_per_user`). If omitted, the connector defaults to a single recent window. | `2024-01-01T00:00:00Z` |
 
 > **Note:** If both `api_key` and `secret_key` are not provided, the connector raises an error at startup. An unsupported `data_region` value also raises an error (only `standard` and `eu` are accepted).
 
@@ -35,13 +35,13 @@ This connector supports **table-specific options** that are passed per table via
 window_hours,window_days,m,i,g
 ```
 
-| Option         | Applies to                                           | Description |
-|----------------|------------------------------------------------------|-------------|
-| `window_hours` | `events`                                             | Width (in hours) of each Export API window per read call. Default `24`. Reduce for high-volume projects that hit timeouts or the 4 GB response limit. |
-| `window_days`  | `active_users_counts`, `average_session_length`      | Width (in days) of each Dashboard date-series window per read call. Default `30`. |
-| `m`            | `active_users_counts`                                | User metric: `active` (default) or `new`. |
-| `i`            | `active_users_counts`                                | Interval: `1` (daily, default), `7` (weekly), or `30` (monthly). |
-| `g`            | `active_users_counts`                                | Group-by property name (e.g. `country`). When set, results are split into one segment per group value. |
+| Option         | Applies to                                                                                    | Description |
+|----------------|-----------------------------------------------------------------------------------------------|-------------|
+| `window_hours` | `events`                                                                                      | Width (in hours) of each Export API window per read call. Default `24`. Reduce for high-volume projects that hit timeouts or the 4 GB response limit. |
+| `window_days`  | `active_users_counts`, `average_session_length`, `sessions_per_user`, `session_length_distribution` | Width (in days) of each Dashboard date-series window per read call. Default `30` (distribution uses `30`, others use `30`). |
+| `m`            | `active_users_counts`                                                                         | User metric: `active` (default) or `new`. |
+| `i`            | `active_users_counts`                                                                         | Interval: `1` (daily, default), `7` (weekly), or `30` (monthly). |
+| `g`            | `active_users_counts`                                                                         | Group-by property name (e.g. `country`). When set, results are split into one segment per group value. |
 
 ### Obtaining the Required Parameters
 
@@ -136,7 +136,11 @@ All source-specific options are optional and have sensible defaults. They must b
   - `g` (string, optional): Group-by property name (e.g. `country`) to split counts by segment.
 - **`average_session_length`**:
   - `window_days` (integer, default `30`): Width of each date window.
-- **`events_list`, `cohorts`, `annotations`**: No source-specific options required.
+- **`session_length_distribution`**:
+  - `window_days` (integer, default `30`): Lookback window for the session length histogram. The API aggregates all sessions in this range into a single set of bucket counts.
+- **`sessions_per_user`**:
+  - `window_days` (integer, default `30`): Width of each date window.
+- **`events_list`, `cohorts`, `annotations`, `taxonomy_events`, `taxonomy_user_properties`**: No source-specific options required.
 
 ## Data Type Mapping
 
@@ -144,17 +148,17 @@ Amplitude API types are mapped to Spark/Delta types as follows:
 
 | Amplitude API type | Example fields | Spark type | Notes |
 |---|---|---|---|
-| string | `event_type`, `user_id`, `value`, `name` | `StringType` | Most text fields. |
-| integer | `event_id`, `app`, `totals`, `size` | `LongType` | All numeric IDs/counts stored as `LongType` to avoid overflow. |
+| string | `event_type`, `user_id`, `value`, `name`, `user_property`, `bucket` | `StringType` | Most text fields. |
+| integer | `event_id`, `app`, `totals`, `size`, `count` | `LongType` | All numeric IDs/counts stored as `LongType` to avoid overflow. |
 | long | `amplitude_id`, `session_id` | `LongType` | Large integer identifiers. |
-| float | `location_lat`, `location_lng`, `length` | `DoubleType` | Floating-point values. |
-| boolean | `paying`, `archived`, `hidden`, `deleted` | `BooleanType` | Standard `true`/`false`. |
+| float | `location_lat`, `location_lng`, `length`, `avg_sessions` | `DoubleType` | Floating-point values. |
+| boolean | `paying`, `archived`, `hidden`, `deleted`, `is_active`, `is_array_type` | `BooleanType` | Standard `true`/`false`. |
 | UTC ISO-8601 timestamp (string) | `event_time`, `server_upload_time`, annotation `start`/`end` | `TimestampType` | Parsed from string. |
 | Unix epoch seconds (integer) | cohort `lastMod`, `createdAt`, `lastComputed` | `LongType` | Stored as raw epoch seconds; multiply by 1000 for milliseconds. |
 | object / dict | `event_properties`, `user_properties`, `group_properties`, `groups`, `data` | `MapType(StringType, StringType)` | Free-form keys vary per event type/project. |
 | nested object | annotation `category` | `StructType` | `{id, name}`. |
 | complex nested object | cohort `definition` | `StringType` (JSON) | Serialized to a JSON string. |
-| array of strings | cohort `owners`, `viewers`, `shortcut_ids`, `metadata` | `ArrayType(StringType)` | Preserved as arrays. |
+| array of strings | cohort `owners`, `viewers`; taxonomy `tags`, `classifications`, `enum_values` | `ArrayType(StringType)` | Preserved as arrays. |
 | UUID string | `events.uuid` | `StringType` | Globally unique event identifier (primary key). |
 
 ## How to Run
@@ -167,53 +171,44 @@ Use the Lakeflow Community Connector UI to copy or reference the Amplitude conne
 
 In your pipeline file (e.g. `ingest.py`), configure a `pipeline_spec` that references the Unity Catalog connection for this connector and one or more tables to ingest. Example:
 
-```json
-{
-  "pipeline_spec": {
+```python
+from databricks.labs.community_connector.pipeline import ingest
+from databricks.labs.community_connector import register
+
+spark.conf.set("spark.databricks.unityCatalog.connectionDfOptionInjection.enabled", "true")
+
+register(spark, "amplitude")
+
+pipeline_spec = {
     "connection_name": "amplitude_connection",
-    "object": [
-      {
-        "table": {
-          "source_table": "events",
-          "table_configuration": {
-            "window_hours": "6"
-          }
-        }
-      },
-      {
-        "table": {
-          "source_table": "active_users_counts",
-          "table_configuration": {
-            "window_days": "30",
-            "m": "active",
-            "i": "1",
-            "g": "country"
-          }
-        }
-      },
-      {
-        "table": {
-          "source_table": "average_session_length"
-        }
-      },
-      {
-        "table": {
-          "source_table": "events_list"
-        }
-      },
-      {
-        "table": {
-          "source_table": "cohorts"
-        }
-      },
-      {
-        "table": {
-          "source_table": "annotations"
-        }
-      }
+    "objects": [
+        # ---- raw events (append-only, incremental by server_upload_time) ----
+        {"table": {"source_table": "events",
+                   "table_configuration": {"window_hours": "6"}}},
+
+        # ---- dashboard time-series (CDC by date) ----
+        {"table": {"source_table": "active_users_counts",
+                   "table_configuration": {"window_days": "30", "m": "active",
+                                           "i": "1", "g": "country"}}},
+        {"table": {"source_table": "average_session_length",
+                   "table_configuration": {"window_days": "30"}}},
+        {"table": {"source_table": "sessions_per_user",
+                   "table_configuration": {"window_days": "30"}}},
+
+        # ---- session length histogram (snapshot over window) ----
+        {"table": {"source_table": "session_length_distribution",
+                   "table_configuration": {"window_days": "30"}}},
+
+        # ---- snapshots (full-refresh each run) ----
+        {"table": {"source_table": "events_list"}},
+        {"table": {"source_table": "cohorts"}},
+        {"table": {"source_table": "annotations"}},
+        {"table": {"source_table": "taxonomy_events"}},
+        {"table": {"source_table": "taxonomy_user_properties"}},
     ]
-  }
 }
+
+ingest(spark, pipeline_spec)
 ```
 
 - `connection_name` must point to the UC connection configured with your Amplitude `api_key` and `secret_key` (and optional `data_region` / `start_date`), with `externalOptionsAllowList` set to `window_hours,window_days,m,i,g`.
@@ -228,7 +223,7 @@ Run the pipeline using your standard Lakeflow / Databricks orchestration (e.g. a
 
 #### Best Practices
 
-- **Start small**: Begin with one or two tables (e.g. `events_list`, `active_users_counts`) to validate configuration and data shape before enabling `events`.
+- **Start small**: Begin with lightweight snapshot tables (e.g. `events_list`, `taxonomy_events`, `taxonomy_user_properties`) to validate configuration and data shape before enabling high-volume incremental tables like `events`.
 - **Use incremental sync**: Rely on the `append`/`cdc` cursors for `events`, `active_users_counts`, and `average_session_length` to minimize API calls.
 - **Tune the Export window**: Lower `window_hours` for high-volume projects to avoid Export API timeouts (HTTP 504) and the 4 GB per-window size limit (HTTP 400). If a single hour exceeds 4 GB, use Amplitude's Amazon S3 Export instead.
 - **Respect rate limits**: The Dashboard REST API uses a cost model (~108,000 cost units/hour, 1,000 per 5-minute burst, max 5 concurrent requests across all endpoints). Space out syncs and avoid unnecessary group-by queries, which cost more.
@@ -256,3 +251,4 @@ Run the pipeline using your standard Lakeflow / Databricks orchestration (e.g. a
   - Dashboard REST API: `https://amplitude.com/docs/apis/analytics/dashboard-rest`
   - Behavioral Cohorts API: `https://amplitude.com/docs/apis/analytics/behavioral-cohorts`
   - Chart Annotations API: `https://amplitude.com/docs/apis/analytics/chart-annotations`
+  - Taxonomy API: `https://amplitude.com/docs/apis/analytics/taxonomy`
