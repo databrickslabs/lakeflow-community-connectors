@@ -1,0 +1,64 @@
+{
+  "version": 1,
+  "endpoints": [
+    {
+      "method": "GET",
+      "url": "https://amplitude.com/api/2/events/list",
+      "count": 3,
+      "param_shapes": [
+        []
+      ]
+    },
+    {
+      "method": "GET",
+      "url": "https://amplitude.com/api/2/export",
+      "count": 2,
+      "param_shapes": [
+        [
+          "end",
+          "start"
+        ]
+      ]
+    },
+    {
+      "method": "GET",
+      "url": "https://amplitude.com/api/2/sessions/average",
+      "count": 2,
+      "param_shapes": [
+        [
+          "end",
+          "start"
+        ]
+      ]
+    },
+    {
+      "method": "GET",
+      "url": "https://amplitude.com/api/2/users",
+      "count": 2,
+      "param_shapes": [
+        [
+          "end",
+          "i",
+          "m",
+          "start"
+        ]
+      ]
+    },
+    {
+      "method": "GET",
+      "url": "https://amplitude.com/api/3/annotations",
+      "count": 3,
+      "param_shapes": [
+        []
+      ]
+    },
+    {
+      "method": "GET",
+      "url": "https://amplitude.com/api/3/cohorts",
+      "count": 3,
+      "param_shapes": [
+        []
+      ]
+    }
+  ]
+}

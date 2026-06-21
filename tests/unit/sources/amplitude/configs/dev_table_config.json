@@ -1,0 +1,5 @@
+{
+  "events": { "window_hours": "24" },
+  "active_users_counts": { "window_days": "7" },
+  "average_session_length": { "window_days": "7" }
+}
