@@ -250,14 +250,24 @@ def _diff(
         return issues
 
     if isinstance(live_body, dict):
-        live_keys = set(live_body.keys())
-        spec_keys = set(spec_body.keys())
-        missing_in_spec = live_keys - spec_keys
-        if missing_in_spec:
-            issues.append(
-                f"top-level keys in live missing from spec: "
-                f"{sorted(list(missing_in_spec))[:5]}"
-            )
+        # When the spec declares ignore_extra_keys on its wrapper, skip the
+        # top-level key diff entirely.  This is the right escape hatch for
+        # APIs (e.g. Amplitude) that return dynamically-varying internal
+        # metadata fields (caching telemetry, cost annotations, etc.) that
+        # change on every call and are never read by the connector.
+        _ignore_extra = (
+            spec.response.wrapper is not None
+            and spec.response.wrapper.ignore_extra_keys
+        )
+        if not _ignore_extra:
+            live_keys = set(live_body.keys())
+            spec_keys = set(spec_body.keys())
+            missing_in_spec = live_keys - spec_keys
+            if missing_in_spec:
+                issues.append(
+                    f"top-level keys in live missing from spec: "
+                    f"{sorted(list(missing_in_spec))[:5]}"
+                )
 
     live_records = _extract_records(live_body, spec)
     spec_records = _extract_records(spec_body, spec)

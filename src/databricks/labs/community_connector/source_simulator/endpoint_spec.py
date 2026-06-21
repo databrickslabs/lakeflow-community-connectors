@@ -98,10 +98,16 @@ class ResponseWrapper:
 
     ``records_key`` is the field name that holds the records array.
     ``extras`` is a dict of fixed fields to include in the wrapper.
+    ``ignore_extra_keys`` suppresses the "top-level keys in live missing
+    from spec" validator finding for this endpoint.  Use when the live API
+    returns dynamically-varying internal metadata fields (e.g. caching
+    telemetry) that are not part of the connector's data contract and
+    change on every call.
     """
 
     records_key: str
     extras: Dict[str, Any] = field(default_factory=dict)
+    ignore_extra_keys: bool = False
 
 
 @dataclass
@@ -285,6 +291,7 @@ def _parse_response(raw: dict) -> ResponseShape:
         wrapper = ResponseWrapper(
             records_key=str(raw_wrapper["records_key"]),
             extras=dict(raw_wrapper.get("extras", {})),
+            ignore_extra_keys=bool(raw_wrapper.get("ignore_extra_keys", False)),
         )
 
     return ResponseShape(

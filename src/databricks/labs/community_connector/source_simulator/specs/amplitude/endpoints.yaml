@@ -40,15 +40,13 @@ endpoints:
       pagination_style: none
       wrapper:
         records_key: data
-        # Extra top-level metadata fields returned by the live API.
-        # Connector only reads ``data``; these are included so the
-        # spec validator does not flag them as unexpected drift.
-        extras:
-          cacheFreshness: null
-          novaCost: null
-          novaRequestDuration: null
-          novaRuntime: null
-          throttleTime: null
+        # Amplitude returns dynamically-varying internal metadata fields
+        # (cacheFreshness, novaCost, novaRuntime, timeComputed, …) that
+        # change per-call and are not part of the connector's data contract.
+        # ignore_extra_keys suppresses the validator's top-level key diff
+        # for this endpoint so live runs report as "validated" regardless of
+        # which internal fields the API happens to return.
+        ignore_extra_keys: true
 
   # ---- active_users_counts (Dashboard REST API, cdc) ----
   - path: /api/2/users
@@ -79,14 +77,8 @@ endpoints:
       pagination_style: none
       wrapper:
         records_key: data
-        # Extra top-level metadata fields returned by the live API.
-        # Connector only reads ``data``; included to avoid validator drift.
-        extras:
-          allQueriesCached: null
-          backend: null
-          cacheFreshness: null
-          containsCohorts: null
-          costMetadata: null
+        # Same dynamic metadata suppression as events_list above.
+        ignore_extra_keys: true
     params:
       start: {role: ignore}
       end: {role: ignore}
