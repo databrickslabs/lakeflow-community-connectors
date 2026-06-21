@@ -227,6 +227,41 @@ def test_read_events_cursor_at_init_ts_returns_empty_without_api_call():
     mocked_request.assert_not_called()
 
 
+def test_flatten_user_counts_multiple_segments_unique_per_date():
+    """When g= (group-by) is active, the API returns one series per group.
+    Each (date, segment) pair must be a distinct row so CDC upserts by the
+    composite primary key ['date', 'segment'] don't overwrite each other."""
+    rows = AmplitudeLakeflowConnect._flatten_user_counts(
+        {
+            "data": {
+                "series": [[10, 20], [30, 40]],
+                "seriesMeta": ["US", "UK"],
+                "xValues": ["2026-06-01", "2026-06-02"],
+            }
+        }
+    )
+
+    assert len(rows) == 4  # 2 dates × 2 segments
+    assert {"date": "2026-06-01", "count": 10, "segment": "US"} in rows
+    assert {"date": "2026-06-01", "count": 30, "segment": "UK"} in rows
+    assert {"date": "2026-06-02", "count": 20, "segment": "US"} in rows
+    assert {"date": "2026-06-02", "count": 40, "segment": "UK"} in rows
+    # All (date, segment) pairs are distinct — safe as a composite CDC key.
+    date_segment_pairs = {(r["date"], r["segment"]) for r in rows}
+    assert len(date_segment_pairs) == 4
+
+
+def test_active_users_counts_primary_key_includes_segment():
+    """Regression: primary key must be ['date', 'segment'] (not just ['date'])
+    to avoid CDC overwrites when the g= table option produces multiple
+    segments per date."""
+    from databricks.labs.community_connector.sources.amplitude.amplitude_schemas import (
+        TABLE_METADATA,
+    )
+
+    assert TABLE_METADATA["active_users_counts"]["primary_keys"] == ["date", "segment"]
+
+
 def test_retry_count_matches_configured_max_attempts():
     connector = _connector()
     unavailable = _mock_response(503)

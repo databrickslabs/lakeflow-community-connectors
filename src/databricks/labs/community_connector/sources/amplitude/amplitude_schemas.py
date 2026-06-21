@@ -219,7 +219,11 @@ TABLE_METADATA = {
         "ingestion_type": "snapshot",
     },
     "active_users_counts": {
-        "primary_keys": ["date"],
+        # Composite key: segment is always present ("Totals" when g= is not
+        # set, or the group-by value when it is).  Using only ["date"] would
+        # silently overwrite earlier segments when multiple rows share the
+        # same date — a data-loss bug when the g= table option is used.
+        "primary_keys": ["date", "segment"],
         "cursor_field": "date",
         "ingestion_type": "cdc",
     },
