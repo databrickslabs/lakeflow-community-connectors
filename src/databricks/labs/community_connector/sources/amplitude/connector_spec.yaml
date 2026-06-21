@@ -17,12 +17,14 @@ connection:
     - name: api_key
       type: string
       required: true
+      secret: true
       description: >
         Amplitude API key used for HTTP Basic authentication.
 
     - name: secret_key
       type: string
       required: true
+      secret: true
       description: >
         Amplitude secret key used for HTTP Basic authentication.
 

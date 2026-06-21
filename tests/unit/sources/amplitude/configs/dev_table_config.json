@@ -1,5 +1,12 @@
 {
-  "events": { "window_hours": "24" },
-  "active_users_counts": { "window_days": "7" },
-  "average_session_length": { "window_days": "7" }
+  "events":                      { "window_hours": "24" },
+  "events_list":                 {},
+  "active_users_counts":         { "window_days": "7" },
+  "average_session_length":      { "window_days": "7" },
+  "session_length_distribution": { "window_days": "30" },
+  "sessions_per_user":           { "window_days": "7" },
+  "cohorts":                     {},
+  "annotations":                 {},
+  "taxonomy_events":             {},
+  "taxonomy_user_properties":    {}
 }
