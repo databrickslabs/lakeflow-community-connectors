@@ -33,6 +33,44 @@
     },
     {
       "method": "GET",
+      "url": "https://amplitude.com/api/2/sessions/length",
+      "count": 3,
+      "param_shapes": [
+        [
+          "end",
+          "start"
+        ]
+      ]
+    },
+    {
+      "method": "GET",
+      "url": "https://amplitude.com/api/2/sessions/peruser",
+      "count": 2,
+      "param_shapes": [
+        [
+          "end",
+          "start"
+        ]
+      ]
+    },
+    {
+      "method": "GET",
+      "url": "https://amplitude.com/api/2/taxonomy/event",
+      "count": 3,
+      "param_shapes": [
+        []
+      ]
+    },
+    {
+      "method": "GET",
+      "url": "https://amplitude.com/api/2/taxonomy/user-property",
+      "count": 3,
+      "param_shapes": [
+        []
+      ]
+    },
+    {
+      "method": "GET",
       "url": "https://amplitude.com/api/2/users",
       "count": 2,
       "param_shapes": [
