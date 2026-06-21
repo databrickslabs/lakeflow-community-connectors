@@ -155,10 +155,18 @@ class AmplitudeLakeflowConnect(LakeflowConnect):
             return self._read_user_counts(start_offset, table_options)
         if table_name == "average_session_length":
             return self._read_session_length(start_offset, table_options)
+        if table_name == "session_length_distribution":
+            return self._read_session_length_distribution(table_options)
+        if table_name == "sessions_per_user":
+            return self._read_sessions_per_user(start_offset, table_options)
         if table_name == "cohorts":
             return self._read_cohorts()
         if table_name == "annotations":
             return self._read_annotations()
+        if table_name == "taxonomy_events":
+            return self._read_taxonomy_events()
+        if table_name == "taxonomy_user_properties":
+            return self._read_taxonomy_user_properties()
         raise ValueError(f"Unsupported table: {table_name!r}")
 
     # ----- helpers --------------------------------------------------------
@@ -450,6 +458,44 @@ class AmplitudeLakeflowConnect(LakeflowConnect):
         return rows
 
     @classmethod
+    def _flatten_session_length_distribution(cls, body) -> list[dict]:
+        """Flatten the sessions/length histogram to one row per bucket."""
+        payload = cls._series_payload(body)
+        if isinstance(payload, list):
+            return payload
+        if not isinstance(payload, dict):
+            return []
+        series = payload.get("series") or []
+        x_values = payload.get("xValues") or []
+        if not series:
+            return []
+        first_series = series[0]
+        return [
+            {"bucket": bucket, "count": cls._coerce_int(first_series[d_idx])}
+            for d_idx, bucket in enumerate(x_values)
+            if d_idx < len(first_series)
+        ]
+
+    @classmethod
+    def _flatten_sessions_per_user(cls, body) -> list[dict]:
+        """Flatten the sessions/peruser time series to one row per date."""
+        payload = cls._series_payload(body)
+        if isinstance(payload, list):
+            return payload
+        if not isinstance(payload, dict):
+            return []
+        series = payload.get("series") or []
+        x_values = payload.get("xValues") or []
+        if not series:
+            return []
+        first_series = series[0]
+        return [
+            {"date": date, "avg_sessions": cls._coerce_float(first_series[d_idx])}
+            for d_idx, date in enumerate(x_values)
+            if d_idx < len(first_series)
+        ]
+
+    @classmethod
     def _flatten_session_length(cls, body) -> list[dict]:
         payload = cls._series_payload(body)
         if isinstance(payload, list):
@@ -484,6 +530,46 @@ class AmplitudeLakeflowConnect(LakeflowConnect):
                 return entry
         return "Totals"
 
+    # ----- session_length_distribution (Dashboard REST, snapshot) ---------
+
+    def _read_session_length_distribution(
+        self, table_options: dict[str, str]
+    ) -> tuple[Iterator[dict], dict]:
+        """Snapshot of session length histogram over the most recent window.
+
+        The Dashboard `/api/2/sessions/length` endpoint aggregates over the
+        requested date range and returns one count per pre-defined bucket
+        (e.g. "0s-60s", "60s-300s").  There is no per-day breakdown, so this
+        is modelled as a snapshot keyed on ``bucket``.  ``window_days``
+        controls the lookback period (default 30 days).
+        """
+        window_days = self._positive_int_option(table_options, "window_days", 30)
+        init_dt = datetime.strptime(self._init_date, "%Y-%m-%d")
+        start_dt = init_dt - timedelta(days=window_days)
+        params = {
+            "start": start_dt.strftime("%Y%m%d"),
+            "end": init_dt.strftime("%Y%m%d"),
+        }
+        resp = self._request_with_retry("/api/2/sessions/length", params=params)
+        if resp.status_code != 200:
+            raise RuntimeError(
+                f"Amplitude sessions/length error: {resp.status_code} {resp.text[:500]}"
+            )
+        records = self._flatten_session_length_distribution(resp.json())
+        return iter(records), {}
+
+    # ----- sessions_per_user (Dashboard REST, cdc) ------------------------
+
+    def _read_sessions_per_user(
+        self, start_offset: dict, table_options: dict[str, str]
+    ) -> tuple[Iterator[dict], dict]:
+        return self._read_dashboard_series(
+            "/api/2/sessions/peruser",
+            start_offset,
+            table_options,
+            flatten=self._flatten_sessions_per_user,
+        )
+
     # ----- cohorts (Behavioral Cohorts API, snapshot) ---------------------
 
     def _read_cohorts(self) -> tuple[Iterator[dict], dict]:
@@ -508,6 +594,47 @@ class AmplitudeLakeflowConnect(LakeflowConnect):
         if resp.status_code != 200:
             raise RuntimeError(
                 f"Amplitude annotations error: {resp.status_code} {resp.text[:500]}"
+            )
+        records = self._unwrap_list(resp.json(), "data")
+        return iter(records), {}
+
+    # ----- taxonomy_events (Taxonomy API, snapshot) -----------------------
+
+    def _read_taxonomy_events(self) -> tuple[Iterator[dict], dict]:
+        resp = self._request_with_retry("/api/2/taxonomy/event")
+        if resp.status_code != 200:
+            raise RuntimeError(
+                f"Amplitude taxonomy/event error: {resp.status_code} {resp.text[:500]}"
+            )
+        raw = self._unwrap_list(resp.json(), "data")
+        records = [self._flatten_taxonomy_event(r) for r in raw]
+        return iter(records), {}
+
+    @staticmethod
+    def _flatten_taxonomy_event(record: dict) -> dict:
+        """Flatten the nested ``category`` struct and normalise nulls."""
+        category = record.get("category") or {}
+        return {
+            "event_type": record.get("event_type"),
+            "category_name": category.get("name") if isinstance(category, dict) else None,
+            "description": record.get("description"),
+            "display_name": record.get("display_name"),
+            "is_active": record.get("is_active"),
+            "is_hidden_from_dropdowns": record.get("is_hidden_from_dropdowns"),
+            "is_hidden_from_persona_results": record.get("is_hidden_from_persona_results"),
+            "is_hidden_from_pathfinder": record.get("is_hidden_from_pathfinder"),
+            "is_hidden_from_timeline": record.get("is_hidden_from_timeline"),
+            "tags": record.get("tags") or [],
+            "owner": record.get("owner"),
+        }
+
+    # ----- taxonomy_user_properties (Taxonomy API, snapshot) -------------
+
+    def _read_taxonomy_user_properties(self) -> tuple[Iterator[dict], dict]:
+        resp = self._request_with_retry("/api/2/taxonomy/user-property")
+        if resp.status_code != 200:
+            raise RuntimeError(
+                f"Amplitude taxonomy/user-property error: {resp.status_code} {resp.text[:500]}"
             )
         records = self._unwrap_list(resp.json(), "data")
         return iter(records), {}

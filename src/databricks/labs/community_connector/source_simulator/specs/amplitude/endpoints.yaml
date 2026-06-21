@@ -94,6 +94,59 @@ endpoints:
       cursor_field: date
       count: 3
 
+  # ---- session_length_distribution (Dashboard REST API, snapshot) ----
+  - path: /api/2/sessions/length
+    method: GET
+    corpus: session_length_distribution
+    response:
+      pagination_style: none
+      wrapper:
+        records_key: data
+        ignore_extra_keys: true
+    params:
+      start: {role: ignore}
+      end: {role: ignore}
+      timeHistogramConfigBinTimeUnit: {role: ignore}
+      timeHistogramConfigBinMin: {role: ignore}
+      timeHistogramConfigBinMax: {role: ignore}
+      timeHistogramConfigBinSize: {role: ignore}
+
+  # ---- sessions_per_user (Dashboard REST API, cdc) ----
+  - path: /api/2/sessions/peruser
+    method: GET
+    corpus: sessions_per_user
+    response:
+      pagination_style: none
+      wrapper:
+        records_key: data
+        ignore_extra_keys: true
+    params:
+      start: {role: ignore}
+      end: {role: ignore}
+    synthesize_future_records:
+      cursor_field: date
+      count: 3
+
+  # ---- taxonomy_events (Taxonomy API, snapshot) ----
+  - path: /api/2/taxonomy/event
+    method: GET
+    corpus: taxonomy_events
+    response:
+      pagination_style: none
+      wrapper:
+        records_key: data
+        ignore_extra_keys: true
+
+  # ---- taxonomy_user_properties (Taxonomy API, snapshot) ----
+  - path: /api/2/taxonomy/user-property
+    method: GET
+    corpus: taxonomy_user_properties
+    response:
+      pagination_style: none
+      wrapper:
+        records_key: data
+        ignore_extra_keys: true
+
   # ---- cohorts (Behavioral Cohorts API, snapshot) ----
   - path: /api/3/cohorts
     method: GET

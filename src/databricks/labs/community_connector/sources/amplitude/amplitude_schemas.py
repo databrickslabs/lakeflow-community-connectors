@@ -46,8 +46,12 @@ TABLES = [
     "events_list",
     "active_users_counts",
     "average_session_length",
+    "session_length_distribution",
+    "sessions_per_user",
     "cohorts",
     "annotations",
+    "taxonomy_events",
+    "taxonomy_user_properties",
 ]
 
 # A free-form key/value object whose keys vary per event type / project.
@@ -174,6 +178,74 @@ def _cohorts_schema() -> StructType:
     )
 
 
+def _session_length_distribution_schema() -> StructType:
+    """Session length distribution — one row per pre-defined length bucket.
+
+    The bucket label is the primary key (e.g. "0s-60s", "60s-300s").
+    This is a snapshot over the requested date window; there is no date
+    dimension in the response.
+    """
+    return StructType(
+        [
+            StructField("bucket", StringType(), nullable=False),
+            StructField("count", LongType(), nullable=True),
+        ]
+    )
+
+
+def _sessions_per_user_schema() -> StructType:
+    """Average sessions per user per day — one row per date."""
+    return StructType(
+        [
+            StructField("date", StringType(), nullable=False),
+            StructField("avg_sessions", DoubleType(), nullable=True),
+        ]
+    )
+
+
+def _taxonomy_events_schema() -> StructType:
+    """Event type taxonomy — one row per planned event type.
+
+    Hidden / deleted events are excluded by default (Amplitude API behaviour).
+    """
+    return StructType(
+        [
+            StructField("event_type", StringType(), nullable=False),
+            StructField("category_name", StringType(), nullable=True),
+            StructField("description", StringType(), nullable=True),
+            StructField("display_name", StringType(), nullable=True),
+            StructField("is_active", BooleanType(), nullable=True),
+            StructField("is_hidden_from_dropdowns", BooleanType(), nullable=True),
+            StructField("is_hidden_from_persona_results", BooleanType(), nullable=True),
+            StructField("is_hidden_from_pathfinder", BooleanType(), nullable=True),
+            StructField("is_hidden_from_timeline", BooleanType(), nullable=True),
+            StructField("tags", ArrayType(StringType()), nullable=True),
+            StructField("owner", StringType(), nullable=True),
+        ]
+    )
+
+
+def _taxonomy_user_properties_schema() -> StructType:
+    """User property taxonomy — one row per planned user property.
+
+    Custom properties have a ``gp:`` prefix in ``user_property``.
+    Hidden / deleted properties are excluded by default.
+    """
+    return StructType(
+        [
+            StructField("user_property", StringType(), nullable=False),
+            StructField("description", StringType(), nullable=True),
+            StructField("type", StringType(), nullable=True),
+            StructField("enum_values", ArrayType(StringType()), nullable=True),
+            StructField("regex", StringType(), nullable=True),
+            StructField("is_array_type", BooleanType(), nullable=True),
+            StructField("is_hidden", BooleanType(), nullable=True),
+            StructField("classifications", ArrayType(StringType()), nullable=True),
+            StructField("deleted", BooleanType(), nullable=True),
+        ]
+    )
+
+
 def _annotations_schema() -> StructType:
     """Chart annotations (releases, incidents, …)."""
     return StructType(
@@ -203,8 +275,12 @@ TABLE_SCHEMAS = {
     "events_list": _events_list_schema(),
     "active_users_counts": _active_users_counts_schema(),
     "average_session_length": _average_session_length_schema(),
+    "session_length_distribution": _session_length_distribution_schema(),
+    "sessions_per_user": _sessions_per_user_schema(),
     "cohorts": _cohorts_schema(),
     "annotations": _annotations_schema(),
+    "taxonomy_events": _taxonomy_events_schema(),
+    "taxonomy_user_properties": _taxonomy_user_properties_schema(),
 }
 
 TABLE_METADATA = {
@@ -237,8 +313,36 @@ TABLE_METADATA = {
         "cursor_field": None,
         "ingestion_type": "snapshot",
     },
+    "session_length_distribution": {
+        # Snapshot: one row per pre-defined bucket ("0s-60s", "60s-300s", …).
+        # The bucket label is stable across runs; the count reflects the
+        # configured window (window_days).
+        "primary_keys": ["bucket"],
+        "cursor_field": None,
+        "ingestion_type": "snapshot",
+    },
+    "sessions_per_user": {
+        "primary_keys": ["date"],
+        "cursor_field": "date",
+        "ingestion_type": "cdc",
+    },
+    "cohorts": {
+        "primary_keys": ["id"],
+        "cursor_field": None,
+        "ingestion_type": "snapshot",
+    },
     "annotations": {
         "primary_keys": ["id"],
+        "cursor_field": None,
+        "ingestion_type": "snapshot",
+    },
+    "taxonomy_events": {
+        "primary_keys": ["event_type"],
+        "cursor_field": None,
+        "ingestion_type": "snapshot",
+    },
+    "taxonomy_user_properties": {
+        "primary_keys": ["user_property"],
         "cursor_field": None,
         "ingestion_type": "snapshot",
     },

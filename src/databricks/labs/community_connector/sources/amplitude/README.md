@@ -60,7 +60,7 @@ A Unity Catalog connection for this connector can be created in two ways via the
 
 1. Follow the **Lakeflow Community Connector** UI flow from the **Add Data** page.
 2. Select any existing Lakeflow Community Connector connection for this source or create a new one.
-3. Set `externalOptionsAllowList` to `window_hours,window_days,m,i,g` (required for this connector to pass table-specific options).
+3. Set `externalOptionsAllowList` to `window_hours,window_days,m,i,g` (required for this connector to pass table-specific options through to the source).
 
 The connection can also be created using the standard Unity Catalog API.
 
@@ -68,28 +68,35 @@ The connection can also be created using the standard Unity Catalog API.
 
 The Amplitude connector exposes a **static list** of tables (Amplitude does not provide object discovery). Use the exact lowercase names below as `source_table`:
 
-| Table                     | API source                | Ingestion type | Primary key | Incremental cursor    |
-|---------------------------|---------------------------|----------------|-------------|-----------------------|
-| `events`                  | Export API                | `append`       | `uuid`      | `server_upload_time`  |
-| `events_list`             | Dashboard REST API        | `snapshot`     | `value`     | n/a                   |
-| `active_users_counts`     | Dashboard REST API        | `cdc`          | `date`      | `date`                |
-| `average_session_length`  | Dashboard REST API        | `cdc`          | `date`      | `date`                |
-| `cohorts`                 | Behavioral Cohorts API    | `snapshot`     | `id`        | n/a                   |
-| `annotations`             | Chart Annotations API     | `snapshot`     | `id`        | n/a                   |
+| Table                          | API source                | Ingestion type | Primary key(s)      | Incremental cursor    |
+|--------------------------------|---------------------------|----------------|---------------------|-----------------------|
+| `events`                       | Export API                | `append`       | `uuid`              | `server_upload_time`  |
+| `events_list`                  | Dashboard REST API        | `snapshot`     | `value`             | n/a                   |
+| `active_users_counts`          | Dashboard REST API        | `cdc`          | `date`, `segment`   | `date`                |
+| `average_session_length`       | Dashboard REST API        | `cdc`          | `date`              | `date`                |
+| `session_length_distribution`  | Dashboard REST API        | `snapshot`     | `bucket`            | n/a                   |
+| `sessions_per_user`            | Dashboard REST API        | `cdc`          | `date`              | `date`                |
+| `cohorts`                      | Behavioral Cohorts API    | `snapshot`     | `id`                | n/a                   |
+| `annotations`                  | Chart Annotations API     | `snapshot`     | `id`                | n/a                   |
+| `taxonomy_events`              | Taxonomy API              | `snapshot`     | `event_type`        | n/a                   |
+| `taxonomy_user_properties`     | Taxonomy API              | `snapshot`     | `user_property`     | n/a                   |
 
 ### Incremental behavior
 
 - **`events`** (append-only): Reads the Export API in sliding hourly windows. The cursor is `server_upload_time` (ISO-8601), i.e. the time Amplitude processed the event — **not** the client `event_time`. Each read call covers one `window_hours`-wide window and advances the cursor up to an init-time snapshot, so a `Trigger.AvailableNow` run terminates deterministically. Late-arriving (e.g. offline) events appear in the window matching their upload time. Append-only tables never truncate a server response, so `window_hours` (not a record cap) bounds per-call work.
-- **`active_users_counts`, `average_session_length`** (CDC by date): Read the Dashboard endpoints in sliding day windows. The cursor is a `YYYY-MM-DD` date string that advances up to the init-time date. The API returns a `{series, xValues}` time series which the connector flattens to one row per date (per segment, for `active_users_counts`).
-- **`events_list`, `cohorts`, `annotations`** (snapshot): Full refresh on every run; these endpoints have no reliable cursor and return the full list in a single response.
+- **`active_users_counts`, `average_session_length`, `sessions_per_user`** (CDC by date): Read the Dashboard endpoints in sliding day windows. The cursor is a `YYYY-MM-DD` date string that advances up to the init-time date. The API returns a `{series, xValues}` time series which the connector flattens to one row per date. For `active_users_counts` the primary key is `(date, segment)` — `segment` is always populated (`"Totals"` when `g=` is not set, or the group-by value when it is).
+- **`session_length_distribution`** (snapshot): Fetches the session length histogram over a sliding `window_days` lookback. Returns one row per pre-defined bucket (e.g. `"60s-300s"`). There is no per-day dimension — the API aggregates over the entire requested range.
+- **`events_list`, `cohorts`, `annotations`, `taxonomy_events`, `taxonomy_user_properties`** (snapshot): Full refresh on every run; these endpoints have no reliable cursor and return the full list in a single response.
 
-> **No delete capture:** None of the tables support delete synchronization. The Export API does not surface deleted events, and hidden/deleted events simply stop appearing in `events_list` rather than being marked deleted.
+> **No delete capture:** None of the tables support delete synchronization. The Export API does not surface deleted events; hidden/deleted events simply stop appearing in snapshot tables.
 
 ### Columns that require attention
 
 - **`events`**: `event_properties`, `user_properties`, `group_properties`, `groups`, and `data` are free-form objects modeled as `MapType(StringType, StringType)` since their keys vary per event type and project.
 - **`cohorts`**: `definition` is an opaque, deeply-nested blob serialized to a JSON **string**. Timestamp fields (`lastMod`, `createdAt`, `lastComputed`, `last_viewed`) are Unix epoch **seconds** stored as `LongType`.
 - **`annotations`**: `category` is a nested struct with `id` and `name`.
+- **`taxonomy_events`**: `category_name` is flattened from the nested `category.name` field in the API response. `tags` is an array of strings.
+- **`taxonomy_user_properties`**: Custom user properties have a `gp:` prefix in `user_property` (e.g. `gp:plan_type`). `enum_values` and `classifications` are arrays of strings.
 
 ## Table Configurations
 
