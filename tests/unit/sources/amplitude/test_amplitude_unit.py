@@ -165,6 +165,68 @@ def test_flatten_session_length_coerces_strings_and_invalid_values():
     ]
 
 
+def test_read_events_404_at_init_ts_cap_does_not_advance_cursor():
+    """When the current window reaches the _init_ts cap, the cursor returned
+    must equal init_ts, not init_ts + window.  A 404 in that last window must
+    still cap the offset correctly so the connector terminates."""
+    connector = _connector()
+    connector._init_ts = "2026-06-20T06:00:00+00:00"
+    resp_404 = _mock_response(404)
+
+    with patch.object(connector, "_request_with_retry", return_value=resp_404):
+        records, offset = connector._read_events(
+            {"cursor": "2026-06-20T04:00:00+00:00"},
+            {"window_hours": "6"},  # would reach 10:00, but cap is 06:00
+        )
+
+    assert list(records) == []
+    # cursor must be capped at init_ts, not at 04:00 + 6h = 10:00
+    assert offset == {"cursor": "2026-06-20T06:00:00+00:00"}
+
+
+def test_read_events_404_then_200_returns_records_on_second_call():
+    """Consecutive 404 windows followed by a 200 must return records correctly
+    on the call that gets the 200, and advance the cursor past all empty windows."""
+    connector = _connector()
+    connector._init_ts = "2026-06-20T12:00:00+00:00"
+
+    event = {"uuid": "e1", "event_type": "page_view"}
+    resp_404 = _mock_response(404)
+    resp_200 = _mock_response(200)
+    resp_200.content = _make_export_zip([event])
+
+    with patch.object(
+        connector, "_request_with_retry", side_effect=[resp_404, resp_200]
+    ):
+        # First call — empty window
+        records1, offset1 = connector._read_events(
+            {"cursor": "2026-06-20T00:00:00+00:00"}, {"window_hours": "2"}
+        )
+        assert list(records1) == []
+        assert offset1 == {"cursor": "2026-06-20T02:00:00+00:00"}
+
+        # Second call — window has data
+        records2, offset2 = connector._read_events(offset1, {"window_hours": "2"})
+        assert list(records2) == [event]
+        assert offset2 == {"cursor": "2026-06-20T04:00:00+00:00"}
+
+
+def test_read_events_cursor_at_init_ts_returns_empty_without_api_call():
+    """Once the cursor equals init_ts the connector is caught up.  It must
+    signal termination immediately without making any HTTP request."""
+    connector = _connector()
+    connector._init_ts = "2026-06-20T06:00:00+00:00"
+
+    with patch.object(connector, "_request_with_retry") as mocked_request:
+        records, offset = connector._read_events(
+            {"cursor": "2026-06-20T06:00:00+00:00"}, {}
+        )
+
+    assert list(records) == []
+    assert offset == {"cursor": "2026-06-20T06:00:00+00:00"}
+    mocked_request.assert_not_called()
+
+
 def test_retry_count_matches_configured_max_attempts():
     connector = _connector()
     unavailable = _mock_response(503)

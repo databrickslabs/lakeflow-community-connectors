@@ -38,8 +38,8 @@
     "group_properties": {},
     "groups": {},
     "data": {},
-    "amplitude_attribution_ids": null,
-    "sample_rate": null
+    "amplitude_attribution_ids": "attr-abc-123",
+    "sample_rate": "1.0"
   },
   {
     "uuid": "evt-corpus-002",
