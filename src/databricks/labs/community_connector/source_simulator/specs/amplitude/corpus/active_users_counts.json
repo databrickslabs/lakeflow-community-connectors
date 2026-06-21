@@ -1,41 +1,41 @@
 [
   {
-    "date": "2024-01--pk0",
+    "date": "2024-01-01",
     "count": 79250,
     "segment": "india-166"
   },
   {
-    "date": "2024-01--pk1",
+    "date": "2024-01-02",
     "count": 73886,
     "segment": "lima-702"
   },
   {
-    "date": "2024-01--pk2",
+    "date": "2024-01-03",
     "count": 10676,
     "segment": "alpha-220"
   },
   {
-    "date": "2024-01--pk3",
+    "date": "2024-01-04",
     "count": 53146,
     "segment": "victor-726"
   },
   {
-    "date": "2024-01--pk4",
+    "date": "2024-01-05",
     "count": 49251,
     "segment": "november-244"
   },
   {
-    "date": "2024-01--pk5",
+    "date": "2024-01-06",
     "count": 33550,
     "segment": "november-308"
   },
   {
-    "date": "2024-01--pk6",
+    "date": "2024-01-07",
     "count": 7301,
     "segment": "quebec-475"
   },
   {
-    "date": "2024-01--pk7",
+    "date": "2024-01-08",
     "count": 88620,
     "segment": "alpha-136"
   }

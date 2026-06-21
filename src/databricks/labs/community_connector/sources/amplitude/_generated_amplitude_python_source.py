@@ -1091,6 +1091,13 @@ def register_lakeflow_source(spark):
             One window per call.  The cursor is a ``YYYY-MM-DD`` date string; it
             advances to the window end (capped at the init-time date) so the read
             always makes forward progress and terminates.
+
+            Admission control: these endpoints return a bounded date range per
+            request (``window_days`` rows maximum).  ``max_records_per_batch`` is
+            intentionally not read here — the window size is the natural batch
+            bound, and the Amplitude Dashboard API does not support server-side
+            record limits.  This is a deliberate divergence from the standard
+            Strategy-B contract.
             """
             cursor = start_offset.get("cursor")
             since_date = cursor or self._start_date or self._default_metric_start(table_options)

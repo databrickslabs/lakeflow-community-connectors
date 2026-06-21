@@ -25,6 +25,12 @@ endpoints:
     params:
       start: {role: ignore}
       end: {role: ignore}
+    # Inject future-timestamped events so test_read_terminates can verify
+    # the connector's _init_ts cap fires even when the corpus contains
+    # records past the init snapshot.
+    synthesize_future_records:
+      cursor_field: server_upload_time
+      count: 3
 
   # ---- events_list (Dashboard REST API, snapshot) ----
   - path: /api/2/events/list
@@ -50,6 +56,11 @@ endpoints:
       i: {role: ignore}
       s: {role: ignore}
       g: {role: ignore}
+    # Inject future-dated rows so test_read_terminates can verify the
+    # connector's _init_date cap fires when the corpus extends past now.
+    synthesize_future_records:
+      cursor_field: date
+      count: 3
 
   # ---- average_session_length (Dashboard REST API, cdc) ----
   - path: /api/2/sessions/average
@@ -62,6 +73,11 @@ endpoints:
     params:
       start: {role: ignore}
       end: {role: ignore}
+    # Inject future-dated rows so test_read_terminates can verify the
+    # connector's _init_date cap fires when the corpus extends past now.
+    synthesize_future_records:
+      cursor_field: date
+      count: 3
 
   # ---- cohorts (Behavioral Cohorts API, snapshot) ----
   - path: /api/3/cohorts
