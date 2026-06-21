@@ -1,0 +1,54 @@
+# Amplitude Community Connector Spec
+# This file defines the specification for the connector including
+# connection parameters and allowlist options.
+
+display_name: Amplitude
+
+# ============================================================================
+# Connection Parameters
+# These are provided when creating the Unity Catalog connection.
+#
+# The Amplitude connector uses HTTP Basic authentication with an API key
+# and secret key pair. It also supports an optional data_region parameter
+# to switch between standard and EU data-residency hosts.
+# ============================================================================
+connection:
+  parameters:
+    - name: api_key
+      type: string
+      required: true
+      secret: true
+      description: >
+        Amplitude API key used for HTTP Basic authentication.
+
+    - name: secret_key
+      type: string
+      required: true
+      secret: true
+      description: >
+        Amplitude secret key used for HTTP Basic authentication.
+
+    - name: data_region
+      type: string
+      required: false
+      description: >
+        Data region for API endpoints: 'standard' (default) for US data center
+        or 'eu' for EU data-residency host. Defaults to 'standard'.
+
+    - name: start_date
+      type: string
+      required: false
+      description: >
+        ISO-8601 date or timestamp for the lower bound of historical backfill
+        (e.g., '2023-01-01' or '2023-01-01T00:00:00Z'). Only applies to
+        append-only tables (events). If not specified, defaults to the most
+        recent window only (24 hours for events).
+
+# ============================================================================
+# External Options Allowlist
+# These table-specific options must be included in the externalOptionsAllowList
+# parameter of the UC connection to allow them to be passed through.
+# Use a comma-separated string of option names.
+# If no table-specific options are needed, set to empty string or omit.
+# ============================================================================
+external_options_allowlist: "window_hours,window_days,m,i,g"

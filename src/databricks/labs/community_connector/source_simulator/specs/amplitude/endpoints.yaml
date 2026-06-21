@@ -1,0 +1,173 @@
+# Amplitude Analytics API endpoints exercised by the connector.
+#
+# Auth is HTTP Basic and ignored by the simulator. All time-range params
+# (start / end) use API-specific string formats (YYYYMMDDTHH for export,
+# YYYYMMDD for the dashboard series) that don't line up with the corpus's
+# ISO timestamps / dates, so they're marked ``ignore``: the simulator
+# returns the full corpus and the connector's init-time cap drives
+# termination. Each ``corpus`` name matches a table so connector-tester
+# can bootstrap it from the table schema.
+#
+# Response-shape notes:
+# * /api/2/export — real API returns a ZIP of gzipped NDJSON; the simulator
+#   serves a bare JSON array and the connector's parser falls back to it.
+# * /api/2/users and /api/2/sessions/average — real API returns a nested
+#   {series, xValues} time series; the simulator serves the already-flat
+#   rows wrapped under ``data`` and the connector accepts that list form.
+
+endpoints:
+  # ---- events (Export API, append) ----
+  - path: /api/2/export
+    method: GET
+    corpus: events
+    response:
+      pagination_style: none
+      # Amplitude returns 404 (not an error — just "no data") when the
+      # requested hourly window contains no events.  This is normal for
+      # newly-provisioned or low-traffic accounts and is handled explicitly
+      # by the connector (records = []).  Declaring 404 here prevents the
+      # LiveValidator from flagging it as a structural mismatch.
+      expected_status_codes: [200, 404]
+    params:
+      start: {role: ignore}
+      end: {role: ignore}
+    # Inject future-timestamped events so test_read_terminates can verify
+    # the connector's _init_ts cap fires even when the corpus contains
+    # records past the init snapshot.
+    synthesize_future_records:
+      cursor_field: server_upload_time
+      count: 3
+
+  # ---- events_list (Dashboard REST API, snapshot) ----
+  - path: /api/2/events/list
+    method: GET
+    corpus: events_list
+    response:
+      pagination_style: none
+      wrapper:
+        records_key: data
+        # Amplitude returns dynamically-varying internal metadata fields
+        # (cacheFreshness, novaCost, novaRuntime, timeComputed, …) that
+        # change per-call and are not part of the connector's data contract.
+        # ignore_extra_keys suppresses the validator's top-level key diff
+        # for this endpoint so live runs report as "validated" regardless of
+        # which internal fields the API happens to return.
+        ignore_extra_keys: true
+
+  # ---- active_users_counts (Dashboard REST API, cdc) ----
+  - path: /api/2/users
+    method: GET
+    corpus: active_users_counts
+    response:
+      pagination_style: none
+      wrapper:
+        records_key: data
+    params:
+      start: {role: ignore}
+      end: {role: ignore}
+      m: {role: ignore}
+      i: {role: ignore}
+      s: {role: ignore}
+      g: {role: ignore}
+    # Inject future-dated rows so test_read_terminates can verify the
+    # connector's _init_date cap fires when the corpus extends past now.
+    synthesize_future_records:
+      cursor_field: date
+      count: 3
+
+  # ---- average_session_length (Dashboard REST API, cdc) ----
+  - path: /api/2/sessions/average
+    method: GET
+    corpus: average_session_length
+    response:
+      pagination_style: none
+      wrapper:
+        records_key: data
+        # Same dynamic metadata suppression as events_list above.
+        ignore_extra_keys: true
+    params:
+      start: {role: ignore}
+      end: {role: ignore}
+    # Inject future-dated rows so test_read_terminates can verify the
+    # connector's _init_date cap fires when the corpus extends past now.
+    synthesize_future_records:
+      cursor_field: date
+      count: 3
+
+  # ---- session_length_distribution (Dashboard REST API, snapshot) ----
+  - path: /api/2/sessions/length
+    method: GET
+    corpus: session_length_distribution
+    response:
+      pagination_style: none
+      wrapper:
+        records_key: data
+        ignore_extra_keys: true
+    params:
+      start: {role: ignore}
+      end: {role: ignore}
+      timeHistogramConfigBinTimeUnit: {role: ignore}
+      timeHistogramConfigBinMin: {role: ignore}
+      timeHistogramConfigBinMax: {role: ignore}
+      timeHistogramConfigBinSize: {role: ignore}
+
+  # ---- sessions_per_user (Dashboard REST API, cdc) ----
+  - path: /api/2/sessions/peruser
+    method: GET
+    corpus: sessions_per_user
+    response:
+      pagination_style: none
+      wrapper:
+        records_key: data
+        ignore_extra_keys: true
+    params:
+      start: {role: ignore}
+      end: {role: ignore}
+    synthesize_future_records:
+      cursor_field: date
+      count: 3
+
+  # ---- taxonomy_events (Taxonomy API, snapshot) ----
+  - path: /api/2/taxonomy/event
+    method: GET
+    corpus: taxonomy_events
+    response:
+      pagination_style: none
+      wrapper:
+        records_key: data
+        ignore_extra_keys: true
+
+  # ---- taxonomy_user_properties (Taxonomy API, snapshot) ----
+  - path: /api/2/taxonomy/user-property
+    method: GET
+    corpus: taxonomy_user_properties
+    response:
+      pagination_style: none
+      wrapper:
+        records_key: data
+        ignore_extra_keys: true
+
+  # ---- cohorts (Behavioral Cohorts API, snapshot) ----
+  - path: /api/3/cohorts
+    method: GET
+    corpus: cohorts
+    response:
+      pagination_style: none
+      wrapper:
+        records_key: cohorts
+    params:
+      includeSyncInfo: {role: ignore}
+
+  # ---- annotations (Chart Annotations API, snapshot) ----
+  - path: /api/3/annotations
+    method: GET
+    corpus: annotations
+    response:
+      pagination_style: none
+      wrapper:
+        records_key: data
+    params:
+      category: {role: ignore}
+      chart_id: {role: ignore}
+      start: {role: ignore}
+      end: {role: ignore}
