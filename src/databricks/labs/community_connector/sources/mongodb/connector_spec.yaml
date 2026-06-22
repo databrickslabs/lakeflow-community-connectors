@@ -1,0 +1,40 @@
+# MongoDB Community Connector Spec
+# Defines the Unity Catalog connection parameters and the table-option allowlist.
+
+display_name: MongoDB
+
+# ============================================================================
+# Connection Parameters — provided when creating the Unity Catalog connection
+# (connection_type COMMUNITY / GENERIC_LAKEFLOW_CONNECT; sourceName=mongodb).
+# ============================================================================
+connection:
+  parameters:
+    - name: connection_uri
+      type: string
+      required: true
+      description: >
+        MongoDB connection URI including credentials — SRV
+        (mongodb+srv://user:pass@cluster.mongodb.net/) or standard
+        (mongodb://host:27017/). Store the value in a Databricks secret and
+        reference it from the connection; never inline credentials in code.
+    - name: database
+      type: string
+      required: false
+      description: >
+        Default database. When set, list_tables() returns that database's
+        collections and tables are addressed by bare collection name. When
+        omitted, address tables as "db.collection" or pass a per-table
+        "database" option.
+    - name: database_allowlist
+      type: string
+      required: false
+      description: >
+        Optional comma-separated list of databases to expose during discovery
+        (list_namespaces). Empty means all non-system databases.
+
+# ============================================================================
+# External Options Allowlist — per-table options allowed through the UC
+# connection. Framework keys (tableName, tableNameList, tableConfigs) are added
+# automatically by the tooling.
+# ============================================================================
+external_options_allowlist: "database,ingestion_type,max_records_per_batch,cdc_idle_ms,database_allowlist,schema_mode,read_preference,max_staleness_seconds,read_concern_level,retry_reads,server_selection_timeout_ms,connect_timeout_ms,socket_timeout_ms,heartbeat_frequency_ms,max_pool_size,max_idle_time_ms,compressors,tls,tls_ca_file,app_name,pii_drop_fields,pii_hash_fields,pii_hash_salt"
