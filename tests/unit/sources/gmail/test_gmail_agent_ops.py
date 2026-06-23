@@ -262,6 +262,10 @@ def test_search_messages_typed_filters_drive_listing_q(connector, monkeypatch):
     def fake_make_request(self, method, path, params=None, **_):
         requests_log.append((method, path, dict(params or {})))
         if path.endswith("/messages"):
+            # The companion has:attachment search returns only m1; the main
+            # list returns both. has_attachment is derived from that intersect.
+            if "has:attachment" in (params or {}).get("q", ""):
+                return {"messages": [{"id": "m1"}]}
             return {"messages": [{"id": "m1"}, {"id": "m2"}]}
         return None
 
@@ -911,50 +915,35 @@ def test_mailbox_overview_returns_per_label_counts(connector, monkeypatch):
     assert by_id["Label_1"]["threads_total"] == 25
 
 
-def test_search_messages_has_attachment_under_metadata_format(connector, monkeypatch):
-    """Regression: format=metadata omits body.attachmentId, so has_attachment
-    must be derived from the part filename, not attachmentId."""
+def test_search_messages_has_attachment_via_companion_query(connector, monkeypatch):
+    """Regression: format=metadata returns no MIME part tree, so has_attachment
+    is derived from a companion ``has:attachment`` search, not the payload.
+
+    The metadata payloads below deliberately carry NO part info — proving the
+    flag does not come from the per-message response."""
+    companion_qs: list = []
 
     def fake_make_request(self, method, path, params=None, **_):
         if path.endswith("/messages"):
+            q = (params or {}).get("q", "")
+            if "has:attachment" in q:
+                companion_qs.append(q)
+                return {"messages": [{"id": "m1"}]}  # only m1 has an attachment
             return {"messages": [{"id": "m1"}, {"id": "m2"}]}
         return None
 
     def fake_batch(self, endpoints, params_list=None):
-        # m1: attachment part has a filename but NO attachmentId (metadata shape)
-        with_attach = {
-            "id": "m1",
-            "threadId": "t1",
-            "labelIds": ["INBOX"],
-            "snippet": "has a pdf",
-            "sizeEstimate": 5000,
-            "payload": {
-                "mimeType": "multipart/mixed",
-                "headers": [{"name": "Subject", "value": "report"}],
-                "parts": [
-                    {"mimeType": "text/plain", "body": {"size": 10}},
-                    {
-                        "mimeType": "application/pdf",
-                        "filename": "report.pdf",
-                        "body": {"size": 1024},  # note: no attachmentId
-                    },
-                ],
-            },
-        }
-        # m2: no attachment parts at all
-        without_attach = {
-            "id": "m2",
-            "threadId": "t2",
-            "labelIds": ["INBOX"],
-            "snippet": "plain note",
-            "sizeEstimate": 200,
-            "payload": {
-                "mimeType": "text/plain",
-                "headers": [{"name": "Subject", "value": "note"}],
-                "body": {"size": 20},
-            },
-        }
-        return [with_attach, without_attach]
+        # Metadata-shaped: headers only, no parts/body — can't reveal attachments.
+        return [
+            {"id": "m1", "threadId": "t1", "labelIds": ["INBOX"], "snippet": "report",
+             "sizeEstimate": 5000,
+             "payload": {"mimeType": "text/plain",
+                         "headers": [{"name": "Subject", "value": "report"}]}},
+            {"id": "m2", "threadId": "t2", "labelIds": ["INBOX"], "snippet": "note",
+             "sizeEstimate": 200,
+             "payload": {"mimeType": "text/plain",
+                         "headers": [{"name": "Subject", "value": "note"}]}},
+        ]
 
     monkeypatch.setattr(
         "databricks.labs.community_connector.sources.gmail.gmail_utils."
@@ -969,5 +958,46 @@ def test_search_messages_has_attachment_under_metadata_format(connector, monkeyp
 
     rows = _dispatch("search_messages", connector, query="report")
     by_id = {r["id"]: r for r in rows}
-    assert by_id["m1"]["has_attachment"] == "true"   # filename present, no attachmentId
+    assert by_id["m1"]["has_attachment"] == "true"
     assert by_id["m2"]["has_attachment"] == "false"
+    # The companion query appended has:attachment to the composed q.
+    assert companion_qs and "has:attachment" in companion_qs[0]
+    assert "report" in companion_qs[0]
+
+
+def test_search_messages_skips_companion_query_when_filtering_attachments(connector, monkeypatch):
+    """When the caller already filters has_attachment=true, every match has an
+    attachment — no extra companion query is issued."""
+    message_lists: list = []
+
+    def fake_make_request(self, method, path, params=None, **_):
+        if path.endswith("/messages"):
+            message_lists.append((params or {}).get("q", ""))
+            return {"messages": [{"id": "m1"}, {"id": "m2"}]}
+        return None
+
+    def fake_batch(self, endpoints, params_list=None):
+        return [
+            {"id": "m1", "threadId": "t1", "labelIds": [], "snippet": "a",
+             "payload": {"headers": []}},
+            {"id": "m2", "threadId": "t2", "labelIds": [], "snippet": "b",
+             "payload": {"headers": []}},
+        ]
+
+    monkeypatch.setattr(
+        "databricks.labs.community_connector.sources.gmail.gmail_utils."
+        "GmailApiClient.make_request",
+        fake_make_request,
+    )
+    monkeypatch.setattr(
+        "databricks.labs.community_connector.sources.gmail.gmail_utils."
+        "GmailApiClient.make_batch_request",
+        fake_batch,
+    )
+
+    rows = _dispatch("search_messages", connector, has_attachment="true")
+    by_id = {r["id"]: r for r in rows}
+    assert by_id["m1"]["has_attachment"] == "true"
+    assert by_id["m2"]["has_attachment"] == "true"
+    # Exactly one /messages list call — no companion round trip.
+    assert len(message_lists) == 1

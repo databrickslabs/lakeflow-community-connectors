@@ -336,24 +336,6 @@ def _attachment_parts(payload: Mapping[str, Any]):
         }
 
 
-def _payload_has_attachment(payload: Mapping[str, Any]) -> bool:
-    """True if the message carries an attachment, format-agnostic.
-
-    A MIME part with a non-empty ``filename`` is the canonical attachment
-    signal and is present in both ``format=full`` and ``format=metadata``
-    responses. ``_attachment_parts`` keys on ``body.attachmentId``, which
-    Gmail omits under ``format=metadata`` — so search_messages (metadata
-    format) must use the filename signal instead, falling back to
-    ``attachmentId`` when present.
-    """
-    for part in _walk_parts(payload):
-        if (part.get("filename") or "").strip():
-            return True
-        if (part.get("body") or {}).get("attachmentId"):
-            return True
-    return False
-
-
 def _safe_int(value: Any) -> Optional[int]:
     if value is None:
         return None
@@ -488,8 +470,9 @@ class SearchMessagesOp(AgentOperation):
 
         limit = self._int_limit(options)
         composed_q = _compose_query(options)
+        capped = min(max(limit, 1), 500)
 
-        params: dict = {"maxResults": min(max(limit, 1), 500)}
+        params: dict = {"maxResults": capped}
         if composed_q:
             params["q"] = composed_q
 
@@ -499,6 +482,16 @@ class SearchMessagesOp(AgentOperation):
             return iter([])
 
         message_ids = [m["id"] for m in listing.get("messages", [])][:limit]
+
+        # has_attachment: ``format=metadata`` returns only id/labels/headers —
+        # no MIME part tree — so attachments can't be read off the per-message
+        # response. Instead run the same search constrained to ``has:attachment``
+        # and intersect the ids. One extra (cheap) list call, and accurate: a
+        # message at position k of the main result has at most k-1 messages
+        # ahead of it, so any attachment-bearing match in our window is within
+        # the top ``capped`` attachment results too.
+        attachment_ids = self._attachment_ids(api, user_id, composed_q, capped, message_ids)
+
         endpoints = [f"/users/{user_id}/messages/{mid}" for mid in message_ids]
         meta_params = [{"format": "metadata"}] * len(message_ids)
         results = api.make_batch_request(endpoints, meta_params)
@@ -519,13 +512,27 @@ class SearchMessagesOp(AgentOperation):
                     "date": _header_value(payload, "Date"),
                     "snippet": msg.get("snippet"),
                     "labelIds": label_ids,
-                    "has_attachment": "true"
-                    if _payload_has_attachment(payload)
-                    else "false",
+                    "has_attachment": "true" if msg.get("id") in attachment_ids else "false",
                     "size_estimate": _safe_int(msg.get("sizeEstimate")),
                 }
             )
         return iter(rows)
+
+    @staticmethod
+    def _attachment_ids(api, user_id, composed_q, max_results, candidate_ids):
+        """Return the subset of message ids (among this search) that carry an
+        attachment, via a companion ``has:attachment`` search."""
+        # If the caller already constrained the search to attachments, every
+        # match has one — skip the extra round trip.
+        if composed_q and "has:attachment" in composed_q:
+            return set(candidate_ids)
+        q = f"{composed_q} has:attachment" if composed_q else "has:attachment"
+        listing = api.make_request(
+            "GET", f"/users/{user_id}/messages", params={"maxResults": max_results, "q": q}
+        )
+        if not listing or "messages" not in listing:
+            return set()
+        return {m["id"] for m in listing.get("messages", [])}
 
     @staticmethod
     def _int_limit(options: Mapping[str, str]) -> int:
