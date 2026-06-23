@@ -19,6 +19,10 @@ from databricks.labs.community_connector.interface import (
     SupportsPartitionedStream,
 )
 from databricks.labs.community_connector.libs.utils import parse_value
+from databricks.labs.community_connector.sparkpds.ingestion_agent_datasource import (
+    IngestionAgentDispatcher,
+    OPERATION,
+)
 
 
 # =============================================================================
@@ -336,6 +340,11 @@ class LakeflowSource(DataSource):
     # single-file path falls back to the ``LakeflowConnectImpl`` placeholder.
     _lakeflow_connect_cls = None
 
+    # Set per-instance in __init__ when the ``operation`` option is present.
+    # Declared at class level so code paths that construct the source without
+    # __init__ (e.g. virtual-table unit tests via __new__) still see ``None``.
+    _agent_dispatcher = None
+
     # Spark format name. Defaults to "lakeflow_connect" because Unity Catalog
     # connection-option injection looks for that exact string. A per-source
     # subclass may override this with its source name once it no longer relies
@@ -344,6 +353,22 @@ class LakeflowSource(DataSource):
 
     def __init__(self, options):
         self.options = options
+
+        # Ingestion-agent dispatch: when the ``operation`` option is present,
+        # this source serves an agent operation (search_messages,
+        # list_operations, ...) instead of a table read — so ``tableName`` is
+        # not required. The connector is built tolerantly: connector-optional
+        # ops (e.g. ``list_operations``) still run when credentials are
+        # missing, and the dispatcher converts a build failure into an error
+        # row for metadata-kind ops.
+        self._agent_dispatcher = None
+        if options.get(OPERATION):
+            connector, init_error = self._build_connector_tolerant(options)
+            self._agent_dispatcher = IngestionAgentDispatcher(
+                options, connector=connector, init_error=init_error
+            )
+            return
+
         table = options.get(TABLE_NAME)
         # Catch typos against the framework's reserved virtual-table namespace
         # early — falling through to the connector with an unknown
@@ -362,10 +387,24 @@ class LakeflowSource(DataSource):
         self.lakeflow_connect = connect_cls(options)  # pylint: disable=abstract-class-instantiated
 
     @classmethod
+    def _build_connector_tolerant(cls, options):
+        """Build the connector for an agent operation, returning
+        ``(connector, init_error)``. A construction failure (e.g. missing
+        credentials) is captured rather than raised so connector-optional
+        operations still work and the dispatcher can emit a typed error row."""
+        connect_cls = cls._lakeflow_connect_cls or LakeflowConnectImpl
+        try:
+            return connect_cls(options), None  # pylint: disable=abstract-class-instantiated
+        except Exception as exc:  # pylint: disable=broad-except
+            return None, exc
+
+    @classmethod
     def name(cls):
         return cls._format_name
 
     def schema(self):
+        if self._agent_dispatcher is not None:
+            return self._agent_dispatcher.schema()
         table = self.options[TABLE_NAME]
         if table == METADATA_TABLE:
             return StructType(
@@ -392,6 +431,8 @@ class LakeflowSource(DataSource):
         return self.lakeflow_connect.get_table_schema(table, self.options)
 
     def reader(self, schema: StructType):
+        if self._agent_dispatcher is not None:
+            return self._agent_dispatcher.reader(schema)
         return LakeflowBatchReader(self.options, schema, self.lakeflow_connect)
 
     def streamReader(self, schema: StructType):

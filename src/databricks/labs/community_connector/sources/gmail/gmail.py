@@ -146,10 +146,21 @@ class GmailLakeflowConnect(LakeflowConnect, SupportsIngestionAgent):
         """Expose Gmail-specific agent operations on top of the framework built-ins.
 
         Replaces ``read_table`` with a filter-aware variant and adds
-        ``search_messages``, ``get_message``, ``list_attachments``,
-        ``download_attachment``. See ``gmail_agent_ops`` for details.
+        ``search_messages``, ``search_threads``, ``get_message``,
+        ``get_thread``, ``list_attachments``, ``download_attachment``, and
+        ``mailbox_overview``. See ``gmail_agent_ops`` for details.
+
+        ``gmail_agent_ops`` is intentionally excluded from the SDP merged
+        single-file (it's the wheel-served agent surface), so in that build
+        ``build_gmail_agent_operations`` is undefined — degrade to the
+        framework built-ins rather than raising. The wheel path has it
+        imported and returns the full set.
         """
-        return build_gmail_agent_operations()
+        try:
+            builder = build_gmail_agent_operations
+        except NameError:
+            return {}
+        return builder()
 
     def get_table_schema(self, table_name: str, table_options: Dict[str, str]) -> StructType:
         """Fetch the schema of a table."""

@@ -438,6 +438,7 @@ def deduplicate_imports(
     skip_patterns = [
         "from databricks.labs.community_connector.libs.utils import",
         "from databricks.labs.community_connector.sparkpds.lakeflow_datasource import",
+        "from databricks.labs.community_connector.sparkpds.ingestion_agent_datasource import",
         "from databricks.labs.community_connector.sources.",
         "from databricks.labs.community_connector.interface",
     ]
@@ -622,6 +623,8 @@ def merge_files(source_name: str, output_path: Optional[Path] = None) -> str:
     partition_path = src_base / "interface" / "supports_partition.py"
     namespaces_path = src_base / "interface" / "supports_namespaces.py"
     ingestion_agent_path = src_base / "interface" / "supports_ingestion_agent.py"
+    agent_protocol_path = src_base / "interface" / "agent_protocol.py"
+    dispatcher_path = src_base / "sparkpds" / "ingestion_agent_datasource.py"
     source_path = src_base / "sources" / source_name / f"{source_name}.py"
     lakeflow_source_path = src_base / "sparkpds" / "lakeflow_datasource.py"
 
@@ -641,6 +644,8 @@ def merge_files(source_name: str, output_path: Optional[Path] = None) -> str:
         partition_content = read_file_content(partition_path)
         namespaces_content = read_file_content(namespaces_path)
         ingestion_agent_content = read_file_content(ingestion_agent_path)
+        agent_protocol_content = read_file_content(agent_protocol_path)
+        dispatcher_content = read_file_content(dispatcher_path)
         source_content = read_file_content(source_path)
         lakeflow_source_content = read_file_content(lakeflow_source_path)
 
@@ -659,6 +664,8 @@ def merge_files(source_name: str, output_path: Optional[Path] = None) -> str:
     print(f"- supports_partition.py: {partition_path}", file=sys.stderr)
     print(f"- supports_namespaces.py: {namespaces_path}", file=sys.stderr)
     print(f"- supports_ingestion_agent.py: {ingestion_agent_path}", file=sys.stderr)
+    print(f"- agent_protocol.py: {agent_protocol_path}", file=sys.stderr)
+    print(f"- ingestion_agent_datasource.py: {dispatcher_path}", file=sys.stderr)
     if lib_files:
         for lib_file in lib_files:
             print(f"- {lib_file.name}: {lib_file}", file=sys.stderr)
@@ -677,6 +684,10 @@ def merge_files(source_name: str, output_path: Optional[Path] = None) -> str:
     ingestion_agent_imports, ingestion_agent_code = extract_imports_and_code(
         ingestion_agent_content
     )
+    agent_protocol_imports, agent_protocol_code = extract_imports_and_code(
+        agent_protocol_content
+    )
+    dispatcher_imports, dispatcher_code = extract_imports_and_code(dispatcher_content)
     source_imports, source_code = extract_imports_and_code(source_content)
     lakeflow_imports, lakeflow_code = extract_imports_and_code(lakeflow_source_content)
 
@@ -730,7 +741,9 @@ def merge_files(source_name: str, output_path: Optional[Path] = None) -> str:
         interface_imports,
         partition_imports,
         namespaces_imports,
+        agent_protocol_imports,
         ingestion_agent_imports,
+        dispatcher_imports,
     ]
     for _, lib_imports, _ in lib_imports_and_code:
         all_import_lists.append(lib_imports)
@@ -824,6 +837,23 @@ def merge_files(source_name: str, output_path: Optional[Path] = None) -> str:
     merged_lines.append("")
     merged_lines.append("")
 
+    # Section 2c2: src/databricks/labs/community_connector/interface/agent_protocol.py
+    # Inlined before supports_ingestion_agent / ingestion_agent_datasource —
+    # it defines ErrorCode, AgentError, and Parameter, which those use.
+    merged_lines.append("    " + "#" * 56)
+    merged_lines.append(
+        "    # src/databricks/labs/community_connector/interface/agent_protocol.py"
+    )
+    merged_lines.append("    " + "#" * 56)
+    merged_lines.append("")
+    for line in agent_protocol_code.strip().split("\n"):
+        if line.strip():
+            merged_lines.append("    " + line)
+        else:
+            merged_lines.append("")
+    merged_lines.append("")
+    merged_lines.append("")
+
     # Section 2d: src/databricks/labs/community_connector/interface/supports_ingestion_agent.py
     merged_lines.append("    " + "#" * 56)
     merged_lines.append(
@@ -832,6 +862,24 @@ def merge_files(source_name: str, output_path: Optional[Path] = None) -> str:
     merged_lines.append("    " + "#" * 56)
     merged_lines.append("")
     for line in ingestion_agent_code.strip().split("\n"):
+        if line.strip():
+            merged_lines.append("    " + line)
+        else:
+            merged_lines.append("")
+    merged_lines.append("")
+    merged_lines.append("")
+
+    # Section 2e: src/databricks/labs/community_connector/sparkpds/ingestion_agent_datasource.py
+    # The ingestion-agent dispatcher + built-in operations. Inlined before
+    # lakeflow_datasource (which delegates to IngestionAgentDispatcher when the
+    # `operation` option is present).
+    merged_lines.append("    " + "#" * 56)
+    merged_lines.append(
+        "    # src/databricks/labs/community_connector/sparkpds/ingestion_agent_datasource.py"
+    )
+    merged_lines.append("    " + "#" * 56)
+    merged_lines.append("")
+    for line in dispatcher_code.strip().split("\n"):
         if line.strip():
             merged_lines.append("    " + line)
         else:
