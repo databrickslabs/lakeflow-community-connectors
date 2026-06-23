@@ -909,3 +909,65 @@ def test_mailbox_overview_returns_per_label_counts(connector, monkeypatch):
     assert by_id["Label_1"]["name"] == "Work"
     assert by_id["Label_1"]["type"] == "user"
     assert by_id["Label_1"]["threads_total"] == 25
+
+
+def test_search_messages_has_attachment_under_metadata_format(connector, monkeypatch):
+    """Regression: format=metadata omits body.attachmentId, so has_attachment
+    must be derived from the part filename, not attachmentId."""
+
+    def fake_make_request(self, method, path, params=None, **_):
+        if path.endswith("/messages"):
+            return {"messages": [{"id": "m1"}, {"id": "m2"}]}
+        return None
+
+    def fake_batch(self, endpoints, params_list=None):
+        # m1: attachment part has a filename but NO attachmentId (metadata shape)
+        with_attach = {
+            "id": "m1",
+            "threadId": "t1",
+            "labelIds": ["INBOX"],
+            "snippet": "has a pdf",
+            "sizeEstimate": 5000,
+            "payload": {
+                "mimeType": "multipart/mixed",
+                "headers": [{"name": "Subject", "value": "report"}],
+                "parts": [
+                    {"mimeType": "text/plain", "body": {"size": 10}},
+                    {
+                        "mimeType": "application/pdf",
+                        "filename": "report.pdf",
+                        "body": {"size": 1024},  # note: no attachmentId
+                    },
+                ],
+            },
+        }
+        # m2: no attachment parts at all
+        without_attach = {
+            "id": "m2",
+            "threadId": "t2",
+            "labelIds": ["INBOX"],
+            "snippet": "plain note",
+            "sizeEstimate": 200,
+            "payload": {
+                "mimeType": "text/plain",
+                "headers": [{"name": "Subject", "value": "note"}],
+                "body": {"size": 20},
+            },
+        }
+        return [with_attach, without_attach]
+
+    monkeypatch.setattr(
+        "databricks.labs.community_connector.sources.gmail.gmail_utils."
+        "GmailApiClient.make_request",
+        fake_make_request,
+    )
+    monkeypatch.setattr(
+        "databricks.labs.community_connector.sources.gmail.gmail_utils."
+        "GmailApiClient.make_batch_request",
+        fake_batch,
+    )
+
+    rows = _dispatch("search_messages", connector, query="report")
+    by_id = {r["id"]: r for r in rows}
+    assert by_id["m1"]["has_attachment"] == "true"   # filename present, no attachmentId
+    assert by_id["m2"]["has_attachment"] == "false"

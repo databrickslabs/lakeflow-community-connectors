@@ -336,6 +336,24 @@ def _attachment_parts(payload: Mapping[str, Any]):
         }
 
 
+def _payload_has_attachment(payload: Mapping[str, Any]) -> bool:
+    """True if the message carries an attachment, format-agnostic.
+
+    A MIME part with a non-empty ``filename`` is the canonical attachment
+    signal and is present in both ``format=full`` and ``format=metadata``
+    responses. ``_attachment_parts`` keys on ``body.attachmentId``, which
+    Gmail omits under ``format=metadata`` — so search_messages (metadata
+    format) must use the filename signal instead, falling back to
+    ``attachmentId`` when present.
+    """
+    for part in _walk_parts(payload):
+        if (part.get("filename") or "").strip():
+            return True
+        if (part.get("body") or {}).get("attachmentId"):
+            return True
+    return False
+
+
 def _safe_int(value: Any) -> Optional[int]:
     if value is None:
         return None
@@ -502,7 +520,7 @@ class SearchMessagesOp(AgentOperation):
                     "snippet": msg.get("snippet"),
                     "labelIds": label_ids,
                     "has_attachment": "true"
-                    if any(_attachment_parts(payload))
+                    if _payload_has_attachment(payload)
                     else "false",
                     "size_estimate": _safe_int(msg.get("sizeEstimate")),
                 }
