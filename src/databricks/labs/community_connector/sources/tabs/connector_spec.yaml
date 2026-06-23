@@ -1,0 +1,29 @@
+# Tabs Platform Community Connector Spec
+# This file defines the specification for the connector including
+# connection parameters and allowlist options.
+
+# ============================================================================
+# Connection Parameters
+# These are provided when creating the Unity Catalog connection.
+# ============================================================================
+display_name: Tabs Platform
+connection:
+  parameters:
+    - name: api_key
+      type: string
+      required: true
+      secret: true
+      description: >
+        The raw Tabs Platform API key created in the Tabs Developers section.
+        This key is passed directly in the Authorization header (not as a Bearer token).
+        Obtained from the Tabs application by navigating to Developers > API Keys
+        (requires admin privileges). Treat this like a password — never expose in
+        client-side code or public repositories.
+
+# ============================================================================
+# External Options Allowlist
+# These table-specific options must be included in the externalOptionsAllowList
+# parameter of the UC connection to allow them to be passed through.
+# Use a comma-separated string of option names.
+# ============================================================================
+external_options_allowlist: "window_days,lookback_days,start_date,limit,base_url"

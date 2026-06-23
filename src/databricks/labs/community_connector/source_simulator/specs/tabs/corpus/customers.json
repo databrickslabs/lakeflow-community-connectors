@@ -1,0 +1,185 @@
+[
+  {
+    "id": "charlie--pk0",
+    "name": "zulu-777",
+    "defaultCurrency": "uniform-548",
+    "primaryBillingContactName": "lima-402",
+    "primaryBillingContactEmail": "juliet-293",
+    "secondaryBillingContacts": [],
+    "billingAddress": {
+      "address1": "lima-411",
+      "address2": "golf-404",
+      "city": "mike-223",
+      "state": "november-619",
+      "country": "oscar-837",
+      "zip": "sierra-221",
+      "addressee": "delta-316",
+      "externalId": "november-441"
+    },
+    "shippingAddress": {
+      "address1": "xray-742",
+      "address2": "kilo-456",
+      "city": "mike-687",
+      "state": "zulu-252",
+      "country": "romeo-396",
+      "zip": "india-122",
+      "addressee": "foxtrot-954",
+      "externalId": "juliet-217"
+    },
+    "externalIds": [
+      {
+        "externalId": "xray-763",
+        "sourceType": "papa-332",
+        "metadata": {}
+      }
+    ],
+    "lastUpdatedAt": "2024-01-01T00:00:00Z"
+  },
+  {
+    "id": "sierra-1-pk1",
+    "name": "uniform-455",
+    "defaultCurrency": "india-552",
+    "primaryBillingContactName": "whiskey-912",
+    "primaryBillingContactEmail": "victor-650",
+    "secondaryBillingContacts": [],
+    "billingAddress": {
+      "address1": "xray-208",
+      "address2": "alpha-859",
+      "city": "oscar-892",
+      "state": "papa-869",
+      "country": "whiskey-495",
+      "zip": "quebec-697",
+      "addressee": "delta-780",
+      "externalId": "xray-531"
+    },
+    "shippingAddress": {
+      "address1": "echo-513",
+      "address2": "foxtrot-629",
+      "city": "romeo-156",
+      "state": "mike-734",
+      "country": "quebec-550",
+      "zip": "romeo-456",
+      "addressee": "tango-721",
+      "externalId": "mike-852"
+    },
+    "externalIds": [
+      {
+        "externalId": "romeo-793",
+        "sourceType": "quebec-718",
+        "metadata": {}
+      }
+    ],
+    "lastUpdatedAt": "2024-01-01T01:00:00Z"
+  },
+  {
+    "id": "echo-879-pk2",
+    "name": "yankee-830",
+    "defaultCurrency": "papa-347",
+    "primaryBillingContactName": "hotel-947",
+    "primaryBillingContactEmail": "lima-382",
+    "secondaryBillingContacts": [
+      "oscar-589",
+      "november-800"
+    ],
+    "billingAddress": {
+      "address1": "india-265",
+      "address2": "lima-646",
+      "city": "bravo-115",
+      "state": "whiskey-687",
+      "country": "juliet-489",
+      "zip": "whiskey-920",
+      "addressee": "bravo-813",
+      "externalId": "bravo-837"
+    },
+    "shippingAddress": {
+      "address1": "echo-835",
+      "address2": "zulu-321",
+      "city": "xray-707",
+      "state": "delta-747",
+      "country": "bravo-632",
+      "zip": "sierra-739",
+      "addressee": "golf-492",
+      "externalId": "yankee-255"
+    },
+    "externalIds": [],
+    "lastUpdatedAt": "2024-01-01T02:00:00Z"
+  },
+  {
+    "id": "november-pk3",
+    "name": "papa-680",
+    "defaultCurrency": "zulu-577",
+    "primaryBillingContactName": "mike-300",
+    "primaryBillingContactEmail": "tango-486",
+    "secondaryBillingContacts": [
+      "november-278",
+      "alpha-115"
+    ],
+    "billingAddress": {
+      "address1": "xray-736",
+      "address2": "golf-246",
+      "city": "alpha-661",
+      "state": "zulu-362",
+      "country": "xray-145",
+      "zip": "hotel-240",
+      "addressee": "quebec-493",
+      "externalId": "papa-973"
+    },
+    "shippingAddress": {
+      "address1": "quebec-416",
+      "address2": "sierra-649",
+      "city": "mike-649",
+      "state": "sierra-660",
+      "country": "victor-504",
+      "zip": "foxtrot-139",
+      "addressee": "hotel-666",
+      "externalId": "oscar-970"
+    },
+    "externalIds": [
+      {
+        "externalId": "kilo-840",
+        "sourceType": "hotel-165",
+        "metadata": {
+          "key_0": "tango-843"
+        }
+      },
+      {
+        "externalId": "whiskey-663",
+        "sourceType": "papa-160",
+        "metadata": {
+          "key_0": "golf-420"
+        }
+      }
+    ],
+    "lastUpdatedAt": "2024-01-01T03:00:00Z"
+  },
+  {
+    "id": "xray-539-pk4",
+    "name": "yankee-977",
+    "defaultCurrency": "tango-140",
+    "primaryBillingContactName": "mike-211",
+    "primaryBillingContactEmail": "zulu-348",
+    "secondaryBillingContacts": [],
+    "billingAddress": {
+      "address1": "whiskey-674",
+      "address2": "lima-461",
+      "city": "mike-130",
+      "state": "india-178",
+      "country": "tango-381",
+      "zip": "alpha-704",
+      "addressee": "lima-786",
+      "externalId": "mike-652"
+    },
+    "shippingAddress": {
+      "address1": "bravo-914",
+      "address2": "victor-700",
+      "city": "zulu-609",
+      "state": "juliet-745",
+      "country": "hotel-544",
+      "zip": "whiskey-365",
+      "addressee": "kilo-357",
+      "externalId": "lima-607"
+    },
+    "externalIds": [],
+    "lastUpdatedAt": "2024-01-01T04:00:00Z"
+  }
+]

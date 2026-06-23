@@ -1,0 +1,123 @@
+# Tabs Platform API v3 (https://integrators.prod.api.tabsplatform.com).
+#
+# Connector flow:
+#   * read_table / read_partition(invoices)            → GET /v3/invoices
+#   * read_table / read_partition(invoice_line_items)  → GET /v3/invoices
+#       (the connector explodes invoices.lineItems client-side)
+#   * read_table / read_partition(payments)            → GET /v3/payments
+#   * read_table / read_partition(customers)           → GET /v3/customers
+#   * read_table / read_partition(contracts)           → GET /v3/contracts
+#   * read_table_deletes(contracts)                    → GET /v3/contracts
+#       (filter=deletedAt:isnotnull,...)
+#   * read_table(obligations|items|categories)         → GET /v3/{table}
+#
+# Pagination: offset-based (`page` 1-indexed + `limit`, default 50 / max 100).
+# Modelled as `page_number`; the connector's `limit` query param drives page
+# size, so it carries `role: per_page`.
+#
+# Filtering: Tabs uses a single combined `filter` query param with custom
+# syntax (`lastUpdatedAt:gte:"YYYY-MM-DD",lastUpdatedAt:lte:"YYYY-MM-DD"`).
+# The declarative spec can't decompose that, so `filter` is `role: ignore`
+# and the simulator serves the full corpus per page. Termination does not
+# depend on server-side filtering — the connector caps the *offset* at
+# init time via `latest_offset`, which stabilises regardless of returned
+# records (see tabs.py module docstring).
+#
+# Cursor capping: the incremental endpoints declare
+# `synthesize_future_records` so the simulator injects a few records dated
+# past init time. This exercises the connector's defensive read path even
+# though offset termination is driven by `latest_offset`, not the data.
+
+endpoints:
+  # ---- /v3/invoices (cdc, lastUpdatedAt; also feeds invoice_line_items) ----
+  - path: "/v3/invoices"
+    method: GET
+    corpus: invoices
+    response:
+      pagination_style: page_number
+      default_sort: "lastUpdatedAt asc"
+    params:
+      filter: {role: ignore}
+      page:   {role: page}
+      limit:  {role: per_page, default: 50, max: 100}
+    synthesize_future_records:
+      cursor_field: lastUpdatedAt
+      count: 3
+
+  # ---- /v3/payments (cdc, receivedAt) ----
+  - path: "/v3/payments"
+    method: GET
+    corpus: payments
+    response:
+      pagination_style: page_number
+      default_sort: "receivedAt asc"
+    params:
+      filter: {role: ignore}
+      page:   {role: page}
+      limit:  {role: per_page, default: 50, max: 100}
+    synthesize_future_records:
+      cursor_field: receivedAt
+      count: 3
+
+  # ---- /v3/customers (cdc, lastUpdatedAt) ----
+  - path: "/v3/customers"
+    method: GET
+    corpus: customers
+    response:
+      pagination_style: page_number
+      default_sort: "lastUpdatedAt asc"
+    params:
+      filter: {role: ignore}
+      page:   {role: page}
+      limit:  {role: per_page, default: 50, max: 100}
+    synthesize_future_records:
+      cursor_field: lastUpdatedAt
+      count: 3
+
+  # ---- /v3/contracts (cdc_with_deletes, lastUpdatedAt) ----
+  - path: "/v3/contracts"
+    method: GET
+    corpus: contracts
+    response:
+      pagination_style: page_number
+      default_sort: "lastUpdatedAt asc"
+    params:
+      filter: {role: ignore}
+      page:   {role: page}
+      limit:  {role: per_page, default: 50, max: 100}
+    synthesize_future_records:
+      cursor_field: lastUpdatedAt
+      count: 3
+
+  # ---- /v3/obligations (snapshot) ----
+  - path: "/v3/obligations"
+    method: GET
+    corpus: obligations
+    response:
+      pagination_style: page_number
+    params:
+      filter: {role: ignore}
+      page:   {role: page}
+      limit:  {role: per_page, default: 50, max: 100}
+
+  # ---- /v3/items (snapshot) ----
+  - path: "/v3/items"
+    method: GET
+    corpus: items
+    response:
+      pagination_style: page_number
+    params:
+      filter: {role: ignore}
+      page:   {role: page}
+      limit:  {role: per_page, default: 50, max: 100}
+
+  # ---- /v3/categories (snapshot) ----
+  - path: "/v3/categories"
+    method: GET
+    corpus: categories
+    response:
+      pagination_style: page_number
+    params:
+      filter: {role: ignore}
+      page:   {role: page}
+      limit:  {role: per_page, default: 50, max: 100}

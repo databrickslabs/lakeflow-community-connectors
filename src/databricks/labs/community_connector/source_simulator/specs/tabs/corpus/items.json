@@ -1,0 +1,78 @@
+[
+  {
+    "id": "quebec-4-pk0",
+    "name": "kilo-840",
+    "sku": "lima-331",
+    "externalIds": [],
+    "lastUpdatedAt": "2024-01-15T06:31:34Z"
+  },
+  {
+    "id": "xray-602-pk1",
+    "name": "sierra-898",
+    "sku": "mike-300",
+    "externalIds": [
+      {
+        "externalId": "yankee-707",
+        "sourceType": "xray-540",
+        "metadata": {
+          "key_0": "uniform-371"
+        }
+      }
+    ],
+    "lastUpdatedAt": "2024-01-23T00:36:25Z"
+  },
+  {
+    "id": "hotel-53-pk2",
+    "name": "victor-200",
+    "sku": "november-577",
+    "externalIds": [
+      {
+        "externalId": "bravo-949",
+        "sourceType": "quebec-459",
+        "metadata": {
+          "key_0": "xray-273",
+          "key_1": "whiskey-242"
+        }
+      },
+      {
+        "externalId": "juliet-488",
+        "sourceType": "delta-627",
+        "metadata": {
+          "key_0": "hotel-918",
+          "key_1": "kilo-435"
+        }
+      }
+    ],
+    "lastUpdatedAt": "2024-01-24T17:15:44Z"
+  },
+  {
+    "id": "romeo-63-pk3",
+    "name": "november-876",
+    "sku": "victor-210",
+    "externalIds": [
+      {
+        "externalId": "echo-711",
+        "sourceType": "romeo-492",
+        "metadata": {
+          "key_0": "kilo-846",
+          "key_1": "victor-697"
+        }
+      },
+      {
+        "externalId": "kilo-540",
+        "sourceType": "charlie-987",
+        "metadata": {
+          "key_0": "quebec-991"
+        }
+      }
+    ],
+    "lastUpdatedAt": "2024-01-23T19:13:38Z"
+  },
+  {
+    "id": "tango-57-pk4",
+    "name": "bravo-314",
+    "sku": "victor-569",
+    "externalIds": [],
+    "lastUpdatedAt": "2024-01-27T23:38:54Z"
+  }
+]

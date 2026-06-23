@@ -1,0 +1,213 @@
+[
+  {
+    "id": "india-82-pk0",
+    "issueDate": "2024-01-01",
+    "dueDate": "2024-01-02",
+    "originalIssueDate": "2024-01-03",
+    "originalDueDate": "2024-01-04",
+    "sentDate": "2024-01-05",
+    "createdAt": "2024-01-06T18:02:59Z",
+    "lastUpdatedAt": "2024-01-01T00:00:00Z",
+    "status": "charlie-581",
+    "customerId": "papa-225",
+    "contractId": "alpha-950",
+    "obligationId": "victor-613",
+    "source": "juliet-347",
+    "total": 618.4,
+    "balanceRemaining": 339.84,
+    "externalIds": [
+      {
+        "externalId": "november-809",
+        "sourceType": "mike-171",
+        "metadata": {}
+      }
+    ],
+    "lineItems": [
+      {
+        "id": "november-510",
+        "name": "echo-621",
+        "description": "zulu-583",
+        "quantity": 363.93,
+        "unitPrice": 624.49,
+        "total": 42.81,
+        "item": {
+          "id": "whiskey-691",
+          "name": "hotel-507",
+          "sku": "november-111"
+        }
+      },
+      {
+        "id": "quebec-999",
+        "name": "mike-422",
+        "description": "charlie-395",
+        "quantity": 659.22,
+        "unitPrice": 732.56,
+        "total": 649.4,
+        "item": {
+          "id": "charlie-203",
+          "name": "sierra-917",
+          "sku": "mike-699"
+        }
+      }
+    ]
+  },
+  {
+    "id": "xray-318-pk1",
+    "issueDate": "2024-01-02",
+    "dueDate": "2024-01-03",
+    "originalIssueDate": "2024-01-04",
+    "originalDueDate": "2024-01-05",
+    "sentDate": "2024-01-06",
+    "createdAt": "2024-01-18T20:25:43Z",
+    "lastUpdatedAt": "2024-01-01T01:00:00Z",
+    "status": "whiskey-596",
+    "customerId": "november-927",
+    "contractId": "mike-312",
+    "obligationId": "foxtrot-563",
+    "source": "alpha-605",
+    "total": 39.76,
+    "balanceRemaining": 759.29,
+    "externalIds": [],
+    "lineItems": [
+      {
+        "id": "papa-952",
+        "name": "yankee-748",
+        "description": "zulu-752",
+        "quantity": 201.92,
+        "unitPrice": 104.32,
+        "total": 332.98,
+        "item": {
+          "id": "echo-869",
+          "name": "uniform-744",
+          "sku": "papa-435"
+        }
+      }
+    ]
+  },
+  {
+    "id": "delta-93-pk2",
+    "issueDate": "2024-01-03",
+    "dueDate": "2024-01-04",
+    "originalIssueDate": "2024-01-05",
+    "originalDueDate": "2024-01-06",
+    "sentDate": "2024-01-07",
+    "createdAt": "2024-01-10T22:36:42Z",
+    "lastUpdatedAt": "2024-01-01T02:00:00Z",
+    "status": "alpha-717",
+    "customerId": "echo-169",
+    "contractId": "golf-733",
+    "obligationId": "xray-442",
+    "source": "tango-228",
+    "total": 320.08,
+    "balanceRemaining": 685.11,
+    "externalIds": [],
+    "lineItems": [
+      {
+        "id": "zulu-336",
+        "name": "oscar-770",
+        "description": "india-143",
+        "quantity": 83.95,
+        "unitPrice": 861.54,
+        "total": 650.35,
+        "item": {
+          "id": "yankee-331",
+          "name": "whiskey-891",
+          "sku": "golf-606"
+        }
+      }
+    ]
+  },
+  {
+    "id": "zulu-513-pk3",
+    "issueDate": "2024-01-04",
+    "dueDate": "2024-01-05",
+    "originalIssueDate": "2024-01-06",
+    "originalDueDate": "2024-01-07",
+    "sentDate": "2024-01-08",
+    "createdAt": "2024-01-22T16:06:31Z",
+    "lastUpdatedAt": "2024-01-01T03:00:00Z",
+    "status": "tango-797",
+    "customerId": "kilo-899",
+    "contractId": "echo-123",
+    "obligationId": "zulu-398",
+    "source": "romeo-250",
+    "total": 882.42,
+    "balanceRemaining": 896.28,
+    "externalIds": [
+      {
+        "externalId": "papa-209",
+        "sourceType": "bravo-919",
+        "metadata": {
+          "key_0": "echo-862"
+        }
+      },
+      {
+        "externalId": "lima-614",
+        "sourceType": "lima-454",
+        "metadata": {}
+      }
+    ],
+    "lineItems": []
+  },
+  {
+    "id": "xray-966-pk4",
+    "issueDate": "2024-01-05",
+    "dueDate": "2024-01-06",
+    "originalIssueDate": "2024-01-07",
+    "originalDueDate": "2024-01-08",
+    "sentDate": "2024-01-09",
+    "createdAt": "2024-01-14T17:20:15Z",
+    "lastUpdatedAt": "2024-01-01T04:00:00Z",
+    "status": "mike-984",
+    "customerId": "golf-552",
+    "contractId": "xray-301",
+    "obligationId": "xray-247",
+    "source": "sierra-685",
+    "total": 109.24,
+    "balanceRemaining": 142.74,
+    "externalIds": [
+      {
+        "externalId": "delta-327",
+        "sourceType": "echo-451",
+        "metadata": {
+          "key_0": "papa-272"
+        }
+      },
+      {
+        "externalId": "uniform-946",
+        "sourceType": "victor-376",
+        "metadata": {
+          "key_0": "kilo-753"
+        }
+      }
+    ],
+    "lineItems": [
+      {
+        "id": "romeo-130",
+        "name": "foxtrot-229",
+        "description": "lima-520",
+        "quantity": 893.79,
+        "unitPrice": 981.12,
+        "total": 521.0,
+        "item": {
+          "id": "echo-546",
+          "name": "zulu-378",
+          "sku": "sierra-442"
+        }
+      },
+      {
+        "id": "hotel-478",
+        "name": "tango-564",
+        "description": "echo-156",
+        "quantity": 952.87,
+        "unitPrice": 876.94,
+        "total": 273.6,
+        "item": {
+          "id": "juliet-719",
+          "name": "india-731",
+          "sku": "xray-934"
+        }
+      }
+    ]
+  }
+]

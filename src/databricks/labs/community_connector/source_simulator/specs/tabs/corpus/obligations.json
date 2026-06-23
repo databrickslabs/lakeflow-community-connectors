@@ -1,0 +1,166 @@
+[
+  {
+    "id": "bravo-94-pk0",
+    "contractId": "yankee-996",
+    "customerId": "charlie-968",
+    "categoryId": "alpha-559",
+    "serviceStartDate": "2024-01-01",
+    "serviceEndDate": "2024-01-02",
+    "startDate": "2024-01-03",
+    "endDate": "2024-01-04",
+    "billingSchedule": {
+      "interval": "tango-866",
+      "intervalFrequency": 729.66,
+      "billingType": "delta-340",
+      "pricingType": "foxtrot-546",
+      "netPaymentTerms": 55477,
+      "isArrears": true,
+      "isRecurring": false,
+      "name": "zulu-287",
+      "description": "alpha-876",
+      "quantity": 857.33,
+      "invoiceType": "bravo-172",
+      "pricingTiers": [
+        {
+          "tierNumber": 56064,
+          "amount": 120.9,
+          "amountType": "alpha-837",
+          "tierMinimum": 106.31
+        }
+      ]
+    },
+    "erpItemId": "sierra-882",
+    "eventTypeId": "zulu-748"
+  },
+  {
+    "id": "victor-4-pk1",
+    "contractId": "papa-245",
+    "customerId": "yankee-984",
+    "categoryId": "tango-951",
+    "serviceStartDate": "2024-01-02",
+    "serviceEndDate": "2024-01-03",
+    "startDate": "2024-01-04",
+    "endDate": "2024-01-05",
+    "billingSchedule": {
+      "interval": "golf-826",
+      "intervalFrequency": 616.79,
+      "billingType": "whiskey-131",
+      "pricingType": "romeo-316",
+      "netPaymentTerms": 98097,
+      "isArrears": true,
+      "isRecurring": true,
+      "name": "echo-926",
+      "description": "kilo-965",
+      "quantity": 408.37,
+      "invoiceType": "xray-178",
+      "pricingTiers": [
+        {
+          "tierNumber": 99648,
+          "amount": 622.92,
+          "amountType": "india-515",
+          "tierMinimum": 654.64
+        }
+      ]
+    },
+    "erpItemId": "victor-881",
+    "eventTypeId": "whiskey-576"
+  },
+  {
+    "id": "charlie--pk2",
+    "contractId": "kilo-373",
+    "customerId": "november-215",
+    "categoryId": "november-590",
+    "serviceStartDate": "2024-01-03",
+    "serviceEndDate": "2024-01-04",
+    "startDate": "2024-01-05",
+    "endDate": "2024-01-06",
+    "billingSchedule": {
+      "interval": "lima-158",
+      "intervalFrequency": 197.5,
+      "billingType": "uniform-310",
+      "pricingType": "india-306",
+      "netPaymentTerms": 18247,
+      "isArrears": false,
+      "isRecurring": false,
+      "name": "bravo-165",
+      "description": "bravo-375",
+      "quantity": 164.45,
+      "invoiceType": "quebec-873",
+      "pricingTiers": []
+    },
+    "erpItemId": "alpha-518",
+    "eventTypeId": "romeo-507"
+  },
+  {
+    "id": "mike-868-pk3",
+    "contractId": "alpha-905",
+    "customerId": "whiskey-137",
+    "categoryId": "alpha-987",
+    "serviceStartDate": "2024-01-04",
+    "serviceEndDate": "2024-01-05",
+    "startDate": "2024-01-06",
+    "endDate": "2024-01-07",
+    "billingSchedule": {
+      "interval": "whiskey-559",
+      "intervalFrequency": 622.88,
+      "billingType": "charlie-579",
+      "pricingType": "romeo-152",
+      "netPaymentTerms": 41599,
+      "isArrears": false,
+      "isRecurring": true,
+      "name": "zulu-451",
+      "description": "quebec-217",
+      "quantity": 285.85,
+      "invoiceType": "kilo-133",
+      "pricingTiers": [
+        {
+          "tierNumber": 91237,
+          "amount": 158.34,
+          "amountType": "delta-708",
+          "tierMinimum": 708.57
+        }
+      ]
+    },
+    "erpItemId": "sierra-442",
+    "eventTypeId": "lima-383"
+  },
+  {
+    "id": "sierra-4-pk4",
+    "contractId": "echo-335",
+    "customerId": "charlie-657",
+    "categoryId": "alpha-418",
+    "serviceStartDate": "2024-01-05",
+    "serviceEndDate": "2024-01-06",
+    "startDate": "2024-01-07",
+    "endDate": "2024-01-08",
+    "billingSchedule": {
+      "interval": "papa-144",
+      "intervalFrequency": 594.33,
+      "billingType": "juliet-193",
+      "pricingType": "uniform-251",
+      "netPaymentTerms": 1986,
+      "isArrears": true,
+      "isRecurring": false,
+      "name": "alpha-825",
+      "description": "whiskey-926",
+      "quantity": 697.12,
+      "invoiceType": "tango-967",
+      "pricingTiers": [
+        {
+          "tierNumber": 39530,
+          "amount": 813.6,
+          "amountType": "tango-198",
+          "tierMinimum": 999.84
+        },
+        {
+          "tierNumber": 34865,
+          "amount": 57.35,
+          "amountType": "echo-339",
+          "tierMinimum": 512.31
+        }
+      ]
+    },
+    "erpItemId": "delta-237",
+    "eventTypeId": "oscar-301"
+  }
+]

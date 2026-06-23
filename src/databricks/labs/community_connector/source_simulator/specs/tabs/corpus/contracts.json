@@ -1,0 +1,108 @@
+[
+  {
+    "id": "romeo-33-pk0",
+    "name": "alpha-740",
+    "fileName": "zulu-322",
+    "status": "romeo-566",
+    "customerId": "bravo-868",
+    "customerName": "bravo-622",
+    "uploaderId": "victor-769",
+    "source": "november-461",
+    "createdAt": "2024-01-07T04:00:37Z",
+    "lastUpdatedAt": "2024-01-01T00:00:00Z",
+    "deletedAt": "2024-01-20T06:32:10Z",
+    "externalIds": [
+      {
+        "externalId": "bravo-899",
+        "sourceType": "alpha-947",
+        "metadata": {
+          "key_0": "lima-266"
+        }
+      }
+    ]
+  },
+  {
+    "id": "yankee-8-pk1",
+    "name": "alpha-224",
+    "fileName": "kilo-729",
+    "status": "echo-251",
+    "customerId": "november-759",
+    "customerName": "delta-900",
+    "uploaderId": "foxtrot-833",
+    "source": "india-288",
+    "createdAt": "2024-01-11T02:15:01Z",
+    "lastUpdatedAt": "2024-01-01T01:00:00Z",
+    "deletedAt": "2024-01-25T03:23:30Z",
+    "externalIds": [
+      {
+        "externalId": "november-466",
+        "sourceType": "quebec-942",
+        "metadata": {
+          "key_0": "whiskey-555",
+          "key_1": "alpha-768"
+        }
+      }
+    ]
+  },
+  {
+    "id": "alpha-40-pk2",
+    "name": "golf-786",
+    "fileName": "romeo-692",
+    "status": "uniform-757",
+    "customerId": "victor-369",
+    "customerName": "alpha-619",
+    "uploaderId": "bravo-592",
+    "source": "mike-861",
+    "createdAt": "2024-01-17T05:41:06Z",
+    "lastUpdatedAt": "2024-01-01T02:00:00Z",
+    "deletedAt": "2024-01-24T19:58:04Z",
+    "externalIds": [
+      {
+        "externalId": "bravo-811",
+        "sourceType": "echo-457",
+        "metadata": {}
+      },
+      {
+        "externalId": "foxtrot-835",
+        "sourceType": "golf-296",
+        "metadata": {
+          "key_0": "tango-963"
+        }
+      }
+    ]
+  },
+  {
+    "id": "romeo-10-pk3",
+    "name": "romeo-328",
+    "fileName": "foxtrot-432",
+    "status": "november-914",
+    "customerId": "yankee-997",
+    "customerName": "foxtrot-411",
+    "uploaderId": "zulu-651",
+    "source": "india-784",
+    "createdAt": "2024-01-20T08:50:31Z",
+    "lastUpdatedAt": "2024-01-01T03:00:00Z",
+    "deletedAt": "2024-01-03T21:54:03Z",
+    "externalIds": []
+  },
+  {
+    "id": "yankee-4-pk4",
+    "name": "tango-459",
+    "fileName": "delta-986",
+    "status": "sierra-850",
+    "customerId": "papa-281",
+    "customerName": "zulu-451",
+    "uploaderId": "echo-563",
+    "source": "romeo-122",
+    "createdAt": "2024-01-14T21:04:56Z",
+    "lastUpdatedAt": "2024-01-01T04:00:00Z",
+    "deletedAt": "2024-01-24T20:16:21Z",
+    "externalIds": [
+      {
+        "externalId": "zulu-826",
+        "sourceType": "hotel-739",
+        "metadata": {}
+      }
+    ]
+  }
+]

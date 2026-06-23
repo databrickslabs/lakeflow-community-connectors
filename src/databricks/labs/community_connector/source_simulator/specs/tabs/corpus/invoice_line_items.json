@@ -1,0 +1,77 @@
+[
+  {
+    "invoiceId": "charlie--pk0",
+    "id": "charlie--pk0",
+    "name": "golf-294",
+    "description": "hotel-722",
+    "quantity": 286.2,
+    "unitPrice": 736.96,
+    "total": 483.76,
+    "item": {
+      "id": "xray-881",
+      "name": "victor-952",
+      "sku": "sierra-817"
+    },
+    "invoiceLastUpdatedAt": "2024-01-01T00:00:00Z"
+  },
+  {
+    "invoiceId": "juliet-1-pk1",
+    "id": "oscar-50-pk1",
+    "name": "quebec-523",
+    "description": "echo-279",
+    "quantity": 770.89,
+    "unitPrice": 25.37,
+    "total": 875.08,
+    "item": {
+      "id": "lima-699",
+      "name": "delta-883",
+      "sku": "oscar-505"
+    },
+    "invoiceLastUpdatedAt": "2024-01-01T01:00:00Z"
+  },
+  {
+    "invoiceId": "delta-13-pk2",
+    "id": "xray-717-pk2",
+    "name": "oscar-486",
+    "description": "whiskey-361",
+    "quantity": 548.43,
+    "unitPrice": 640.52,
+    "total": 350.54,
+    "item": {
+      "id": "november-454",
+      "name": "alpha-620",
+      "sku": "victor-517"
+    },
+    "invoiceLastUpdatedAt": "2024-01-01T02:00:00Z"
+  },
+  {
+    "invoiceId": "hotel-53-pk3",
+    "id": "tango-78-pk3",
+    "name": "xray-277",
+    "description": "juliet-293",
+    "quantity": 202.97,
+    "unitPrice": 986.31,
+    "total": 565.71,
+    "item": {
+      "id": "juliet-861",
+      "name": "hotel-185",
+      "sku": "whiskey-575"
+    },
+    "invoiceLastUpdatedAt": "2024-01-01T03:00:00Z"
+  },
+  {
+    "invoiceId": "lima-757-pk4",
+    "id": "tango-92-pk4",
+    "name": "zulu-984",
+    "description": "hotel-470",
+    "quantity": 400.68,
+    "unitPrice": 556.72,
+    "total": 381.68,
+    "item": {
+      "id": "alpha-740",
+      "name": "delta-714",
+      "sku": "victor-575"
+    },
+    "invoiceLastUpdatedAt": "2024-01-01T04:00:00Z"
+  }
+]
