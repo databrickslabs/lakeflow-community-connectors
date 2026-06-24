@@ -5241,6 +5241,65 @@ def test_retry_connection_error_exhausted_reraises_same_type(monkeypatch):
 
 
 @responses.activate
+def test_retry_json_decode_error_recovers(monkeypatch):
+    """Some sources (e.g. Hexagon SCApi) intermittently emit a 200
+    response with a truncated JSON body under load. The connector
+    must treat that as transient and retry the GET — same shape as the
+    `ChunkedEncodingError` recovery path."""
+    _mock_metadata()
+    sleeps = _patch_sleep(monkeypatch)
+    # First attempt: 200 with malformed JSON (single brace, EOF — exactly
+    # the failure mode the SCApi customer hit).
+    responses.add(
+        responses.GET,
+        f"{SERVICE_URL}Customers",
+        body="{",
+        status=200,
+        content_type="application/json",
+    )
+    responses.add(
+        responses.GET,
+        f"{SERVICE_URL}Customers",
+        json={"value": [{"Id": 9}]},
+        status=200,
+    )
+    c = _make({"token": "t"})
+    rows, _ = c.read_table("Customers", None, {})
+    assert [r["Id"] for r in rows] == [9]
+    assert sleeps == [1.0]
+
+
+@responses.activate
+def test_json_decode_error_exhausted_includes_body_in_message(monkeypatch):
+    """After max_retries exhausted JSON decode failures, the raised
+    JSONDecodeError must include the offending URL + a truncated
+    response body so the operator can escalate to the upstream owner
+    with concrete evidence — not just the bare "Expecting property
+    name" parser message."""
+    import requests as _requests
+
+    _mock_metadata()
+    _patch_sleep(monkeypatch)
+    body = "{<unexpected-html-error-page-from-proxy>"
+    for _ in range(3):  # max_retries=2 → 3 attempts total
+        responses.add(
+            responses.GET,
+            f"{SERVICE_URL}Customers",
+            body=body,
+            status=200,
+            content_type="application/json",
+        )
+    c = _make({"token": "t", "max_retries": "2"})
+    rows, _ = c.read_table("Customers", None, {})
+    with pytest.raises(_requests.exceptions.JSONDecodeError) as ei:
+        list(rows)
+    msg = str(ei.value)
+    assert f"{SERVICE_URL}Customers" in msg
+    assert "Server response body" in msg
+    assert "<unexpected-html-error-page-from-proxy>" in msg
+
+
+@responses.activate
 def test_400_error_message_includes_server_body():
     """4xx that the retry layer doesn't handle (anything other than
     401/403/429/503) must surface the server's response body in the

@@ -35,6 +35,7 @@ Per-table options (allowlisted via externalOptionsAllowList):
 import base64
 import hashlib
 import itertools
+import json
 import os
 import pickle
 import tempfile
@@ -863,7 +864,7 @@ class ODataLakeflowConnect(
                 self._verify_delta_bootstrap(resp, table_name)
                 bootstrap_verified = True
 
-            payload = resp.json()
+            payload = _decode_json_with_body(resp, current_url)
             sparse_checked = self._delta_collect_page_records(
                 payload=payload,
                 records=records,
@@ -1172,9 +1173,7 @@ class ODataLakeflowConnect(
         session = self._get_session()
         next_url: str | None = url
         while next_url:
-            resp = self._http_get(session, next_url)
-            _raise_for_status_with_body(resp, next_url)
-            payload = resp.json()
+            resp, payload = self._fetch_page_payload(session, next_url)
             page_rows = [
                 {k: v for k, v in item.items() if not k.startswith("@odata.")}
                 for item in payload.get("value", [])
@@ -1183,6 +1182,39 @@ class ODataLakeflowConnect(
             new_next = urljoin(resp.url, raw_next) if raw_next else None
             yield page_rows, new_next
             next_url = new_next
+
+    def _fetch_page_payload(
+        self, session: requests.Session, url: str
+    ) -> tuple[requests.Response, dict]:
+        """GET one page + decode JSON, retrying on truncated/malformed
+        response bodies.
+
+        ``_http_get`` already retries on transport-layer transients
+        (TCP reset, timeout, 429/503). Some upstream sources additionally
+        emit **200 responses with corrupt JSON bodies** under load —
+        observed with Hexagon SCApi, which sometimes truncates response
+        bodies mid-serialization for large contained-collection
+        responses. Each outer attempt issues a fresh ``_http_get``, so
+        the retry composes cleanly with the transport-layer retries
+        already inside ``_http_get``. After ``max_retries`` exhausted
+        JSON decode attempts, raises the enriched JSONDecodeError with
+        the URL + truncated body in the message so the operator can
+        escalate to the upstream owner.
+        """
+        attempts = self.max_retries + 1
+        for attempt in range(attempts):
+            resp = self._http_get(session, url)
+            _raise_for_status_with_body(resp, url)
+            try:
+                return resp, _decode_json_with_body(resp, url)
+            except json.JSONDecodeError:
+                if attempt >= self.max_retries:
+                    raise
+                time.sleep(self._backoff_delay(attempt))
+        # Defensive: the loop above always returns or raises.
+        raise RuntimeError(  # pragma: no cover
+            f"Exhausted retries decoding JSON for {url!r}."
+        )
 
     def _http_get(self, session: requests.Session, url: str, **kwargs: Any) -> requests.Response:
         """GET with auth-aware 401/403 handling + transient-failure retry.
@@ -1515,8 +1547,9 @@ class ODataLakeflowConnect(
         scope = self.options.get("oauth2_scope")
         if scope:
             data["scope"] = scope
+        token_url = _require(self.options, "oauth2_token_url")
         resp = requests.post(
-            _require(self.options, "oauth2_token_url"),
+            token_url,
             data=data,
             timeout=self.timeout,
         )
@@ -1544,7 +1577,7 @@ class ODataLakeflowConnect(
                 f"'oauth2_scope' on this connection. Server response: {hint}"
             ) from None
         resp.raise_for_status()
-        payload = resp.json()
+        payload = _decode_json_with_body(resp, token_url)
         token = payload.get("access_token")
         if not token:
             raise RuntimeError("OAuth2 token endpoint did not return access_token.")
@@ -2010,6 +2043,32 @@ def _parse_retry_after(header: str) -> float | None:
         dt = dt.replace(tzinfo=timezone.utc)
     delta = (dt - datetime.now(timezone.utc)).total_seconds()
     return max(0.0, delta)
+
+
+def _decode_json_with_body(resp: requests.Response, url: str):
+    """Like ``resp.json()`` but enrich the error with URL + truncated
+    body when the decoder fails.
+
+    The bare ``requests.exceptions.JSONDecodeError`` exposes only the
+    Python parser's "Expecting … at line X column Y" message —
+    useless for diagnosing a source that returned a truncated or
+    non-JSON body (an HTML error page, a partial response under load,
+    an upstream proxy intercept, etc.). This wrapper catches the
+    decoder error and re-raises with the offending URL and the first
+    1000 chars of the body baked into the message, mirroring the
+    pattern ``_raise_for_status_with_body`` uses for 4xx/5xx
+    responses.
+
+    Preserves the original exception type so any callers catching
+    ``JSONDecodeError`` (or its ``requests`` subclass) specifically
+    still match.
+    """
+    try:
+        return resp.json()
+    except json.JSONDecodeError as exc:
+        body = _truncate((resp.text or "").strip(), 1000) or "(empty body)"
+        msg = f"{exc.msg} (parsing response for url: {url}). Server response body: {body}"
+        raise type(exc)(msg, exc.doc, exc.pos) from exc
 
 
 def _raise_for_status_with_body(resp: requests.Response, url: str) -> None:
