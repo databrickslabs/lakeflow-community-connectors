@@ -592,6 +592,52 @@ def test_download_attachment_gmail_writes_bytes(connector, tmp_path, monkeypatch
     assert target.read_bytes() == b"hello world"
 
 
+def test_download_attachment_gmail_accepts_directory_volume_path(connector, tmp_path, monkeypatch):
+    """When volume_path is an existing directory, the attachment's own filename
+    is appended (regression: open() on a directory raised IsADirectoryError)."""
+    payload = {
+        "payload": {
+            "headers": [],
+            "parts": [
+                {
+                    "mimeType": "application/pdf",
+                    "filename": "report.pdf",
+                    "body": {"attachmentId": "att1", "size": 5},
+                }
+            ],
+        }
+    }
+    monkeypatch.setattr(
+        "databricks.labs.community_connector.sources.gmail.gmail_utils."
+        "GmailApiClient.make_request",
+        lambda self, method, path, params=None, **_: payload,
+    )
+    monkeypatch.setattr(
+        "databricks.labs.community_connector.sources.gmail.gmail_utils."
+        "GmailApiClient.get_attachment",
+        lambda self, mid, aid: b"bytes",
+    )
+    monkeypatch.setattr(
+        "databricks.labs.community_connector.sources.gmail.gmail_agent_ops."
+        "DownloadAttachmentOp._VOLUME_PREFIX",
+        str(tmp_path) + "/",
+    )
+    dest_dir = tmp_path / "temp_files"
+    dest_dir.mkdir()  # volume_path points at this existing directory
+    rows = _dispatch(
+        "download_attachment",
+        connector,
+        volume_path=str(dest_dir),  # a directory, not a file
+        attachment_id="att1",
+        message_id="m1",
+    )
+    assert rows[0]["_meta"]["status"] == "ok"
+    written = dest_dir / "report.pdf"
+    assert written.read_bytes() == b"bytes"
+    assert rows[0]["volume_path"] == str(written)
+    assert rows[0]["filename"] == "report.pdf"
+
+
 def test_download_attachment_drive_streams_and_returns_metadata(
     connector, tmp_path, monkeypatch
 ):

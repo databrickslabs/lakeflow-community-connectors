@@ -777,6 +777,41 @@ _DOWNLOAD_ATTACHMENT_SCHEMA = StructType(
 )
 
 
+def _safe_basename(name: Optional[str]) -> Optional[str]:
+    """Strip any directory components from a filename so a downloaded
+    attachment can't escape its target directory."""
+    if not name:
+        return None
+    base = os.path.basename(name.strip())
+    return base or None
+
+
+def _resolve_volume_dest(volume_path: str, filename: Optional[str], fallback: str) -> str:
+    """Resolve the destination file path for a download.
+
+    ``volume_path`` may be a full file path *or* a directory. It is treated
+    as a directory when it ends with ``/`` or already exists as one, in which
+    case the attachment's own ``filename`` (``fallback`` when unknown) is
+    appended. Otherwise it is used verbatim as the destination file.
+    """
+    if volume_path.endswith("/") or os.path.isdir(volume_path):
+        return os.path.join(volume_path.rstrip("/") or "/", _safe_basename(filename) or fallback)
+    return volume_path
+
+
+def _ensure_parent_dir(dest: str) -> None:
+    parent = os.path.dirname(dest)
+    if not parent:
+        return
+    try:
+        os.makedirs(parent, exist_ok=True)
+    except OSError as exc:
+        raise AgentError(
+            ErrorCode.PERMISSION_DENIED,
+            f"Cannot create parent directory '{parent}': {exc}",
+        ) from exc
+
+
 class DownloadAttachmentOp(AgentOperation):
     """Download an attachment to a Databricks Volume path.
 
@@ -789,13 +824,13 @@ class DownloadAttachmentOp(AgentOperation):
         ``export_mime_type`` overrides the default ``application/pdf``
         export target.
 
-    ``volume_path`` must be a writable path the executor can ``open()``
-    in write-binary mode. The canonical shape is
-    ``/Volumes/<catalog>/<schema>/<volume>/<filename>`` — the op
-    creates the parent directory if needed but does not create the
-    volume itself. The path is required to start with ``/Volumes/`` so
-    the op can't accidentally write outside Unity Catalog (override
-    intentionally via the framework's option dict only).
+    ``volume_path`` may be either a full destination file path
+    (``/Volumes/<catalog>/<schema>/<volume>/invoice.pdf``) or an existing
+    directory (``/Volumes/<catalog>/<schema>/<volume>/``) — in the directory
+    case the attachment's own filename is appended. The op creates the parent
+    directory if needed but does not create the volume itself, and requires
+    the path to start with ``/Volumes/`` so it can't write outside Unity
+    Catalog. The resolved path is returned in the ``volume_path`` column.
     """
 
     name = "download_attachment"
@@ -811,8 +846,9 @@ class DownloadAttachmentOp(AgentOperation):
             name="volume_path",
             required=True,
             description=(
-                "Destination path under /Volumes/<catalog>/<schema>/<volume>/. "
-                "The parent directory is created if missing."
+                "Destination under /Volumes/<catalog>/<schema>/<volume>/. "
+                "Either a full file path, or a directory (the attachment's "
+                "own filename is appended). Parent dirs are created if missing."
             ),
         ),
         Parameter(
@@ -874,16 +910,6 @@ class DownloadAttachmentOp(AgentOperation):
                 "message_id is required when attachment_id is supplied.",
             )
 
-        parent = os.path.dirname(volume_path)
-        if parent:
-            try:
-                os.makedirs(parent, exist_ok=True)
-            except OSError as exc:
-                raise AgentError(
-                    ErrorCode.PERMISSION_DENIED,
-                    f"Cannot create parent directory '{parent}': {exc}",
-                ) from exc
-
         if attachment_id:
             return iter([self._download_gmail(connector, message_id, attachment_id, volume_path)])
         return iter([self._download_drive(connector, drive_file_id, volume_path, options)])
@@ -896,8 +922,7 @@ class DownloadAttachmentOp(AgentOperation):
             raise _agent_error_from_status(exc) from exc
 
         # Look up filename + mime from the parent message payload so the
-        # row carries it. One extra API call (format=metadata is cheap at
-        # 5 quota units) — worth it for downstream UX.
+        # row carries it (and so a directory volume_path can be named).
         filename = None
         mime_type = None
         meta = connector.api.make_request(
@@ -912,30 +937,43 @@ class DownloadAttachmentOp(AgentOperation):
                     mime_type = part["mime_type"]
                     break
 
-        with open(volume_path, "wb") as fh:
+        dest = _resolve_volume_dest(volume_path, filename, fallback=attachment_id)
+        _ensure_parent_dir(dest)
+        with open(dest, "wb") as fh:
             fh.write(data)
 
         return {
-            "volume_path": volume_path,
+            "volume_path": dest,
             "size_bytes": len(data),
             "mime_type": mime_type,
-            "filename": filename,
+            "filename": filename or _safe_basename(dest),
             "source": "gmail",
         }
 
     @staticmethod
     def _download_drive(connector, drive_file_id, volume_path, options):
+        # When volume_path is a directory, resolve the filename up front from
+        # Drive metadata so the file lands inside it with its real name.
+        dest = volume_path
+        if volume_path.endswith("/") or os.path.isdir(volume_path):
+            try:
+                meta = connector.api.get_drive_file_metadata(drive_file_id)
+            except GmailApiError as exc:
+                raise _agent_error_from_status(exc) from exc
+            dest = _resolve_volume_dest(volume_path, meta.get("name"), fallback=drive_file_id)
+        _ensure_parent_dir(dest)
+
         try:
             size, name, mime = connector.api.download_drive_file(
                 drive_file_id,
-                volume_path,
+                dest,
                 export_mime_type=options.get("export_mime_type") or None,
             )
         except GmailApiError as exc:
             raise _agent_error_from_status(exc) from exc
 
         return {
-            "volume_path": volume_path,
+            "volume_path": dest,
             "size_bytes": size,
             "mime_type": mime,
             "filename": name,
