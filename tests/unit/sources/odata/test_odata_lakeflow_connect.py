@@ -5098,6 +5098,95 @@ def test_retry_exhaustion_raises_actionable_runtime_error(monkeypatch):
 
 
 @responses.activate
+def test_retry_500_transient_then_recovers(monkeypatch):
+    """A 500 Internal Server Error from the source is treated as
+    transient (Hexagon SCApi's "Unexpected server failure" template
+    is the prototype case) — the connector retries with exponential
+    backoff and succeeds when the second attempt returns 200."""
+    _mock_metadata()
+    sleeps = _patch_sleep(monkeypatch)
+    responses.add(
+        responses.GET,
+        f"{SERVICE_URL}Customers",
+        json={"error": {"code": "500", "message": "Unexpected server failure"}},
+        status=500,
+    )
+    responses.add(
+        responses.GET,
+        f"{SERVICE_URL}Customers",
+        json={"value": [{"Id": 7}]},
+        status=200,
+    )
+    c = _make({"token": "t"})
+    rows, _ = c.read_table("Customers", None, {})
+    assert [r["Id"] for r in rows] == [7]
+    # Exponential backoff: first retry waits 1s (2**0).
+    assert sleeps == [1.0]
+
+
+@responses.activate
+def test_retry_502_and_504_treated_as_transient(monkeypatch):
+    """Bad Gateway (502) and Gateway Timeout (504) — almost always
+    upstream-proxy issues — must also be retried. Sequence: 502, 504,
+    200 → succeeds on the third attempt."""
+    _mock_metadata()
+    sleeps = _patch_sleep(monkeypatch)
+    responses.add(
+        responses.GET,
+        f"{SERVICE_URL}Customers",
+        body="Bad Gateway",
+        status=502,
+    )
+    responses.add(
+        responses.GET,
+        f"{SERVICE_URL}Customers",
+        body="Gateway Timeout",
+        status=504,
+    )
+    responses.add(
+        responses.GET,
+        f"{SERVICE_URL}Customers",
+        json={"value": [{"Id": 3}]},
+        status=200,
+    )
+    c = _make({"token": "t"})
+    rows, _ = c.read_table("Customers", None, {})
+    assert [r["Id"] for r in rows] == [3]
+    assert sleeps == [1.0, 2.0]
+
+
+@responses.activate
+def test_500_exhausted_error_message_calls_out_request_shape(monkeypatch):
+    """After ``max_retries`` consecutive 500s, the raised RuntimeError
+    must mention that a deterministic 500 likely points at a request
+    shape the source can't handle — e.g. ``$top`` above SCApi's
+    per-page cap — and surface the server response body. Without this
+    hint the operator chases retry-budget knobs instead of the actual
+    cause."""
+    _mock_metadata()
+    _patch_sleep(monkeypatch)
+    server_body = (
+        '{"error":{"code":"500","message":"Unexpected server failure. '
+        'Error ID: [2026-06-24T05:16:46Z]."}}'
+    )
+    for _ in range(3):  # max_retries=2 → 3 attempts total
+        responses.add(
+            responses.GET,
+            f"{SERVICE_URL}Customers",
+            body=server_body,
+            status=500,
+        )
+    c = _make({"token": "t", "max_retries": "2"})
+    rows, _ = c.read_table("Customers", None, {})
+    with pytest.raises(RuntimeError) as ei:
+        list(rows)
+    msg = str(ei.value)
+    assert "500" in msg
+    assert "page_size" in msg  # remediation hint
+    assert "Unexpected server failure" in msg  # body echoed
+
+
+@responses.activate
 def test_retry_after_capped_at_retry_max_delay_seconds(monkeypatch):
     """A pathological ``Retry-After: 9999`` is clamped at the cap."""
     _mock_metadata()
@@ -5238,6 +5327,88 @@ def test_retry_connection_error_exhausted_reraises_same_type(monkeypatch):
     assert "3 attempts" in msg
     assert "max_retries" in msg
     assert sleeps == [1.0, 2.0]
+
+
+@responses.activate
+def test_verbose_http_logging_off_by_default_no_info_logs(caplog):
+    """Without ``verbose_http_logging=true``, per-request INFO logs
+    must not appear. Diagnostic noise should be opt-in — every request
+    in a streaming pipeline shouldn't flood the log stream by
+    default."""
+    import logging as _logging
+
+    _mock_metadata()
+    responses.get(f"{SERVICE_URL}Customers", json={"value": [{"Id": 1}]})
+    c = _make({"token": "t"})
+    with caplog.at_level(
+        _logging.INFO, logger="databricks.labs.community_connector.sources.odata.odata"
+    ):
+        rows, _ = c.read_table("Customers", None, {})
+        list(rows)
+    info_lines = [r.getMessage() for r in caplog.records if r.levelno == _logging.INFO]
+    assert not any("OData GET" in m for m in info_lines)
+
+
+@responses.activate
+def test_verbose_http_logging_on_emits_request_and_response(caplog):
+    """``verbose_http_logging=true`` emits one INFO line per request
+    URL and one INFO line per response (status + body snippet). Used
+    for triaging silent partial-data or under-row-count problems
+    against flaky upstream sources."""
+    import logging as _logging
+
+    _mock_metadata()
+    responses.get(
+        f"{SERVICE_URL}Customers",
+        json={"value": [{"Id": 42, "Name": "Acme"}]},
+    )
+    c = _make({"token": "t", "verbose_http_logging": "true"})
+    with caplog.at_level(
+        _logging.INFO, logger="databricks.labs.community_connector.sources.odata.odata"
+    ):
+        rows, _ = c.read_table("Customers", None, {})
+        list(rows)
+    messages = [r.getMessage() for r in caplog.records]
+    # Outgoing request URL line.
+    assert any("OData GET" in m and "/Customers" in m for m in messages)
+    # Response line includes status + body snippet (we just need the
+    # source row to be visible somewhere in the log stream).
+    assert any("→ 200" in m for m in messages)
+    assert any('"Id": 42' in m or "Id': 42" in m or "Acme" in m for m in messages)
+
+
+@responses.activate
+def test_retry_emits_warning_log_on_transient_429(monkeypatch, caplog):
+    """Every retried 429/503/network blip writes one WARNING line — so
+    operators reading pipeline logs see how often the source flakes
+    without enabling anything verbose. Mirrors the existing
+    ``test_429_retry_after_seconds_used`` setup but with caplog
+    instead of a response-count check."""
+    import logging as _logging
+
+    _mock_metadata()
+    _patch_sleep(monkeypatch)
+    responses.add(
+        responses.GET,
+        f"{SERVICE_URL}Customers",
+        json={"error": "rate-limited"},
+        status=429,
+        headers={"Retry-After": "1"},
+    )
+    responses.add(
+        responses.GET,
+        f"{SERVICE_URL}Customers",
+        json={"value": [{"Id": 1}]},
+        status=200,
+    )
+    c = _make({"token": "t"})
+    with caplog.at_level(
+        _logging.WARNING, logger="databricks.labs.community_connector.sources.odata.odata"
+    ):
+        rows, _ = c.read_table("Customers", None, {})
+        list(rows)
+    warns = [r.getMessage() for r in caplog.records if r.levelno == _logging.WARNING]
+    assert any("OData 429 on GET" in m and "retrying" in m for m in warns)
 
 
 @responses.activate

@@ -156,5 +156,28 @@ connection:
         Extra request headers as ``Key:Value,Key2:Value2``. Useful for tenant
         IDs, CSRF tokens, etc.
 
+    - name: verbose_http_logging
+      type: string
+      required: false
+      description: >
+        When ``"true"``, emit one INFO log line per HTTP request (URL)
+        and one per response (status + first N chars of body) to the
+        ``databricks.labs.community_connector.sources.odata.odata``
+        Python logger. Used for triaging silent partial-data,
+        under-row-count, or "why am I missing rows" problems against
+        flaky sources. **Source data ends up in the log stream** when
+        enabled — turn it on only for diagnostics. Retries and JSON
+        decode failures always log at WARNING/ERROR regardless of this
+        flag. Default ``false``.
+
+    - name: verbose_http_log_body_chars
+      type: string
+      required: false
+      description: >
+        Cap on the response body snippet length included in each INFO
+        log line when ``verbose_http_logging`` is on. Default 500. Raise
+        for richer diagnostics or lower to cut log volume on
+        high-throughput pipelines.
+
 # Per-table options the pipeline may pass through.
 external_options_allowlist: "namespace,cursor_field,select,filter,filter_at_*,page_size,max_records_per_batch,delta_tracking,expand_contained,num_partitions"

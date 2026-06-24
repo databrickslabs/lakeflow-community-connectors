@@ -36,6 +36,7 @@ import base64
 import hashlib
 import itertools
 import json
+import logging
 import os
 import pickle
 import tempfile
@@ -175,6 +176,35 @@ _TRANSIENT_NETWORK_ERRORS = (
     requests.exceptions.Timeout,
     requests.exceptions.ChunkedEncodingError,
 )
+
+# HTTP status codes treated as transient by ``_http_get``'s retry loop:
+# * 429 — Too Many Requests (throttling).
+# * 500 — Internal Server Error. Frequently transient (the "contact
+#   support" templated body that Hexagon SCApi returns under load is
+#   the prototype case); deterministic 500s eat the retry budget and
+#   surface the original body, same as deterministic 503s.
+# * 502 — Bad Gateway. Upstream proxy failure; virtually always
+#   transient.
+# * 503 — Service Unavailable. Server overload / restart.
+# * 504 — Gateway Timeout. Upstream took too long; same shape as 502.
+# 429 and 503 honour the server's ``Retry-After`` header when present;
+# 500/502/504 fall back to pure exponential backoff (Retry-After is
+# rarely emitted on those, and we shouldn't trust it if it is).
+_RETRYABLE_HTTP_STATUSES = frozenset({429, 500, 502, 503, 504})
+
+# Module logger. Always-on:
+#   * WARNING — every retry (network/429/503/JSON decode), so an
+#     operator inspecting pipeline logs sees how often the source
+#     flakes without enabling anything extra.
+#   * ERROR   — JSON decode failure (after retries exhausted) and
+#     other terminal problems re-raised as exceptions.
+# Opt-in via the ``verbose_http_logging`` connection option:
+#   * INFO    — one log line per request URL + response status / body
+#     snippet. Useful for triaging "why am I missing rows" but
+#     **emits source data into the log stream**, so it's off by
+#     default. Body snippet length is bounded by
+#     ``verbose_http_log_body_chars`` (default 500).
+_LOG = logging.getLogger(__name__)
 
 
 def _metadata_cache_path(service_url: str) -> str:
@@ -393,6 +423,17 @@ class ODataLakeflowConnect(
         # than this (some misbehaving servers emit hour-long values).
         self.max_retries = int(options.get("max_retries", "5"))
         self.retry_max_delay_seconds = int(options.get("retry_max_delay_seconds", "60"))
+        # Per-request diagnostic logging. Off by default — when on,
+        # writes one INFO line per HTTP request (URL + status + body
+        # snippet) to the module logger. The body snippet is the
+        # source's response data, so enabling this emits source rows
+        # into pipeline logs; turn it on only for triage.
+        self.verbose_http_logging = (
+            options.get("verbose_http_logging") or "false"
+        ).strip().lower() == "true"
+        # How many chars of the response body to include in each INFO
+        # log line when ``verbose_http_logging`` is on. Default 500.
+        self.verbose_http_log_body_chars = int(options.get("verbose_http_log_body_chars", "500"))
         self._session: requests.Session | None = None
         # Parsed CSDL bundle: root + lookup index + per-instance memos.
         # ``None`` until the first ``_metadata_root()`` call.
@@ -1207,9 +1248,22 @@ class ODataLakeflowConnect(
             _raise_for_status_with_body(resp, url)
             try:
                 return resp, _decode_json_with_body(resp, url)
-            except json.JSONDecodeError:
+            except json.JSONDecodeError as exc:
                 if attempt >= self.max_retries:
+                    _LOG.error(
+                        "OData JSON decode failed after %d attempts on GET %s — %s",
+                        attempt + 1,
+                        url,
+                        exc.msg,
+                    )
                     raise
+                _LOG.warning(
+                    "OData JSON decode failed on GET %s (%s) — retrying (%d/%d)",
+                    url,
+                    exc.msg,
+                    attempt + 1,
+                    self.max_retries,
+                )
                 time.sleep(self._backoff_delay(attempt))
         # Defensive: the loop above always returns or raises.
         raise RuntimeError(  # pragma: no cover
@@ -1278,17 +1332,59 @@ class ODataLakeflowConnect(
                         f"raise 'max_retries' on the connection if the "
                         f"source needs more retries)"
                     ) from exc
+                _LOG.warning(
+                    "OData transient %s on GET %s — retrying (%d/%d)",
+                    type(exc).__name__,
+                    url,
+                    attempt + 1,
+                    self.max_retries,
+                )
                 time.sleep(self._backoff_delay(attempt))
                 continue
-            if resp.status_code in (429, 503):
+            if resp.status_code in _RETRYABLE_HTTP_STATUSES:
                 if attempt >= self.max_retries:
-                    raise RuntimeError(self._throttle_exhausted_error(resp, url, attempt + 1))
+                    raise RuntimeError(
+                        self._transient_status_exhausted_error(resp, url, attempt + 1)
+                    )
+                _LOG.warning(
+                    "OData %d on GET %s — retrying (%d/%d)",
+                    resp.status_code,
+                    url,
+                    attempt + 1,
+                    self.max_retries,
+                )
                 time.sleep(self._retry_after_delay(resp, attempt))
                 continue
             return resp
         # Defensive: the loop always returns or raises before exiting.
         raise RuntimeError(  # pragma: no cover
             f"Exhausted retries for {url!r} without producing a response."
+        )
+
+    def _log_http_request(self, method: str, url: str) -> None:
+        """Emit a one-line INFO log for the outgoing request when
+        ``verbose_http_logging`` is enabled. No-op otherwise so the
+        hot path stays free of formatting work."""
+        if self.verbose_http_logging:
+            _LOG.info("OData %s %s", method, url)
+
+    def _log_http_response(self, method: str, url: str, resp: requests.Response) -> None:
+        """Emit a one-line INFO log for the response when
+        ``verbose_http_logging`` is enabled. Includes the status code,
+        ``Content-Length``, and the first ``verbose_http_log_body_chars``
+        chars of the body. **Source data ends up in the log stream**
+        when this is on — that's the point — so don't enable it for
+        steady-state pipelines."""
+        if not self.verbose_http_logging:
+            return
+        body_snippet = _truncate(resp.text or "", self.verbose_http_log_body_chars)
+        _LOG.info(
+            "OData %s %s → %d (%s bytes); body: %s",
+            method,
+            url,
+            resp.status_code,
+            resp.headers.get("Content-Length", "?"),
+            body_snippet or "(empty)",
         )
 
     def _backoff_delay(self, attempt: int) -> float:
@@ -1307,10 +1403,14 @@ class ODataLakeflowConnect(
         """One auth-aware GET attempt; throttle handling lives in `_http_get`."""
         if self._should_preemptively_refresh():
             session.headers["Authorization"] = f"Bearer {self._oauth2_token()}"
+        self._log_http_request("GET", url)
         resp = session.get(url, timeout=self.timeout, **kwargs)
+        self._log_http_response("GET", url, resp)
         if resp.status_code == 401 and self._has_oauth_refresh_path():
             session.headers["Authorization"] = f"Bearer {self._oauth2_token()}"
+            self._log_http_request("GET", url)
             resp = session.get(url, timeout=self.timeout, **kwargs)
+            self._log_http_response("GET", url, resp)
             if resp.status_code == 401:
                 # We just minted a token straight from the OAuth provider
                 # and the source still rejected it — the access token isn't
@@ -1352,19 +1452,35 @@ class ODataLakeflowConnect(
                 return min(parsed, cap)
         return min(float(2**attempt), cap)
 
-    def _throttle_exhausted_error(self, resp: requests.Response, url: str, attempts: int) -> str:
-        """Message for the post-retry-budget RuntimeError."""
+    def _transient_status_exhausted_error(
+        self, resp: requests.Response, url: str, attempts: int
+    ) -> str:
+        """Message for the post-retry-budget RuntimeError when the
+        server kept returning a retryable 4xx/5xx
+        (``_RETRYABLE_HTTP_STATUSES``)."""
+        status = resp.status_code
         retry_after = resp.headers.get("Retry-After", "<none>")
+        if status in (429, 503):
+            symptom = "server is throttling or temporarily unavailable"
+        elif status == 500:
+            symptom = (
+                "server returned an internal error on every attempt — likely a "
+                "request shape the source can't handle (e.g. ``$top`` above its "
+                "per-page cap) or a deterministic upstream bug; check the "
+                "response body and lower ``page_size`` / narrow the request "
+                "before retrying"
+            )
+        else:  # 502, 504
+            symptom = "upstream gateway returned a transient error on every attempt"
         return (
-            f"OData service returned {resp.status_code} for {url!r} after "
-            f"{attempts} attempts (server is throttling or temporarily "
-            f"unavailable). Last Retry-After header: {retry_after}. "
-            f"Raise 'max_retries' (current: {self.max_retries}) or "
-            f"'retry_max_delay_seconds' (current: {self.retry_max_delay_seconds}) "
-            f"on the connection if the source needs longer cooldowns; "
-            f"reduce read concurrency via the per-table 'num_partitions' "
-            f"option if the throttle is concurrency-driven. Server "
-            f"response: {_truncate(resp.text, 300)}"
+            f"OData service returned {status} for {url!r} after "
+            f"{attempts} attempts ({symptom}). Last Retry-After header: "
+            f"{retry_after}. Raise 'max_retries' (current: {self.max_retries}) "
+            f"or 'retry_max_delay_seconds' (current: "
+            f"{self.retry_max_delay_seconds}) on the connection if the source "
+            f"needs longer cooldowns; reduce read concurrency via the "
+            f"per-table 'num_partitions' option if the failure is "
+            f"concurrency-driven. Server response: {_truncate(resp.text, 300)}"
         )
 
     def _no_refresh_auth_error(self, resp: requests.Response, url: str) -> str:
