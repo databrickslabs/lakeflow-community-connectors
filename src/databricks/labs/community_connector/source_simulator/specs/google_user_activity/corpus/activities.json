@@ -1,0 +1,54 @@
+[
+  {
+    "kind": "admin#reports#activity",
+    "id": {
+      "time": "2026-01-15T10:30:00.000Z",
+      "uniqueQualifier": "12345",
+      "applicationName": "login"
+    },
+    "actor": {
+      "callerType": "USER",
+      "email": "user@example.com",
+      "profileId": "100000000000000000001"
+    },
+    "ipAddress": "192.0.2.1",
+    "events": [
+      {
+        "type": "login_success",
+        "name": "login_success",
+        "parameters": [
+          {
+            "name": "login_type",
+            "value": "user"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "kind": "admin#reports#activity",
+    "id": {
+      "time": "2026-01-15T11:45:00.000Z",
+      "uniqueQualifier": "12346",
+      "applicationName": "admin"
+    },
+    "actor": {
+      "callerType": "USER",
+      "email": "admin@example.com",
+      "profileId": "100000000000000000002"
+    },
+    "ipAddress": "192.0.2.2",
+    "events": [
+      {
+        "type": "CREATE_USER",
+        "name": "CREATE_USER",
+        "parameters": [
+          {
+            "name": "email",
+            "value": "newuser@example.com"
+          }
+        ]
+      }
+    ]
+  }
+]
