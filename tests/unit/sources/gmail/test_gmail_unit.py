@@ -92,3 +92,49 @@ class TestGmailConnectorUnit:
         field_names = [f.name for f in schema.fields]
 
         assert "emailAddress" in field_names
+
+
+class TestBatchRequestFallback:
+    """make_batch_request must fall back to sequential when a 200 response
+    parses to zero rows (Gmail's batch endpoint can answer 200 with a body
+    the multipart parser can't read)."""
+
+    class _FakeResp:
+        def __init__(self, status_code, text):
+            self.status_code = status_code
+            self.text = text
+
+    def _client(self):
+        from databricks.labs.community_connector.sources.gmail.gmail_utils import (
+            GmailApiClient,
+        )
+        return GmailApiClient(access_token="tok")
+
+    def test_empty_parse_falls_back_to_sequential(self, monkeypatch):
+        client = self._client()
+        # Batch returns 200 but an unparseable body -> _parse_batch_response == [].
+        monkeypatch.setattr(
+            client._session, "post",
+            lambda *a, **kw: self._FakeResp(200, "HTTP/1.1 200 OK\r\n\r\n<not multipart>"),
+        )
+        seen = []
+        def fake_get(method, endpoint, params=None, retry_count=3):
+            seen.append(endpoint)
+            return {"id": endpoint.rsplit("/", 1)[-1]}
+        monkeypatch.setattr(client, "make_request", fake_get)
+
+        out = client.make_batch_request(["/users/me/messages/m1", "/users/me/messages/m2"])
+        assert [r["id"] for r in out] == ["m1", "m2"]   # came from the sequential fallback
+        assert len(seen) == 2
+
+    def test_non_200_falls_back_to_sequential(self, monkeypatch):
+        client = self._client()
+        monkeypatch.setattr(
+            client._session, "post", lambda *a, **kw: self._FakeResp(503, "unavailable")
+        )
+        monkeypatch.setattr(
+            client, "make_request",
+            lambda method, endpoint, params=None, retry_count=3: {"id": "x"},
+        )
+        out = client.make_batch_request(["/users/me/messages/m1"])
+        assert out == [{"id": "x"}]
