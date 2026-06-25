@@ -17,12 +17,16 @@
     ],
     "google_analytics_aggregated": [
       "pipeline_spec.example.py"
+    ],
+    "gmail": [
+      "gmail_agent_ops.py"
     ]
   },
   "_comments": {
     "zoho_crm_oauth_setup.py": "Databricks notebook to help users set up OAuth credentials for Zoho CRM. Not part of the connector runtime.",
     "osipi/ingest.py": "Databricks notebook example for ingestion. Not part of the connector runtime.",
     "microsoft_teams/sample-ingest.py": "Databricks notebook sample for fully automated ingestion. Not part of the connector runtime.",
-    "google_analytics_aggregated/pipeline_spec.example.py": "Example pipeline spec notebook. Not part of the connector runtime."
+    "google_analytics_aggregated/pipeline_spec.example.py": "Example pipeline spec notebook. Not part of the connector runtime.",
+    "gmail/gmail_agent_ops.py": "Ingestion-agent operation implementations (search_messages, get_message, list_attachments, download_attachment, filtered read_table). Served from the installed wheel via the lakeflow_connect agent format, not the SDP pipeline path; excluded so the merged single-file stays free of the agent-dispatch framework imports."
   }
 }

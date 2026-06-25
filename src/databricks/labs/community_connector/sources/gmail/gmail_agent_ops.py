@@ -1,0 +1,1294 @@
+# Gmail agent operations: typed filter read + per-message tools.
+#
+# Exposed via ``GmailLakeflowConnect.agent_operations`` and dispatched
+# through the lakeflow_connect format with ``operation=<name>``. Agents
+# call ``list_operations`` to discover names, parameters, and result
+# schemas.
+#
+# Five operations:
+#   - read_table (override): adds typed filters that compose into Gmail's
+#     ``q`` syntax (after_date, before_date, newer_than, subject, from_address,
+#     to_address, label, has_attachment, is_unread, query). Other tables use
+#     the framework default. Caller chains ``.limit(N)`` on the DataFrame.
+#   - search_messages: lightweight triage — id/threadId/from/subject/date/snippet
+#     without fetching message bodies. Same typed filters as read_table.
+#   - get_message: fetch one message by id with decoded plain-text + HTML.
+#   - list_attachments: enumerate attachments on a message (gmail-native plus
+#     Drive-hosted links extracted from the body).
+#   - download_attachment: write attachment bytes to a Databricks volume path.
+#     Routes through Gmail's attachments.get or the Drive API depending on
+#     which ID is supplied. Requires the OAuth refresh token to have been
+#     granted both gmail.readonly and drive.readonly at consent time.
+
+from __future__ import annotations
+
+import os
+from typing import Any, Iterable, Mapping, Optional
+
+from pyspark.sql.types import (
+    ArrayType,
+    LongType,
+    StringType,
+    StructField,
+    StructType,
+)
+
+from databricks.labs.community_connector.interface import (
+    AgentError,
+    AgentOperation,
+    ErrorCode,
+    Parameter,
+)
+from databricks.labs.community_connector.sparkpds.ingestion_agent_datasource import (
+    ReadTableOp,
+    _connector_options,
+)
+from databricks.labs.community_connector.sources.gmail.gmail_utils import (
+    GmailApiError,
+    b64url_decode,
+    extract_drive_file_ids,
+)
+
+
+class CaseInsensitiveDict(dict):
+    """A ``dict`` with case-insensitive string-key lookups (``[]``, ``get``,
+    ``in``, ``pop``).
+
+    Defined here (not in ``libs/utils``) so it stays out of the SDP merged
+    single-file: this module is the ingestion-agent surface, served from the
+    installed wheel, and is excluded from ``merge_python_source.py``.
+
+    Some Spark option-delivery paths (notebook reads via
+    ``databricks.connection`` → UC injection) lowercase option keys before
+    they reach Python, so ``options["tableName"]`` would ``KeyError`` even
+    though the caller wrote ``.option("tableName", ...)``. Other paths
+    preserve case. Wrapping the option dict here lets camelCase lookups keep
+    working regardless. No private instance state — cloudpickle reconstructs
+    dict subclasses via ``__new__`` + ``__setitem__`` (bypassing
+    ``__init__``), so any cached index would be unset on the executor; we
+    scan keys per lookup instead (fine for small option dicts).
+    """
+
+    def __getitem__(self, key):
+        return super().__getitem__(self._resolve(key))
+
+    def __contains__(self, key) -> bool:
+        if isinstance(key, str):
+            return self._find(key) is not None
+        return super().__contains__(key)
+
+    def get(self, key, default=None):
+        if isinstance(key, str):
+            actual = self._find(key)
+            return super().__getitem__(actual) if actual is not None else default
+        return super().get(key, default)
+
+    def pop(self, key, *args):
+        if isinstance(key, str):
+            actual = self._find(key)
+            if actual is not None:
+                return super().pop(actual)
+            if args:
+                return args[0]
+            raise KeyError(key)
+        return super().pop(key, *args)
+
+    def __delitem__(self, key):
+        super().__delitem__(self._resolve(key))
+
+    def _find(self, key: str):
+        lowered = key.lower()
+        for existing in super().keys():
+            if isinstance(existing, str) and existing.lower() == lowered:
+                return existing
+        return None
+
+    def _resolve(self, key):
+        if isinstance(key, str):
+            actual = self._find(key)
+            if actual is None:
+                raise KeyError(key)
+            return actual
+        return key
+
+
+# ---------------------------------------------------------------------------
+# Filter composition: typed agent params → Gmail q syntax
+# ---------------------------------------------------------------------------
+
+# Tables that accept Gmail search filters. Anything outside this set is
+# previewed with the framework default (full table snapshot).
+_FILTERABLE_TABLES = frozenset({"messages", "threads"})
+
+# Typed filter parameters shared by read_table override and search_messages.
+# Each tuple is (param, render_fn) where render_fn(value) → q fragment.
+def _q_quote(value: str) -> str:
+    """Wrap a multi-word value in parentheses so Gmail treats it as one operand."""
+    value = value.strip()
+    if not value:
+        return ""
+    if " " in value and not (value.startswith("(") and value.endswith(")")):
+        return f"({value})"
+    return value
+
+
+def _render_after(v: str) -> str:
+    return f"after:{v}"
+
+
+def _render_before(v: str) -> str:
+    return f"before:{v}"
+
+
+def _render_newer_than(v: str) -> str:
+    return f"newer_than:{v}"
+
+
+def _render_subject(v: str) -> str:
+    return f"subject:{_q_quote(v)}"
+
+
+def _render_from(v: str) -> str:
+    return f"from:{v}"
+
+
+def _render_to(v: str) -> str:
+    return f"to:{v}"
+
+
+def _render_label(v: str) -> str:
+    return f"label:{v}"
+
+
+def _render_has_attachment(v: str) -> str:
+    return "has:attachment" if v.lower() == "true" else ""
+
+
+def _render_is_unread(v: str) -> str:
+    return "is:unread" if v.lower() == "true" else ""
+
+
+def _render_passthrough(v: str) -> str:
+    # Free-form query — let the caller author Gmail syntax directly.
+    return v.strip()
+
+
+_FILTER_RENDERERS = (
+    ("after_date", _render_after),
+    ("before_date", _render_before),
+    ("newer_than", _render_newer_than),
+    ("subject", _render_subject),
+    ("from_address", _render_from),
+    ("to_address", _render_to),
+    ("label", _render_label),
+    ("has_attachment", _render_has_attachment),
+    ("is_unread", _render_is_unread),
+    ("query", _render_passthrough),
+)
+
+
+_FILTER_PARAMETERS = (
+    Parameter(
+        name="after_date",
+        description="Date filter — messages on or after YYYY/MM/DD (day granularity).",
+    ),
+    Parameter(
+        name="before_date",
+        description="Date filter — messages strictly before YYYY/MM/DD (day granularity).",
+    ),
+    Parameter(
+        name="newer_than",
+        description="Relative window like '7d', '2m', '1y' (no hours/seconds).",
+    ),
+    Parameter(name="subject", description="Subject keyword or phrase."),
+    Parameter(name="from_address", description="Sender email or substring."),
+    Parameter(name="to_address", description="Recipient email or substring."),
+    Parameter(
+        name="label",
+        description="Gmail label name (e.g. 'inbox', 'work/urgent'). Spaces become '-'.",
+    ),
+    Parameter(
+        name="has_attachment",
+        type="boolean",
+        description="If true, restrict to messages with attachments.",
+    ),
+    Parameter(
+        name="is_unread",
+        type="boolean",
+        description="If true, restrict to unread messages.",
+    ),
+    Parameter(
+        name="query",
+        description=(
+            "Free-form Gmail search expression appended verbatim. "
+            "Combined with the typed filters via AND."
+        ),
+    ),
+)
+
+
+def _compose_query(options: Mapping[str, str]) -> Optional[str]:
+    """Compose typed filter params into a Gmail ``q`` string.
+
+    Returns ``None`` when no filters were supplied (preserves the
+    connector's default listing behaviour). Multiple typed filters are
+    joined with implicit AND, which is Gmail's default conjunction.
+    """
+    fragments: list[str] = []
+    for name, render in _FILTER_RENDERERS:
+        raw = options.get(name)
+        if raw is None or raw == "":
+            continue
+        fragment = render(raw)
+        if fragment:
+            fragments.append(fragment)
+    # Caller's pre-existing q passthrough on the connector — preserve it.
+    raw_q = options.get("q")
+    if raw_q:
+        fragments.append(raw_q)
+    if not fragments:
+        return None
+    return " ".join(fragments)
+
+
+def _table_options_with_query(
+    options: Mapping[str, str], table_name: str
+) -> "CaseInsensitiveDict":
+    """Return connector-side options with the composed ``q`` injected.
+
+    Stripped of the typed filter keys (consumed here) and the agent-reserved
+    keys; the connector sees only its own option namespace plus the merged
+    ``q``. Keeps the ``CaseInsensitiveDict`` wrapper so the connector's
+    camelCase option lookups (``maxResults``, ``labelIds``,
+    ``includeSpamTrash``) keep working when Spark delivered the keys
+    lowercased.
+    """
+    base = CaseInsensitiveDict(_connector_options(options))
+    typed_keys = {name for name, _ in _FILTER_RENDERERS}
+    for key in typed_keys:
+        base.pop(key, None)
+    if table_name in _FILTERABLE_TABLES:
+        composed = _compose_query(options)
+        if composed:
+            base["q"] = composed
+    return base
+
+
+# ---------------------------------------------------------------------------
+# Header extraction helpers
+# ---------------------------------------------------------------------------
+
+def _header_value(payload: Mapping[str, Any], name: str) -> Optional[str]:
+    """Look up a header by case-insensitive name on a parsed payload."""
+    if not payload:
+        return None
+    target = name.lower()
+    for header in payload.get("headers", []) or []:
+        if (header.get("name") or "").lower() == target:
+            return header.get("value")
+    return None
+
+
+def _walk_parts(payload: Mapping[str, Any]):
+    """Depth-first iterate every MessagePart in a parsed payload."""
+    if not payload:
+        return
+    stack = [payload]
+    while stack:
+        part = stack.pop()
+        yield part
+        for child in part.get("parts", []) or []:
+            stack.append(child)
+
+
+def _decode_body_text(payload: Mapping[str, Any], mime_target: str) -> Optional[str]:
+    """Decode the first body part matching ``mime_target`` to text.
+
+    Gmail returns part bodies as base64url; we decode then UTF-8 with
+    ``errors='replace'`` so caller never crashes on legacy encodings.
+    """
+    for part in _walk_parts(payload):
+        if part.get("mimeType") != mime_target:
+            continue
+        body = part.get("body") or {}
+        data = body.get("data")
+        if not data:
+            continue
+        try:
+            return b64url_decode(data).decode("utf-8", errors="replace")
+        except Exception:  # pylint: disable=broad-except
+            return None
+    return None
+
+
+def _attachment_parts(payload: Mapping[str, Any]):
+    """Yield (filename, mimeType, attachmentId, size) for parts with attachments."""
+    for part in _walk_parts(payload):
+        body = part.get("body") or {}
+        attachment_id = body.get("attachmentId")
+        if not attachment_id:
+            continue
+        yield {
+            "filename": part.get("filename") or "",
+            "mime_type": part.get("mimeType") or "application/octet-stream",
+            "attachment_id": attachment_id,
+            "size_bytes": int(body.get("size") or 0),
+        }
+
+
+def _safe_int(value: Any) -> Optional[int]:
+    if value is None:
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _int_option(options: Mapping[str, str], name: str, default: int) -> int:
+    """Parse an integer option, raising ``bad_request`` on a non-integer."""
+    raw = options.get(name)
+    if raw is None or raw == "":
+        return default
+    try:
+        return int(raw)
+    except (TypeError, ValueError) as exc:
+        raise AgentError(
+            ErrorCode.BAD_REQUEST,
+            f"Option {name!r} must be an integer, got {raw!r}.",
+        ) from exc
+
+
+def _thread_participants_and_labels(messages):
+    """Return (participants, label_ids) deduped in first-seen order across
+    every message in a thread."""
+    participants: dict = {}
+    labels: dict = {}
+    for msg in messages:
+        payload = msg.get("payload") or {}
+        for header_name in ("From", "To", "Cc"):
+            value = _header_value(payload, header_name)
+            if value:
+                participants.setdefault(value, None)
+        for label_id in msg.get("labelIds") or []:
+            labels.setdefault(label_id, None)
+    return list(participants.keys()), list(labels.keys())
+
+
+# ---------------------------------------------------------------------------
+# read_table override: apply typed filters to messages / threads
+# ---------------------------------------------------------------------------
+
+class GmailReadTableOp(ReadTableOp):
+    """read_table that composes typed filters into Gmail's ``q`` syntax.
+
+    For ``messages`` and ``threads``, the typed parameters below are joined
+    via AND and become the ``q`` option the connector sends to Gmail. For
+    every other table, behaviour matches the framework default.
+
+    Default row cap is **50** so notebook ``display(df)`` calls return
+    quickly against busy mailboxes. Pass ``maxResults=N`` to raise the cap,
+    or ``maxResults=-1`` for unlimited (the full table is streamed). The
+    cap is enforced inside the connector's pagination loop, so we don't
+    fetch pages we'll throw away.
+    """
+
+    _DEFAULT_MAX_RESULTS = "50"
+
+    description = (
+        "Read a tabular object. For messages/threads, accepts typed "
+        "filters (after_date, before_date, newer_than, subject, "
+        "from_address, to_address, label, has_attachment, is_unread, "
+        "query) that compose into Gmail search syntax. "
+        "Default cap is 50 rows; set maxResults=N to change, or "
+        "maxResults=-1 for unlimited."
+    )
+    parameters = ReadTableOp.parameters + _FILTER_PARAMETERS
+
+    def pull(self, connector, options):
+        table_name = options["tableName"]
+        gmail_options = _table_options_with_query(options, table_name)
+        # Inject the default cap if the caller didn't specify one.
+        # ``in`` is case-insensitive on the CaseInsensitiveDict that
+        # ``_table_options_with_query`` returns, so any casing of
+        # ``maxResults`` the caller passed will be detected.
+        if "maxResults" not in gmail_options:
+            gmail_options["maxResults"] = self._DEFAULT_MAX_RESULTS
+        records, _offset = connector.read_table(table_name, None, gmail_options)
+        return records
+
+
+# ---------------------------------------------------------------------------
+# search_messages: lightweight triage view (no body, no payload)
+# ---------------------------------------------------------------------------
+
+_SEARCH_MESSAGES_SCHEMA = StructType(
+    [
+        StructField("id", StringType(), False),
+        StructField("threadId", StringType(), True),
+        StructField("from_address", StringType(), True),
+        StructField("to_address", StringType(), True),
+        StructField("subject", StringType(), True),
+        StructField("date", StringType(), True),
+        StructField("snippet", StringType(), True),
+        StructField("labelIds", ArrayType(StringType()), True),
+        StructField("has_attachment", StringType(), True),
+        StructField("size_estimate", LongType(), True),
+    ]
+)
+
+
+class SearchMessagesOp(AgentOperation):
+    """Lightweight search returning header-level info, no message bodies.
+
+    Designed for agent triage flows where the planner wants to scan many
+    messages cheaply, then call ``get_message`` only on the ones it picks.
+    Uses Gmail's ``format=metadata`` so each message costs 5 quota units
+    instead of 20 for ``format=full``.
+    """
+
+    name = "search_messages"
+    description = (
+        "Search messages and return one row per match with id, threadId, "
+        "from, to, subject, date, snippet, labels, has_attachment, "
+        "size_estimate. No message bodies."
+    )
+    kind = "data"
+    schema = _SEARCH_MESSAGES_SCHEMA
+    parameters = (
+        Parameter(
+            name="limit",
+            type="integer",
+            default=50,
+            description="Maximum messages to return (default 50, max 500).",
+        ),
+    ) + _FILTER_PARAMETERS
+
+    def pull(self, connector, options):
+        api = connector.api
+        user_id = connector.user_id
+
+        limit = self._int_limit(options)
+        composed_q = _compose_query(options)
+        capped = min(max(limit, 1), 500)
+
+        params: dict = {"maxResults": capped}
+        if composed_q:
+            params["q"] = composed_q
+
+        # First list to get IDs, then fetch metadata-format for headers only.
+        listing = api.make_request("GET", f"/users/{user_id}/messages", params=params)
+        if not listing or "messages" not in listing:
+            return iter([])
+
+        message_ids = [m["id"] for m in listing.get("messages", [])][:limit]
+
+        # has_attachment: ``format=metadata`` returns only id/labels/headers —
+        # no MIME part tree — so attachments can't be read off the per-message
+        # response. Instead run the same search constrained to ``has:attachment``
+        # and intersect the ids. One extra (cheap) list call, and accurate: a
+        # message at position k of the main result has at most k-1 messages
+        # ahead of it, so any attachment-bearing match in our window is within
+        # the top ``capped`` attachment results too.
+        attachment_ids = self._attachment_ids(api, user_id, composed_q, capped, message_ids)
+
+        endpoints = [f"/users/{user_id}/messages/{mid}" for mid in message_ids]
+        meta_params = [{"format": "metadata"}] * len(message_ids)
+        results = api.make_batch_request(endpoints, meta_params)
+
+        rows = []
+        for msg in results:
+            if not msg:
+                continue
+            payload = msg.get("payload") or {}
+            label_ids = msg.get("labelIds") or []
+            rows.append(
+                {
+                    "id": msg.get("id"),
+                    "threadId": msg.get("threadId"),
+                    "from_address": _header_value(payload, "From"),
+                    "to_address": _header_value(payload, "To"),
+                    "subject": _header_value(payload, "Subject"),
+                    "date": _header_value(payload, "Date"),
+                    "snippet": msg.get("snippet"),
+                    "labelIds": label_ids,
+                    "has_attachment": "true" if msg.get("id") in attachment_ids else "false",
+                    "size_estimate": _safe_int(msg.get("sizeEstimate")),
+                }
+            )
+        return iter(rows)
+
+    @staticmethod
+    def _attachment_ids(api, user_id, composed_q, max_results, candidate_ids):
+        """Return the subset of message ids (among this search) that carry an
+        attachment, via a companion ``has:attachment`` search."""
+        # If the caller already constrained the search to attachments, every
+        # match has one — skip the extra round trip.
+        if composed_q and "has:attachment" in composed_q:
+            return set(candidate_ids)
+        q = f"{composed_q} has:attachment" if composed_q else "has:attachment"
+        listing = api.make_request(
+            "GET", f"/users/{user_id}/messages", params={"maxResults": max_results, "q": q}
+        )
+        if not listing or "messages" not in listing:
+            return set()
+        return {m["id"] for m in listing.get("messages", [])}
+
+    @staticmethod
+    def _int_limit(options: Mapping[str, str]) -> int:
+        raw = options.get("limit")
+        if raw is None or raw == "":
+            return 50
+        try:
+            return int(raw)
+        except (TypeError, ValueError) as exc:
+            raise AgentError(
+                ErrorCode.BAD_REQUEST,
+                f"Option 'limit' must be an integer, got {raw!r}.",
+            ) from exc
+
+
+# ---------------------------------------------------------------------------
+# get_message: fetch a single message with decoded plain + html bodies
+# ---------------------------------------------------------------------------
+
+_GET_MESSAGE_SCHEMA = StructType(
+    [
+        StructField("id", StringType(), False),
+        StructField("threadId", StringType(), True),
+        StructField("from_address", StringType(), True),
+        StructField("to_address", StringType(), True),
+        StructField("cc_address", StringType(), True),
+        StructField("subject", StringType(), True),
+        StructField("date", StringType(), True),
+        StructField("snippet", StringType(), True),
+        StructField("labelIds", ArrayType(StringType()), True),
+        StructField("body_text", StringType(), True),
+        StructField("body_html", StringType(), True),
+        StructField("size_estimate", LongType(), True),
+        StructField(
+            "attachments",
+            ArrayType(
+                StructType(
+                    [
+                        StructField("filename", StringType(), True),
+                        StructField("mime_type", StringType(), True),
+                        StructField("attachment_id", StringType(), True),
+                        StructField("size_bytes", LongType(), True),
+                    ]
+                )
+            ),
+            True,
+        ),
+        StructField("drive_file_ids", ArrayType(StringType()), True),
+    ]
+)
+
+
+class GetMessageOp(AgentOperation):
+    """Fetch one message by id with decoded plain-text and HTML bodies.
+
+    Returns a single row. Body parts arrive base64url-encoded from Gmail;
+    this op decodes them so the agent sees ready-to-read text. Drive-
+    hosted attachment IDs are extracted from the HTML body and surfaced
+    in ``drive_file_ids`` so the agent can chain ``download_attachment``.
+    """
+
+    name = "get_message"
+    description = (
+        "Fetch one message by id with decoded body_text/body_html, "
+        "headers, attachments list, and any Drive file IDs referenced "
+        "in the body."
+    )
+    kind = "data"
+    schema = _GET_MESSAGE_SCHEMA
+    parameters = (
+        Parameter(
+            name="message_id",
+            required=True,
+            description="Gmail message id to fetch.",
+        ),
+    )
+
+    def pull(self, connector, options):
+        message_id = options["message_id"]
+        api = connector.api
+        user_id = connector.user_id
+
+        msg = api.make_request(
+            "GET",
+            f"/users/{user_id}/messages/{message_id}",
+            {"format": "full"},
+        )
+        if not msg:
+            raise AgentError(
+                ErrorCode.NOT_FOUND,
+                f"Message '{message_id}' not found or inaccessible.",
+            )
+        payload = msg.get("payload") or {}
+        body_text = _decode_body_text(payload, "text/plain")
+        body_html = _decode_body_text(payload, "text/html")
+        drive_ids = extract_drive_file_ids(body_html or body_text or "")
+
+        return iter(
+            [
+                {
+                    "id": msg.get("id"),
+                    "threadId": msg.get("threadId"),
+                    "from_address": _header_value(payload, "From"),
+                    "to_address": _header_value(payload, "To"),
+                    "cc_address": _header_value(payload, "Cc"),
+                    "subject": _header_value(payload, "Subject"),
+                    "date": _header_value(payload, "Date"),
+                    "snippet": msg.get("snippet"),
+                    "labelIds": msg.get("labelIds") or [],
+                    "body_text": body_text,
+                    "body_html": body_html,
+                    "size_estimate": _safe_int(msg.get("sizeEstimate")),
+                    "attachments": list(_attachment_parts(payload)),
+                    "drive_file_ids": drive_ids,
+                }
+            ]
+        )
+
+
+# ---------------------------------------------------------------------------
+# list_attachments: enumerate gmail-native + Drive-hosted attachments
+# ---------------------------------------------------------------------------
+
+_LIST_ATTACHMENTS_SCHEMA = StructType(
+    [
+        StructField("message_id", StringType(), False),
+        StructField("kind", StringType(), False),  # "gmail" or "drive"
+        StructField("attachment_id", StringType(), True),
+        StructField("drive_file_id", StringType(), True),
+        StructField("filename", StringType(), True),
+        StructField("mime_type", StringType(), True),
+        StructField("size_bytes", LongType(), True),
+    ]
+)
+
+
+class ListAttachmentsOp(AgentOperation):
+    """List attachments for a message.
+
+    Surfaces two kinds in the same result set:
+      - ``kind = "gmail"``: parts with an ``attachment_id`` from the
+        message payload. Fetch via ``download_attachment`` with
+        ``attachment_id``.
+      - ``kind = "drive"``: file IDs extracted from Drive/Docs links in
+        the message body. Fetch via ``download_attachment`` with
+        ``drive_file_id``. Filename / size enriched via Drive metadata.
+    """
+
+    name = "list_attachments"
+    description = (
+        "List Gmail-native and Drive-hosted attachments for a message id. "
+        "Returns one row per attachment with the IDs the "
+        "download_attachment op needs."
+    )
+    kind = "data"
+    schema = _LIST_ATTACHMENTS_SCHEMA
+    parameters = (
+        Parameter(
+            name="message_id",
+            required=True,
+            description="Gmail message id whose attachments to enumerate.",
+        ),
+    )
+
+    def pull(self, connector, options):
+        message_id = options["message_id"]
+        api = connector.api
+        user_id = connector.user_id
+
+        msg = api.make_request(
+            "GET",
+            f"/users/{user_id}/messages/{message_id}",
+            {"format": "full"},
+        )
+        if not msg:
+            raise AgentError(
+                ErrorCode.NOT_FOUND,
+                f"Message '{message_id}' not found or inaccessible.",
+            )
+        payload = msg.get("payload") or {}
+
+        rows: list[dict] = []
+        for part in _attachment_parts(payload):
+            rows.append(
+                {
+                    "message_id": message_id,
+                    "kind": "gmail",
+                    "attachment_id": part["attachment_id"],
+                    "drive_file_id": None,
+                    "filename": part["filename"],
+                    "mime_type": part["mime_type"],
+                    "size_bytes": part["size_bytes"],
+                }
+            )
+
+        body_html = _decode_body_text(payload, "text/html")
+        body_text = _decode_body_text(payload, "text/plain")
+        drive_ids = extract_drive_file_ids(body_html or body_text or "")
+        for file_id in drive_ids:
+            # Drive metadata lookup is best-effort; permission errors
+            # surface in the row's mime_type so the agent sees them.
+            try:
+                meta = api.get_drive_file_metadata(file_id)
+                rows.append(
+                    {
+                        "message_id": message_id,
+                        "kind": "drive",
+                        "attachment_id": None,
+                        "drive_file_id": file_id,
+                        "filename": meta.get("name"),
+                        "mime_type": meta.get("mimeType"),
+                        "size_bytes": _safe_int(meta.get("size")),
+                    }
+                )
+            except GmailApiError as exc:
+                rows.append(
+                    {
+                        "message_id": message_id,
+                        "kind": "drive",
+                        "attachment_id": None,
+                        "drive_file_id": file_id,
+                        "filename": None,
+                        "mime_type": f"error:http_{exc.status}",
+                        "size_bytes": None,
+                    }
+                )
+        return iter(rows)
+
+
+# ---------------------------------------------------------------------------
+# download_attachment: write bytes to a Databricks volume path
+# ---------------------------------------------------------------------------
+
+_DOWNLOAD_ATTACHMENT_SCHEMA = StructType(
+    [
+        StructField("volume_path", StringType(), False),
+        StructField("size_bytes", LongType(), True),
+        StructField("mime_type", StringType(), True),
+        StructField("filename", StringType(), True),
+        StructField("source", StringType(), False),  # "gmail" or "drive"
+    ]
+)
+
+
+def _safe_basename(name: Optional[str]) -> Optional[str]:
+    """Strip any directory components from a filename so a downloaded
+    attachment can't escape its target directory."""
+    if not name:
+        return None
+    base = os.path.basename(name.strip())
+    return base or None
+
+
+def _resolve_volume_dest(volume_path: str, filename: Optional[str], fallback: str) -> str:
+    """Resolve the destination file path for a download.
+
+    ``volume_path`` may be a full file path *or* a directory. It is treated
+    as a directory when it ends with ``/`` or already exists as one, in which
+    case the attachment's own ``filename`` (``fallback`` when unknown) is
+    appended. Otherwise it is used verbatim as the destination file.
+    """
+    if volume_path.endswith("/") or os.path.isdir(volume_path):
+        return os.path.join(volume_path.rstrip("/") or "/", _safe_basename(filename) or fallback)
+    return volume_path
+
+
+def _ensure_parent_dir(dest: str) -> None:
+    parent = os.path.dirname(dest)
+    if not parent:
+        return
+    try:
+        os.makedirs(parent, exist_ok=True)
+    except OSError as exc:
+        raise AgentError(
+            ErrorCode.PERMISSION_DENIED,
+            f"Cannot create parent directory '{parent}': {exc}",
+        ) from exc
+
+
+class DownloadAttachmentOp(AgentOperation):
+    """Download an attachment to a Databricks Volume path.
+
+    Two input shapes; exactly one ID must be supplied:
+      - ``attachment_id`` + ``message_id`` → Gmail's
+        ``users.messages.attachments.get``. Decoded bytes are written
+        to ``volume_path``.
+      - ``drive_file_id`` → Drive ``files.get?alt=media`` (binary) or
+        ``files.export`` (Google-native types: Docs/Sheets/Slides).
+        ``export_mime_type`` overrides the default ``application/pdf``
+        export target.
+
+    ``volume_path`` may be either a full destination file path
+    (``/Volumes/<catalog>/<schema>/<volume>/invoice.pdf``) or an existing
+    directory (``/Volumes/<catalog>/<schema>/<volume>/``) — in the directory
+    case the attachment's own filename is appended. The op creates the parent
+    directory if needed but does not create the volume itself, and requires
+    the path to start with ``/Volumes/`` so it can't write outside Unity
+    Catalog. The resolved path is returned in the ``volume_path`` column.
+    """
+
+    name = "download_attachment"
+    description = (
+        "Download a Gmail or Drive-hosted attachment to a Databricks "
+        "Volume path. Supply attachment_id+message_id for Gmail or "
+        "drive_file_id for Drive."
+    )
+    kind = "metadata"
+    schema = _DOWNLOAD_ATTACHMENT_SCHEMA
+    parameters = (
+        Parameter(
+            name="volume_path",
+            required=True,
+            description=(
+                "Destination under /Volumes/<catalog>/<schema>/<volume>/. "
+                "Either a full file path, or a directory (the attachment's "
+                "own filename is appended). Parent dirs are created if missing."
+            ),
+        ),
+        Parameter(
+            name="message_id",
+            description=(
+                "Gmail message id. Required when attachment_id is supplied."
+            ),
+        ),
+        Parameter(
+            name="attachment_id",
+            description=(
+                "Gmail attachment id (from list_attachments where kind=gmail)."
+            ),
+        ),
+        Parameter(
+            name="drive_file_id",
+            description=(
+                "Drive file id (from list_attachments where kind=drive)."
+            ),
+        ),
+        Parameter(
+            name="export_mime_type",
+            description=(
+                "For Google-native Drive files, the export MIME type "
+                "(default 'application/pdf'). Ignored for binary files."
+            ),
+        ),
+    )
+
+    _VOLUME_PREFIX = "/Volumes/"
+
+    def pull(self, connector, options):
+        volume_path = options["volume_path"]
+        if not volume_path.startswith(self._VOLUME_PREFIX):
+            raise AgentError(
+                ErrorCode.BAD_REQUEST,
+                f"volume_path must start with '{self._VOLUME_PREFIX}'; "
+                f"got {volume_path!r}.",
+            )
+
+        attachment_id = options.get("attachment_id") or None
+        message_id = options.get("message_id") or None
+        drive_file_id = options.get("drive_file_id") or None
+
+        if attachment_id and drive_file_id:
+            raise AgentError(
+                ErrorCode.BAD_REQUEST,
+                "Supply attachment_id OR drive_file_id, not both.",
+            )
+        if not attachment_id and not drive_file_id:
+            raise AgentError(
+                ErrorCode.BAD_REQUEST,
+                "Either attachment_id (with message_id) or drive_file_id "
+                "is required.",
+            )
+        if attachment_id and not message_id:
+            raise AgentError(
+                ErrorCode.BAD_REQUEST,
+                "message_id is required when attachment_id is supplied.",
+            )
+
+        if attachment_id:
+            return iter([self._download_gmail(connector, message_id, attachment_id, volume_path)])
+        return iter([self._download_drive(connector, drive_file_id, volume_path, options)])
+
+    @staticmethod
+    def _download_gmail(connector, message_id, attachment_id, volume_path):
+        try:
+            data = connector.api.get_attachment(message_id, attachment_id)
+        except GmailApiError as exc:
+            raise _agent_error_from_status(exc) from exc
+
+        # Look up filename + mime from the parent message payload so the
+        # row carries it (and so a directory volume_path can be named).
+        filename = None
+        mime_type = None
+        meta = connector.api.make_request(
+            "GET",
+            f"/users/{connector.user_id}/messages/{message_id}",
+            {"format": "full"},
+        )
+        if meta:
+            for part in _attachment_parts(meta.get("payload") or {}):
+                if part["attachment_id"] == attachment_id:
+                    filename = part["filename"] or None
+                    mime_type = part["mime_type"]
+                    break
+
+        dest = _resolve_volume_dest(volume_path, filename, fallback=attachment_id)
+        _ensure_parent_dir(dest)
+        with open(dest, "wb") as fh:
+            fh.write(data)
+
+        return {
+            "volume_path": dest,
+            "size_bytes": len(data),
+            "mime_type": mime_type,
+            "filename": filename or _safe_basename(dest),
+            "source": "gmail",
+        }
+
+    @staticmethod
+    def _download_drive(connector, drive_file_id, volume_path, options):
+        # When volume_path is a directory, resolve the filename up front from
+        # Drive metadata so the file lands inside it with its real name.
+        dest = volume_path
+        if volume_path.endswith("/") or os.path.isdir(volume_path):
+            try:
+                meta = connector.api.get_drive_file_metadata(drive_file_id)
+            except GmailApiError as exc:
+                raise _agent_error_from_status(exc) from exc
+            dest = _resolve_volume_dest(volume_path, meta.get("name"), fallback=drive_file_id)
+        _ensure_parent_dir(dest)
+
+        try:
+            size, name, mime = connector.api.download_drive_file(
+                drive_file_id,
+                dest,
+                export_mime_type=options.get("export_mime_type") or None,
+            )
+        except GmailApiError as exc:
+            raise _agent_error_from_status(exc) from exc
+
+        return {
+            "volume_path": dest,
+            "size_bytes": size,
+            "mime_type": mime,
+            "filename": name,
+            "source": "drive",
+        }
+
+
+# ---------------------------------------------------------------------------
+# get_thread: fetch a full conversation with decoded message bodies
+# ---------------------------------------------------------------------------
+
+_THREAD_MESSAGE_STRUCT = StructType(
+    [
+        StructField("id", StringType(), True),
+        StructField("from_address", StringType(), True),
+        StructField("to_address", StringType(), True),
+        StructField("cc_address", StringType(), True),
+        StructField("subject", StringType(), True),
+        StructField("date", StringType(), True),
+        StructField("snippet", StringType(), True),
+        StructField("body_text", StringType(), True),
+        StructField("labelIds", ArrayType(StringType()), True),
+        StructField("size_estimate", LongType(), True),
+    ]
+)
+
+_GET_THREAD_SCHEMA = StructType(
+    [
+        StructField("thread_id", StringType(), False),
+        StructField("history_id", StringType(), True),
+        StructField("subject", StringType(), True),
+        StructField("message_count", LongType(), True),
+        StructField("participants", ArrayType(StringType()), True),
+        StructField("labelIds", ArrayType(StringType()), True),
+        StructField("messages", ArrayType(_THREAD_MESSAGE_STRUCT), True),
+    ]
+)
+
+
+class GetThreadOp(AgentOperation):
+    """Fetch a full conversation thread by id with decoded message bodies.
+
+    Returns one row: the thread, with a ``messages`` array in Gmail's
+    chronological order. Each message carries decoded ``body_text`` (plain
+    text — call ``get_message`` for HTML or attachment IDs).
+    ``participants`` is the de-duplicated set of From/To/Cc addresses across
+    the thread. The conversation is the natural unit for analysis, so this
+    pairs with ``search_threads`` (find threads) the way ``get_message``
+    pairs with ``search_messages``.
+    """
+
+    name = "get_thread"
+    description = (
+        "Fetch one conversation thread by thread_id: every message in order "
+        "with decoded body_text, plus the thread's subject, participants, "
+        "message_count, and labels."
+    )
+    kind = "data"
+    schema = _GET_THREAD_SCHEMA
+    parameters = (
+        Parameter(
+            name="thread_id",
+            required=True,
+            description="Gmail thread id to fetch (e.g. from search_threads).",
+        ),
+    )
+
+    def pull(self, connector, options):
+        thread_id = options["thread_id"]
+        api = connector.api
+        user_id = connector.user_id
+
+        thread = api.make_request(
+            "GET", f"/users/{user_id}/threads/{thread_id}", {"format": "full"}
+        )
+        if not thread:
+            raise AgentError(
+                ErrorCode.NOT_FOUND,
+                f"Thread '{thread_id}' not found or inaccessible.",
+            )
+
+        messages = thread.get("messages") or []
+        participants, labels = _thread_participants_and_labels(messages)
+
+        message_rows = []
+        for msg in messages:
+            payload = msg.get("payload") or {}
+            message_rows.append(
+                {
+                    "id": msg.get("id"),
+                    "from_address": _header_value(payload, "From"),
+                    "to_address": _header_value(payload, "To"),
+                    "cc_address": _header_value(payload, "Cc"),
+                    "subject": _header_value(payload, "Subject"),
+                    "date": _header_value(payload, "Date"),
+                    "snippet": msg.get("snippet"),
+                    "body_text": _decode_body_text(payload, "text/plain"),
+                    "labelIds": msg.get("labelIds") or [],
+                    "size_estimate": _safe_int(msg.get("sizeEstimate")),
+                }
+            )
+
+        first_payload = (messages[0].get("payload") if messages else {}) or {}
+        return iter(
+            [
+                {
+                    "thread_id": thread.get("id") or thread_id,
+                    "history_id": thread.get("historyId"),
+                    "subject": _header_value(first_payload, "Subject"),
+                    "message_count": len(message_rows),
+                    "participants": participants,
+                    "labelIds": labels,
+                    "messages": message_rows,
+                }
+            ]
+        )
+
+
+# ---------------------------------------------------------------------------
+# search_threads: thread-level triage (one row per conversation)
+# ---------------------------------------------------------------------------
+
+_SEARCH_THREADS_SCHEMA = StructType(
+    [
+        StructField("id", StringType(), False),
+        StructField("subject", StringType(), True),
+        StructField("snippet", StringType(), True),
+        StructField("message_count", LongType(), True),
+        StructField("participants", ArrayType(StringType()), True),
+        StructField("last_date", StringType(), True),
+        StructField("labelIds", ArrayType(StringType()), True),
+        StructField("history_id", StringType(), True),
+    ]
+)
+
+
+class SearchThreadsOp(AgentOperation):
+    """Search conversations and return one row per thread.
+
+    The thread-level companion to ``search_messages`` — use it when the
+    unit of analysis is the conversation, not the individual message.
+    Composes the same typed filters into Gmail ``q`` syntax, lists matching
+    threads, then fetches each (``format=metadata``, header-only) to derive
+    subject, participants, message_count, last activity, and labels.
+    Bounded by ``limit``.
+    """
+
+    name = "search_threads"
+    description = (
+        "Search conversation threads and return one row per thread with id, "
+        "subject, snippet, message_count, participants, last_date, labels. "
+        "Accepts the same typed filters as search_messages."
+    )
+    kind = "data"
+    schema = _SEARCH_THREADS_SCHEMA
+    parameters = (
+        Parameter(
+            name="limit",
+            type="integer",
+            default=50,
+            description="Maximum threads to return (default 50, max 500).",
+        ),
+    ) + _FILTER_PARAMETERS
+
+    def pull(self, connector, options):
+        api = connector.api
+        user_id = connector.user_id
+
+        limit = _int_option(options, "limit", 50)
+        composed_q = _compose_query(options)
+        params: dict = {"maxResults": min(max(limit, 1), 500)}
+        if composed_q:
+            params["q"] = composed_q
+
+        listing = api.make_request("GET", f"/users/{user_id}/threads", params=params)
+        if not listing or "threads" not in listing:
+            return iter([])
+
+        threads = listing.get("threads", [])[:limit]
+        snippet_by_id = {t["id"]: t.get("snippet") for t in threads}
+        thread_ids = [t["id"] for t in threads]
+        endpoints = [f"/users/{user_id}/threads/{tid}" for tid in thread_ids]
+        meta_params = [{"format": "metadata"}] * len(thread_ids)
+        results = api.make_batch_request(endpoints, meta_params)
+
+        rows = []
+        for thread in results:
+            if not thread:
+                continue
+            messages = thread.get("messages") or []
+            participants, labels = _thread_participants_and_labels(messages)
+            first_payload = (messages[0].get("payload") if messages else {}) or {}
+            last_payload = (messages[-1].get("payload") if messages else {}) or {}
+            tid = thread.get("id")
+            rows.append(
+                {
+                    "id": tid,
+                    "subject": _header_value(first_payload, "Subject"),
+                    "snippet": snippet_by_id.get(tid),
+                    "message_count": len(messages),
+                    "participants": participants,
+                    "last_date": _header_value(last_payload, "Date"),
+                    "labelIds": labels,
+                    "history_id": thread.get("historyId"),
+                }
+            )
+        return iter(rows)
+
+
+# ---------------------------------------------------------------------------
+# mailbox_overview: per-label message/thread counts for orientation
+# ---------------------------------------------------------------------------
+
+_MAILBOX_OVERVIEW_SCHEMA = StructType(
+    [
+        StructField("label_id", StringType(), False),
+        StructField("name", StringType(), True),
+        StructField("type", StringType(), True),
+        StructField("messages_total", LongType(), True),
+        StructField("messages_unread", LongType(), True),
+        StructField("threads_total", LongType(), True),
+        StructField("threads_unread", LongType(), True),
+    ]
+)
+
+
+class MailboxOverviewOp(AgentOperation):
+    """Per-label message/thread counts, so the agent can see the mailbox's
+    shape before drilling in.
+
+    Lists every label and fetches each one's counts (``users.labels.get``
+    returns messagesTotal / messagesUnread / threadsTotal / threadsUnread).
+    One row per label — system labels (INBOX, SENT, SPAM, ...) alongside
+    user labels — useful for "where is the volume?" orientation before a
+    targeted ``search_messages`` / ``read_table``.
+    """
+
+    name = "mailbox_overview"
+    description = (
+        "List every Gmail label with its message and thread counts (total "
+        "and unread). One row per label; orientation before querying."
+    )
+    kind = "data"
+    schema = _MAILBOX_OVERVIEW_SCHEMA
+    parameters = ()
+
+    def pull(self, connector, options):
+        del options
+        api = connector.api
+        user_id = connector.user_id
+
+        listing = api.make_request("GET", f"/users/{user_id}/labels")
+        labels = (listing or {}).get("labels", [])
+        if not labels:
+            return iter([])
+
+        label_ids = [lb["id"] for lb in labels if lb.get("id")]
+        endpoints = [f"/users/{user_id}/labels/{lid}" for lid in label_ids]
+        details = api.make_batch_request(endpoints)
+
+        rows = []
+        for detail in details:
+            if not detail:
+                continue
+            rows.append(
+                {
+                    "label_id": detail.get("id"),
+                    "name": detail.get("name"),
+                    "type": detail.get("type"),
+                    "messages_total": _safe_int(detail.get("messagesTotal")),
+                    "messages_unread": _safe_int(detail.get("messagesUnread")),
+                    "threads_total": _safe_int(detail.get("threadsTotal")),
+                    "threads_unread": _safe_int(detail.get("threadsUnread")),
+                }
+            )
+        return iter(rows)
+
+
+def _agent_error_from_status(exc: GmailApiError) -> AgentError:
+    """Map HTTP status to a canonical agent ErrorCode."""
+    if exc.status == 401:
+        return AgentError(
+            ErrorCode.AUTH_FAILED,
+            f"Authentication failed: {exc}",
+        )
+    if exc.status == 403:
+        return AgentError(
+            ErrorCode.PERMISSION_DENIED,
+            f"Permission denied (does the OAuth token include drive.readonly?): {exc}",
+        )
+    if exc.status == 404:
+        return AgentError(ErrorCode.NOT_FOUND, str(exc))
+    if exc.status == 429:
+        return AgentError(ErrorCode.RATE_LIMITED, str(exc))
+    return AgentError(ErrorCode.INTERNAL_ERROR, str(exc))
+
+
+# ---------------------------------------------------------------------------
+# Entry point — what GmailLakeflowConnect.agent_operations returns
+# ---------------------------------------------------------------------------
+
+def build_gmail_agent_operations() -> dict:
+    """Return the agent-operation map for the Gmail connector.
+
+    Wired in via :meth:`GmailLakeflowConnect.agent_operations`. The
+    ``read_table`` entry overrides the framework built-in.
+    """
+    ops = [
+        GmailReadTableOp(),
+        SearchMessagesOp(),
+        SearchThreadsOp(),
+        GetMessageOp(),
+        GetThreadOp(),
+        ListAttachmentsOp(),
+        DownloadAttachmentOp(),
+        MailboxOverviewOp(),
+    ]
+    return {op.name: op for op in ops}
