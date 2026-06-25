@@ -268,6 +268,43 @@ def test_snapshot_path_absolute_nextlink_resolves_against_host():
     assert [r["Id"] for r in rows] == [1, 2]
 
 
+@responses.activate
+def test_contained_leaf_service_root_relative_nextlink_does_not_double_path():
+    """Regression: a leaf-collection ``@odata.nextLink`` returned as a
+    path relative to the **service root** (``Parents(1)/Children(11)/
+    Notes?$skiptoken=...`` — the Hexagon/SAP style) must not be naively
+    ``urljoin``-ed against the deep request URL, which would duplicate
+    the ancestor path and 404 the next page — silently dropping every
+    page after the first on a contained snapshot. It must resolve
+    against the service root."""
+    _mock_nested_metadata()
+    responses.get(f"{SERVICE_URL}Parents", json={"value": [{"Id": 1}]})
+    responses.get(f"{SERVICE_URL}Parents(1)/Children", json={"value": [{"Id": 11}]})
+    # Leaf page 1 carries a SERVICE-ROOT-relative nextLink (no host, and
+    # it restates the full ancestor path from the top entity set).
+    responses.add(
+        responses.GET,
+        f"{SERVICE_URL}Parents(1)/Children(11)/Notes",
+        json={
+            "value": [{"Id": 101, "Text": "a"}],
+            "@odata.nextLink": "Parents(1)/Children(11)/Notes?$skiptoken=n2",
+        },
+        match_querystring=False,
+    )
+    # Correct resolution = service_root + the relative link. The doubled
+    # path (.../Notes/Parents(1)/Children(11)/Notes) is deliberately NOT
+    # registered, so the old behavior would error / drop page 2.
+    responses.get(
+        f"{SERVICE_URL}Parents(1)/Children(11)/Notes?$skiptoken=n2",
+        json={"value": [{"Id": 102, "Text": "b"}]},
+    )
+
+    c = _make()
+    records, _ = c.read_table("Parents__Children__Notes", None, {})
+    rows = list(records)
+    assert [r["Id"] for r in rows] == [101, 102]
+
+
 # ---------------------------------------------------------------------------
 # Incremental read
 # ---------------------------------------------------------------------------

@@ -47,7 +47,7 @@ from pyspark.sql.types import (
     VariantVal,
 )
 from requests.auth import HTTPBasicAuth
-from urllib.parse import urljoin
+from urllib.parse import urljoin, urlparse
 from xml.etree import ElementTree as ET
 import base64
 import hashlib
@@ -3878,9 +3878,50 @@ def register_lakeflow_source(spark):
                     for item in payload.get("value", [])
                 ]
                 raw_next = payload.get("@odata.nextLink")
-                new_next = urljoin(resp.url, raw_next) if raw_next else None
+                new_next = self._resolve_next_link(resp.url, raw_next) if raw_next else None
                 yield page_rows, new_next
                 next_url = new_next
+
+        def _resolve_next_link(self, request_url: str, raw_next: str) -> str:
+            """Resolve an ``@odata.nextLink`` against the request URL.
+
+            Absolute links, root-absolute links (leading ``/``) and bare
+            query references (``?...``) all resolve correctly with a plain
+            ``urljoin`` against the request URL. The trap is a **relative
+            path** nextLink on a contained-collection request: some servers
+            (Hexagon SCApi, SAP Gateway, …) return it relative to the
+            **service root** — ``Top(key)/Child(key)/Leaf?$skiptoken=...`` —
+            rather than the current resource. Naively ``urljoin``-ing that
+            against the deep request URL **duplicates the ancestor path**
+            (``.../Leaf/Top(key)/Child(key)/Leaf?...``), so the next page
+            404s and the read silently stops after page one — only visible
+            on multi-page collections such as a full contained snapshot.
+
+            Detect that form — the relative link restates the entity set
+            that immediately follows the service root in the request URL —
+            and resolve it against the service root instead. Genuinely
+            resource-relative links (e.g. flat ``Customers?$skiptoken=...``
+            or leaf-only ``Leaf?$skiptoken=...``) fall through to the
+            standard request-URL resolution.
+            """
+            parsed = urlparse(raw_next)
+            if parsed.scheme or raw_next.startswith("/") or raw_next.startswith("?"):
+                return urljoin(request_url, raw_next)
+
+            def _first_seg(path: str) -> str:
+                seg = path.lstrip("/").split("/", 1)[0]
+                # Strip any key predicate and query so ``Top(key)?x`` → ``Top``.
+                return seg.split("(", 1)[0].split("?", 1)[0]
+
+            root = self.service_url if self.service_url.endswith("/") else self.service_url + "/"
+            root_path = urlparse(root).path
+            req_path = urlparse(request_url).path
+            after_root = req_path[len(root_path) :] if req_path.startswith(root_path) else req_path
+            if after_root and _first_seg(raw_next) == _first_seg(after_root):
+                # Service-root-relative: resolve against the root so the
+                # ancestor path isn't doubled.
+                return urljoin(root, raw_next)
+            return urljoin(request_url, raw_next)
 
         def _fetch_page_payload(
             self, session: requests.Session, url: str
