@@ -1930,14 +1930,16 @@ def register_lakeflow_source(spark):
             max_records: int,
             fk_columns: dict[tuple[str, str], str],
             leaf_segment_filter: str | None = None,
-        ) -> tuple[list[dict], bool, int, int, str | None]:
+        ) -> tuple[list[dict], bool, int, str | None, Any]:
             """Drive the per-parent fetch loop (leaf-cursor mode).
 
-            ``chains_iter`` is consumed lazily: the parent-chain enumeration
-            only walks far enough to reach the chain that hits the
-            ``max_records`` cap, and is abandoned (along with all its
-            unfetched ancestor pages) the moment the loop breaks. Peak
-            memory is bounded to one chain regardless of subtree fan-out.
+            ``chains_iter`` is consumed lazily and the walk stops at the
+            first parent that offers a valid resume checkpoint once the
+            ``max_records`` cap is reached. Peak memory is normally bounded
+            to one chain; the exception is a *complete* parent whose entire
+            leaf collection shares a single cursor value (see below), which
+            is emitted in full and absorbed into the walk rather than
+            checkpointed.
 
             Resume preference, applied to the chain at ``parent_idx_start``:
 
@@ -1945,24 +1947,31 @@ def register_lakeflow_source(spark):
                bypassing URL rebuild. Used when the previous batch parked
                at a page boundary mid-chain.
             2. ``truncated_chain_cursor`` — used as ``cursor gt <value>``
-               in a freshly-built URL. Used when the previous batch had
-               to apply the Option A boundary trim at mid-page truncation
-               (server skiptoken couldn't represent the row-level position).
+               in a freshly-built URL. Used when the previous batch dropped
+               a trailing same-cursor cohort at a complete-parent boundary.
             3. Otherwise the global ``since`` is used.
 
-            Pagination is page-aware: rows are emitted as each page arrives,
-            and a truncation that lands at a page boundary checkpoints with
-            the response's @odata.nextLink. Mid-page truncations leave
-            ``chain_next_link_out`` as ``None`` so the caller falls back to
-            the Option A trim path.
+            Truncation checkpoint, decided when the cap is hit:
 
-            Returns ``(rows, truncated, parent_idx, truncated_chain_start_idx,
-            chain_next_link_out)``."""
+            * **Page boundary** (server returned an ``@odata.nextLink``) →
+              ``chain_next_link_out`` is set; resume re-enters this parent.
+            * **Complete parent with a distinct-cursor boundary** (no
+              nextLink) → the trailing same-cursor cohort is dropped and
+              ``truncated_chain_cursor_out`` is set; resume re-reads it.
+            * **Complete parent, single cursor value** (no nextLink, no
+              splittable boundary) → no checkpoint is possible and none is
+              needed: the cohort is complete, so all its rows are kept and
+              the walk continues to the next parent. The cap is overshot
+              for that one parent (bounded by one server response).
+
+            Returns ``(rows, truncated, parent_idx, chain_next_link_out,
+            truncated_chain_cursor_out)``."""
             emitted: list[dict] = []
             truncated = False
             parent_idx = 0
             chain_start_idx = 0
             chain_next_link_out: str | None = None
+            truncated_chain_cursor_out: Any = None
             for chain in chains_iter:
                 # Skip the chains we already emitted in prior batches. The
                 # iterator still pays for the ancestor pages that produce
@@ -2010,19 +2019,46 @@ def register_lakeflow_source(spark):
                         if len(emitted) >= max_records:
                             cap_hit_in_page = True
                     if cap_hit_in_page:
-                        # Finish the current page so the server's nextLink
-                        # (page-after-this-one) is a clean checkpoint, but
-                        # don't fetch any more pages for this chain.
+                        # Finish the current page (above) so its nextLink is a
+                        # clean checkpoint, then stop fetching more pages of
+                        # this chain and decide how to checkpoint below.
+                        break
+                if cap_hit_in_page:
+                    if page_next_url is not None:
+                        # Page boundary mid-collection: the server skiptoken is
+                        # a clean resume point — park it and re-enter this
+                        # parent next batch.
                         truncated = True
-                        # ``page_next_url`` is None ⇒ chain ended on this page;
-                        # caller falls back to Option A trim. Non-None ⇒
-                        # caller parks chain_next_link.
                         chain_next_link_out = page_next_url
                         break
-                if truncated:
-                    break
+                    # No nextLink ⇒ the server returned this parent's ENTIRE
+                    # leaf collection, so its cohort is complete. Prefer an
+                    # intra-parent boundary: drop the trailing same-cursor
+                    # cohort and resume this parent at ``cursor gt`` the last
+                    # distinct value (which re-reads that cohort).
+                    trimmed = _trim_to_distinct_cursor_boundary(emitted[chain_start_idx:], cursor_field)
+                    if trimmed:
+                        del emitted[chain_start_idx + len(trimmed) :]
+                        truncated = True
+                        truncated_chain_cursor_out = trimmed[-1].get(cursor_field)
+                        break
+                    # Every row of this complete parent shares one cursor value
+                    # — no splittable boundary exists, and re-reading the parent
+                    # can't make progress. The cohort is COMPLETE, so keep all
+                    # its rows and continue to the next parent. The cap is
+                    # necessarily overshot for this parent (bounded by one
+                    # server response); there is no valid mid-walk checkpoint,
+                    # which beats failing the batch. (Formerly a RuntimeError.)
+                    parent_idx += 1
+                    continue
                 parent_idx += 1
-            return emitted, truncated, parent_idx, chain_start_idx, chain_next_link_out
+            return (
+                emitted,
+                truncated,
+                parent_idx,
+                chain_next_link_out,
+                truncated_chain_cursor_out,
+            )
 
         def _no_progress_cursor_error(
             self, table_name: str, cursor_field: str, n_emitted: int
@@ -2115,27 +2151,24 @@ def register_lakeflow_source(spark):
         ) -> tuple[Iterator[dict], dict]:
             """Cursor lives on the leaf entity — filter at the leaf fetch.
 
-            Truncation has two recovery shapes, applied to the truncated
-            chain only (subsequent chains keep using the original
-            ``since``, since per-chain cursor distributions are
-            independent):
+            ``_walk_contained_with_cursor`` chooses the truncation
+            checkpoint (and trims ``emitted`` to match); this method only
+            serialises it into the resume offset. The checkpoint is scoped
+            to the truncated chain — subsequent chains keep the original
+            ``since`` since per-chain cursor distributions are independent:
 
-            * **NextLink (preferred)**: when truncation lands on a page
-              boundary, the server's @odata.nextLink is parked in the
-              offset as ``chain_next_link`` and the resumed call hands it
-              straight back to the server. No client-side filter
-              reconstruction; no boundary-cohort math.
-            * **Option A trim (fallback)**: when truncation lands
-              mid-page (the skiptoken can't represent a row-level
-              position), the trailing same-cursor cohort within the
-              truncated chain's emit is dropped and the chain's last
-              distinct cursor is parked as ``truncated_chain_cursor``.
-              The resumed call rebuilds the URL with
+            * **NextLink (preferred)**: truncation on a page boundary parks
+              the server's @odata.nextLink as ``chain_next_link``; the
+              resumed call hands it straight back to the server.
+            * **Trim boundary**: a *complete* parent (no nextLink) with a
+              distinct-cursor boundary drops its trailing same-cursor cohort
+              and parks ``truncated_chain_cursor``; the resumed call rebuilds
               ``cursor gt truncated_chain_cursor`` for that chain only.
-              If trimming leaves the chain with zero rows, the cohort
-              exceeded ``max_records_per_batch`` on its own and the
-              connector raises ``RuntimeError`` — same shape as the
-              flat-path failure mode.
+
+            A complete parent whose entire leaf collection shares one cursor
+            value has no splittable boundary; the walk emits it in full and
+            continues to the next parent (the cap is overshot for that one
+            parent), so there is no failure case here.
             """
             namespace = (table_options or {}).get("namespace")
             since = (start_offset or {}).get("cursor")
@@ -2149,8 +2182,8 @@ def register_lakeflow_source(spark):
                 emitted,
                 truncated,
                 parent_idx,
-                chain_start_idx,
                 chain_next_link_out,
+                truncated_chain_cursor_out,
             ) = self._walk_contained_with_cursor(
                 segments,
                 chains_iter,
@@ -2166,32 +2199,19 @@ def register_lakeflow_source(spark):
                 leaf_segment_filter=segment_filters.get(len(segments) - 1),
             )
             if truncated:
+                # The walk has already chosen the checkpoint and trimmed
+                # ``emitted`` accordingly: ``chain_next_link_out`` for a page
+                # boundary, else ``truncated_chain_cursor_out`` for a complete
+                # parent with a distinct-cursor boundary. (A complete parent
+                # with a single cursor value never truncates — the walk emits
+                # it in full and continues — so there's no failure case here.)
+                end_offset: dict = {"parent_idx": parent_idx}
                 if chain_next_link_out is not None:
-                    end_offset: dict = {
-                        "parent_idx": parent_idx,
-                        "chain_next_link": chain_next_link_out,
-                    }
-                    if since is not None:
-                        end_offset["cursor"] = since
+                    end_offset["chain_next_link"] = chain_next_link_out
                 else:
-                    trimmed_chain = _trim_to_distinct_cursor_boundary(
-                        emitted[chain_start_idx:], cursor_field
-                    )
-                    if not trimmed_chain:
-                        raise RuntimeError(
-                            f"max_records_per_batch={max_records} is smaller than "
-                            f"the largest same-cursor cohort under one parent in "
-                            f"contained path {table_name!r}. Raise "
-                            f"max_records_per_batch above that cohort, or pick a "
-                            f"higher-cardinality cursor."
-                        )
-                    emitted = emitted[:chain_start_idx] + trimmed_chain
-                    end_offset = {
-                        "parent_idx": parent_idx,
-                        "truncated_chain_cursor": trimmed_chain[-1].get(cursor_field),
-                    }
-                    if since is not None:
-                        end_offset["cursor"] = since
+                    end_offset["truncated_chain_cursor"] = truncated_chain_cursor_out
+                if since is not None:
+                    end_offset["cursor"] = since
             else:
                 if not emitted:
                     return iter([]), start_offset or {}

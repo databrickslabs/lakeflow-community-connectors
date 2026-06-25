@@ -4297,10 +4297,14 @@ def test_contained_incremental_truncation_trims_boundary_cohort():
 
 
 @responses.activate
-def test_contained_incremental_truncation_raises_when_cohort_exceeds_cap():
-    """If max_records_per_batch is smaller than a single same-cursor
-    cohort within one parent, trimming leaves zero rows and we surface
-    an actionable RuntimeError (same shape as the flat path)."""
+def test_contained_incremental_complete_parent_single_cursor_emits_all():
+    """A *complete* parent (server returned the whole leaf collection in
+    one page, no @odata.nextLink) whose rows all share one cursor value
+    has no splittable boundary. Rather than fail when
+    max_records_per_batch is smaller than that cohort, the connector
+    emits the full cohort and advances the watermark — the cohort is
+    complete, so ``cursor gt <value>`` next batch is safe (same exposure
+    as natural completion). (Formerly raised RuntimeError.)"""
     _mock_nested_metadata()
     responses.get(f"{SERVICE_URL}Parents", json={"value": [{"Id": 1}]})
     responses.get(
@@ -4315,13 +4319,66 @@ def test_contained_incremental_truncation_raises_when_cohort_exceeds_cap():
         match_querystring=False,
     )
     c = _make()
-    with pytest.raises(RuntimeError, match="largest same-cursor cohort"):
-        records, _ = c.read_table(
-            "Parents__Children",
-            None,
-            {"cursor_field": "ModifiedAt", "max_records_per_batch": "2"},
-        )
-        list(records)
+    records, offset = c.read_table(
+        "Parents__Children",
+        None,
+        {"cursor_field": "ModifiedAt", "max_records_per_batch": "2"},
+    )
+    rows = list(records)
+    # All three same-cursor rows come through despite the cap of 2 ...
+    assert [r["Id"] for r in rows] == [11, 12, 13]
+    # ... and the watermark advances to that value with the terminal
+    # offset shape — no parent_idx / truncated_chain_cursor parked.
+    assert offset == {"cursor": "2024-01-01T00:00:00Z"}
+
+
+@responses.activate
+def test_contained_incremental_continues_past_single_cursor_parent_then_checkpoints():
+    """When an all-one-cursor *complete* parent overruns the cap, the walk
+    emits it in full and continues; it then truncates at the next parent
+    that offers a distinct-cursor boundary (parking truncated_chain_cursor
+    there). The single-cursor parent is not re-read on resume."""
+    _mock_nested_metadata()
+    responses.get(f"{SERVICE_URL}Parents", json={"value": [{"Id": 1}, {"Id": 2}]})
+    # Parent 1: complete (no nextLink), both rows share one cursor value →
+    # overruns cap=2, no splittable boundary → emitted in full, walk
+    # continues.
+    responses.get(
+        f"{SERVICE_URL}Parents(1)/Children",
+        json={
+            "value": [
+                {"Id": 11, "Label": "a", "ModifiedAt": "2024-01-01T00:00:00Z"},
+                {"Id": 12, "Label": "b", "ModifiedAt": "2024-01-01T00:00:00Z"},
+            ]
+        },
+        match_querystring=False,
+    )
+    # Parent 2: distinct cursors → the trailing cohort is trimmed and the
+    # last distinct cursor is parked as the checkpoint.
+    responses.get(
+        f"{SERVICE_URL}Parents(2)/Children",
+        json={
+            "value": [
+                {"Id": 21, "Label": "x", "ModifiedAt": "2024-02-01T00:00:00Z"},
+                {"Id": 22, "Label": "y", "ModifiedAt": "2024-02-02T00:00:00Z"},
+            ]
+        },
+        match_querystring=False,
+    )
+    c = _make()
+    records, offset = c.read_table(
+        "Parents__Children",
+        None,
+        {"cursor_field": "ModifiedAt", "max_records_per_batch": "2"},
+    )
+    rows = list(records)
+    # Parent 1's full cohort + parent 2's trimmed prefix (22's cohort dropped).
+    assert [r["Id"] for r in rows] == [11, 12, 21]
+    # Checkpoint lands on parent 2 (index 1) at its last distinct cursor.
+    assert offset == {
+        "parent_idx": 1,
+        "truncated_chain_cursor": "2024-02-01T00:00:00Z",
+    }
 
 
 @responses.activate

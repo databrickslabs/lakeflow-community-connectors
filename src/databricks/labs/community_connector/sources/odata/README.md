@@ -509,14 +509,22 @@ connector tries the cheapest resume that won't lose rows:
    server, which picks up exactly where it stopped (no
    `$filter`/`$orderby`/`$select` reconstruction). Subsequent parents
    in the resume re-use the original `since`.
-2. **Leaf-cursor fallback (Option A trim)** — if no nextLink is
-   available, the connector drops the trailing same-cursor cohort
-   within that one chain's emit and parks
-   `truncated_chain_cursor`. The resumed call rebuilds the URL with
-   `cursor gt truncated_chain_cursor` for that parent. If a single
-   parent's same-cursor cohort exceeds the cap, `RuntimeError` —
-   raise the cap or pick a higher-cardinality cursor.
-3. **Ancestor-cursor fallback** — none. Every leaf under a chain
+2. **Leaf-cursor trim (no nextLink)** — when the truncating page is the
+   parent's last (the server returned its whole leaf collection, so the
+   cohort is complete), the connector drops the trailing same-cursor
+   cohort within that one chain's emit and parks `truncated_chain_cursor`.
+   The resumed call rebuilds the URL with
+   `cursor gt truncated_chain_cursor` for that parent.
+3. **Complete parent, single cursor value** — if that same complete
+   parent's entire emitted cohort shares one cursor value, there's no
+   splittable boundary to trim. Since the cohort is complete, the
+   connector **emits it in full and continues to the next parent**
+   (the cap is overshot for that one parent, bounded by a single server
+   response) rather than failing. The watermark advances exactly as it
+   would on natural completion — `cursor gt <value>` next batch is safe
+   because every cursor=`<value>` row under that parent has been read.
+   (Earlier versions raised `RuntimeError` here.)
+4. **Ancestor-cursor fallback** — none. Every leaf under a chain
    shares the chain's stamped cursor by construction, so a
    within-chain `cursor gt` rebuild can't split it. Ancestor mode
    relies entirely on `chain_next_link`; if your server doesn't
