@@ -2346,8 +2346,11 @@ def test_build_expand_url_three_level():
     c = _make()
     url = c._build_expand_url(["Parents", "Children", "Notes"], {})
     # Dynamic distribution for N=3, page_size=1000: [34, 5, 5] (product 850).
+    # PK-only $orderby is injected at every (non-cursor) level for
+    # skiptoken stability.
     assert "Parents?$top=34" in url
-    assert "$expand=Children($top=5;$expand=Notes($top=5))" in url
+    assert "$orderby=Id asc" in url
+    assert "$expand=Children($top=5;$orderby=Id asc;$expand=Notes($top=5;$orderby=Id asc))" in url
 
 
 @responses.activate
@@ -2356,6 +2359,9 @@ def test_build_expand_url_four_level_nests_correctly():
     c = _make()
     url = c._build_expand_url(["A", "B", "C", "D"], {})
     # Dynamic distribution for N=4, page_size=1000: [8, 5, 5, 5] (product 1000).
+    # A/B/C/D aren't declared in the fixture metadata, so the per-level
+    # PK $orderby degrades to none — this test pins the $top nesting
+    # structure only (real-entity $orderby is covered above).
     assert "A?$top=8" in url
     assert "$expand=B($top=5;$expand=C($top=5;$expand=D($top=5)))" in url
 
@@ -2369,7 +2375,7 @@ def test_build_expand_url_dynamic_tops_for_two_level():
     c = _make()
     url = c._build_expand_url(["Parents", "Children"], {})
     assert "Parents?$top=100" in url
-    assert "$expand=Children($top=10)" in url
+    assert "$expand=Children($top=10;$orderby=Id asc)" in url
 
 
 @responses.activate
@@ -2382,7 +2388,7 @@ def test_build_expand_url_page_size_scales_dynamic_tops():
     # then upper level absorbs remaining budget = 100 // 5 = 20.
     # Product 20 × 5 = 100 (exact).
     assert "Parents?$top=20" in url
-    assert "$expand=Children($top=5)" in url
+    assert "$expand=Children($top=5;$orderby=Id asc)" in url
 
 
 @responses.activate
@@ -3472,6 +3478,47 @@ def test_combine_filters():
 
 
 @responses.activate
+def test_contained_ancestor_walks_force_pk_orderby_for_stable_skiptoken():
+    """Every ancestor-key fetch must carry a PK-only ``$orderby`` so
+    server skiptoken pagination is stable across pages. OData v4
+    §11.2.5.7 doesn't promise stable default ordering without an
+    explicit ``$orderby`` over a unique key set — without it sources
+    whose default sort isn't PK can drop or duplicate parents, and
+    every leaf row under a dropped parent is silently lost. Verifies
+    both the top URL and the intermediate ancestor URL carry
+    ``$orderby=Id asc`` on a 3-segment N+1 walk."""
+    _mock_nested_metadata()
+    captured: list[str] = []
+
+    def _callback(req):
+        captured.append(req.url)
+        if req.url.startswith(f"{SERVICE_URL}Parents(1)/Children(10)/Notes"):
+            return (200, {}, json.dumps({"value": [{"Id": 100, "Text": "n"}]}))
+        if "Parents(1)/Children" in req.url:
+            return (200, {}, json.dumps({"value": [{"Id": 10}]}))
+        return (200, {}, json.dumps({"value": [{"Id": 1}]}))
+
+    responses.add_callback(responses.GET, f"{SERVICE_URL}Parents", callback=_callback)
+    responses.add_callback(responses.GET, f"{SERVICE_URL}Parents(1)/Children", callback=_callback)
+    responses.add_callback(
+        responses.GET, f"{SERVICE_URL}Parents(1)/Children(10)/Notes", callback=_callback
+    )
+    c = _make()
+    records, _ = c.read_table("Parents__Children__Notes", None, {})
+    list(records)
+    # Top-level + intermediate ancestor fetches both carry
+    # ``$orderby=Id asc``. The leaf collection (Notes) doesn't need
+    # an ancestor-style $orderby — it's a different code path and
+    # its skiptoken stability is the caller's concern.
+    top_call = next(u for u in captured if u.startswith(f"{SERVICE_URL}Parents?"))
+    mid_call = next(u for u in captured if "Parents(1)/Children?" in u)
+    # ``requests`` may emit the space in the order_by value as ``+`` or
+    # ``%20`` depending on version; accept either encoding.
+    for url in (top_call, mid_call):
+        assert "$orderby=Id" in url and ("Id%20asc" in url or "Id+asc" in url or "Id asc" in url)
+
+
+@responses.activate
 def test_contained_npp_filter_at_top_prunes_parent_walk():
     """``filter_at_<top>`` lands on the level-0 walk; only matching
     parents are then traversed for children. Other parents skipped."""
@@ -3481,7 +3528,12 @@ def test_contained_npp_filter_at_top_prunes_parent_walk():
         json={"value": [{"Id": 5}]},
         match=[
             responses.matchers.query_param_matcher(
-                {"$top": "1000", "$select": "Id", "$filter": "Id eq 5"}
+                {
+                    "$top": "1000",
+                    "$select": "Id",
+                    "$filter": "Id eq 5",
+                    "$orderby": "Id asc",
+                }
             )
         ],
     )
@@ -3511,7 +3563,12 @@ def test_contained_npp_filter_at_middle_prunes_middle_walk():
         json={"value": [{"Id": 10}]},
         match=[
             responses.matchers.query_param_matcher(
-                {"$top": "1000", "$select": "Id", "$filter": "Id eq 10"}
+                {
+                    "$top": "1000",
+                    "$select": "Id",
+                    "$filter": "Id eq 10",
+                    "$orderby": "Id asc",
+                }
             )
         ],
     )
@@ -3520,7 +3577,12 @@ def test_contained_npp_filter_at_middle_prunes_middle_walk():
         json={"value": []},
         match=[
             responses.matchers.query_param_matcher(
-                {"$top": "1000", "$select": "Id", "$filter": "Id eq 10"}
+                {
+                    "$top": "1000",
+                    "$select": "Id",
+                    "$filter": "Id eq 10",
+                    "$orderby": "Id asc",
+                }
             )
         ],
     )
@@ -3544,7 +3606,11 @@ def test_contained_npp_filter_at_leaf_applies_at_leaf_url():
     responses.get(
         f"{SERVICE_URL}Parents(1)/Children",
         json={"value": [{"Id": 11, "Label": "a", "ModifiedAt": "2024-01-01T00:00:00Z"}]},
-        match=[responses.matchers.query_param_matcher({"$top": "1000", "$filter": "Label eq 'a'"})],
+        match=[
+            responses.matchers.query_param_matcher(
+                {"$top": "1000", "$filter": "Label eq 'a'", "$orderby": "Id asc"}
+            )
+        ],
     )
     c = _make()
     records, _ = c.read_table("Parents__Children", None, {"filter_at_Children": "Label eq 'a'"})
@@ -3562,7 +3628,12 @@ def test_contained_npp_filter_at_all_levels_cascades():
         json={"value": [{"Id": 5}]},
         match=[
             responses.matchers.query_param_matcher(
-                {"$top": "1000", "$select": "Id", "$filter": "Id eq 5"}
+                {
+                    "$top": "1000",
+                    "$select": "Id",
+                    "$filter": "Id eq 5",
+                    "$orderby": "Id asc",
+                }
             )
         ],
     )
@@ -3571,14 +3642,23 @@ def test_contained_npp_filter_at_all_levels_cascades():
         json={"value": [{"Id": 10}]},
         match=[
             responses.matchers.query_param_matcher(
-                {"$top": "1000", "$select": "Id", "$filter": "Id eq 10"}
+                {
+                    "$top": "1000",
+                    "$select": "Id",
+                    "$filter": "Id eq 10",
+                    "$orderby": "Id asc",
+                }
             )
         ],
     )
     responses.get(
         f"{SERVICE_URL}Parents(5)/Children(10)/Notes",
         json={"value": [{"Id": 100, "Text": "x"}]},
-        match=[responses.matchers.query_param_matcher({"$top": "1000", "$filter": "Id eq 100"})],
+        match=[
+            responses.matchers.query_param_matcher(
+                {"$top": "1000", "$filter": "Id eq 100", "$orderby": "Id asc"}
+            )
+        ],
     )
     c = _make()
     records, _ = c.read_table(
@@ -3602,7 +3682,12 @@ def test_contained_npp_filter_at_index_form_equivalent():
         json={"value": [{"Id": 5}]},
         match=[
             responses.matchers.query_param_matcher(
-                {"$top": "1000", "$select": "Id", "$filter": "Id eq 5"}
+                {
+                    "$top": "1000",
+                    "$select": "Id",
+                    "$filter": "Id eq 5",
+                    "$orderby": "Id asc",
+                }
             )
         ],
     )
@@ -3826,6 +3911,7 @@ def test_contained_npp_filter_at_leaf_composes_with_user_filter():
                 {
                     "$top": "1000",
                     "$filter": "(Id lt 100) and (Label eq 'a')",
+                    "$orderby": "Id asc",
                 }
             )
         ],
@@ -3856,6 +3942,7 @@ def test_flat_filter_at_segment_applies_to_flat_table_read():
                 {
                     "$top": "1000",
                     "$filter": "CustomerID eq 'ALFKI'",
+                    "$orderby": "Id asc",
                 }
             )
         ],
@@ -4845,7 +4932,12 @@ def test_partition_get_partitions_applies_filter_at_top():
         json={"value": [{"Id": 5}]},
         match=[
             responses.matchers.query_param_matcher(
-                {"$top": "1000", "$select": "Id", "$filter": "Id eq 5"}
+                {
+                    "$top": "1000",
+                    "$select": "Id",
+                    "$filter": "Id eq 5",
+                    "$orderby": "Id asc",
+                }
             )
         ],
     )
@@ -4866,7 +4958,11 @@ def test_partition_read_partition_applies_filter_at_leaf():
     responses.get(
         f"{SERVICE_URL}Parents(1)/Children",
         json={"value": [{"Id": 11, "Label": "a", "ModifiedAt": "2024-01-01T00:00:00Z"}]},
-        match=[responses.matchers.query_param_matcher({"$top": "1000", "$filter": "Label eq 'a'"})],
+        match=[
+            responses.matchers.query_param_matcher(
+                {"$top": "1000", "$filter": "Label eq 'a'", "$orderby": "Id asc"}
+            )
+        ],
     )
     c = _make()
     partition = {"top_parent_rows": [{"Id": 1}], "cursor_lower": None}

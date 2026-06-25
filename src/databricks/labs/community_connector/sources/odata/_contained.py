@@ -322,6 +322,20 @@ def fk_column_name(segment: str, pk_name: str) -> str:
     return f"{segment}_{pk_name}"
 
 
+def _ancestor_pk_order_by(ancestor_pks: list[str]) -> str:
+    """Build a stable PK-only ``$orderby`` clause for ancestor key
+    enumeration. OData v4 §11.2.5.7 (server-driven paging) doesn't
+    promise stable default ordering across pages without an explicit
+    ``$orderby`` over a unique key set, so server skiptokens can
+    silently drop or duplicate ancestor rows — every leaf row under a
+    skipped ancestor would then be lost. The leaf-cursor path already
+    composes ``cursor asc, pk asc`` for the same reason
+    (``_leaf_cursor_order_by``); ancestor key fetches need the
+    PK-only variant of the same guarantee.
+    """
+    return ",".join(f"{pk} asc" for pk in ancestor_pks)
+
+
 class ContainedNavMixin:
     """Mixin providing contained-collection support for the OData connector.
 
@@ -447,8 +461,39 @@ class ContainedNavMixin:
         ``$expand`` ignore it — the wire format stays valid OData v4.
         """
         segment_filters = resolve_segment_filters(table_options, segments)
+        namespace = (table_options or {}).get("namespace")
         top, *children = segments
         base = join_url(self.service_url, top)
+
+        # ``$orderby`` at every level so server skiptoken paging is stable
+        # — for the top collection AND each expanded sub-collection. OData
+        # v4 §11.2.5.7 promises no stable default order across pages, so
+        # without a unique sort a value-based skiptoken can drop or
+        # duplicate rows (the same failure the N+1 path guards against via
+        # ``_ancestor_pk_order_by`` / ``_leaf_pk_order_by``). The
+        # cursor-owning level keeps its cursor-first composite
+        # (``cursor_order``); every other level falls back to PK-only.
+        # Servers that ignore ``$orderby`` inside ``$expand`` leave the
+        # wire format valid OData v4 — same contract as ``$top`` here. The
+        # server-generated ``<NavProp>@odata.nextLink`` continuations
+        # preserve these options per §11.2.6.1, so paging stays ordered.
+        def _level_order_by(level: int) -> str | None:
+            if level == cursor_level and cursor_order:
+                return cursor_order
+            try:
+                et = self._entity_type_for(
+                    CONTAINED_PATH_SEP.join(segments[: level + 1]), namespace
+                )
+            except ValueError:
+                # Segment isn't resolvable in $metadata. A real expand
+                # path is validated upstream (``_read_contained_expand``
+                # raises on a missing segment/PK before we get here), so
+                # this only fires for synthetic paths. No resolvable key
+                # ⇒ no stable order to add; degrade to the server default
+                # rather than crash the URL build.
+                return None
+            return _ancestor_pk_order_by(self._own_primary_keys_for_et(et)) or None
+
         # The table's ``filter`` option is the leaf filter — same as
         # N+1 mode, where it lands at the leaf URL — so strip it from
         # the top-URL query params when there are children. It re-enters
@@ -471,7 +516,7 @@ class ContainedNavMixin:
         query = self._format_query_params(
             top_opts,
             top_extra,
-            cursor_order if cursor_level == 0 else None,
+            _level_order_by(0),
         )
         if not children:
             return f"{base}?{query}"
@@ -491,8 +536,9 @@ class ContainedNavMixin:
                 parts.append(f"$select={cursor_select}")
             if level_filter:
                 parts.append(f"$filter={level_filter}")
-            if cursor_level == i + 1 and cursor_order:
-                parts.append(f"$orderby={cursor_order}")
+            level_order = _level_order_by(i + 1)
+            if level_order:
+                parts.append(f"$orderby={level_order}")
             if inner:
                 parts.append(f"$expand={inner}")
             inner = f"{children[i]}({';'.join(parts)})"
@@ -636,7 +682,13 @@ class ContainedNavMixin:
             else:
                 select_cols = list(ancestor_pks)
                 extra_filter: str | None = None
-                order_by: str | None = None
+                # Default to PK-only ordering so server skiptoken
+                # pagination is stable even at non-cursor levels —
+                # OData v4 §11.2.5.7 doesn't promise stable default
+                # ordering across pages without an explicit
+                # ``$orderby``. The cursor level overrides this with a
+                # cursor-first composite below.
+                order_by: str | None = _ancestor_pk_order_by(ancestor_pks)
                 if level == cursor_level:
                     if cursor_field not in select_cols:
                         select_cols.append(cursor_field)
@@ -709,10 +761,20 @@ class ContainedNavMixin:
                 }
                 if segment_filters.get(level):
                     opts["filter"] = segment_filters[level]
+                # PK-only ``$orderby`` so server skiptoken pagination
+                # over the ancestor key set is stable across pages —
+                # without this, sources whose default sort isn't PK
+                # (or whose skiptoken doesn't encode the PK) can skip
+                # or duplicate parents and silently lose every leaf
+                # row under the skipped parent. See
+                # ``_leaf_cursor_order_by`` for the leaf-side comment
+                # documenting the same skiptoken concern one level
+                # deeper.
+                order_by = _ancestor_pk_order_by(ancestor_pks)
                 url = (
-                    self._build_url(segments[0], opts)
+                    self._build_url(segments[0], opts, order_by=order_by)
                     if level == 0
-                    else self._build_contained_url(sub_segments, chain, opts)
+                    else self._build_contained_url(sub_segments, chain, opts, order_by=order_by)
                 )
                 row_source = self._fetch_pages(url)
             for row in row_source:
@@ -738,11 +800,12 @@ class ContainedNavMixin:
         fk_columns = self._resolve_fk_columns(segments, namespace)
         segment_filters = resolve_segment_filters(table_options, segments)
         leaf_extra = segment_filters.get(len(segments) - 1)
+        leaf_order_by = self._leaf_pk_order_by(segments, namespace)
 
         def _emit() -> Iterator[dict]:
             for chain in self._iter_parent_key_chains(segments, namespace, table_options):
                 url = self._build_contained_url(
-                    segments, chain, table_options, extra_filter=leaf_extra
+                    segments, chain, table_options, extra_filter=leaf_extra, order_by=leaf_order_by
                 )
                 for row in self._fetch_pages(url):
                     self._tag_with_ancestor_fks(row, segments, chain, fk_columns)
@@ -1227,6 +1290,20 @@ class ContainedNavMixin:
         terms.extend(f"{pk} asc" for pk in leaf_pks if pk != cursor_field)
         return ",".join(terms)
 
+    def _leaf_pk_order_by(self, segments: list[str], namespace: str | None) -> str:
+        """PK-only ``$orderby`` for a full leaf-collection fetch.
+
+        Snapshot, ancestor-cursor, and partition reads pull the whole
+        leaf collection under a parent with no cursor ``$filter``. Like
+        the ancestor key fetches (``_ancestor_pk_order_by``), these page
+        across server skiptokens, and OData v4 §11.2.5.7 doesn't promise
+        a stable default order — without an explicit unique ``$orderby``
+        the skiptoken can silently drop or duplicate leaf rows. Returns
+        ``""`` when the leaf declares no PK (``_format_query_params``
+        treats that as "no ``$orderby``")."""
+        leaf_et = self._entity_type_for(CONTAINED_PATH_SEP.join(segments), namespace)
+        return _ancestor_pk_order_by(self._own_primary_keys_for_et(leaf_et))
+
     def _walk_contained_with_cursor(
         self,
         segments: list[str],
@@ -1589,6 +1666,8 @@ class ContainedNavMixin:
         Page-aware: a truncation at a page boundary parks the chain's
         ``@odata.nextLink``; when the chain happens to end on the
         truncating page, ``parent_idx`` simply advances past it."""
+        namespace = (table_options or {}).get("namespace")
+        leaf_order_by = self._leaf_pk_order_by(segments, namespace)
         parent_idx = 0
         emitted: list[dict] = []
         truncated = False
@@ -1604,7 +1683,11 @@ class ContainedNavMixin:
                 initial_url = chain_next_link_in
             else:
                 initial_url = self._build_contained_url(
-                    segments, chain, table_options, extra_filter=leaf_segment_filter
+                    segments,
+                    chain,
+                    table_options,
+                    extra_filter=leaf_segment_filter,
+                    order_by=leaf_order_by,
                 )
             page_next_url: str | None = None
             for page_rows, page_next_url in self._fetch_pages_with_links(initial_url):

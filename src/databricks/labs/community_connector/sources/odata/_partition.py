@@ -46,6 +46,7 @@ from databricks.labs.community_connector.interface.supports_partition import (
     SupportsPartitionedStream,
 )
 from databricks.labs.community_connector.sources.odata._contained import (
+    _ancestor_pk_order_by,
     combine_filters,
     parse_contained_path,
     resolve_segment_filters,
@@ -264,7 +265,11 @@ class PartitionMixin(SupportsPartitionedStream):
         ancestor_pks = self._own_primary_keys_for_et(ancestor_et)
         select_cols = list(ancestor_pks)
         cursor_extra: str | None = None
-        order_by = None
+        # Default to PK-only ordering so server skiptoken pagination
+        # is stable when there's no cursor at the top set (or the
+        # cursor lives deeper). See ``_ancestor_pk_order_by`` for the
+        # skiptoken-safety argument.
+        order_by: str | None = _ancestor_pk_order_by(ancestor_pks)
         if cursor_field:
             own_fields = self._own_fields_for_et(ancestor_et)
             if any(f.name == cursor_field for f in own_fields):
@@ -310,12 +315,17 @@ class PartitionMixin(SupportsPartitionedStream):
         fk_columns = self._resolve_fk_columns(segments, namespace)
         segment_filters = resolve_segment_filters(table_options, segments)
         leaf_seg_filter = segment_filters.get(len(segments) - 1)
+        leaf_order_by = self._leaf_pk_order_by(segments, namespace)
         if not cursor_field:
             for chain in self._iter_parent_key_chains(
                 segments, namespace, table_options, top_parent_rows=top_parent_rows
             ):
                 url = self._build_contained_url(
-                    segments, chain, table_options, extra_filter=leaf_seg_filter
+                    segments,
+                    chain,
+                    table_options,
+                    extra_filter=leaf_seg_filter,
+                    order_by=leaf_order_by,
                 )
                 for row in self._fetch_pages(url):
                     self._tag_with_ancestor_fks(row, segments, chain, fk_columns)
@@ -342,7 +352,7 @@ class PartitionMixin(SupportsPartitionedStream):
         )
         for chain, ancestor_cursor in chains_iter:
             url = self._build_contained_url(
-                segments, chain, table_options, extra_filter=leaf_seg_filter
+                segments, chain, table_options, extra_filter=leaf_seg_filter, order_by=leaf_order_by
             )
             for row in self._fetch_pages(url):
                 self._tag_with_ancestor_fks(row, segments, chain, fk_columns)

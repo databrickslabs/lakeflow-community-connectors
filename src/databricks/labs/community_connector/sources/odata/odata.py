@@ -613,7 +613,19 @@ class ODataLakeflowConnect(
         # the whole result into a list (the prior shape) pinned every
         # row in memory at once on large tables.
         segment_filters = _resolve_segment_filters(table_options, [table_name])
-        url = self._build_url(table_name, table_options, extra_filter=segment_filters.get(0))
+        # PK-only ``$orderby`` so server skiptoken paging is stable across
+        # pages — OData v4 §11.2.5.7 doesn't promise a stable default
+        # order, and a value-based skiptoken over an unstable sort can
+        # drop or duplicate rows mid-scan. Empty (keyless entity) → no
+        # ``$orderby`` appended.
+        namespace = (table_options or {}).get("namespace")
+        pk_order = ",".join(f"{pk} asc" for pk in self._primary_keys_for(table_name, namespace))
+        url = self._build_url(
+            table_name,
+            table_options,
+            extra_filter=segment_filters.get(0),
+            order_by=pk_order or None,
+        )
         return self._fetch_pages(url), {}
 
     def _read_incremental(

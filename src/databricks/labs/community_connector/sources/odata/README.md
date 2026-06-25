@@ -295,7 +295,7 @@ build_pipeline(
 | `select`                | all     | Comma-separated `$select` projection. |
 | `filter`                |         | Extra OData `$filter` expression. Applied to the **leaf segment** in both modes — leaf URL in N+1 mode (`expand_contained=false`), innermost `$expand(...)` clause in expand mode. Equivalent to `filter_at_<leaf-segment>`; AND-composes with it if both are set. For per-segment placement on intermediate ancestors of contained paths, use `filter_at_<segment>` below. |
 | `filter_at_<segment>` <br/> `filter_at_<idx>` | | Per-segment `$filter` for contained-path tables. Each entry is applied to the matching walk level — in N+1 mode the ancestor walks at each level get pruned to matching rows, cascading the savings down the children; in `expand_contained=true` mode the filter is injected inside the corresponding `$expand(...)` clause per OData v4 §5.1.1.6. Two equivalent forms: by segment name (`filter_at_Instances=Id eq 5` — must match a segment in the contained path) or by zero-based index (`filter_at_0=Id eq 5`). Index wins on conflict. Composes with cursor filters (AND-ed at the cursor's segment) and with the existing `filter` option (AND-ed at the leaf in N+1 mode, AND-ed at the top in expand mode). Unknown segment names and out-of-range indices raise `ValueError` at read time. |
-| `page_size`             | 1000    | Maximum per-response row budget. For flat tables it's the `$top` at the single URL. For `expand_contained=true` paths it's distributed across all `$top` points (top URL + every nested `$expand(...)`) with triangular weights — top gets the largest share, each deeper level proportionally less — so the cross-product `top × inner_1 × inner_2 × …` fits in the budget. Each per-level `$top` is floored at 5 (very small pages amplify the `@odata.nextLink` chase at every level); when a deep level would drop below 5 it's pinned to 5 and the remaining budget is divided back across the upper levels, so the cross-product stays at or under `page_size`. Examples with `page_size=1000`: depth 2 → `[100, 10]` (product 1000), depth 3 → `[34, 5, 5]` (850), depth 4 → `[8, 5, 5, 5]` (1000). For chains so deep that `5 ** N > page_size` the floor unavoidably wins (e.g. `5**5 = 3125`); raise `page_size` to restore the cap, or switch to `expand_contained=false` so the chain becomes N+1 single-segment fetches. |
+| `page_size`             | 1000    | Maximum per-response row budget. For flat tables it's the `$top` at the single URL. For `expand_contained=true` paths it's distributed across all `$top` points (top URL + every nested `$expand(...)`) with triangular weights — top gets the largest share, each deeper level proportionally less — so the cross-product `top × inner_1 × inner_2 × …` fits in the budget. Each per-level `$top` is floored at 5 (very small pages amplify the `@odata.nextLink` chase at every level); when a deep level would drop below 5 it's pinned to 5 and the remaining budget is divided back across the upper levels, so the cross-product stays at or under `page_size`. Each level (top URL and every nested `$expand(...)`) additionally carries a stable `$orderby` for skiptoken-safe paging — see [Pagination ordering](#pagination-ordering). Examples with `page_size=1000`: depth 2 → `[100, 10]` (product 1000), depth 3 → `[34, 5, 5]` (850), depth 4 → `[8, 5, 5, 5]` (1000). For chains so deep that `5 ** N > page_size` the floor unavoidably wins (e.g. `5**5 = 3125`); raise `page_size` to restore the cap, or switch to `expand_contained=false` so the chain becomes N+1 single-segment fetches. |
 | `max_records_per_batch` | 10000   | Per-call upper bound on rows returned. The connector has **no wall-clock ceiling** — `max_records_per_batch` is the only cap on a single batch. Each batch fetches `cursor gt <last>` and pulls up to this many rows, then commits the offset. Smaller values give continuous-mode pipelines lower latency per micro-batch at the cost of more round trips; larger values amortize HTTP overhead. Honoured by every read path (flat / contained N+1 / contained `expand_contained=true`). On the `expand_contained=true` path the cap is enforced **per HTTP fetch at any depth** via an iterative work queue: each inner-collection `@odata.nextLink` discovered during inline descent is appended to a queue rather than followed inline, and the cap is checked between fetches. Pending fetches are parked in the offset as `pending_fetches` (a list of `{url, level, chain, cur_val, skip}` items) so the next `read()` resumes the queue verbatim. Cap deviation per batch is bounded by one HTTP response's worth of leaf rows (≤ `page_size`), regardless of how deep the chain is or how wide any single parent's inner collection grows. In cursor mode the watermark only advances once the chain fully drains; until then the running max sits in `running_max_cursor`. The default of 10000 balances commit frequency / visibility against HTTP overhead; lower it (e.g. to 100) for tighter per-batch latency or higher (e.g. 100000+) for throughput-oriented batch backfills. |
 | `delta_tracking`        | disabled | Opt-in OData v4 delta queries. Values: `disabled` (default — no behavior change), `auto` (probe once, fall back to cursor/snapshot if the server doesn't acknowledge), `enabled` (require support; error if the server doesn't acknowledge). See [Delta tracking](#delta-tracking) below. |
 | `expand_contained`      | false   | For contained-collection tables (`Parent__Child__...` paths). When `true`, the connector issues a single `GET Parent?$expand=Child($expand=...)` per pipeline trigger instead of the default N+1 traversal (one parent fetch + one per-parent leaf fetch). See [Contained navigation properties](#contained-navigation-properties) below. |
@@ -450,6 +450,32 @@ the nested response into leaf rows tagged with all ancestor FKs. Most
 servers cap ``$expand`` depth at 1; deeper expands surface server errors
 verbatim. Use only against servers known to honor the depth you need
 (Microsoft Graph, SAP S/4HANA Cloud).
+
+### Pagination ordering
+
+OData v4 server-driven paging (§11.2.5.7) doesn't promise a stable row
+order across `@odata.nextLink` pages, so a value-based skiptoken over an
+unstable sort can silently drop or duplicate rows. To make paging safe,
+**every server-paged fetch the connector builds carries an explicit
+`$orderby`** over a unique key:
+
+- **PK-only** (`pk asc, …`) on fetches with no cursor filter — flat
+  snapshots, contained ancestor-key walks, every leaf-collection fetch,
+  and each non-cursor level of an `expand_contained=true` request (the
+  top URL and every nested `$expand(...)`).
+- **Cursor-first** (`cursor asc, pk asc, …`) on the single fetch whose
+  entity owns the `cursor_field`. This isn't only for stability — the
+  same-cursor boundary trim and watermark logic require ascending cursor
+  order (see [Truncation handling](#truncation-handling)).
+
+The cursor term is added only where the cursor is a declared property of
+the fetched entity; other levels stay PK-only (ordering by an absent
+column would be invalid OData). Fetches that follow an opaque server
+continuation — `@odata.nextLink`, delta links, a parked
+`chain_next_link` — carry no `$orderby`: the token already encodes
+order/position and the server preserves the original request's
+`$orderby` per §11.2.6.1. Servers that ignore `$orderby` inside
+`$expand` still receive valid OData v4.
 
 ### Cursor-based incremental on contained tables
 
