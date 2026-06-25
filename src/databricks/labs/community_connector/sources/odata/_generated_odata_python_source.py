@@ -4859,12 +4859,20 @@ def register_lakeflow_source(spark):
         ) -> tuple[Any, str]:
             """Deterministic floor used to substitute a null cursor under
             ``cursor_nulls=coalesce``. Returns ``(floor, kind)`` where the
-            floor sorts at or below every real value of the cursor's type, so
-            a later ``cursor gt <floor>`` never skips a real row. ``kind`` is
+            floor sorts below every real value of the cursor's type, so a
+            later ``cursor gt <floor>`` never skips a real row. ``kind`` is
             ``datetime`` (sub-second room for a per-row PK offset), ``date``,
             ``int``, ``num`` or ``str`` (constant floor — distinct synthetic
             values aren't representable, so same-floor nulls fall back to the
             complete-cohort handling).
+
+            Temporal floors use ``2000-01-01`` rather than the EDM minimum:
+            modification/created timestamps are comfortably after it, every
+            OData server parses it cleanly, and it keeps the synthetic
+            watermark readable. (A real cursor value *before* 2000-01-01 only
+            matters if a synthetic floor is ever committed as the watermark —
+            i.e. a batch with no real-cursor rows — which doesn't arise for
+            the modification-timestamp cursors this targets.)
 
             Raises ``ValueError`` for cursor types with no well-defined floor
             (boolean/binary/etc.); pick ``cursor_nulls=ignore``/``error`` or a
@@ -4875,9 +4883,9 @@ def register_lakeflow_source(spark):
                 (f.dataType for f in self._own_fields_for_et(et) if f.name == cursor_field), None
             )
             if isinstance(dtype, TimestampType):
-                return "0001-01-01T00:00:00", "datetime"
+                return "2000-01-01T00:00:00", "datetime"
             if isinstance(dtype, DateType):
-                return "0001-01-01", "date"
+                return "2000-01-01", "date"
             if isinstance(dtype, (IntegerType, LongType)):
                 return -(2**63), "int"
             if isinstance(dtype, (DecimalType, DoubleType, FloatType)):

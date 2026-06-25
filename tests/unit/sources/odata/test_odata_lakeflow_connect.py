@@ -674,7 +674,7 @@ def test_incremental_coalesce_default_emits_null_rows_and_advances():
     # The real null is preserved in the emitted rows (synthetic is internal).
     assert all(r["ModifiedAt"] is None for r in rows)
     # Watermark advanced to a synthetic floor (year-0001), not {}.
-    assert offset["cursor"].startswith("0001-01-01T00:00:00.")
+    assert offset["cursor"].startswith("2000-01-01T00:00:00.")
 
 
 @responses.activate
@@ -4386,7 +4386,7 @@ def test_contained_leaf_cursor_coalesce_default_emits_null_rows_and_advances():
     rows = list(records)
     assert [r["Id"] for r in rows] == [10]
     assert rows[0]["ModifiedAt"] is None
-    assert offset["cursor"].startswith("0001-01-01T00:00:00.")
+    assert offset["cursor"].startswith("2000-01-01T00:00:00.")
 
 
 @responses.activate
