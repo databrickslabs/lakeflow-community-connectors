@@ -214,8 +214,9 @@ def test_list_operations_returns_builtin_catalog():
         OP_READ_TABLE,
         OP_GET_OBJECT_METADATA,
         OP_VALIDATE_CONNECTION,
-        OP_LIST_OPERATIONS,
     }.issubset(names)
+    # list_operations does not advertise itself — you already called it.
+    assert OP_LIST_OPERATIONS not in names
 
 
 def test_list_operations_works_when_connector_failed_to_build():
@@ -227,9 +228,9 @@ def test_list_operations_works_when_connector_failed_to_build():
     )
     rows = _collect(dispatcher)
     names = {r["name"] for r in rows}
-    # Built-ins are still listed.
+    # Built-ins are still listed (but not list_operations itself).
     assert OP_LIST_OBJECTS in names
-    assert OP_LIST_OPERATIONS in names
+    assert OP_LIST_OPERATIONS not in names
 
 
 def test_list_operations_rows_carry_planning_metadata():
@@ -508,8 +509,8 @@ def test_list_operations_includes_source_plug_ins():
         "read_table",
         "get_object_metadata",
         "validate_connection",
-        "list_operations",
     }.issubset(names)
+    assert "list_operations" not in names  # not self-listed
     assert _DescribeTableOp.name in names
     assert _RowCountOp.name in names
     descriptions = {r["name"]: r["description"] for r in rows}

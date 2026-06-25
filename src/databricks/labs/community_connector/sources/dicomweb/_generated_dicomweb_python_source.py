@@ -1118,6 +1118,10 @@ def register_lakeflow_source(spark):
         def pull(self, connector, options):
             del options
             for op in _resolve_operation_catalog(connector).values():
+                # Don't advertise list_operations itself — a caller already has to
+                # invoke it to get here, so listing it adds no discovery value.
+                if op.name == OP_LIST_OPERATIONS:
+                    continue
                 yield {
                     "name": op.name,
                     "description": op.description,
