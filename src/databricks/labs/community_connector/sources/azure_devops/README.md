@@ -26,8 +26,14 @@ Provide the following **connection-level** options when configuring the connecto
 |--------------------------|--------|----------|---------------------------------------------------------------------------------------------|------------------------------------|
 | `organization`           | string | yes      | Azure DevOps organization name. This is the organization segment in the Azure DevOps URL.  | `my-organization`                  |
 | `project`                | string | no       | Project name or ID. If provided, scopes Git and Work Item operations to this project. If omitted, tables can fetch from all projects. | `my-project`                       |
-| `personal_access_token`  | string | yes      | Personal Access Token (PAT) used for authentication with Azure DevOps Services REST API.   | `7tq...qDnpdg1Nitj8JQQJ99BLAC...` |
+| `auth_mode`              | string | no       | `pat` (default) for a Personal Access Token, or `oauth` for a Microsoft Entra ID service principal (client-credentials flow). | `oauth`                            |
+| `personal_access_token`  | string | conditional | Personal Access Token (PAT). **Required when `auth_mode=pat`** (the default).            | `7tq...qDnpdg1Nitj8JQQJ99BLAC...` |
+| `tenant_id`              | string | conditional | Microsoft Entra ID tenant (directory) ID. **Required when `auth_mode=oauth`**.            | `72f988bf-86f1-41af-91ab-...`      |
+| `client_id`             | string | conditional | Entra ID service principal (application) client ID. **Required when `auth_mode=oauth`**.   | `a1b2c3d4-5678-90ab-cdef-...`      |
+| `client_secret`         | string | conditional | Client secret for the service principal. **Required when `auth_mode=oauth`**.              | `Abc8Q~secretvalue...`             |
 | `externalOptionsAllowList` | string | yes    | Comma-separated list of allowed table-specific options. Must be set to: `project,repository_id,pullrequest_id,status_filter,filter,ids` | `project,repository_id,pullrequest_id,status_filter,filter,ids` |
+
+**Authentication:** the connector supports two modes via `auth_mode`. `pat` (the default) uses a Personal Access Token; `oauth` uses a Microsoft Entra ID service principal with a client secret (OAuth 2.0 client-credentials), which avoids per-user PATs and fits enterprise identity governance. Existing PAT connections are unaffected — `auth_mode` defaults to `pat`.
 
 **Important**: The `externalOptionsAllowList` parameter is **required** because tables support table-specific configuration options (`project`, `repository_id`, `pullrequest_id`, `status_filter`, `filter`, `ids`).
 
@@ -53,6 +59,12 @@ Provide the following **connection-level** options when configuring the connecto
        - **Work Items (read)** under the Work Items section - Required if you plan to ingest work item tables
   5. Click **Create** and copy the generated token immediately. Store it securely as you won't be able to see it again.
   6. Use this token as the `personal_access_token` connection option.
+
+- **Entra ID Service Principal (when `auth_mode=oauth`)**:
+  1. In the Azure portal, register an application (Entra ID → App registrations) — note its **Application (client) ID** and **Directory (tenant) ID**.
+  2. Under **Certificates & secrets**, create a **client secret** and copy its value immediately.
+  3. Add the service principal to your Azure DevOps organization (Organization settings → Users) and grant it the same read access the PAT scopes describe (Code, Graph, Project and Team, Work Items).
+  4. Set the connection options: `auth_mode=oauth`, `tenant_id`, `client_id`, `client_secret`. The connector acquires a bearer token via the client-credentials flow (scope `499b84ac-1321-427f-aa17-267ca6975798/.default`) and refreshes it automatically before expiry — no PAT required.
 
 ### Create a Unity Catalog Connection
 

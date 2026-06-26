@@ -24,14 +24,45 @@ connection:
         operations to this project. If omitted, tables can fetch from
         all projects in the organization.
 
+    - name: auth_mode
+      type: string
+      required: false
+      description: >
+        Authentication mode: "pat" (default) for a Personal Access Token,
+        or "oauth" for a Microsoft Entra ID service principal using the
+        OAuth 2.0 client-credentials flow.
+
     - name: personal_access_token
       type: string
-      required: true
+      required: false
       secret: true
       description: >
-        Personal Access Token (PAT) for authentication with the Azure
-        DevOps Services REST API. Required scopes: Code (read),
+        Personal Access Token (PAT) for the Azure DevOps Services REST
+        API. Required when auth_mode="pat". Required scopes: Code (read),
         Graph (read), Project and Team (read), Work Items (read).
+
+    - name: tenant_id
+      type: string
+      required: false
+      description: >
+        Microsoft Entra ID tenant (directory) ID. Required when
+        auth_mode="oauth".
+
+    - name: client_id
+      type: string
+      required: false
+      description: >
+        Entra ID service principal (application) client ID. Required when
+        auth_mode="oauth". The service principal must be added to the Azure
+        DevOps organization with the required read access.
+
+    - name: client_secret
+      type: string
+      required: false
+      secret: true
+      description: >
+        Client secret for the Entra ID service principal. Required when
+        auth_mode="oauth".
 
 # ============================================================================
 # External Options Allowlist

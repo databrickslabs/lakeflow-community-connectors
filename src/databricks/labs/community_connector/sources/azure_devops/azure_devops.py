@@ -19,6 +19,7 @@ from databricks.labs.community_connector.sources.azure_devops.azure_devops_utils
     resolve_projects,
     nullify_empty,
     for_each_pr,
+    EntraClientSecretAuth,
 )
 
 
@@ -32,19 +33,17 @@ class AzureDevopsLakeflowConnect(LakeflowConnect):
         Expected options:
             - organization: Azure DevOps organization name.
             - project: Project name or ID (optional).
-            - personal_access_token: PAT for authentication.
+            - auth_mode: "pat" (default) or "oauth".
+            - personal_access_token: PAT (required when auth_mode="pat").
+            - tenant_id, client_id, client_secret: Entra ID service
+              principal credentials (required when auth_mode="oauth").
         """
         organization = options.get("organization")
         project = options.get("project")
-        personal_access_token = options.get("personal_access_token")
 
         if not organization:
             raise ValueError(
                 "Azure DevOps connector requires 'organization'"
-            )
-        if not personal_access_token:
-            raise ValueError(
-                "Azure DevOps connector requires 'personal_access_token'"
             )
 
         self.organization = organization
@@ -54,17 +53,53 @@ class AzureDevopsLakeflowConnect(LakeflowConnect):
             f"https://vssps.dev.azure.com/{organization}"
         )
 
-        auth_b64 = base64.b64encode(
-            f":{personal_access_token}".encode("ascii")
-        ).decode("ascii")
-
         self._session = requests.Session()
-        self._session.headers.update(
-            {
-                "Authorization": f"Basic {auth_b64}",
-                "Accept": "application/json",
+        self._session.headers.update({"Accept": "application/json"})
+        self._configure_auth(options)
+
+    def _configure_auth(self, options: dict[str, str]) -> None:
+        """Configure session authentication based on ``auth_mode``.
+
+        - ``"pat"`` (default): HTTP Basic auth with a Personal Access Token.
+        - ``"oauth"``: Entra ID service principal via the client-credentials
+          flow; ``EntraClientSecretAuth`` fetches and refreshes the bearer
+          token transparently on every request.
+        """
+        auth_mode = (options.get("auth_mode") or "pat").lower()
+
+        if auth_mode == "pat":
+            personal_access_token = options.get("personal_access_token")
+            if not personal_access_token:
+                raise ValueError(
+                    "Azure DevOps connector with auth_mode='pat' requires "
+                    "'personal_access_token'"
+                )
+            auth_b64 = base64.b64encode(
+                f":{personal_access_token}".encode("ascii")
+            ).decode("ascii")
+            self._session.headers["Authorization"] = f"Basic {auth_b64}"
+        elif auth_mode == "oauth":
+            required = {
+                "tenant_id": options.get("tenant_id"),
+                "client_id": options.get("client_id"),
+                "client_secret": options.get("client_secret"),
             }
-        )
+            missing = [name for name, value in required.items() if not value]
+            if missing:
+                raise ValueError(
+                    "Azure DevOps connector with auth_mode='oauth' requires: "
+                    + ", ".join(missing)
+                )
+            self._session.auth = EntraClientSecretAuth(
+                required["tenant_id"],
+                required["client_id"],
+                required["client_secret"],
+            )
+        else:
+            raise ValueError(
+                f"Azure DevOps connector: unknown auth_mode '{auth_mode}' "
+                "(expected 'pat' or 'oauth')"
+            )
 
     # ------------------------------------------------------------------ #
     # Interface methods
