@@ -15,6 +15,7 @@ Two layers:
 """
 
 import json
+import logging
 import time
 
 import pytest
@@ -329,7 +330,7 @@ def test_incremental_first_call_has_no_cursor_filter():
     c = _make()
     records, offset = c.read_table(
         "Customers",
-        None,
+        {},
         {"cursor_field": "ModifiedAt", "max_records_per_batch": "10"},
     )
     rows = list(records)
@@ -430,7 +431,7 @@ def test_incremental_continuous_polling_picks_up_new_rows():
     c = _make()
     # Batch 1: no offset, two rows drain. Trim of trailing single-cohort
     # leaves [Id=1]; offset = 2024-03-01.
-    rows1, offset1 = c.read_table("Customers", None, {"cursor_field": "ModifiedAt"})
+    rows1, offset1 = c.read_table("Customers", {}, {"cursor_field": "ModifiedAt"})
     assert [r["Id"] for r in rows1] == [1]
     assert offset1 == {"cursor": "2024-03-01T00:00:00Z"}
 
@@ -474,7 +475,7 @@ def test_incremental_trims_trailing_same_cursor_cohort_when_truncated():
     c = _make()
     records, offset = c.read_table(
         "Customers",
-        None,
+        {},
         {"cursor_field": "ModifiedAt", "max_records_per_batch": "5"},
     )
     rows = list(records)
@@ -506,7 +507,7 @@ def test_incremental_trims_boundary_cohort_on_natural_exhaustion_too():
     c = _make()
     records, offset = c.read_table(
         "Customers",
-        None,
+        {},
         {"cursor_field": "ModifiedAt", "max_records_per_batch": "100"},
     )
     rows = list(records)
@@ -537,7 +538,7 @@ def test_incremental_all_same_cursor_truncated_raises():
     with pytest.raises(RuntimeError, match="max_records_per_batch"):
         records, _ = c.read_table(
             "Customers",
-            None,
+            {},
             {"cursor_field": "ModifiedAt", "max_records_per_batch": "3"},
         )
         list(records)
@@ -567,7 +568,7 @@ def test_incremental_all_same_cursor_natural_exhaustion_emits_as_is():
     c = _make()
     records, offset = c.read_table(
         "Customers",
-        None,
+        {},
         {"cursor_field": "ModifiedAt", "max_records_per_batch": "100"},
     )
     rows = list(records)
@@ -653,6 +654,112 @@ def test_incremental_batch_mode_null_cursor_rows_emit_without_raise():
     )
     rows = list(records)
     assert [r["Id"] for r in rows] == [1, 2]
+
+
+@responses.activate
+def test_batch_mode_flat_cursor_drains_fully_despite_explicit_cap():
+    """Batch reader (``start_offset=None``) with an explicit cap reads the
+    whole table. The offset is discarded, so the cap is force-disabled —
+    honouring it could only truncate-and-lose — and rows stream lazily.
+    Three distinct-cursor rows that the *streaming* path with ``cap=1``
+    would truncate then trim to empty (and raise) all come through here,
+    with the terminal ``{}`` offset."""
+    _mock_metadata()
+    responses.get(
+        f"{SERVICE_URL}Customers",
+        json={
+            "value": [
+                {"Id": 1, "ModifiedAt": "2024-01-01T00:00:00Z"},
+                {"Id": 2, "ModifiedAt": "2024-01-02T00:00:00Z"},
+                {"Id": 3, "ModifiedAt": "2024-01-03T00:00:00Z"},
+            ]
+        },
+        match_querystring=False,
+    )
+    c = _make()
+    records, offset = c.read_table(
+        "Customers", None, {"cursor_field": "ModifiedAt", "max_records_per_batch": "1"}
+    )
+    assert [r["Id"] for r in records] == [1, 2, 3]
+    assert offset == {}
+
+
+@responses.activate
+def test_batch_mode_contained_cursor_streams_lazily_per_parent():
+    """The batch-mode contained cursor read yields lazily: consuming only
+    the first parent's leaf row must not have fetched the second parent's
+    leaf collection. This is the property that bounds peak memory to one
+    page instead of materialising the whole result set (which the
+    streaming walk's ``emitted`` list does). Draining the rest then
+    reaches parent 2."""
+    _mock_nested_metadata()
+    responses.get(f"{SERVICE_URL}Parents", json={"value": [{"Id": 1}, {"Id": 2}]})
+    fetched: list[str] = []
+
+    def _leaf(request):
+        fetched.append(request.url)
+        n = "1" if "Parents(1)" in request.url else "2"
+        return (
+            200,
+            {},
+            '{"value": [{"Id": 1' + n + ', "Label": "x", '
+            '"ModifiedAt": "2024-01-0' + n + 'T00:00:00Z"}]}',
+        )
+
+    responses.add_callback(responses.GET, f"{SERVICE_URL}Parents(1)/Children", callback=_leaf)
+    responses.add_callback(responses.GET, f"{SERVICE_URL}Parents(2)/Children", callback=_leaf)
+    c = _make()
+    records, offset = c.read_table(
+        "Parents__Children",
+        None,
+        {"cursor_field": "ModifiedAt", "max_records_per_batch": "1"},
+    )
+    it = iter(records)
+    first = next(it)
+    assert first["Id"] == 11
+    # Lazy: only parent 1's leaf fetched so far; parent 2 untouched.
+    assert any("Parents(1)/Children" in u for u in fetched)
+    assert not any("Parents(2)/Children" in u for u in fetched)
+    # Draining the rest reaches parent 2 — full coverage, uncapped.
+    rest = [r["Id"] for r in it]
+    assert rest == [12]
+    assert any("Parents(2)/Children" in u for u in fetched)
+    assert offset == {}
+
+
+@responses.activate
+def test_batch_mode_expand_streams_lazily_and_uncapped():
+    """``expand_contained=true`` under the batch reader streams flattened
+    leaf rows one $expand response at a time and ignores an explicit cap
+    (offset discarded → a cap could only truncate-and-lose). All leaf
+    rows across the inline cross-product come through with a ``{}``
+    offset."""
+    _mock_nested_metadata()
+    responses.add(
+        responses.GET,
+        f"{SERVICE_URL}Parents",
+        json={
+            "value": [
+                {
+                    "Id": 1,
+                    "Children": [
+                        {"Id": 11, "Label": "a", "ModifiedAt": "2024-01-01T00:00:00Z"},
+                        {"Id": 12, "Label": "b", "ModifiedAt": "2024-01-02T00:00:00Z"},
+                        {"Id": 13, "Label": "c", "ModifiedAt": "2024-01-03T00:00:00Z"},
+                    ],
+                }
+            ]
+        },
+        match_querystring=False,
+    )
+    c = _make()
+    records, offset = c.read_table(
+        "Parents__Children",
+        None,
+        {"expand_contained": "true", "max_records_per_batch": "1"},
+    )
+    assert [r["Id"] for r in records] == [11, 12, 13]
+    assert offset == {}
 
 
 @responses.activate
@@ -774,7 +881,7 @@ def test_incremental_orderby_appends_primary_key_tiebreaker():
     responses.add_callback(responses.GET, f"{SERVICE_URL}Customers", callback=_callback)
 
     c = _make()
-    c.read_table("Customers", None, {"cursor_field": "ModifiedAt"})
+    c.read_table("Customers", {}, {"cursor_field": "ModifiedAt"})
     # `Id` is Customers' Key in METADATA_XML.
     url = captured["url"]
     assert "ModifiedAt" in url and "asc" in url
@@ -844,7 +951,7 @@ def test_incremental_max_records_caps_batch_with_boundary_trim():
     c = _make()
     records, offset = c.read_table(
         "Customers",
-        None,
+        {},
         {"cursor_field": "ModifiedAt", "max_records_per_batch": "2"},
     )
     rows = list(records)
@@ -2887,7 +2994,7 @@ def test_contained_expand_truncates_at_page_boundary_queues_only_next_page():
     assert "cursor" not in offset
 
 
-def test_read_table_disables_cap_when_start_offset_none_and_cap_unset():
+def test_read_table_disables_cap_when_start_offset_none_and_cap_unset(caplog):
     """Spark's batch reader (``LakeflowBatchReader``) calls
     ``read_table`` with ``start_offset=None`` and discards the
     returned end-offset. ``read_table`` detects that signal and
@@ -2898,9 +3005,10 @@ def test_read_table_disables_cap_when_start_offset_none_and_cap_unset():
     Streaming readers always pass a dict (``{}`` initial or parked
     offset), so this override does not touch the streaming path.
 
-    If the user passes ``max_records_per_batch`` themselves, the
-    override is skipped — same-cursor-cohort overflow detection and
-    any other cap-driven behaviour stays intact."""
+    A user-set ``max_records_per_batch`` is **also** overridden in
+    batch mode (with a warning), because the discarded offset means a
+    cap there can only truncate-and-lose — honouring it would silently
+    drop the remainder. Resumable caps only make sense for streaming."""
     _mock_nested_metadata()
     captured: list[dict] = []
 
@@ -2924,18 +3032,21 @@ def test_read_table_disables_cap_when_start_offset_none_and_cap_unset():
 
     assert captured[0]["max_records_per_batch"] == str(_BATCH_UNCAPPED)
 
-    # start_offset=None BUT cap explicitly set → user's value wins.
+    # start_offset=None AND cap explicitly set → still overridden to the
+    # uncapped sentinel, and a warning names the ignored value.
     captured.clear()
     ODataLakeflowConnect._read_contained_expand = _spy  # type: ignore[assignment]
-    try:
-        c.read_table(
-            "Parents__Children",
-            None,
-            {"expand_contained": "true", "max_records_per_batch": "50"},
-        )
-    finally:
-        ODataLakeflowConnect._read_contained_expand = original  # type: ignore[assignment]
-    assert captured[0]["max_records_per_batch"] == "50"
+    with caplog.at_level(logging.WARNING):
+        try:
+            c.read_table(
+                "Parents__Children",
+                None,
+                {"expand_contained": "true", "max_records_per_batch": "50"},
+            )
+        finally:
+            ODataLakeflowConnect._read_contained_expand = original  # type: ignore[assignment]
+    assert captured[0]["max_records_per_batch"] == str(_BATCH_UNCAPPED)
+    assert any("max_records_per_batch=50 ignored" in r.getMessage() for r in caplog.records)
 
     # start_offset={} (streaming) → override never applies.
     captured.clear()
@@ -4252,7 +4363,7 @@ def test_contained_incremental_first_call_no_filter():
         match_querystring=False,
     )
     c = _make()
-    records, offset = c.read_table("Parents__Children", None, {"cursor_field": "ModifiedAt"})
+    records, offset = c.read_table("Parents__Children", {}, {"cursor_field": "ModifiedAt"})
     rows = list(records)
     assert len(rows) == 2
     assert offset == {"cursor": "2024-01-02T00:00:00Z"}
@@ -4473,7 +4584,7 @@ def test_contained_incremental_truncation_trims_boundary_cohort():
     c = _make()
     records, offset = c.read_table(
         "Parents__Children",
-        None,
+        {},
         {"cursor_field": "ModifiedAt", "max_records_per_batch": "2"},
     )
     rows = list(records)
@@ -4512,7 +4623,7 @@ def test_contained_incremental_complete_parent_single_cursor_emits_all():
     c = _make()
     records, offset = c.read_table(
         "Parents__Children",
-        None,
+        {},
         {"cursor_field": "ModifiedAt", "max_records_per_batch": "2"},
     )
     rows = list(records)
@@ -4559,7 +4670,7 @@ def test_contained_incremental_continues_past_single_cursor_parent_then_checkpoi
     c = _make()
     records, offset = c.read_table(
         "Parents__Children",
-        None,
+        {},
         {"cursor_field": "ModifiedAt", "max_records_per_batch": "2"},
     )
     rows = list(records)
@@ -4637,7 +4748,7 @@ def test_contained_incremental_truncation_uses_nextlink_at_page_boundary():
     c = _make()
     records, offset = c.read_table(
         "Parents__Children",
-        None,
+        {},
         {"cursor_field": "ModifiedAt", "max_records_per_batch": "2"},
     )
     rows = list(records)
@@ -4713,7 +4824,7 @@ def test_ancestor_cursor_truncation_parks_chain_next_link():
     c = _make()
     records, offset = c.read_table(
         "Parents__Children__Notes",
-        None,
+        {},
         {"cursor_field": "ModifiedAt", "max_records_per_batch": "2"},
     )
     rows = list(records)
@@ -4833,7 +4944,7 @@ def test_ancestor_cursor_incremental_filters_at_ancestor_level():
         json={"value": [{"Id": 200, "Text": "c"}]},
     )
     c = _make()
-    records, offset = c.read_table("Parents__Children__Notes", None, {"cursor_field": "ModifiedAt"})
+    records, offset = c.read_table("Parents__Children__Notes", {}, {"cursor_field": "ModifiedAt"})
     rows = list(records)
     # All 3 leaf rows emitted; cursor value propagated from ancestor.
     assert len(rows) == 3

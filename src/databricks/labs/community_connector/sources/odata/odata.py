@@ -552,17 +552,32 @@ class ODataLakeflowConnect(
         # discards the returned end-offset — so any continuation state
         # the connector would normally park in the offset (e.g.
         # ``pending_fetches`` on the ``expand_contained=true`` path,
-        # ``chain_next_link`` on the leaf-cursor N+1 path) would be
-        # silently dropped, truncating the read at the default
-        # ``max_records_per_batch``. Both streaming readers always
-        # pass a dict (``{}`` or the parked offset). Treat ``None``
-        # plus an *unset* cap as the batch-mode signal and force the
-        # cap effectively-infinite so the chain drains fully in one
-        # call. When the user passes ``max_records_per_batch``
-        # themselves we still honour it — same-cursor-cohort overflow
-        # detection and any other cap-driven behaviour stays intact.
+        # ``chain_next_link`` on the leaf-cursor N+1 path) is dropped.
+        # Honouring ``max_records_per_batch`` here would therefore
+        # truncate the read at the cap and silently lose the remainder:
+        # a cap can only do something *correct* when the offset survives
+        # to resume from, which it never does under the batch reader.
+        # So treat ``start_offset is None`` as the batch-mode signal and
+        # force the cap effectively-infinite regardless of whether the
+        # user set one — warning when we override a user value so the
+        # ignored option isn't silent. Streaming readers always pass a
+        # dict (``{}`` or the parked offset) and keep their cap intact.
+        # The cursor read paths additionally stream lazily in this mode
+        # (see ``_read_incremental`` / ``_read_contained_incremental`` /
+        # ``_read_contained_expand``) so an uncapped batch doesn't
+        # materialise the whole result set in memory.
         opts = dict(table_options or {})
-        if start_offset is None and "max_records_per_batch" not in opts:
+        if start_offset is None:
+            if "max_records_per_batch" in opts:
+                _LOG.warning(
+                    "max_records_per_batch=%s ignored for %r: the batch reader "
+                    "(LakeflowBatchReader) discards the returned offset, so a "
+                    "cap can only truncate the read and silently drop the "
+                    "remainder. Reading uncapped. Use a streaming table for a "
+                    "resumable per-batch cap.",
+                    opts["max_records_per_batch"],
+                    table_name,
+                )
             opts["max_records_per_batch"] = str(_BATCH_UNCAPPED)
         # ``offset`` is a local view used for shape checks below.
         # The original ``start_offset`` (``None`` for batch reader,
@@ -649,6 +664,14 @@ class ODataLakeflowConnect(
         #     same way. There is no type mismatch between the cursor
         #     literal and the server's column type because we don't
         #     manufacture a timestamp ceiling out of wall-clock time.
+        if start_offset is None:
+            # Batch reader: offset discarded, ``since`` is None (no
+            # ``cursor gt`` filter), no cap and no no-progress guard — so
+            # the watermark, same-cursor trim and ``records`` buffer the
+            # streaming path builds all serve nothing. Stream pages
+            # straight through so peak memory is one page, not the whole
+            # table. See ``read_table`` for why the cap is force-disabled.
+            return self._stream_incremental_flat(table_name, table_options, cursor_field), {}
         since = start_offset.get("cursor") if start_offset else None
         segment_filters = _resolve_segment_filters(table_options, [table_name])
         extra_filter = _combine_filters(
@@ -748,6 +771,38 @@ class ODataLakeflowConnect(
         return self._finalize_cursor_read(
             start_offset, end_offset, records, table_name, cursor_field
         )
+
+    def _stream_incremental_flat(
+        self, table_name: str, table_options: dict[str, str], cursor_field: str
+    ) -> Iterator[dict]:
+        """Lazy batch-mode flat cursor read.
+
+        Mirrors ``_read_incremental``'s per-row work minus everything the
+        batch reader makes moot: no ``cursor gt`` filter (``since`` is
+        None), no cap, no same-cursor trim, no watermark, no no-progress
+        guard. The only per-row behaviour kept is ``cursor_nulls=ignore``
+        null-skipping (``coalesce`` emits the real null as-is here, since
+        nothing consumes the synthetic ``effective`` value). Pages stream
+        through ``_fetch_pages`` so peak memory is one page."""
+        namespace = (table_options or {}).get("namespace")
+        segment_filters = _resolve_segment_filters(table_options, [table_name])
+        order_terms = [f"{cursor_field} asc"]
+        for pk in self._primary_keys_for(table_name, namespace):
+            if pk != cursor_field:
+                order_terms.append(f"{pk} asc")
+        url = self._build_url(
+            table_name,
+            table_options,
+            extra_filter=segment_filters.get(0),
+            order_by=",".join(order_terms),
+        )
+        skip_null, _effective = self._make_cursor_resolver(
+            table_name, namespace, cursor_field, table_options
+        )
+        for row in self._fetch_pages(url):
+            if skip_null and row.get(cursor_field) is None:
+                continue
+            yield row
 
     def _read_incremental_delta(
         self,

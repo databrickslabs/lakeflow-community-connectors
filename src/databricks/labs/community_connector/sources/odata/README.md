@@ -643,12 +643,17 @@ entity set name appears in two schemas, set the `namespace` table option:
   commits at every parent-walk boundary.
 - Batch reads (`LakeflowBatchReader`, used by
   `spark.read.format("lakeflow_connect")`) call `read_table` with
-  `start_offset=None` and discard the returned end-offset. The
-  connector detects that signal and **auto-disables the cap** when
-  `max_records_per_batch` is not explicitly set, so the chain drains
-  in one call instead of silently truncating at the default. If the
-  user passes `max_records_per_batch` explicitly the override is
-  skipped — same-cursor-cohort overflow detection and any other
-  cap-driven behaviour stay intact, at the cost of accepting that the
-  batch reader may drop continuation state. Streaming triggers
-  (default for SDP) always pass a dict and are unaffected.
+  `start_offset=None` and discard the returned end-offset. Since there
+  is no offset to resume from, the connector **reads the whole table in
+  one call** rather than across capped batches: `max_records_per_batch`
+  is disabled in batch mode (a `WARNING` notes when an explicitly-set
+  value is being ignored) so the chain drains fully. To keep memory
+  bounded while it does, the cursor read paths **stream lazily** in
+  batch mode (flat, contained N+1, and `expand_contained=true`): leaf
+  rows are yielded a page (or one flattened `$expand` response) at a
+  time instead of being collected into one list, so peak memory is a
+  single response, not the whole result set. For a per-batch cap with
+  resume across batches, use a **streaming** table (the SDP default) —
+  streaming triggers pass a dict offset, honour the cap, and park
+  continuation state (`chain_next_link` / `pending_fetches`) across
+  micro-batches.

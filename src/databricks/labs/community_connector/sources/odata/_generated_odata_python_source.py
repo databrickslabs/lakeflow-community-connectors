@@ -1513,7 +1513,6 @@ def register_lakeflow_source(spark):
                     }
                 ]
                 resuming = False
-            emitted: list[dict] = []
             ctx = (cursor_field, cursor_level, None) if cursor_field else None
             # Per-level $top values from the initial dynamic distribution.
             # Passed into the flatten recursion so inner-collection nextLink
@@ -1522,6 +1521,19 @@ def register_lakeflow_source(spark):
             per_level_tops = compute_dynamic_tops(
                 int((table_options or {}).get("page_size", "1000")), len(segments)
             )
+            if start_offset is None:
+                # Batch reader: offset discarded, ``since`` is None (no cursor
+                # filter), cap disabled, guard skipped — so the ``emitted``
+                # accumulation the drainer does serves nothing. Stream leaf
+                # rows one response at a time so an uncapped batch doesn't
+                # materialise the whole result set. See ``read_table``.
+                return (
+                    self._stream_expand_pages(
+                        initial_queue, segments, pks_per_level, fk_columns, ctx, per_level_tops
+                    ),
+                    {},
+                )
+            emitted: list[dict] = []
             remaining_queue = self._drain_expand_pages(
                 initial_queue,
                 max_records,
@@ -1654,6 +1666,76 @@ def register_lakeflow_source(spark):
                         }
                     )
             return queue
+
+        def _stream_expand_pages(
+            self,
+            initial_queue: list[dict],
+            segments: list[str],
+            pks_per_level: list[list[str]],
+            fk_columns: dict[tuple[str, str], str],
+            ctx: tuple | None,
+            per_level_tops: list[int],
+        ) -> Iterator[dict]:
+            """Lazy variant of :meth:`_drain_expand_pages` for the batch reader.
+
+            Pops fetch tasks FIFO, fetches one page each, flattens that page's
+            rows into a short-lived local buffer and yields them, deferring
+            inner-collection ``@odata.nextLink`` continuations back onto the
+            queue exactly as the drainer does. No ``max_records`` cap and no
+            cross-page accumulation: peak memory is one response's flattened
+            cross-product (bounded by the ``page_size`` budget) plus the queue
+            of pending fetch descriptors (URLs + chains, not rows). Emission
+            order matches the drainer's ``emitted`` order — inline rows first,
+            deferred continuations processed when their queue item is popped."""
+            queue: list[dict] = list(initial_queue)
+            cur_field, cur_level, _ = ctx or (None, -1, None)
+            while queue:
+                item = queue.pop(0)
+                url = item["url"]
+                level = item["level"]
+                chain = [dict(p) for p in item.get("chain") or []]
+                cur_val = item.get("cur_val")
+                skip = int(item.get("skip", 0) or 0)
+                item_ctx = (cur_field, cur_level, cur_val) if cur_field else None
+                page_rows, page_next_url = self._fetch_one_expand_page(url)
+                if not page_rows:
+                    if page_next_url:
+                        queue.append(
+                            {
+                                "url": page_next_url,
+                                "level": level,
+                                "chain": [dict(p) for p in chain],
+                                "cur_val": cur_val,
+                                "skip": 0,
+                            }
+                        )
+                    continue
+                for row_idx in range(skip, len(page_rows)):
+                    local_out: list[dict] = []
+                    self._flatten_expand_response(
+                        level,
+                        page_rows[row_idx],
+                        segments,
+                        pks_per_level,
+                        chain,
+                        fk_columns,
+                        local_out,
+                        item_ctx,
+                        per_level_tops,
+                        response_url=url,
+                        pending_fetches=queue,
+                    )
+                    yield from local_out
+                if page_next_url:
+                    queue.append(
+                        {
+                            "url": page_next_url,
+                            "level": level,
+                            "chain": [dict(p) for p in chain],
+                            "cur_val": cur_val,
+                            "skip": 0,
+                        }
+                    )
 
         def _fetch_one_expand_page(self, url: str) -> tuple[list[dict], str | None]:
             """One HTTP GET; returns ``(page_rows, next_url)``. Thin wrapper
@@ -2155,6 +2237,19 @@ def register_lakeflow_source(spark):
                     f"{table_name!r} or any of its ancestors. Pick a column "
                     f"declared on the leaf or one of the parent segments."
                 )
+            if start_offset is None:
+                # Batch reader: offset discarded, ``since`` is None (no cursor
+                # filter), no cap, no no-progress guard — so the ``emitted``
+                # list, watermark and truncation checkpoint the streaming
+                # walks build all serve nothing. Stream leaf rows one page at
+                # a time so an uncapped batch doesn't materialise the whole
+                # result set. See ``read_table`` for why the cap is disabled.
+                return (
+                    self._stream_contained_incremental(
+                        table_name, segments, namespace, table_options, cursor_field, cursor_level
+                    ),
+                    {},
+                )
             if cursor_level == len(segments) - 1:
                 return self._read_contained_incremental_leaf_cursor(
                     table_name, segments, start_offset, table_options, cursor_field
@@ -2162,6 +2257,58 @@ def register_lakeflow_source(spark):
             return self._read_contained_incremental_ancestor_cursor(
                 table_name, segments, start_offset, table_options, cursor_field, cursor_level
             )
+
+        def _stream_contained_incremental(
+            self,
+            table_name: str,
+            segments: list[str],
+            namespace: str | None,
+            table_options: dict[str, str],
+            cursor_field: str,
+            cursor_level: int,
+        ) -> Iterator[dict]:
+            """Lazy batch-mode contained cursor read (leaf- or ancestor-cursor).
+
+            Mirrors the per-row work of ``_read_contained_incremental_*``
+            minus everything the batch reader makes moot (``since`` is None,
+            offset discarded, cap disabled, guard skipped): no cursor
+            ``$filter``, no ``emitted`` buffer, no watermark, no truncation
+            checkpoint. Leaf rows stream one page at a time. The cursor lives
+            on the leaf (``leaf`` branch — apply ``cursor_nulls=ignore``
+            null-skip; ``coalesce`` keeps the real null since nothing consumes
+            the synthetic value) or on a non-leaf ancestor (``ancestor``
+            branch — stamp the ancestor's cursor value onto each leaf row,
+            exactly as ``_walk_ancestor_chains`` does)."""
+            fk_columns = self._resolve_fk_columns(segments, namespace)
+            segment_filters = resolve_segment_filters(table_options, segments)
+            leaf_filter = segment_filters.get(len(segments) - 1)
+            if cursor_level == len(segments) - 1:
+                order_by = self._leaf_cursor_order_by(table_name, namespace, cursor_field)
+                skip_null, _effective = self._make_cursor_resolver(
+                    table_name, namespace, cursor_field, table_options
+                )
+                for chain in self._iter_parent_key_chains(segments, namespace, table_options):
+                    url = self._build_contained_url(
+                        segments, chain, table_options, extra_filter=leaf_filter, order_by=order_by
+                    )
+                    for row in self._fetch_pages(url):
+                        if skip_null and row.get(cursor_field) is None:
+                            continue
+                        self._tag_with_ancestor_fks(row, segments, chain, fk_columns)
+                        yield row
+                return
+            leaf_order_by = self._leaf_pk_order_by(segments, namespace)
+            chains_iter = self._iter_parent_chains_with_cursor(
+                segments, namespace, table_options, cursor_level, cursor_field, None
+            )
+            for chain, ancestor_cursor in chains_iter:
+                url = self._build_contained_url(
+                    segments, chain, table_options, extra_filter=leaf_filter, order_by=leaf_order_by
+                )
+                for row in self._fetch_pages(url):
+                    self._tag_with_ancestor_fks(row, segments, chain, fk_columns)
+                    row[cursor_field] = ancestor_cursor
+                    yield row
 
         def _read_contained_incremental_leaf_cursor(
             self,
@@ -3228,17 +3375,32 @@ def register_lakeflow_source(spark):
             # discards the returned end-offset — so any continuation state
             # the connector would normally park in the offset (e.g.
             # ``pending_fetches`` on the ``expand_contained=true`` path,
-            # ``chain_next_link`` on the leaf-cursor N+1 path) would be
-            # silently dropped, truncating the read at the default
-            # ``max_records_per_batch``. Both streaming readers always
-            # pass a dict (``{}`` or the parked offset). Treat ``None``
-            # plus an *unset* cap as the batch-mode signal and force the
-            # cap effectively-infinite so the chain drains fully in one
-            # call. When the user passes ``max_records_per_batch``
-            # themselves we still honour it — same-cursor-cohort overflow
-            # detection and any other cap-driven behaviour stays intact.
+            # ``chain_next_link`` on the leaf-cursor N+1 path) is dropped.
+            # Honouring ``max_records_per_batch`` here would therefore
+            # truncate the read at the cap and silently lose the remainder:
+            # a cap can only do something *correct* when the offset survives
+            # to resume from, which it never does under the batch reader.
+            # So treat ``start_offset is None`` as the batch-mode signal and
+            # force the cap effectively-infinite regardless of whether the
+            # user set one — warning when we override a user value so the
+            # ignored option isn't silent. Streaming readers always pass a
+            # dict (``{}`` or the parked offset) and keep their cap intact.
+            # The cursor read paths additionally stream lazily in this mode
+            # (see ``_read_incremental`` / ``_read_contained_incremental`` /
+            # ``_read_contained_expand``) so an uncapped batch doesn't
+            # materialise the whole result set in memory.
             opts = dict(table_options or {})
-            if start_offset is None and "max_records_per_batch" not in opts:
+            if start_offset is None:
+                if "max_records_per_batch" in opts:
+                    _LOG.warning(
+                        "max_records_per_batch=%s ignored for %r: the batch reader "
+                        "(LakeflowBatchReader) discards the returned offset, so a "
+                        "cap can only truncate the read and silently drop the "
+                        "remainder. Reading uncapped. Use a streaming table for a "
+                        "resumable per-batch cap.",
+                        opts["max_records_per_batch"],
+                        table_name,
+                    )
                 opts["max_records_per_batch"] = str(_BATCH_UNCAPPED)
             # ``offset`` is a local view used for shape checks below.
             # The original ``start_offset`` (``None`` for batch reader,
@@ -3325,6 +3487,14 @@ def register_lakeflow_source(spark):
             #     same way. There is no type mismatch between the cursor
             #     literal and the server's column type because we don't
             #     manufacture a timestamp ceiling out of wall-clock time.
+            if start_offset is None:
+                # Batch reader: offset discarded, ``since`` is None (no
+                # ``cursor gt`` filter), no cap and no no-progress guard — so
+                # the watermark, same-cursor trim and ``records`` buffer the
+                # streaming path builds all serve nothing. Stream pages
+                # straight through so peak memory is one page, not the whole
+                # table. See ``read_table`` for why the cap is force-disabled.
+                return self._stream_incremental_flat(table_name, table_options, cursor_field), {}
             since = start_offset.get("cursor") if start_offset else None
             segment_filters = _resolve_segment_filters(table_options, [table_name])
             extra_filter = _combine_filters(
@@ -3424,6 +3594,38 @@ def register_lakeflow_source(spark):
             return self._finalize_cursor_read(
                 start_offset, end_offset, records, table_name, cursor_field
             )
+
+        def _stream_incremental_flat(
+            self, table_name: str, table_options: dict[str, str], cursor_field: str
+        ) -> Iterator[dict]:
+            """Lazy batch-mode flat cursor read.
+
+            Mirrors ``_read_incremental``'s per-row work minus everything the
+            batch reader makes moot: no ``cursor gt`` filter (``since`` is
+            None), no cap, no same-cursor trim, no watermark, no no-progress
+            guard. The only per-row behaviour kept is ``cursor_nulls=ignore``
+            null-skipping (``coalesce`` emits the real null as-is here, since
+            nothing consumes the synthetic ``effective`` value). Pages stream
+            through ``_fetch_pages`` so peak memory is one page."""
+            namespace = (table_options or {}).get("namespace")
+            segment_filters = _resolve_segment_filters(table_options, [table_name])
+            order_terms = [f"{cursor_field} asc"]
+            for pk in self._primary_keys_for(table_name, namespace):
+                if pk != cursor_field:
+                    order_terms.append(f"{pk} asc")
+            url = self._build_url(
+                table_name,
+                table_options,
+                extra_filter=segment_filters.get(0),
+                order_by=",".join(order_terms),
+            )
+            skip_null, _effective = self._make_cursor_resolver(
+                table_name, namespace, cursor_field, table_options
+            )
+            for row in self._fetch_pages(url):
+                if skip_null and row.get(cursor_field) is None:
+                    continue
+                yield row
 
         def _read_incremental_delta(
             self,
