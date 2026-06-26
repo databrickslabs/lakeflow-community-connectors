@@ -1318,6 +1318,8 @@ class ContainedNavMixin:
         max_records: int,
         fk_columns: dict[tuple[str, str], str],
         leaf_segment_filter: str | None = None,
+        effective=None,
+        skip_null: bool = False,
     ) -> tuple[list[dict], bool, int, str | None, Any]:
         """Drive the per-parent fetch loop (leaf-cursor mode).
 
@@ -1353,7 +1355,15 @@ class ContainedNavMixin:
           for that one parent (bounded by one server response).
 
         Returns ``(rows, truncated, parent_idx, chain_next_link_out,
-        truncated_chain_cursor_out)``."""
+        truncated_chain_cursor_out)``.
+
+        ``effective(row)`` supplies the cursor value used for filtering,
+        the boundary trim and (via the caller) the watermark — the
+        ``cursor_nulls`` resolver, so a null cursor can resolve to a
+        synthetic floor without mutating the emitted row. ``skip_null``
+        drops rows with a real null cursor (``cursor_nulls=ignore``)."""
+        if effective is None:
+            effective = lambda row: row.get(cursor_field)  # noqa: E731
         emitted: list[dict] = []
         truncated = False
         parent_idx = 0
@@ -1395,7 +1405,9 @@ class ContainedNavMixin:
             page_next_url: str | None = None
             for page_rows, page_next_url in self._fetch_pages_with_links(initial_url):
                 for row in page_rows:
-                    rec_cursor = row.get(cursor_field)
+                    if skip_null and row.get(cursor_field) is None:
+                        continue
+                    rec_cursor = effective(row)
                     if (
                         chain_since is not None
                         and rec_cursor is not None
@@ -1428,7 +1440,10 @@ class ContainedNavMixin:
                 if trimmed:
                     del emitted[chain_start_idx + len(trimmed) :]
                     truncated = True
-                    truncated_chain_cursor_out = trimmed[-1].get(cursor_field)
+                    # Effective value (synthetic floor for a null under
+                    # coalesce) so the resumed ``cursor gt`` is a real,
+                    # comparable boundary — never the restored-null column.
+                    truncated_chain_cursor_out = effective(trimmed[-1])
                     break
                 # Every row of this complete parent shares one cursor value
                 # — no splittable boundary exists, and re-reading the parent
@@ -1566,6 +1581,12 @@ class ContainedNavMixin:
         order_by = self._leaf_cursor_order_by(table_name, namespace, cursor_field)
         chains_iter = self._iter_parent_key_chains(segments, namespace, table_options)
         segment_filters = resolve_segment_filters(table_options, segments)
+        # ``cursor_nulls`` resolver (synthetic floor for nulls under
+        # coalesce; skip nulls under ignore). The cursor lives on the leaf
+        # entity, so PKs/floor come from the full contained path's leaf.
+        skip_null, effective = self._make_cursor_resolver(
+            table_name, namespace, cursor_field, table_options
+        )
         (
             emitted,
             truncated,
@@ -1585,6 +1606,8 @@ class ContainedNavMixin:
             max_records,
             self._resolve_fk_columns(segments, namespace),
             leaf_segment_filter=segment_filters.get(len(segments) - 1),
+            effective=effective,
+            skip_null=skip_null,
         )
         if truncated:
             # The walk has already chosen the checkpoint and trimmed
@@ -1603,7 +1626,7 @@ class ContainedNavMixin:
         else:
             if not emitted:
                 return iter([]), start_offset or {}
-            cursors = [r.get(cursor_field) for r in emitted if r.get(cursor_field) is not None]
+            cursors = [effective(r) for r in emitted if effective(r) is not None]
             # Mirror ``_build_expand_end_offset`` /
             # ``_ancestor_cursor_offset``: when there's no cursor data
             # this batch and no prior ``since`` to carry, the offset is

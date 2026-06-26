@@ -23,6 +23,13 @@ def trim_to_distinct_cursor_boundary(
     surrender the whole group and let ``cursor gt <prev_distinct>``
     re-fetch them.
 
+    Reads the **real** cursor column, never a ``cursor_nulls=coalesce``
+    synthetic. That's deliberate: a same-cursor cohort is re-readable
+    via ``cursor gt`` next call, but null-cursor rows are excluded by
+    ``gt`` server-side, so they must not be trimmed — a batch of only
+    null cursors trims to empty (every real value is the same ``None``)
+    and the caller keeps the rows as-is.
+
     Returns an empty list when every record shares one cursor value;
     the caller decides whether that's recoverable (natural exhaustion)
     or a hard failure (truncated batch with too-small cap).

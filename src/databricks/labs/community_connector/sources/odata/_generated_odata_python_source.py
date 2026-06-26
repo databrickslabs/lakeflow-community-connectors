@@ -620,6 +620,13 @@ def register_lakeflow_source(spark):
         surrender the whole group and let ``cursor gt <prev_distinct>``
         re-fetch them.
 
+        Reads the **real** cursor column, never a ``cursor_nulls=coalesce``
+        synthetic. That's deliberate: a same-cursor cohort is re-readable
+        via ``cursor gt`` next call, but null-cursor rows are excluded by
+        ``gt`` server-side, so they must not be trimmed — a batch of only
+        null cursors trims to empty (every real value is the same ``None``)
+        and the caller keeps the rows as-is.
+
         Returns an empty list when every record shares one cursor value;
         the caller decides whether that's recoverable (natural exhaustion)
         or a hard failure (truncated batch with too-small cap).
@@ -1930,6 +1937,8 @@ def register_lakeflow_source(spark):
             max_records: int,
             fk_columns: dict[tuple[str, str], str],
             leaf_segment_filter: str | None = None,
+            effective=None,
+            skip_null: bool = False,
         ) -> tuple[list[dict], bool, int, str | None, Any]:
             """Drive the per-parent fetch loop (leaf-cursor mode).
 
@@ -1965,7 +1974,15 @@ def register_lakeflow_source(spark):
               for that one parent (bounded by one server response).
 
             Returns ``(rows, truncated, parent_idx, chain_next_link_out,
-            truncated_chain_cursor_out)``."""
+            truncated_chain_cursor_out)``.
+
+            ``effective(row)`` supplies the cursor value used for filtering,
+            the boundary trim and (via the caller) the watermark — the
+            ``cursor_nulls`` resolver, so a null cursor can resolve to a
+            synthetic floor without mutating the emitted row. ``skip_null``
+            drops rows with a real null cursor (``cursor_nulls=ignore``)."""
+            if effective is None:
+                effective = lambda row: row.get(cursor_field)  # noqa: E731
             emitted: list[dict] = []
             truncated = False
             parent_idx = 0
@@ -2007,7 +2024,9 @@ def register_lakeflow_source(spark):
                 page_next_url: str | None = None
                 for page_rows, page_next_url in self._fetch_pages_with_links(initial_url):
                     for row in page_rows:
-                        rec_cursor = row.get(cursor_field)
+                        if skip_null and row.get(cursor_field) is None:
+                            continue
+                        rec_cursor = effective(row)
                         if (
                             chain_since is not None
                             and rec_cursor is not None
@@ -2040,7 +2059,10 @@ def register_lakeflow_source(spark):
                     if trimmed:
                         del emitted[chain_start_idx + len(trimmed) :]
                         truncated = True
-                        truncated_chain_cursor_out = trimmed[-1].get(cursor_field)
+                        # Effective value (synthetic floor for a null under
+                        # coalesce) so the resumed ``cursor gt`` is a real,
+                        # comparable boundary — never the restored-null column.
+                        truncated_chain_cursor_out = effective(trimmed[-1])
                         break
                     # Every row of this complete parent shares one cursor value
                     # — no splittable boundary exists, and re-reading the parent
@@ -2178,6 +2200,12 @@ def register_lakeflow_source(spark):
             order_by = self._leaf_cursor_order_by(table_name, namespace, cursor_field)
             chains_iter = self._iter_parent_key_chains(segments, namespace, table_options)
             segment_filters = resolve_segment_filters(table_options, segments)
+            # ``cursor_nulls`` resolver (synthetic floor for nulls under
+            # coalesce; skip nulls under ignore). The cursor lives on the leaf
+            # entity, so PKs/floor come from the full contained path's leaf.
+            skip_null, effective = self._make_cursor_resolver(
+                table_name, namespace, cursor_field, table_options
+            )
             (
                 emitted,
                 truncated,
@@ -2197,6 +2225,8 @@ def register_lakeflow_source(spark):
                 max_records,
                 self._resolve_fk_columns(segments, namespace),
                 leaf_segment_filter=segment_filters.get(len(segments) - 1),
+                effective=effective,
+                skip_null=skip_null,
             )
             if truncated:
                 # The walk has already chosen the checkpoint and trimmed
@@ -2215,7 +2245,7 @@ def register_lakeflow_source(spark):
             else:
                 if not emitted:
                     return iter([]), start_offset or {}
-                cursors = [r.get(cursor_field) for r in emitted if r.get(cursor_field) is not None]
+                cursors = [effective(r) for r in emitted if effective(r) is not None]
                 # Mirror ``_build_expand_end_offset`` /
                 # ``_ancestor_cursor_offset``: when there's no cursor data
                 # this batch and no prior ``since`` to carry, the offset is
@@ -3319,11 +3349,21 @@ def register_lakeflow_source(spark):
                 order_by=",".join(order_terms),
             )
             max_records = int(table_options.get("max_records_per_batch", "10000"))
+            # ``cursor_nulls`` policy: ``effective`` yields the value used for
+            # filtering/trim/watermark (a synthetic floor for nulls under
+            # ``coalesce``); ``skip_null`` drops null-cursor rows under
+            # ``ignore``. The emitted row is never mutated — its cursor column
+            # keeps the real null.
+            skip_null, effective = self._make_cursor_resolver(
+                table_name, namespace, cursor_field, table_options
+            )
 
             records: list[dict] = []
             truncated = False
             for row in self._fetch_pages(url):
-                rec_cursor = row.get(cursor_field)
+                if skip_null and row.get(cursor_field) is None:
+                    continue
+                rec_cursor = effective(row)
                 if since is not None and rec_cursor is not None and rec_cursor <= since:
                     continue
                 records.append(row)
@@ -3345,7 +3385,10 @@ def register_lakeflow_source(spark):
             # via apply_changes' MERGE on the primary key.
             trimmed = _trim_to_distinct_cursor_boundary(records, cursor_field)
             if not trimmed:
-                # Every record in this batch shares one cursor value.
+                # Every record in this batch shares one cursor value (including
+                # an all-null-cursor batch, which trims to empty here and is
+                # kept as-is; under cursor_nulls=coalesce the watermark still
+                # advances via the synthetic effective value below).
                 if truncated:
                     raise RuntimeError(
                         f"max_records_per_batch ({max_records}) is too small for "
@@ -3371,7 +3414,7 @@ def register_lakeflow_source(spark):
             # normalization. The shared no-progress guard then fires on
             # null-only batches (committing ``{"cursor": None}`` would loop
             # because every subsequent trigger re-emits the same nulls).
-            cursors = [r.get(cursor_field) for r in records if r.get(cursor_field) is not None]
+            cursors = [effective(r) for r in records if effective(r) is not None]
             if cursors:
                 end_offset = {"cursor": max(cursors)}
             elif since is not None:
@@ -4797,10 +4840,160 @@ def register_lakeflow_source(spark):
                 return None
             return f"{cursor_field} gt {_odata_literal(since)}"
 
+        # ------------------------------------------------------------------
+        # Null-cursor policy (``cursor_nulls``)
+        # ------------------------------------------------------------------
+
+        _DEFAULT_COALESCE_FLOOR_YEAR = 2000
+
+        def _parse_cursor_nulls(self, table_options: dict[str, str] | None) -> tuple[str, int]:
+            """Parse the ``cursor_nulls`` option into ``(mode, floor_year)``.
+
+            Forms: ``coalesce`` (default), ``error``, ``ignore``, and
+            ``coalesce:<YYYY>`` to override the temporal synthetic floor year
+            (default ``2000``). The year suffix is only valid with
+            ``coalesce``. Raises on an unrecognised mode or a malformed year.
+            """
+            raw = (table_options or {}).get("cursor_nulls", "coalesce").strip().lower()
+            mode, _, floor = raw.partition(":")
+            mode = mode.strip()
+            if mode not in ("coalesce", "error", "ignore"):
+                raise ValueError(
+                    f"cursor_nulls mode must be one of 'coalesce', 'error', 'ignore'; got {mode!r}."
+                )
+            floor_year = self._DEFAULT_COALESCE_FLOOR_YEAR
+            if floor:
+                floor = floor.strip()
+                if mode != "coalesce":
+                    raise ValueError(
+                        f"cursor_nulls floor year is only valid with 'coalesce'; got {raw!r}."
+                    )
+                if not (floor.isdigit() and len(floor) == 4):
+                    raise ValueError(
+                        f"cursor_nulls floor must be a 4-digit year (e.g. 'coalesce:1990'); "
+                        f"got {floor!r}."
+                    )
+                floor_year = int(floor)
+            return mode, floor_year
+
+        def _cursor_floor(
+            self,
+            table_name: str,
+            namespace: str | None,
+            cursor_field: str,
+            floor_year: int = _DEFAULT_COALESCE_FLOOR_YEAR,
+        ) -> tuple[Any, str]:
+            """Deterministic floor used to substitute a null cursor under
+            ``cursor_nulls=coalesce``. Returns ``(floor, kind)`` where the
+            floor sorts below every real value of the cursor's type, so a
+            later ``cursor gt <floor>`` never skips a real row. ``kind`` is
+            ``datetime`` (sub-second room for a per-row PK offset), ``date``,
+            ``int``, ``num`` or ``str`` (constant floor — distinct synthetic
+            values aren't representable, so same-floor nulls fall back to the
+            complete-cohort handling).
+
+            Temporal floors use ``<floor_year>-01-01`` (default ``2000``,
+            configurable via ``cursor_nulls=coalesce:<YYYY>``) rather than the
+            EDM minimum: modification/created timestamps are comfortably after
+            it, every OData server parses it cleanly, and it keeps the
+            synthetic watermark readable. (A real cursor value *before* the
+            floor only matters if a synthetic floor is ever committed as the
+            watermark — i.e. a batch with no real-cursor rows — which doesn't
+            arise for the modification-timestamp cursors this targets; lower
+            the year if your data predates it.)
+
+            Raises ``ValueError`` for cursor types with no well-defined floor
+            (boolean/binary/etc.); pick ``cursor_nulls=ignore``/``error`` or a
+            different cursor for those.
+            """
+            et = self._entity_type_for(table_name, namespace)
+            dtype = next(
+                (f.dataType for f in self._own_fields_for_et(et) if f.name == cursor_field), None
+            )
+            if isinstance(dtype, TimestampType):
+                return f"{floor_year:04d}-01-01T00:00:00", "datetime"
+            if isinstance(dtype, DateType):
+                return f"{floor_year:04d}-01-01", "date"
+            if isinstance(dtype, (IntegerType, LongType)):
+                return -(2**63), "int"
+            if isinstance(dtype, (DecimalType, DoubleType, FloatType)):
+                return -1.0e308, "num"
+            if isinstance(dtype, StringType):
+                return "", "str"
+            raise ValueError(
+                f"cursor_nulls=coalesce cannot synthesise a floor for cursor_field "
+                f"{cursor_field!r} of type {type(dtype).__name__ if dtype else 'unknown'} "
+                f"on {table_name!r}. Use cursor_nulls=ignore (skip null-cursor rows), "
+                f"cursor_nulls=error, or pick a temporal/numeric/string cursor."
+            )
+
+        def _make_cursor_resolver(
+            self,
+            table_name: str,
+            namespace: str | None,
+            cursor_field: str,
+            table_options: dict[str, str] | None,
+        ):
+            """Return ``(skip_null, effective)`` for a cursor read.
+
+            ``effective(row)`` is the value used for filtering, the same-cursor
+            boundary trim and the watermark — **never** written back into the
+            row, so the emitted column keeps its real ``null``:
+
+            * ``coalesce`` (default) — a null cursor resolves to a synthetic
+              floor (``datetime`` floors carry a per-PK sub-second offset so
+              distinct nulls don't collapse into one cohort). The watermark
+              always advances, so null-cursor rows are ingested once on the
+              seed pass and the stream converges.
+            * ``error`` — ``effective`` is the raw value (``None`` for nulls);
+              a null-only batch can't advance the watermark and surfaces the
+              shared no-progress ``RuntimeError``.
+            * ``ignore`` — ``skip_null`` is True; null-cursor rows are dropped
+              (never emitted), so they don't block watermark progress.
+            """
+            mode, floor_year = self._parse_cursor_nulls(table_options)
+            if mode == "ignore":
+                return True, (lambda row: row.get(cursor_field))
+            if mode == "error":
+                return False, (lambda row: row.get(cursor_field))
+            try:
+                floor, kind = self._cursor_floor(table_name, namespace, cursor_field, floor_year)
+            except ValueError:
+                # No synthesisable floor for this cursor type. ``coalesce`` is
+                # the default, so silently fall back to ``error`` behaviour
+                # rather than break a previously-working pipeline — unless the
+                # user asked for ``coalesce`` explicitly, in which case the
+                # type error is theirs to see.
+                if "cursor_nulls" in (table_options or {}):
+                    raise
+                return False, (lambda row: row.get(cursor_field))
+            pk_names = self._own_primary_keys_for_et(self._entity_type_for(table_name, namespace))
+
+            def effective(row: dict) -> Any:
+                value = row.get(cursor_field)
+                if value is not None:
+                    return value
+                if kind == "datetime":
+                    return f"{floor}.{_synthetic_pk_ordinal(row, pk_names):06d}Z"
+                return floor
+
+            return False, effective
+
 
     # ---------------------------------------------------------------------------
     # Helpers (module-level, no class state — easier to unit-test)
     # ---------------------------------------------------------------------------
+
+
+    def _synthetic_pk_ordinal(row: dict, pk_names: list[str]) -> int:
+        """Deterministic 0..999999 ordinal from a row's primary key, used to
+        spread synthetic datetime floors for null cursors across the
+        sub-second range so they don't form one same-cursor cohort. Hash, so
+        it's stable across runs and works for any PK type; collisions only
+        cost cohort granularity, never correctness (the destination MERGE
+        keys on the real PK)."""
+        key = "\x1f".join(str(row.get(p)) for p in pk_names) if pk_names else repr(sorted(row.items()))
+        return int(hashlib.sha1(key.encode("utf-8")).hexdigest()[:8], 16) % 1_000_000
 
 
     def _extract_oauth_error_hint(resp: requests.Response) -> str:

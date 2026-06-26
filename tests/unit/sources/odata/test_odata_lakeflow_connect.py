@@ -607,7 +607,11 @@ def test_incremental_first_batch_null_cursor_rows_raises():
         records, _ = c.read_table(
             "Customers",
             {},
-            {"cursor_field": "ModifiedAt", "max_records_per_batch": "100"},
+            {
+                "cursor_field": "ModifiedAt",
+                "max_records_per_batch": "100",
+                "cursor_nulls": "error",
+            },
         )
         list(records)
 
@@ -641,10 +645,112 @@ def test_incremental_batch_mode_null_cursor_rows_emit_without_raise():
     records, _ = c.read_table(
         "Customers",
         None,
-        {"cursor_field": "ModifiedAt", "max_records_per_batch": "100"},
+        {
+            "cursor_field": "ModifiedAt",
+            "max_records_per_batch": "100",
+            "cursor_nulls": "error",
+        },
     )
     rows = list(records)
     assert [r["Id"] for r in rows] == [1, 2]
+
+
+@responses.activate
+def test_incremental_coalesce_default_emits_null_rows_and_advances():
+    """Default ``cursor_nulls=coalesce``: a null-only streaming batch is
+    emitted (column left null) and the watermark advances via a
+    synthetic floor, so no no-progress RuntimeError fires."""
+    _mock_metadata()
+    responses.add(
+        responses.GET,
+        f"{SERVICE_URL}Customers",
+        json={"value": [{"Id": 1, "ModifiedAt": None}, {"Id": 2, "ModifiedAt": None}]},
+        match_querystring=False,
+    )
+    c = _make()
+    records, offset = c.read_table("Customers", {}, {"cursor_field": "ModifiedAt"})
+    rows = list(records)
+    assert [r["Id"] for r in rows] == [1, 2]
+    # The real null is preserved in the emitted rows (synthetic is internal).
+    assert all(r["ModifiedAt"] is None for r in rows)
+    # Watermark advanced to the default synthetic floor (year 2000), not {}.
+    assert offset["cursor"].startswith("2000-01-01T00:00:00.")
+
+
+@responses.activate
+def test_incremental_coalesce_floor_year_configurable():
+    """``cursor_nulls=coalesce:<YYYY>`` overrides the temporal synthetic
+    floor year (default 2000)."""
+    _mock_metadata()
+    responses.add(
+        responses.GET,
+        f"{SERVICE_URL}Customers",
+        json={"value": [{"Id": 1, "ModifiedAt": None}]},
+        match_querystring=False,
+    )
+    c = _make()
+    records, offset = c.read_table(
+        "Customers", {}, {"cursor_field": "ModifiedAt", "cursor_nulls": "coalesce:1990"}
+    )
+    rows = list(records)
+    assert [r["Id"] for r in rows] == [1]
+    assert rows[0]["ModifiedAt"] is None
+    assert offset["cursor"].startswith("1990-01-01T00:00:00.")
+
+
+@responses.activate
+def test_cursor_nulls_floor_year_with_non_coalesce_raises():
+    _mock_metadata()
+    responses.get(
+        f"{SERVICE_URL}Customers",
+        json={"value": [{"Id": 1, "ModifiedAt": "2024-01-01T00:00:00Z"}]},
+    )
+    c = _make()
+    with pytest.raises(ValueError, match="floor year is only valid with 'coalesce'"):
+        records, _ = c.read_table(
+            "Customers", {}, {"cursor_field": "ModifiedAt", "cursor_nulls": "error:1990"}
+        )
+        list(records)
+
+
+@responses.activate
+def test_incremental_ignore_skips_null_rows():
+    """``cursor_nulls=ignore`` drops null-cursor rows entirely; only the
+    real-cursor row is emitted and drives the watermark."""
+    _mock_metadata()
+    responses.add(
+        responses.GET,
+        f"{SERVICE_URL}Customers",
+        json={
+            "value": [
+                {"Id": 1, "ModifiedAt": None},
+                {"Id": 2, "ModifiedAt": "2024-01-01T00:00:00Z"},
+            ]
+        },
+        match_querystring=False,
+    )
+    c = _make()
+    records, offset = c.read_table(
+        "Customers", {}, {"cursor_field": "ModifiedAt", "cursor_nulls": "ignore"}
+    )
+    rows = list(records)
+    assert [r["Id"] for r in rows] == [2]
+    assert offset == {"cursor": "2024-01-01T00:00:00Z"}
+
+
+@responses.activate
+def test_cursor_nulls_invalid_value_raises():
+    _mock_metadata()
+    responses.get(
+        f"{SERVICE_URL}Customers",
+        json={"value": [{"Id": 1, "ModifiedAt": "2024-01-01T00:00:00Z"}]},
+    )
+    c = _make()
+    with pytest.raises(ValueError, match="cursor_nulls"):
+        records, _ = c.read_table(
+            "Customers", {}, {"cursor_field": "ModifiedAt", "cursor_nulls": "bogus"}
+        )
+        list(records)
 
 
 @responses.activate
@@ -4229,7 +4335,7 @@ def test_contained_incremental_leaf_cursor_first_batch_null_rows_raises():
         records, _ = c.read_table(
             "Parents__Children",
             {},
-            {"cursor_field": "ModifiedAt"},
+            {"cursor_field": "ModifiedAt", "cursor_nulls": "error"},
         )
         list(records)
 
@@ -4292,9 +4398,57 @@ def test_contained_incremental_leaf_cursor_null_rows_raises():
         records, _ = c.read_table(
             "Parents__Children",
             {"cursor": "2024-01-02T00:00:00Z"},
-            {"cursor_field": "ModifiedAt"},
+            {"cursor_field": "ModifiedAt", "cursor_nulls": "error"},
         )
         list(records)
+
+
+@responses.activate
+def test_contained_leaf_cursor_coalesce_default_emits_null_rows_and_advances():
+    """Default ``cursor_nulls=coalesce`` on the contained leaf-cursor
+    path: a null-cursor leaf row is emitted (column left null) and the
+    watermark advances via a synthetic floor — no no-progress raise.
+    This is the Hexagon ``WorkPackagesStepInstances`` failure mode."""
+    _mock_nested_metadata()
+    responses.get(f"{SERVICE_URL}Parents", json={"value": [{"Id": 1}]})
+    responses.add(
+        responses.GET,
+        f"{SERVICE_URL}Parents(1)/Children",
+        json={"value": [{"Id": 10, "Label": "a", "ModifiedAt": None}]},
+        match_querystring=False,
+    )
+    c = _make()
+    records, offset = c.read_table("Parents__Children", {}, {"cursor_field": "ModifiedAt"})
+    rows = list(records)
+    assert [r["Id"] for r in rows] == [10]
+    assert rows[0]["ModifiedAt"] is None
+    assert offset["cursor"].startswith("2000-01-01T00:00:00.")
+
+
+@responses.activate
+def test_contained_leaf_cursor_ignore_skips_null_rows():
+    """``cursor_nulls=ignore`` on the contained leaf-cursor path drops
+    null-cursor leaf rows; only the real-cursor row is emitted."""
+    _mock_nested_metadata()
+    responses.get(f"{SERVICE_URL}Parents", json={"value": [{"Id": 1}]})
+    responses.add(
+        responses.GET,
+        f"{SERVICE_URL}Parents(1)/Children",
+        json={
+            "value": [
+                {"Id": 10, "Label": "a", "ModifiedAt": None},
+                {"Id": 11, "Label": "b", "ModifiedAt": "2024-02-01T00:00:00Z"},
+            ]
+        },
+        match_querystring=False,
+    )
+    c = _make()
+    records, offset = c.read_table(
+        "Parents__Children", {}, {"cursor_field": "ModifiedAt", "cursor_nulls": "ignore"}
+    )
+    rows = list(records)
+    assert [r["Id"] for r in rows] == [11]
+    assert offset == {"cursor": "2024-02-01T00:00:00Z"}
 
 
 @responses.activate
