@@ -47,11 +47,17 @@ If a token expires or is revoked mid-query, Gmail returns 401; re-run the connec
 1. **APIs & Services → Credentials → Create Credentials → OAuth client ID**.
 2. **Application type**: **Web application**.
 3. Name it (e.g. `Gmail Lakeflow Web Client`).
-4. **Authorized redirect URIs**: add the loopback URI the Databricks community-connector CLI listens on:
-   ```
-   http://localhost
-   ```
-   The CLI picks a free port at run time and registers `http://127.0.0.1:<port>/callback`. Google requires the host to be listed; the port is not part of the matching rule.
+4. **Authorized redirect URIs**: add the redirect URI(s) for the way(s) you'll create the connection. Add both if you'll use both.
+   - **Databricks UI flow** (creating the connection from the **Add Data** page): add your workspace's redirect URL, substituting your own workspace host:
+     ```
+     https://<your-workspace-url>/login/oauth/http.html
+     ```
+     This must match exactly (scheme, host, path). If it's missing, the Google consent popup fails with `Error 400: redirect_uri_mismatch`.
+   - **`community-connector` CLI flow**: add the loopback host the CLI listens on:
+     ```
+     http://localhost
+     ```
+     The CLI picks a free port at run time and registers `http://127.0.0.1:<port>/callback`. Google requires the host to be listed; the port is not part of the matching rule, so no workspace URL is needed for the CLI.
 5. **Create**, then copy and save:
    - **Client ID** (e.g. `123456789-abc.apps.googleusercontent.com`)
    - **Client Secret** (e.g. `GOCSPX-xxxx...`)
@@ -78,6 +84,8 @@ A Unity Catalog connection for this connector can be created in two ways via the
 1. Follow the **Lakeflow Community Connector** UI flow from the **Add Data** page.
 2. Select any existing Lakeflow Community Connector connection for this source or create a new one.
 3. Supply the OAuth app identity (`client_id` + `client_secret`) and complete the in-browser Google consent when prompted; the `gmail.readonly` scope and Google's authorization / token URLs come from the connector spec.
+
+> **Before using the UI flow**, make sure your OAuth client lists `https://<your-workspace-url>/login/oauth/http.html` under **Authorized redirect URIs** (Step 3). The UI flow redirects back to your workspace, not to a loopback, so without it Google rejects the consent popup with `redirect_uri_mismatch`.
 
 The connection can also be created using the standard Unity Catalog API.
 
@@ -471,6 +479,12 @@ Run the pipeline using your standard Lakeflow / Databricks orchestration:
   - Verify the Gmail connector files are in `src/databricks/labs/community_connector/sources/gmail/` directory
 
 **API and Authentication Issues:**
+
+- **`Error 400: redirect_uri_mismatch` in the consent popup**:
+  - The redirect URI Databricks sent isn't registered on your OAuth client. For the UI flow, add `https://<your-workspace-url>/login/oauth/http.html` (your actual workspace host) under **Authorized redirect URIs** in Google Cloud Console (Step 3). For the CLI, register the `http://localhost` loopback host.
+
+- **`Error 401: invalid_client` ("The OAuth client was not found")**:
+  - The `client_id` sent to Google doesn't match an existing client. Re-check the `client_id` on the connection for typos/whitespace, confirm it's the **Web application** client (not a Desktop/CLI-only client), and that it lives in the same Google Cloud project where you configured the consent screen.
 
 - **Authentication failures (`401 Unauthorized`)**:
   - The injected `access_token` has expired or been revoked — re-run the connection setup to re-consent through the u2m flow
