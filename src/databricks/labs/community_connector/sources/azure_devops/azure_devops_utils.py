@@ -8,11 +8,71 @@ import time
 from typing import Any, Callable
 
 import requests
+from requests.auth import AuthBase
 
 
 RETRIABLE_STATUS_CODES = {429, 500, 502, 503, 504}
 MAX_RETRIES = 5
 INITIAL_BACKOFF = 1.0  # seconds; doubled after each retry
+
+# Azure DevOps resource (app) ID. Requesting an Entra ID token for
+# "<id>/.default" yields a token whose audience Azure DevOps accepts.
+AZURE_DEVOPS_RESOURCE_ID = "499b84ac-1321-427f-aa17-267ca6975798"
+_TOKEN_REFRESH_SKEW_SECONDS = 300  # refresh slightly before expiry
+
+
+class EntraClientSecretAuth(AuthBase):
+    """``requests`` auth for Azure DevOps via an Entra ID service principal.
+
+    Uses the OAuth 2.0 client-credentials flow (client secret). The token is
+    fetched lazily on first use and refreshed before it expires, so a
+    long-running read survives the ~1h token TTL without any change to the
+    call sites — every request through the session picks up a valid bearer.
+    """
+
+    def __init__(
+        self, tenant_id: str, client_id: str, client_secret: str
+    ) -> None:
+        self._tenant_id = tenant_id
+        self._client_id = client_id
+        self._client_secret = client_secret
+        self._token = None
+        self._expires_at = 0.0
+
+    def _fetch_token(self) -> None:
+        url = (
+            f"https://login.microsoftonline.com/{self._tenant_id}"
+            "/oauth2/v2.0/token"
+        )
+        resp = requests.post(
+            url,
+            data={
+                "grant_type": "client_credentials",
+                "client_id": self._client_id,
+                "client_secret": self._client_secret,
+                "scope": f"{AZURE_DEVOPS_RESOURCE_ID}/.default",
+            },
+            timeout=30,
+        )
+        if resp.status_code != 200:
+            raise RuntimeError(
+                "Azure DevOps OAuth token request failed: "
+                f"{resp.status_code} {resp.text}"
+            )
+        payload = resp.json()
+        self._token = payload["access_token"]
+        self._expires_at = time.time() + int(payload.get("expires_in", 3600))
+
+    def __call__(
+        self, request: requests.PreparedRequest
+    ) -> requests.PreparedRequest:
+        if (
+            self._token is None
+            or time.time() >= self._expires_at - _TOKEN_REFRESH_SKEW_SECONDS
+        ):
+            self._fetch_token()
+        request.headers["Authorization"] = f"Bearer {self._token}"
+        return request
 
 
 def request_with_retry(
