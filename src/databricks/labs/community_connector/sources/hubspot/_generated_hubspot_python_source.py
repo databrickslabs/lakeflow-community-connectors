@@ -912,11 +912,19 @@ def register_lakeflow_source(spark):
             try:
                 resp = requests.get(url, headers=self.auth_header, timeout=60)
                 if resp.status_code != 200:
-                    raise Exception("API error: {resp.status_code} {resp.text}")
+                    raise RuntimeError(
+                        f"HubSpot Properties API error for {object_type}: "
+                        f"{resp.status_code} {resp.text}"
+                    )
 
                 return resp.json()
             except Exception as e:
-                return {"error": f"Failed to get object properties: {str(e)}"}
+                # Re-raise (don't return an error dict): callers iterate this as a
+                # list of property dicts, so a dict here turns a real API error into
+                # an unrelated TypeError far downstream.
+                raise RuntimeError(
+                    f"Failed to get object properties for {object_type}: {e}"
+                ) from e
 
         def _map_hubspot_type_to_spark(self, hubspot_type: str) -> DataType:
             """
