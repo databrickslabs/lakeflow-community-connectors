@@ -2511,9 +2511,59 @@ def test_key_predicate_composite():
 def test_build_contained_url_two_level():
     _mock_nested_metadata()
     c = _make()
-    url = c._build_contained_url(["Parents", "Children"], [{"Id": 7}], {})
+    url = c._build_contained_url(["Parents", "Children"], [{"Id": 7}], {"page_size": "1000"})
     assert url.startswith(f"{SERVICE_URL}Parents(7)/Children?")
     assert "$top=1000" in url
+
+
+@responses.activate
+def test_no_top_emitted_when_page_size_unset():
+    """With no ``page_size`` the connector sends no ``$top`` at all and
+    lets the server choose its page size. Covers flat, contained N+1,
+    and ``expand_contained=true`` URL builders."""
+    _mock_nested_metadata()
+    c = _make()
+    flat = c._build_url("Parents", {})
+    assert "$top" not in flat
+    leaf = c._build_contained_url(["Parents", "Children"], [{"Id": 7}], {})
+    assert "$top" not in leaf
+    expand = c._build_expand_url(["Parents", "Children", "Notes"], {})
+    assert "$top" not in expand
+    # Nested $expand clauses still nest and still carry $orderby — only
+    # $top is dropped; ``Leaf()`` empty-paren forms are not produced.
+    assert "$expand=Children($orderby=Id asc;$expand=Notes($orderby=Id asc))" in expand
+
+
+@responses.activate
+def test_top_emitted_when_page_size_set():
+    """Setting ``page_size`` restores the ``$top`` (flat = the value
+    verbatim)."""
+    _mock_nested_metadata()
+    c = _make()
+    assert "$top=250" in c._build_url("Parents", {"page_size": "250"})
+
+
+@responses.activate
+def test_page_size_default_split_by_ingest_type():
+    """``read_table`` defaults ``page_size`` only for cursor-based ingest:
+    a ``cursor_field`` read with no ``page_size`` still sends ``$top=1000``
+    (bounded incremental pages), while a snapshot read with no
+    ``page_size`` sends no ``$top`` at all (server picks the page size)."""
+    _mock_metadata()
+    captured = []
+
+    def cb(req):
+        captured.append(req.url)
+        return (200, {}, json.dumps({"value": []}))
+
+    responses.add_callback(responses.GET, f"{SERVICE_URL}Customers", callback=cb)
+    c = _make()
+    # Snapshot (no cursor_field, no page_size) → no $top.
+    list(c.read_table("Customers", None, {})[0])
+    assert "$top" not in captured[-1]
+    # Cursor-based (cursor_field, no page_size) → default $top=1000.
+    list(c.read_table("Customers", {}, {"cursor_field": "ModifiedAt"})[0])
+    assert "$top=1000" in captured[-1]
 
 
 @responses.activate
@@ -2594,7 +2644,7 @@ def test_compute_dynamic_tops():
 def test_build_expand_url_three_level():
     _mock_nested_metadata()
     c = _make()
-    url = c._build_expand_url(["Parents", "Children", "Notes"], {})
+    url = c._build_expand_url(["Parents", "Children", "Notes"], {"page_size": "1000"})
     # Dynamic distribution for N=3, page_size=1000: [34, 5, 5] (product 850).
     # PK-only $orderby is injected at every (non-cursor) level for
     # skiptoken stability.
@@ -2607,7 +2657,7 @@ def test_build_expand_url_three_level():
 def test_build_expand_url_four_level_nests_correctly():
     _mock_nested_metadata()
     c = _make()
-    url = c._build_expand_url(["A", "B", "C", "D"], {})
+    url = c._build_expand_url(["A", "B", "C", "D"], {"page_size": "1000"})
     # Dynamic distribution for N=4, page_size=1000: [8, 5, 5, 5] (product 1000).
     # A/B/C/D aren't declared in the fixture metadata, so the per-level
     # PK $orderby degrades to none — this test pins the $top nesting
@@ -2623,7 +2673,7 @@ def test_build_expand_url_dynamic_tops_for_two_level():
     ``$top=10`` — product equals the budget exactly."""
     _mock_nested_metadata()
     c = _make()
-    url = c._build_expand_url(["Parents", "Children"], {})
+    url = c._build_expand_url(["Parents", "Children"], {"page_size": "1000"})
     assert "Parents?$top=100" in url
     assert "$expand=Children($top=10;$orderby=Id asc)" in url
 
@@ -2893,7 +2943,9 @@ def test_contained_expand_inner_nextlink_rewrites_top_for_continuation():
         responses.GET, f"{SERVICE_URL}Parents(1)/Children", callback=_continuation
     )
     c = _make()
-    records, _ = c.read_table("Parents__Children", None, {"expand_contained": "true"})
+    records, _ = c.read_table(
+        "Parents__Children", None, {"expand_contained": "true", "page_size": "1000"}
+    )
     list(records)
     from urllib.parse import unquote
 
@@ -3783,7 +3835,6 @@ def test_contained_npp_filter_at_top_prunes_parent_walk():
         match=[
             responses.matchers.query_param_matcher(
                 {
-                    "$top": "1000",
                     "$select": "Id",
                     "$filter": "Id eq 5",
                     "$orderby": "Id asc",
@@ -3818,7 +3869,6 @@ def test_contained_npp_filter_at_middle_prunes_middle_walk():
         match=[
             responses.matchers.query_param_matcher(
                 {
-                    "$top": "1000",
                     "$select": "Id",
                     "$filter": "Id eq 10",
                     "$orderby": "Id asc",
@@ -3832,7 +3882,6 @@ def test_contained_npp_filter_at_middle_prunes_middle_walk():
         match=[
             responses.matchers.query_param_matcher(
                 {
-                    "$top": "1000",
                     "$select": "Id",
                     "$filter": "Id eq 10",
                     "$orderby": "Id asc",
@@ -3862,7 +3911,7 @@ def test_contained_npp_filter_at_leaf_applies_at_leaf_url():
         json={"value": [{"Id": 11, "Label": "a", "ModifiedAt": "2024-01-01T00:00:00Z"}]},
         match=[
             responses.matchers.query_param_matcher(
-                {"$top": "1000", "$filter": "Label eq 'a'", "$orderby": "Id asc"}
+                {"$filter": "Label eq 'a'", "$orderby": "Id asc"}
             )
         ],
     )
@@ -3883,7 +3932,6 @@ def test_contained_npp_filter_at_all_levels_cascades():
         match=[
             responses.matchers.query_param_matcher(
                 {
-                    "$top": "1000",
                     "$select": "Id",
                     "$filter": "Id eq 5",
                     "$orderby": "Id asc",
@@ -3897,7 +3945,6 @@ def test_contained_npp_filter_at_all_levels_cascades():
         match=[
             responses.matchers.query_param_matcher(
                 {
-                    "$top": "1000",
                     "$select": "Id",
                     "$filter": "Id eq 10",
                     "$orderby": "Id asc",
@@ -3909,9 +3956,7 @@ def test_contained_npp_filter_at_all_levels_cascades():
         f"{SERVICE_URL}Parents(5)/Children(10)/Notes",
         json={"value": [{"Id": 100, "Text": "x"}]},
         match=[
-            responses.matchers.query_param_matcher(
-                {"$top": "1000", "$filter": "Id eq 100", "$orderby": "Id asc"}
-            )
+            responses.matchers.query_param_matcher({"$filter": "Id eq 100", "$orderby": "Id asc"})
         ],
     )
     c = _make()
@@ -3937,7 +3982,6 @@ def test_contained_npp_filter_at_index_form_equivalent():
         match=[
             responses.matchers.query_param_matcher(
                 {
-                    "$top": "1000",
                     "$select": "Id",
                     "$filter": "Id eq 5",
                     "$orderby": "Id asc",
@@ -3990,8 +4034,8 @@ def test_contained_expand_user_filter_lands_in_leaf_expand_not_top():
     # filter_at_Parents lands at the top URL; user `filter` lands
     # inside $expand=Children(...).
     # Dynamic tops for N=2 page_size=1000: [100, 10].
-    assert "Parents?$top=100&$filter=Id eq 1" in url
-    assert "$expand=Children($top=10;$filter=Id eq 3" in url
+    assert "Parents?$filter=Id eq 1" in url
+    assert "$expand=Children($filter=Id eq 3" in url
     # User filter must NOT be at the top URL.
     assert "(Id eq 1) and (Id eq 3)" not in url
     assert "(Id eq 3) and (Id eq 1)" not in url
@@ -4071,7 +4115,7 @@ def test_contained_expand_filter_at_middle_lands_inside_expand():
     from urllib.parse import unquote
 
     # Dynamic tops for N=3 page_size=1000: [34, 5, 5]. Middle level = 5.
-    assert "Children($top=5;$filter=Id eq 10" in unquote(captured[0])
+    assert "Children($filter=Id eq 10" in unquote(captured[0])
 
 
 @responses.activate
@@ -4109,7 +4153,7 @@ def test_contained_expand_filter_at_leaf_lands_in_innermost_expand():
     from urllib.parse import unquote
 
     # Dynamic tops for N=3 page_size=1000: [34, 5, 5]. Leaf level = 5.
-    assert "Notes($top=5;$filter=Id eq 100" in unquote(captured[0])
+    assert "Notes($filter=Id eq 100" in unquote(captured[0])
 
 
 # --- Composition ---
@@ -4130,6 +4174,7 @@ def test_contained_npp_filter_at_composes_with_cursor_at_same_level():
         match=[
             responses.matchers.query_param_matcher(
                 {
+                    # Cursor-based read → default page_size, so $top is sent.
                     "$top": "1000",
                     "$filter": "(ModifiedAt gt 2024-01-01T00:00:00Z) and (Label eq 'a')",
                     "$orderby": "ModifiedAt asc,Id asc",
@@ -4163,7 +4208,6 @@ def test_contained_npp_filter_at_leaf_composes_with_user_filter():
         match=[
             responses.matchers.query_param_matcher(
                 {
-                    "$top": "1000",
                     "$filter": "(Id lt 100) and (Label eq 'a')",
                     "$orderby": "Id asc",
                 }
@@ -4194,7 +4238,6 @@ def test_flat_filter_at_segment_applies_to_flat_table_read():
         match=[
             responses.matchers.query_param_matcher(
                 {
-                    "$top": "1000",
                     "$filter": "CustomerID eq 'ALFKI'",
                     "$orderby": "Id asc",
                 }
@@ -5292,7 +5335,6 @@ def test_partition_get_partitions_applies_filter_at_top():
         match=[
             responses.matchers.query_param_matcher(
                 {
-                    "$top": "1000",
                     "$select": "Id",
                     "$filter": "Id eq 5",
                     "$orderby": "Id asc",
@@ -5319,7 +5361,7 @@ def test_partition_read_partition_applies_filter_at_leaf():
         json={"value": [{"Id": 11, "Label": "a", "ModifiedAt": "2024-01-01T00:00:00Z"}]},
         match=[
             responses.matchers.query_param_matcher(
-                {"$top": "1000", "$filter": "Label eq 'a'", "$orderby": "Id asc"}
+                {"$filter": "Label eq 'a'", "$orderby": "Id asc"}
             )
         ],
     )

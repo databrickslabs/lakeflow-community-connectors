@@ -671,6 +671,14 @@ def register_lakeflow_source(spark):
     # ``@odata.nextLink`` chase at every level.
     MIN_DYNAMIC_TOP = 5
 
+    # Default ``page_size`` applied to **cursor-based** reads (cursor_field
+    # or delta) when the user didn't set one, so a ``$top`` is still sent.
+    # Snapshot reads deliberately omit ``$top`` entirely when ``page_size``
+    # is unset (see ``_format_query_params``) — letting the server choose
+    # its page size avoids servers that reject an explicit ``$top``. Cursor
+    # reads keep a bounded page for predictable incremental batches.
+    DEFAULT_PAGE_SIZE = "1000"
+
 
     _TOP_PARAM_RE = re.compile(r"(?<=[?&])(\$top=|%24top=)\d+", re.IGNORECASE)
 
@@ -1121,8 +1129,16 @@ def register_lakeflow_source(spark):
             # would land at Instances (wrong segment) and 400 the server.
             opts = table_options or {}
             top_opts = {k: v for k, v in opts.items() if k != "filter"} if children else opts
-            per_level_tops = compute_dynamic_tops(int(opts.get("page_size", "1000")), len(segments))
-            if children:
+            # ``$top`` is emitted across the expand levels only when the user
+            # set ``page_size``; with none, no ``$top`` is sent at any level
+            # and the server picks its own page size (see
+            # ``_format_query_params``). ``per_level_tops`` is ``None`` then.
+            per_level_tops = (
+                compute_dynamic_tops(int(opts["page_size"]), len(segments))
+                if opts.get("page_size")
+                else None
+            )
+            if children and per_level_tops is not None:
                 # Override page_size in the opts dict ``_format_query_params``
                 # reads from, so the top-URL ``$top`` reflects the dynamic
                 # allocation instead of the unscaled budget.
@@ -1145,7 +1161,9 @@ def register_lakeflow_source(spark):
                 is_leaf = i == len(children) - 1
                 # ``per_level_tops`` is indexed by segment (0 = top,
                 # 1 = first child, …). ``children[i]`` is segment i+1.
-                parts: list[str] = [f"$top={per_level_tops[i + 1]}"]
+                parts: list[str] = []
+                if per_level_tops is not None:
+                    parts.append(f"$top={per_level_tops[i + 1]}")
                 level_filter = combine_filters(
                     cursor_filter if cursor_level == i + 1 else None,
                     segment_filters.get(i + 1),
@@ -1160,7 +1178,9 @@ def register_lakeflow_source(spark):
                     parts.append(f"$orderby={level_order}")
                 if inner:
                     parts.append(f"$expand={inner}")
-                inner = f"{children[i]}({';'.join(parts)})"
+                # No options at all (no $top/filter/select/orderby/expand) ⇒
+                # emit the bare nav-property name; ``Leaf()`` is not valid.
+                inner = f"{children[i]}({';'.join(parts)})" if parts else children[i]
             return f"{base}?{query}&$expand={inner}"
 
         # --- read paths --------------------------------------------------------
@@ -1315,10 +1335,12 @@ def register_lakeflow_source(spark):
                         terms = [f"{cursor_field} asc"]
                         terms.extend(f"{pk} asc" for pk in ancestor_pks if pk != cursor_field)
                         order_by = ",".join(terms)
-                    opts = {
-                        "page_size": (table_options or {}).get("page_size", "1000"),
-                        "select": ",".join(select_cols),
-                    }
+                    opts = {"select": ",".join(select_cols)}
+                    # Propagate the user's ``page_size`` only when set; with no
+                    # ``page_size`` no ``$top`` is sent (see
+                    # ``_format_query_params``).
+                    if (table_options or {}).get("page_size"):
+                        opts["page_size"] = table_options["page_size"]
                     if segment_filters.get(level):
                         opts["filter"] = segment_filters[level]
                     url = (
@@ -1374,10 +1396,12 @@ def register_lakeflow_source(spark):
                 if level == 0 and top_parent_rows is not None:
                     row_source = iter(top_parent_rows)
                 else:
-                    opts = {
-                        "page_size": (table_options or {}).get("page_size", "1000"),
-                        "select": ",".join(ancestor_pks),
-                    }
+                    opts = {"select": ",".join(ancestor_pks)}
+                    # Propagate the user's ``page_size`` only when set; with no
+                    # ``page_size`` no ``$top`` is sent (see
+                    # ``_format_query_params``).
+                    if (table_options or {}).get("page_size"):
+                        opts["page_size"] = table_options["page_size"]
                     if segment_filters.get(level):
                         opts["filter"] = segment_filters[level]
                     # PK-only ``$orderby`` so server skiptoken pagination
@@ -1517,9 +1541,12 @@ def register_lakeflow_source(spark):
             # Per-level $top values from the initial dynamic distribution.
             # Passed into the flatten recursion so inner-collection nextLink
             # follows can rewrite their $top to a larger value without
-            # blowing the page_size budget.
-            per_level_tops = compute_dynamic_tops(
-                int((table_options or {}).get("page_size", "1000")), len(segments)
+            # blowing the page_size budget. ``None`` when ``page_size`` is
+            # unset — no ``$top`` is sent, so there's no budget to rebalance
+            # and the nextLink $top rewrite is skipped.
+            page_size_opt = (table_options or {}).get("page_size")
+            per_level_tops = (
+                compute_dynamic_tops(int(page_size_opt), len(segments)) if page_size_opt else None
             )
             if start_offset is None:
                 # Batch reader: offset discarded, ``since`` is None (no cursor
@@ -2682,6 +2709,10 @@ def register_lakeflow_source(spark):
             segments = parse_contained_path(table_name) or [table_name]
             namespace = opts.get("namespace")
             cursor_field = opts.get("cursor_field")
+            if cursor_field:
+                # Cursor-based read: default page_size so a $top is sent.
+                # Snapshot partitioning leaves it unset → no $top.
+                opts = {**opts, "page_size": opts.get("page_size", DEFAULT_PAGE_SIZE)}
             # ``cursor_lower`` is "what we've already read up to" — used
             # by read_partition as ``cursor gt cursor_lower``. ``end`` is
             # the previously-probed fence; we stamp it onto each row's
@@ -2718,6 +2749,10 @@ def register_lakeflow_source(spark):
                 return records
             segments = parse_contained_path(table_name) or [table_name]
             cursor_field = opts.get("cursor_field")
+            if cursor_field:
+                # Cursor-based read: default page_size so a $top is sent.
+                # Snapshot partitioning leaves it unset → no $top.
+                opts = {**opts, "page_size": opts.get("page_size", DEFAULT_PAGE_SIZE)}
             top_parent_rows = partition["top_parent_rows"]
             cursor_lower = partition.get("cursor_lower")
             return self._iter_partition_rows(
@@ -2800,10 +2835,11 @@ def register_lakeflow_source(spark):
             # excluded by the top filter.
             segment_filters = resolve_segment_filters(table_options, segments)
             extra_filter = combine_filters(cursor_extra, segment_filters.get(0))
-            opts = {
-                "page_size": table_options.get("page_size", "1000"),
-                "select": ",".join(select_cols),
-            }
+            opts = {"select": ",".join(select_cols)}
+            # Propagate the user's ``page_size`` only when set; with no
+            # ``page_size`` no ``$top`` is sent (see ``_format_query_params``).
+            if table_options.get("page_size"):
+                opts["page_size"] = table_options["page_size"]
             url = self._build_url(top_set, opts, extra_filter=extra_filter, order_by=order_by)
             return list(self._fetch_pages(url))
 
@@ -3418,8 +3454,15 @@ def register_lakeflow_source(spark):
                         "or ingest the parent set directly."
                     )
                 if self._expand_contained_active(opts):
+                    # Cursor-based expand keeps a default $top (page_size);
+                    # snapshot expand omits $top when page_size is unset.
+                    if opts.get("cursor_field"):
+                        opts.setdefault("page_size", _DEFAULT_PAGE_SIZE)
                     return self._read_contained_expand(table_name, start_offset, opts)
                 if opts.get("cursor_field"):
+                    # Cursor-based read: default page_size so a $top is sent.
+                    # Snapshot (the branch below) leaves it unset → no $top.
+                    opts.setdefault("page_size", _DEFAULT_PAGE_SIZE)
                     return self._read_contained_incremental(
                         table_name, start_offset, opts, opts["cursor_field"]
                     )
@@ -3432,8 +3475,13 @@ def register_lakeflow_source(spark):
                 or "next_link" in offset
                 or self._delta_active_for(table_name, opts)
             ):
+                # Delta (CDC) is cursor-based — keep a default $top.
+                opts.setdefault("page_size", _DEFAULT_PAGE_SIZE)
                 return self._read_incremental_delta(table_name, offset, opts)
             if opts.get("cursor_field"):
+                # Cursor-based read: default page_size so a $top is sent.
+                # Snapshot (the branch below) leaves it unset → no $top.
+                opts.setdefault("page_size", _DEFAULT_PAGE_SIZE)
                 return self._read_incremental(table_name, start_offset, opts, opts["cursor_field"])
             return self._read_snapshot(table_name, opts)
 
@@ -4069,9 +4117,19 @@ def register_lakeflow_source(spark):
             extra_filter: str | None = None,
             order_by: str | None = None,
         ) -> str:
-            """Compose $top/$select/$filter/$orderby; shared across all URL builders."""
+            """Compose $top/$select/$filter/$orderby; shared across all URL builders.
+
+            ``$top`` is emitted only when ``page_size`` is set. With no
+            ``page_size`` the connector sends no ``$top`` at all and lets the
+            server pick its own page size — some services reject or mishandle
+            an explicit ``$top`` (e.g. a value above their per-page cap), and
+            omitting it is the safe default. Server-driven paging via
+            ``@odata.nextLink`` still walks the full collection either way.
+            """
             opts = table_options or {}
-            params = [f"$top={opts.get('page_size', '1000')}"]
+            params = []
+            if opts.get("page_size"):
+                params.append(f"$top={opts['page_size']}")
             if opts.get("select"):
                 params.append(f"$select={opts['select']}")
             filters = [f for f in (opts.get("filter"), extra_filter) if f]
@@ -5333,6 +5391,7 @@ def register_lakeflow_source(spark):
     _trim_to_distinct_cursor_boundary = trim_to_distinct_cursor_boundary
     _trim_to_distinct_cursor_boundary = trim_to_distinct_cursor_boundary
     _CONTAINED_PATH_SEP = CONTAINED_PATH_SEP
+    _DEFAULT_PAGE_SIZE = DEFAULT_PAGE_SIZE
     _combine_filters = combine_filters
     _join_url = join_url
     _odata_literal = odata_literal

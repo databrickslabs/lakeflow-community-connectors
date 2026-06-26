@@ -46,6 +46,7 @@ from databricks.labs.community_connector.interface.supports_partition import (
     SupportsPartitionedStream,
 )
 from databricks.labs.community_connector.sources.odata._contained import (
+    DEFAULT_PAGE_SIZE,
     _ancestor_pk_order_by,
     combine_filters,
     parse_contained_path,
@@ -171,6 +172,10 @@ class PartitionMixin(SupportsPartitionedStream):
         segments = parse_contained_path(table_name) or [table_name]
         namespace = opts.get("namespace")
         cursor_field = opts.get("cursor_field")
+        if cursor_field:
+            # Cursor-based read: default page_size so a $top is sent.
+            # Snapshot partitioning leaves it unset → no $top.
+            opts = {**opts, "page_size": opts.get("page_size", DEFAULT_PAGE_SIZE)}
         # ``cursor_lower`` is "what we've already read up to" — used
         # by read_partition as ``cursor gt cursor_lower``. ``end`` is
         # the previously-probed fence; we stamp it onto each row's
@@ -207,6 +212,10 @@ class PartitionMixin(SupportsPartitionedStream):
             return records
         segments = parse_contained_path(table_name) or [table_name]
         cursor_field = opts.get("cursor_field")
+        if cursor_field:
+            # Cursor-based read: default page_size so a $top is sent.
+            # Snapshot partitioning leaves it unset → no $top.
+            opts = {**opts, "page_size": opts.get("page_size", DEFAULT_PAGE_SIZE)}
         top_parent_rows = partition["top_parent_rows"]
         cursor_lower = partition.get("cursor_lower")
         return self._iter_partition_rows(
@@ -289,10 +298,11 @@ class PartitionMixin(SupportsPartitionedStream):
         # excluded by the top filter.
         segment_filters = resolve_segment_filters(table_options, segments)
         extra_filter = combine_filters(cursor_extra, segment_filters.get(0))
-        opts = {
-            "page_size": table_options.get("page_size", "1000"),
-            "select": ",".join(select_cols),
-        }
+        opts = {"select": ",".join(select_cols)}
+        # Propagate the user's ``page_size`` only when set; with no
+        # ``page_size`` no ``$top`` is sent (see ``_format_query_params``).
+        if table_options.get("page_size"):
+            opts["page_size"] = table_options["page_size"]
         url = self._build_url(top_set, opts, extra_filter=extra_filter, order_by=order_by)
         return list(self._fetch_pages(url))
 
