@@ -289,10 +289,11 @@ class PartitionMixin(SupportsPartitionedStream):
         # excluded by the top filter.
         segment_filters = resolve_segment_filters(table_options, segments)
         extra_filter = combine_filters(cursor_extra, segment_filters.get(0))
-        opts = {
-            "page_size": table_options.get("page_size", "1000"),
-            "select": ",".join(select_cols),
-        }
+        opts = {"select": ",".join(select_cols)}
+        # Propagate the user's ``page_size`` only when set; with no
+        # ``page_size`` no ``$top`` is sent (see ``_format_query_params``).
+        if table_options.get("page_size"):
+            opts["page_size"] = table_options["page_size"]
         url = self._build_url(top_set, opts, extra_filter=extra_filter, order_by=order_by)
         return list(self._fetch_pages(url))
 

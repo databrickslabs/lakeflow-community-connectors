@@ -18,7 +18,7 @@ Per-table options (allowlisted via externalOptionsAllowList):
     cursor_field          column to drive incremental reads; absent → snapshot
     select                comma-separated $select projection
     filter                additional $filter expression
-    page_size             $top per request (default 1000)
+    page_size             $top per request; unset → no $top sent (server default)
     max_records_per_batch cap rows returned per read_table call (default 10000)
     delta_tracking        disabled (default) | auto | enabled. Opt-in.
                           When the source honours ``Prefer: odata.track-changes``
@@ -1246,9 +1246,19 @@ class ODataLakeflowConnect(
         extra_filter: str | None = None,
         order_by: str | None = None,
     ) -> str:
-        """Compose $top/$select/$filter/$orderby; shared across all URL builders."""
+        """Compose $top/$select/$filter/$orderby; shared across all URL builders.
+
+        ``$top`` is emitted only when ``page_size`` is set. With no
+        ``page_size`` the connector sends no ``$top`` at all and lets the
+        server pick its own page size — some services reject or mishandle
+        an explicit ``$top`` (e.g. a value above their per-page cap), and
+        omitting it is the safe default. Server-driven paging via
+        ``@odata.nextLink`` still walks the full collection either way.
+        """
         opts = table_options or {}
-        params = [f"$top={opts.get('page_size', '1000')}"]
+        params = []
+        if opts.get("page_size"):
+            params.append(f"$top={opts['page_size']}")
         if opts.get("select"):
             params.append(f"$select={opts['select']}")
         filters = [f for f in (opts.get("filter"), extra_filter) if f]
