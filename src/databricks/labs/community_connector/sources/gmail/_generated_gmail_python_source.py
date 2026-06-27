@@ -941,35 +941,56 @@ def register_lakeflow_source(spark):
 
 
     class GmailApiClient:
-        """Handles Gmail API communication: auth, requests, batch, and parallel fetching."""
+        """Gmail HTTP client supporting two OAuth modes.
+
+        Pass a pre-issued ``access_token`` (UC COMMUNITY u2m / u2m_per_user flow
+        injects it) for the opaque-token mode, or pass ``client_id`` +
+        ``client_secret`` + ``refresh_token`` for the in-code refresh mode used
+        by connections created before the u2m migration. The access-token mode
+        takes precedence when both are present.
+        """
 
         BASE_URL = "https://gmail.googleapis.com/gmail/v1"
         BATCH_URL = "https://gmail.googleapis.com/batch/gmail/v1"
+        TOKEN_URL = "https://oauth2.googleapis.com/token"
 
         def __init__(
             self,
-            client_id: str,
-            client_secret: str,
-            refresh_token: str,
+            access_token: Optional[str] = None,
             user_id: str = "me",
+            *,
+            client_id: Optional[str] = None,
+            client_secret: Optional[str] = None,
+            refresh_token: Optional[str] = None,
         ) -> None:
+            self.user_id = user_id
+            self._session = requests.Session()
+
+            # Mode 1: opaque pre-issued bearer token (no refresh in code).
+            self.access_token = access_token
+
+            # Mode 2: in-code refresh credentials + cached short-lived token.
             self.client_id = client_id
             self.client_secret = client_secret
             self.refresh_token = refresh_token
-            self.user_id = user_id
-
-            self._access_token = None
-            self._token_expires_at = 0
-            self._session = requests.Session()
+            self._refreshed_token: Optional[str] = None
+            self._token_expires_at = 0.0
 
         def get_access_token(self) -> str:
-            """Exchange refresh token for access token with caching."""
-            # Return cached token if still valid (with 60s buffer)
-            if self._access_token and time.time() < self._token_expires_at - 60:
-                return self._access_token
+            """Return a valid bearer token for the active auth mode.
+
+            Opaque-token mode returns the injected token verbatim. Refresh mode
+            exchanges the refresh token at Google's token endpoint, caching the
+            result until ~60s before expiry.
+            """
+            if self.access_token:
+                return self.access_token
+
+            if self._refreshed_token and time.time() < self._token_expires_at - 60:
+                return self._refreshed_token
 
             response = requests.post(
-                "https://oauth2.googleapis.com/token",
+                self.TOKEN_URL,
                 data={
                     "client_id": self.client_id,
                     "client_secret": self.client_secret,
@@ -981,13 +1002,12 @@ def register_lakeflow_source(spark):
             response.raise_for_status()
             data = response.json()
 
-            self._access_token = data["access_token"]
+            self._refreshed_token = data["access_token"]
             self._token_expires_at = time.time() + data.get("expires_in", 3600)
-
-            return self._access_token
+            return self._refreshed_token
 
         def get_headers(self) -> Dict[str, str]:
-            """Get headers with valid access token."""
+            """Bearer-token headers for Gmail API calls."""
             return {
                 "Authorization": f"Bearer {self.get_access_token()}",
                 "Accept": "application/json",
@@ -1139,29 +1159,55 @@ def register_lakeflow_source(spark):
 
         def __init__(self, options: dict[str, str]) -> None:
             """
-            Initialize the Gmail connector with OAuth 2.0 credentials.
+            Initialize the Gmail connector. Two auth modes are supported,
+            selected by the credentials present in ``options``:
+
+            1. Pre-issued access token (preferred). The Unity Catalog COMMUNITY
+               connection (``community_oauth_flow=u2m`` or ``u2m_per_user``) owns
+               the OAuth dance — Databricks performs the authorization-code
+               exchange (and per-user refresh in u2m_per_user mode) and injects a
+               valid bearer token at query time. The connector treats it as
+               opaque: no client_id/secret, no refresh, no token endpoint. A 401
+               mid-query means the token expired or was revoked; the user
+               re-authorizes through the connection.
+            2. In-code refresh (backward-compat). Connections created before the
+               u2m migration store ``client_id`` + ``client_secret`` +
+               ``refresh_token``; the connector exchanges them for short-lived
+               access tokens at Google's token endpoint itself.
 
             Expected options:
-                - client_id: OAuth 2.0 client ID from Google Cloud Console
-                - client_secret: OAuth 2.0 client secret
-                - refresh_token: Long-lived refresh token obtained via OAuth flow
-                - user_id (optional): User email or 'me' (default: 'me')
+                - access_token: OAuth 2.0 bearer token (mode 1), OR
+                - refresh_token + client_id + client_secret (mode 2)
+                - user_id (optional): user email or 'me' (default: 'me')
             """
+            self.access_token = options.get("access_token")
+            self.refresh_token = options.get("refresh_token")
             self.client_id = options.get("client_id")
             self.client_secret = options.get("client_secret")
-            self.refresh_token = options.get("refresh_token")
             self.user_id = options.get("user_id", "me")
 
-            if not self.client_id:
-                raise ValueError("Gmail connector requires 'client_id' in options")
-            if not self.client_secret:
-                raise ValueError("Gmail connector requires 'client_secret' in options")
-            if not self.refresh_token:
-                raise ValueError("Gmail connector requires 'refresh_token' in options")
-
-            self.api = GmailApiClient(
-                self.client_id, self.client_secret, self.refresh_token, self.user_id
-            )
+            if self.access_token:
+                self.api = GmailApiClient(self.access_token, self.user_id)
+            elif self.refresh_token:
+                if not self.client_id or not self.client_secret:
+                    raise ValueError(
+                        "Gmail refresh-token auth requires 'client_id' and "
+                        "'client_secret' alongside 'refresh_token' in options."
+                    )
+                self.api = GmailApiClient(
+                    user_id=self.user_id,
+                    client_id=self.client_id,
+                    client_secret=self.client_secret,
+                    refresh_token=self.refresh_token,
+                )
+            else:
+                raise ValueError(
+                    "Gmail connector requires an OAuth credential in options: "
+                    "either 'access_token' (the Unity Catalog COMMUNITY "
+                    "connection's u2m / u2m_per_user OAuth flow injects it at "
+                    "query time) or 'refresh_token' plus 'client_id' and "
+                    "'client_secret' (in-code refresh for older connections)."
+                )
 
             # Snapshot the mailbox historyId at init time. Gmail's mailbox
             # historyId advances on every write (new mail, reads, label edits),
@@ -2054,8 +2100,33 @@ def register_lakeflow_source(spark):
 
     class LakeflowSource(DataSource):
         """
-        PySpark DataSource implementation for Lakeflow Connect.
+        PySpark DataSource base for Lakeflow Connect.
+
+        Two ways the connector implementation is bound:
+
+        - Per-source subclass (wheel / multi-file deployment): subclass and set
+          ``_lakeflow_connect_cls``::
+
+              class GmailDataSource(LakeflowSource):
+                  _lakeflow_connect_cls = GmailLakeflowConnect
+
+              spark.dataSource.register(GmailDataSource)
+
+        - Merged single-file deployment (SDP): ``_lakeflow_connect_cls`` is left
+          ``None`` and the connector is taken from the module-level
+          ``LakeflowConnectImpl`` placeholder, which the merge script substitutes
+          with the actual implementation class.
         """
+
+        # Per-source subclasses set this. Left ``None`` on the base so the merged
+        # single-file path falls back to the ``LakeflowConnectImpl`` placeholder.
+        _lakeflow_connect_cls = None
+
+        # Spark format name. Defaults to "lakeflow_connect" because Unity Catalog
+        # connection-option injection looks for that exact string. A per-source
+        # subclass may override this with its source name once it no longer relies
+        # on UC injection (see the commented override in each source's __init__.py).
+        _format_name = "lakeflow_connect"
 
         def __init__(self, options):
             self.options = options
@@ -2070,13 +2141,15 @@ def register_lakeflow_source(spark):
                     f"For a regular source table, use a name that does not start "
                     f"with '_community_'."
                 )
-            # TEMPORARY: LakeflowConnectImpl is replaced with the actual implementation
-            # class during merge. See the placeholder comment at the top of this file.
-            self.lakeflow_connect = LakeflowConnectImpl(options)  # pylint: disable=abstract-class-instantiated
+            # Per-source subclasses bind the implementation via _lakeflow_connect_cls.
+            # The merged single-file path leaves it None and relies on the
+            # LakeflowConnectImpl placeholder (substituted by the merge script).
+            connect_cls = type(self)._lakeflow_connect_cls or LakeflowConnectImpl
+            self.lakeflow_connect = connect_cls(options)  # pylint: disable=abstract-class-instantiated
 
         @classmethod
         def name(cls):
-            return "lakeflow_connect"
+            return cls._format_name
 
         def schema(self):
             table = self.options[TABLE_NAME]

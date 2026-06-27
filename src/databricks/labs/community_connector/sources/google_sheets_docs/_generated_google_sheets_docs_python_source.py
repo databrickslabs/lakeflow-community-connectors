@@ -1495,8 +1495,33 @@ def register_lakeflow_source(spark):
 
     class LakeflowSource(DataSource):
         """
-        PySpark DataSource implementation for Lakeflow Connect.
+        PySpark DataSource base for Lakeflow Connect.
+
+        Two ways the connector implementation is bound:
+
+        - Per-source subclass (wheel / multi-file deployment): subclass and set
+          ``_lakeflow_connect_cls``::
+
+              class GmailDataSource(LakeflowSource):
+                  _lakeflow_connect_cls = GmailLakeflowConnect
+
+              spark.dataSource.register(GmailDataSource)
+
+        - Merged single-file deployment (SDP): ``_lakeflow_connect_cls`` is left
+          ``None`` and the connector is taken from the module-level
+          ``LakeflowConnectImpl`` placeholder, which the merge script substitutes
+          with the actual implementation class.
         """
+
+        # Per-source subclasses set this. Left ``None`` on the base so the merged
+        # single-file path falls back to the ``LakeflowConnectImpl`` placeholder.
+        _lakeflow_connect_cls = None
+
+        # Spark format name. Defaults to "lakeflow_connect" because Unity Catalog
+        # connection-option injection looks for that exact string. A per-source
+        # subclass may override this with its source name once it no longer relies
+        # on UC injection (see the commented override in each source's __init__.py).
+        _format_name = "lakeflow_connect"
 
         def __init__(self, options):
             self.options = options
@@ -1511,13 +1536,15 @@ def register_lakeflow_source(spark):
                     f"For a regular source table, use a name that does not start "
                     f"with '_community_'."
                 )
-            # TEMPORARY: LakeflowConnectImpl is replaced with the actual implementation
-            # class during merge. See the placeholder comment at the top of this file.
-            self.lakeflow_connect = LakeflowConnectImpl(options)  # pylint: disable=abstract-class-instantiated
+            # Per-source subclasses bind the implementation via _lakeflow_connect_cls.
+            # The merged single-file path leaves it None and relies on the
+            # LakeflowConnectImpl placeholder (substituted by the merge script).
+            connect_cls = type(self)._lakeflow_connect_cls or LakeflowConnectImpl
+            self.lakeflow_connect = connect_cls(options)  # pylint: disable=abstract-class-instantiated
 
         @classmethod
         def name(cls):
-            return "lakeflow_connect"
+            return cls._format_name
 
         def schema(self):
             table = self.options[TABLE_NAME]
