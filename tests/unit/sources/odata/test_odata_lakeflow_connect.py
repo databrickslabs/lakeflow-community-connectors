@@ -2994,6 +2994,127 @@ def test_pagination_no_progress_guard_stops_ignored_skip():
 
 
 @responses.activate
+def test_pagination_nextlink_guard_stops_self_referential_link():
+    """pagination=nextlink: a server that points @odata.nextLink back at the
+    just-fetched URL would loop forever; the guard stops after emitting the
+    current page."""
+    _mock_metadata()
+    calls = []
+
+    def cb(req):
+        calls.append(req.url)
+        n = len(calls)
+        return (
+            200,
+            {},
+            json.dumps(
+                {
+                    "value": [{"Id": n, "Name": "x"}],
+                    "@odata.nextLink": f"{SERVICE_URL}Customers?$skiptoken=x",
+                }
+            ),
+        )
+
+    responses.add_callback(responses.GET, f"{SERVICE_URL}Customers", callback=cb)
+    c = _make()
+    records, _ = c.read_table("Customers", None, {"pagination": "nextlink"})
+    rows = list(records)
+    assert [r["Id"] for r in rows] == [1, 2]  # page 1, then the self-referential page 2
+    assert len(calls) == 2
+
+
+@responses.activate
+def test_pagination_nextlink_guard_stops_identical_page_cycle():
+    """pagination=nextlink: a server that returns the same rows but a fresh
+    nextLink token each time (URL keeps changing) is caught by the page
+    fingerprint guard — the duplicate page is dropped, not re-emitted."""
+    _mock_metadata()
+    calls = []
+
+    def cb(req):
+        calls.append(req.url)
+        n = len(calls)
+        return (
+            200,
+            {},
+            json.dumps(
+                {
+                    "value": [{"Id": 1, "Name": "x"}],
+                    "@odata.nextLink": f"{SERVICE_URL}Customers?$skiptoken=t{n}",
+                }
+            ),
+        )
+
+    responses.add_callback(responses.GET, f"{SERVICE_URL}Customers", callback=cb)
+    c = _make()
+    records, _ = c.read_table("Customers", None, {"pagination": "nextlink"})
+    rows = list(records)
+    assert [r["Id"] for r in rows] == [1]
+    assert len(calls) == 2
+
+
+@responses.activate
+def test_pagination_auto_guard_stops_self_referential_link():
+    """pagination=auto: while following the server's @odata.nextLink, a
+    self-referential link is caught by the URL-equality backstop."""
+    _mock_metadata()
+    calls = []
+
+    def cb(req):
+        calls.append(req.url)
+        n = len(calls)
+        return (
+            200,
+            {},
+            json.dumps(
+                {
+                    "value": [{"Id": n, "Name": "x"}],
+                    "@odata.nextLink": f"{SERVICE_URL}Customers?$skiptoken=x",
+                }
+            ),
+        )
+
+    responses.add_callback(responses.GET, f"{SERVICE_URL}Customers", callback=cb)
+    c = _make()
+    records, _ = c.read_table("Customers", None, {"pagination": "auto"})
+    rows = list(records)
+    assert [r["Id"] for r in rows] == [1, 2]
+    assert len(calls) == 2
+
+
+@responses.activate
+def test_delta_walk_guard_stops_self_referential_link():
+    """The delta walk guards against a self-referential @odata.nextLink: the
+    server points the continuation back at the same URL. The walk stops after
+    emitting the page and resumes next run from the prior delta_link."""
+    _mock_metadata()
+    calls = []
+
+    def cb(req):
+        calls.append(req.url)
+        return (
+            200,
+            {},
+            json.dumps(
+                {
+                    "value": [{"Id": 10, "Name": "x", "ModifiedAt": "t"}],
+                    "@odata.nextLink": DELTA_LINK_V1,
+                }
+            ),
+        )
+
+    responses.add_callback(responses.GET, DELTA_LINK_V1, callback=cb)
+    c = _make()
+    records, offset = c.read_table(
+        "Customers", {"delta_link": DELTA_LINK_V1}, {"delta_tracking": "enabled"}
+    )
+    rows = list(records)
+    assert [r["Id"] for r in rows] == [10]
+    assert len(calls) == 1  # self-loop detected before re-fetching
+    assert offset == {"delta_link": DELTA_LINK_V1}
+
+
+@responses.activate
 def test_build_contained_url_three_level():
     _mock_nested_metadata()
     c = _make()

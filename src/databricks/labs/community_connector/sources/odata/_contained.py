@@ -281,6 +281,16 @@ def _pg_with_extra_filter(url: str, clause: str) -> str:
     return _pg_set_query(url, "$filter", combined)
 
 
+def _pg_page_fingerprint(page_rows: list[dict]) -> int:
+    """Order-sensitive fingerprint of a page's rows for the no-progress
+    guard. ``hash(repr(...))`` is process-stable — only ever compared within
+    a single walk — and costs one page's worth of work. Two consecutive
+    non-empty pages with the same fingerprint mean the server returned the
+    same data twice (it ignored our seek/``$skip`` or handed back a cyclic
+    ``@odata.nextLink``), so the walk has stalled."""
+    return hash(repr(page_rows))
+
+
 # Re-export of the EDM namespace prefix used by the main module.
 _NS_EDM = "{http://docs.oasis-open.org/odata/ns/edm}"
 

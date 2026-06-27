@@ -900,6 +900,16 @@ def register_lakeflow_source(spark):
         return _pg_set_query(url, "$filter", combined)
 
 
+    def _pg_page_fingerprint(page_rows: list[dict]) -> int:
+        """Order-sensitive fingerprint of a page's rows for the no-progress
+        guard. ``hash(repr(...))`` is process-stable — only ever compared within
+        a single walk — and costs one page's worth of work. Two consecutive
+        non-empty pages with the same fingerprint mean the server returned the
+        same data twice (it ignored our seek/``$skip`` or handed back a cyclic
+        ``@odata.nextLink``), so the walk has stalled."""
+        return hash(repr(page_rows))
+
+
     # Re-export of the EDM namespace prefix used by the main module.
     _NS_EDM = "{http://docs.oasis-open.org/odata/ns/edm}"
 
@@ -4167,6 +4177,7 @@ def register_lakeflow_source(spark):
                     sparse_checked=sparse_checked,
                     max_records=max_records,
                 )
+                fetched_url = resp.url
                 current_url, new_delta_link, carry_next_link = self._delta_advance_links(
                     payload=payload,
                     resp_url=resp.url,
@@ -4175,6 +4186,17 @@ def register_lakeflow_source(spark):
                     new_delta_link=new_delta_link,
                     carry_next_link=carry_next_link,
                 )
+                if current_url is not None and current_url == fetched_url:
+                    # Self-referential ``@odata.nextLink`` — the server handed back
+                    # the URL we just fetched. Stop rather than loop forever; the
+                    # caller persists ``new_delta_link`` (or falls back to the prior
+                    # one) so the next run still resumes.
+                    _LOG.warning(
+                        "delta walk: server returned a self-referential "
+                        "@odata.nextLink for %r; stopping to avoid an infinite loop.",
+                        fetched_url,
+                    )
+                    break
                 page_index += 1
 
             return records, new_delta_link, carry_next_link, False
@@ -4499,14 +4521,38 @@ def register_lakeflow_source(spark):
                 return
             session = self._get_session()
             next_url: str | None = url
+            # No-progress guard: a server that hands back a self-referential or
+            # cyclic ``@odata.nextLink`` would loop forever. Stop if the resolved
+            # link points back at the URL we just fetched, or if a non-empty page
+            # repeats the one before it.
+            prev_fp: int | None = None
             while next_url:
                 resp, payload = self._fetch_page_payload(session, next_url)
                 page_rows = [
                     {k: v for k, v in item.items() if not k.startswith("@odata.")}
                     for item in payload.get("value", [])
                 ]
+                fp = _pg_page_fingerprint(page_rows)
+                if page_rows and prev_fp is not None and fp == prev_fp:
+                    _LOG.warning(
+                        "pagination=nextlink made no progress on %r: the server "
+                        "returned an identical page (cyclic @odata.nextLink). "
+                        "Stopping to avoid an infinite loop; some rows may be "
+                        "unread.",
+                        next_url,
+                    )
+                    return
+                prev_fp = fp
                 raw_next = payload.get("@odata.nextLink")
                 new_next = self._resolve_next_link(resp.url, raw_next) if raw_next else None
+                if new_next is not None and new_next == next_url:
+                    _LOG.warning(
+                        "pagination=nextlink: server returned a self-referential "
+                        "@odata.nextLink for %r; stopping to avoid an infinite loop.",
+                        next_url,
+                    )
+                    yield page_rows, None
+                    return
                 yield page_rows, new_next
                 next_url = new_next
 
@@ -4548,6 +4594,11 @@ def register_lakeflow_source(spark):
             # from. If the next fetch returns an identical page, the server is
             # ignoring our seek/$skip and we'd loop forever — stop instead (without
             # re-yielding the duplicate, which was already emitted last iteration).
+            # No-progress guard, shared across all client-driven steps: a server
+            # that ignores our seek/$skip (keyset/skip) or hands back a cyclic
+            # @odata.nextLink (auto) would loop forever. Stop when a non-empty page
+            # repeats the previous one — those rows were already emitted, so the
+            # duplicate is dropped rather than re-yielded.
             prev_fp: int | None = None
             while cur_url is not None:
                 resp, payload = self._fetch_page_payload(session, cur_url)
@@ -4555,29 +4606,38 @@ def register_lakeflow_source(spark):
                     {k: v for k, v in item.items() if not k.startswith("@odata.")}
                     for item in payload.get("value", [])
                 ]
-                raw_next = payload.get("@odata.nextLink")
-                if mode == "auto" and raw_next:
-                    # Server is paginating — defer to its link for this step. Not a
-                    # client-computed continuation, so reset the no-progress guard.
-                    fetched += len(page_rows)
-                    prev_fp = None
-                    nxt = self._resolve_next_link(resp.url, raw_next)
-                    yield page_rows, nxt
-                    cur_url = nxt
-                    continue
-                fp = hash(repr(page_rows))
+                fp = _pg_page_fingerprint(page_rows)
                 if page_rows and prev_fp is not None and fp == prev_fp:
                     _LOG.warning(
-                        "pagination=%s made no progress on %r: the continuation "
-                        "returned an identical page, so the server is ignoring the "
-                        "seek/$skip. Stopping this collection to avoid an infinite "
-                        "loop; some rows may be unread. Use pagination=nextlink if "
-                        "the server emits @odata.nextLink.",
+                        "pagination=%s made no progress on %r: an identical page "
+                        "came back (server ignoring the seek/$skip, or a cyclic "
+                        "@odata.nextLink). Stopping this collection to avoid an "
+                        "infinite loop; some rows may be unread. Use "
+                        "pagination=nextlink if the server pages correctly.",
                         mode,
                         cur_url,
                     )
                     return
+                prev_fp = fp
                 fetched += len(page_rows)
+                raw_next = payload.get("@odata.nextLink")
+                if mode == "auto" and raw_next:
+                    # Server is paginating — defer to its link for this step.
+                    nxt = self._resolve_next_link(resp.url, raw_next)
+                    if nxt == cur_url:
+                        # Self-referential link (catches the empty-page case the
+                        # fingerprint guard skips). Emit this page, then stop.
+                        _LOG.warning(
+                            "pagination=auto: server returned a self-referential "
+                            "@odata.nextLink for %r; stopping to avoid an infinite "
+                            "loop.",
+                            cur_url,
+                        )
+                        yield page_rows, None
+                        return
+                    yield page_rows, nxt
+                    cur_url = nxt
+                    continue
                 if top is None or not page_rows or len(page_rows) < top:
                     # Short page (or unsized) ⇒ collection exhausted.
                     yield page_rows, None
@@ -4594,9 +4654,6 @@ def register_lakeflow_source(spark):
                         nxt = _pg_set_query(url, "$skip", str(base_skip + fetched))
                 else:
                     nxt = _pg_set_query(url, "$skip", str(base_skip + fetched))
-                # Remember this page so the next fetch can detect a server that
-                # returns it again (ignoring the continuation we just built).
-                prev_fp = fp
                 yield page_rows, nxt
                 cur_url = nxt
 
