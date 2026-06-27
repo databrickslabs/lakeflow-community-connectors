@@ -768,7 +768,7 @@ class ODataLakeflowConnect(
 
         records: list[dict] = []
         truncated = False
-        for row in self._fetch_pages(url, auto_drains_short=False):
+        for row in self._fetch_pages(url):
             if skip_null and row.get(cursor_field) is None:
                 continue
             rec_cursor = effective(row)
@@ -860,7 +860,7 @@ class ODataLakeflowConnect(
         skip_null, _effective = self._make_cursor_resolver(
             table_name, namespace, cursor_field, table_options
         )
-        for row in self._fetch_pages(url, auto_drains_short=False):
+        for row in self._fetch_pages(url):
             if skip_null and row.get(cursor_field) is None:
                 continue
             yield row
@@ -1350,25 +1350,16 @@ class ODataLakeflowConnect(
             params.append(f"$orderby={order_by}")
         return "&".join(params)
 
-    def _fetch_pages(self, url: str, auto_drains_short: bool = True) -> Iterator[dict]:
+    def _fetch_pages(self, url: str) -> Iterator[dict]:
         """Walk a collection's pages, yielding raw JSON dicts (no coercion).
 
         Thin row-flattening wrapper over :meth:`_fetch_pages_with_links`,
         which handles the pagination strategy (nextlink / keyset / skip /
-        auto). The whole collection is drained within this call.
-
-        ``auto_drains_short`` is forwarded to :meth:`_fetch_pages_with_links`
-        (see there). Snapshot reads and the contained leaf/ancestor cursor walks
-        leave it ``True`` so the default ``auto`` fully drains a server that
-        page-limits below ``$top`` without a continuation link. The *flat*
-        incremental read passes ``False`` here: its drain would emit the
-        compound ``(cursor gt v) or (cursor eq v and pk gt p)`` keyset seek,
-        which the bundled simulator can't parse, so it stays conservative and
-        relies on its cross-batch ``cursor gt`` resume (set ``pagination=keyset``
-        for a flat cursor read against a sub-``$top``-capping, link-omitting
-        server).
+        auto). The whole collection is drained within this call: under the
+        default ``auto`` a server that page-limits below ``$top`` without a
+        continuation link is still fully drained (keep seeking until empty).
         """
-        for page_rows, _ in self._fetch_pages_with_links(url, auto_drains_short):
+        for page_rows, _ in self._fetch_pages_with_links(url):
             yield from page_rows
 
     def _parse_pagination(self, table_options: dict[str, str] | None) -> str:
@@ -1392,9 +1383,7 @@ class ODataLakeflowConnect(
             )
         return raw
 
-    def _fetch_pages_with_links(
-        self, url: str, auto_drains_short: bool = True
-    ) -> Iterator[tuple[list[dict], str | None]]:
+    def _fetch_pages_with_links(self, url: str) -> Iterator[tuple[list[dict], str | None]]:
         """Page-aware fetch: yields ``(page_rows, next_url)`` per response,
         where ``next_url`` resumes the next page (``None`` at the end).
 
@@ -1410,21 +1399,14 @@ class ODataLakeflowConnect(
           ``$skip``), for servers that page-limit a response but omit the
           continuation link. See :meth:`_client_paginate_pages`.
 
-        ``auto_drains_short`` (default ``True``) governs only the ``auto`` mode
-        when the server has emitted no ``@odata.nextLink``: when ``True`` (the
-        full-drain callers — :meth:`_fetch_pages` and the like, which iterate
-        this generator to exhaustion with the no-progress guard intact) ``auto``
-        keeps seeking past a short link-less page until empty. Set ``False`` for
-        one-page-at-a-time callers (the ``$expand`` work-queue drainer via
-        :meth:`_fetch_one_expand_page`) that re-enter with a fresh generator per
-        page: there the in-generator guard can't span calls, so a synthesized
-        short-page seek isn't safe — ``auto`` reverts to the conservative
-        short-page-is-the-end behaviour (full link-less pages still continue;
-        the drainer has its own inner-continuation mechanism).
+        Under ``auto``, when the server has emitted no ``@odata.nextLink`` the
+        walk keeps seeking past a short link-less page until empty, so a server
+        that page-limits below ``$top`` while suppressing the continuation link
+        is still fully drained.
         """
         mode = getattr(self, "_pagination", "nextlink")
         if mode != "nextlink":
-            yield from self._client_paginate_pages(url, mode, auto_drains_short)
+            yield from self._client_paginate_pages(url, mode)
             return
         session = self._get_session()
         next_url: str | None = url
@@ -1464,7 +1446,7 @@ class ODataLakeflowConnect(
             next_url = new_next
 
     def _client_paginate_pages(
-        self, url: str, mode: str, auto_drains_short: bool = True
+        self, url: str, mode: str
     ) -> Iterator[tuple[list[dict], str | None]]:
         """Client-driven pagination for servers that don't (always) emit
         ``@odata.nextLink``. Yields ``(page_rows, next_url)`` like
@@ -1585,15 +1567,6 @@ class ODataLakeflowConnect(
                 # link. A *full* no-link page after we've seen links is still
                 # ambiguous (the server may have stopped linking mid-collection),
                 # so it falls through to the keyset/skip fallback below.
-                yield page_rows, None
-                return
-            if mode == "auto" and not auto_drains_short and len(page_rows) < top:
-                # One-page-at-a-time caller (the $expand drainer): the in-generator
-                # no-progress guard can't span its per-page re-entries, so a
-                # synthesized short-page seek isn't safe here. Treat a short
-                # link-less page as the end (the conservative pre-drain auto
-                # behaviour); a FULL link-less page still continues below, and the
-                # drainer's own inner-continuation handles nested collections.
                 yield page_rows, None
                 return
             # auto (never saw a link) / keyset / skip: do NOT stop on a short

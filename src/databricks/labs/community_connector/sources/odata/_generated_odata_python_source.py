@@ -772,6 +772,24 @@ def register_lakeflow_source(spark):
         return tops
 
 
+    def compute_expand_tops_for_root(page_size: int, num_segments: int, root_level: int) -> list[int]:
+        """Per-level ``$top`` for an ``$expand`` request rooted at ``root_level``.
+
+        Only the levels from ``root_level`` to the leaf are collections that
+        multiply into the response cross-product; the ancestors ``0..root_level-1``
+        are addressed by key in the request path (e.g. ``Instances(6)/Projects(7)/
+        WorkPackageDetails?...``), so they carry no ``$top`` and must NOT eat into
+        the ``page_size`` budget. Distributing across only the collection levels is
+        what lets a continuation rooted deep in the chain use a sensible ``$top``
+        (e.g. ``[100, 10]`` for the last two levels) instead of the whole-chain
+        floor (``[…, 5, 5]``).
+
+        Returns a full-length list so callers keep indexing by absolute segment
+        level; entries below ``root_level`` are placeholders that are never read
+        (those levels carry a key, not a ``$top``)."""
+        return [0] * root_level + compute_dynamic_tops(page_size, num_segments - root_level)
+
+
     def join_url(base: str, suffix: str) -> str:
         """Append ``suffix`` to ``base`` with at most one slash."""
         return f"{base}{suffix}" if base.endswith("/") else f"{base}/{suffix}"
@@ -1748,16 +1766,14 @@ def register_lakeflow_source(spark):
                 ]
                 resuming = False
             ctx = (cursor_field, cursor_level, None) if cursor_field else None
-            # Per-level $top values from the initial dynamic distribution.
-            # Passed into the flatten recursion so inner-collection nextLink
-            # follows can rewrite their $top to a larger value without
-            # blowing the page_size budget. ``None`` when ``page_size`` is
-            # unset — no ``$top`` is sent, so there's no budget to rebalance
-            # and the nextLink $top rewrite is skipped.
+            # The page_size budget (``None`` when unset — no ``$top`` is sent at
+            # any level). The drainer/streamer re-derive the per-level ``$top``
+            # distribution per work item from its root level (see
+            # :func:`compute_expand_tops_for_root`), so a continuation rooted deep
+            # in the chain budgets across only its own collection levels rather than
+            # the whole chain.
             page_size_opt = (table_options or {}).get("page_size")
-            per_level_tops = (
-                compute_dynamic_tops(int(page_size_opt), len(segments)) if page_size_opt else None
-            )
+            page_size = int(page_size_opt) if page_size_opt else None
             if start_offset is None:
                 # Batch reader: offset discarded, ``since`` is None (no cursor
                 # filter), cap disabled, guard skipped — so the ``emitted``
@@ -1766,7 +1782,7 @@ def register_lakeflow_source(spark):
                 # materialise the whole result set. See ``read_table``.
                 return (
                     self._stream_expand_pages(
-                        initial_queue, segments, pks_per_level, fk_columns, ctx, per_level_tops
+                        initial_queue, segments, pks_per_level, fk_columns, ctx, page_size
                     ),
                     {},
                 )
@@ -1779,7 +1795,7 @@ def register_lakeflow_source(spark):
                 fk_columns,
                 emitted,
                 ctx,
-                per_level_tops,
+                page_size,
             )
             end_offset = self._build_expand_end_offset(
                 emitted, cursor_field, start_offset, remaining_queue
@@ -1802,7 +1818,7 @@ def register_lakeflow_source(spark):
             fk_columns: dict[str, str],
             emitted: list[dict],
             ctx: tuple | None,
-            per_level_tops: list[int],
+            page_size: int | None,
         ) -> list[dict]:
             """Iterative work-queue processor.
 
@@ -1845,6 +1861,11 @@ def register_lakeflow_source(spark):
                 cur_val = item.get("cur_val")
                 skip = int(item.get("skip", 0) or 0)
                 item_ctx = (cur_field, cur_level, cur_val) if cur_field else None
+                # Tops budgeted over only THIS request's collection levels
+                # (root == item level downward); ancestors above are fixed keys.
+                item_tops = (
+                    compute_expand_tops_for_root(page_size, len(segments), level) if page_size else None
+                )
                 # Fetch one page only — pulling further pages of THIS
                 # collection waits until the next dequeue so we can check
                 # the cap between them.
@@ -1872,9 +1893,10 @@ def register_lakeflow_source(spark):
                         fk_columns,
                         emitted,
                         item_ctx,
-                        per_level_tops,
+                        item_tops,
                         response_url=url,
                         pending_fetches=queue,
+                        page_size=page_size,
                     )
                     if len(emitted) >= max_records and row_idx + 1 < len(page_rows):
                         # Mid-page: re-queue the SAME URL at the front so
@@ -1911,7 +1933,7 @@ def register_lakeflow_source(spark):
             pks_per_level: list[list[str]],
             fk_columns: dict[tuple[str, str], str],
             ctx: tuple | None,
-            per_level_tops: list[int],
+            page_size: int | None,
         ) -> Iterator[dict]:
             """Lazy variant of :meth:`_drain_expand_pages` for the batch reader.
 
@@ -1934,6 +1956,9 @@ def register_lakeflow_source(spark):
                 cur_val = item.get("cur_val")
                 skip = int(item.get("skip", 0) or 0)
                 item_ctx = (cur_field, cur_level, cur_val) if cur_field else None
+                item_tops = (
+                    compute_expand_tops_for_root(page_size, len(segments), level) if page_size else None
+                )
                 page_rows, page_next_url = self._fetch_one_expand_page(url)
                 if not page_rows:
                     if page_next_url:
@@ -1958,9 +1983,10 @@ def register_lakeflow_source(spark):
                         fk_columns,
                         local_out,
                         item_ctx,
-                        per_level_tops,
+                        item_tops,
                         response_url=url,
                         pending_fetches=queue,
+                        page_size=page_size,
                     )
                     yield from local_out
                 if page_next_url:
@@ -1981,20 +2007,29 @@ def register_lakeflow_source(spark):
 
             No-progress guard for the work-queue drainers: those slice pagination
             one page per call, so the in-generator guard in
-            :meth:`_client_paginate_pages` is bypassed. If a client-built
-            continuation doesn't advance (the resolved next URL equals the one we
-            just fetched — the server ignored the seek/``$skip``), drop the link so
-            the drainer stops this collection instead of looping forever.
+            :meth:`_client_paginate_pages` is bypassed. The drainer instead drops
+            the link when the resolved next URL equals the one we just fetched —
+            i.e. the continuation didn't advance (server ignored the seek/``$skip``,
+            or a self-referential ``@odata.nextLink``) — so the collection stops
+            instead of looping forever.
 
-            ``auto_drains_short=False``: this caller re-enters with a fresh
-            :meth:`_fetch_pages_with_links` generator per page, so the in-generator
-            no-progress guard can't span calls. Under ``auto`` that makes a
-            synthesized short-page seek unsafe (it would re-fetch and re-emit the
-            page — duplicate rows), so ``auto`` here keeps the conservative
-            short-page-is-the-end behaviour. Full link-less pages still continue,
-            and a parent's truncated inner collection is drained by the dedicated
-            inner-``$expand`` continuation, not by this top-level walk."""
-            for page_rows, page_next_url in self._fetch_pages_with_links(url, auto_drains_short=False):
+            A continuation must keep going past a SHORT page, because a server that
+            page-limits below the requested ``$top`` while omitting
+            ``@odata.nextLink`` returns short pages that are NOT exhaustion —
+            stopping there silently drops the rest of the inner collection (and in
+            cursor mode the watermark then advances past the dropped rows, losing
+            them permanently). The optimization that budgets a deep continuation's
+            ``$top`` up to ``page_size`` makes this the common case: ``$top`` now
+            routinely exceeds the server's per-response cap, so every continuation
+            page is short. :meth:`_fetch_pages_with_links` drains short link-less
+            pages; draining is safe even though its in-generator guard can't span
+            these per-page re-entries: for keyset/skip the next seek differs from the
+            current URL only when rows advanced, so a server that ignores the seek
+            trips the ``page_next_url == url`` guard after at most one repeated page
+            — and a repeated row is deduped at the destination by ``apply_changes``'
+            MERGE on the primary key (a harmless duplicate, vs. the data loss a
+            short-page stop causes)."""
+            for page_rows, page_next_url in self._fetch_pages_with_links(url):
                 return page_rows, (None if page_next_url == url else page_next_url)
             return [], None
 
@@ -2106,6 +2141,7 @@ def register_lakeflow_source(spark):
             per_level_tops: list[int] | None = None,
             response_url: str | None = None,
             pending_fetches: list[dict] | None = None,
+            page_size: int | None = None,
         ) -> None:
             """Recurse into the nested $expand payload; tag and emit leaf rows.
             ``cursor_ctx`` is ``(cursor_field, cursor_level, captured_value)``
@@ -2174,6 +2210,7 @@ def register_lakeflow_source(spark):
                     per_level_tops,
                     response_url=base_url,
                     pending_fetches=pending_fetches,
+                    page_size=page_size,
                 )
             inner_next = row.get(f"{next_seg}@odata.nextLink")
             if inner_next:
@@ -2193,10 +2230,13 @@ def register_lakeflow_source(spark):
                     inner_product = 1
                     for t in per_level_tops[continuation_level + 1 :]:
                         inner_product *= t
-                    page_budget = 1
-                    for t in per_level_tops:
-                        page_budget *= t
-                    new_top = max(MIN_DYNAMIC_TOP, page_budget // max(1, inner_product))
+                    # Budget is the full page_size: the ancestors 0..level are a
+                    # single fixed parent in the continuation, so they don't
+                    # multiply. ``page_size`` is passed explicitly rather than
+                    # re-derived from per_level_tops, whose entries below this
+                    # request's root level are placeholders. (per_level_tops is only
+                    # truthy when page_size was set, so page_size is present here.)
+                    new_top = max(MIN_DYNAMIC_TOP, (page_size or 0) // max(1, inner_product))
                     resolved = rewrite_top_in_url(resolved, new_top)
             else:
                 # No ``<NavProp>@odata.nextLink``. In a client-driven pagination
@@ -2278,7 +2318,7 @@ def register_lakeflow_source(spark):
                 return None
             cur_field = cursor_ctx[0] if cursor_ctx else None
             return self._build_expand_continuation_url(
-                segments, level, chain, cur_field, per_level_tops, mode, children[-1], len(children)
+                segments, level, chain, cur_field, mode, children[-1], len(children)
             )
 
         # pylint: disable=too-many-arguments,too-many-positional-arguments,too-many-locals
@@ -2288,7 +2328,6 @@ def register_lakeflow_source(spark):
             level: int,
             chain: list[dict[str, Any]],
             cursor_field: str | None,
-            per_level_tops: list[int],
             mode: str,
             last_child: dict,
             inline_count: int,
@@ -2330,6 +2369,17 @@ def register_lakeflow_source(spark):
                 self.service_url,
                 self._build_contained_path(segments[: child_level + 1], chain),
             )
+            # Budget the continuation's $top over only its own collection levels
+            # (child_level..leaf); levels 0..level are now fixed keys in the path, so
+            # they take no share. This is what gives the inner collection a real
+            # $top (e.g. [100, 10] for the last two levels) rather than the
+            # whole-chain floor (… 5, 5) the initial root-0 distribution would force.
+            page_size_opt = table_options.get("page_size")
+            cont_tops = (
+                compute_expand_tops_for_root(int(page_size_opt), len(segments), child_level)
+                if page_size_opt
+                else None
+            )
             segment_filters = resolve_segment_filters(table_options, segments)
             url = self._assemble_expand_url(
                 contained_base,
@@ -2341,7 +2391,7 @@ def register_lakeflow_source(spark):
                 cursor_filter,
                 cursor_order,
                 cursor_select,
-                per_level_tops,
+                cont_tops,
             )
             order_keys = _pg_orderby_keys(url)
             if mode in ("keyset", "auto") and order_keys:
@@ -2479,7 +2529,7 @@ def register_lakeflow_source(spark):
                     )
                 cap_hit_in_page = False
                 page_next_url: str | None = None
-                # auto_drains_short defaults True: under the default ``auto``, a
+                # Under the default ``auto``, a
                 # server that page-limits a leaf below $top while omitting
                 # @odata.nextLink is still drained (keyset seek until empty), so a
                 # cursor read isn't silently truncated to one short page. The
@@ -2885,7 +2935,7 @@ def register_lakeflow_source(spark):
                         order_by=leaf_order_by,
                     )
                 page_next_url: str | None = None
-                # auto_drains_short defaults True (see the leaf-cursor walk): the
+                # See the leaf-cursor walk: the
                 # default auto drains a link-omitting, sub-$top-capped leaf via the
                 # keyset seek, and the synthesized seek doubles as the cap-hit resume
                 # checkpoint.
@@ -3971,7 +4021,7 @@ def register_lakeflow_source(spark):
 
             records: list[dict] = []
             truncated = False
-            for row in self._fetch_pages(url, auto_drains_short=False):
+            for row in self._fetch_pages(url):
                 if skip_null and row.get(cursor_field) is None:
                     continue
                 rec_cursor = effective(row)
@@ -4063,7 +4113,7 @@ def register_lakeflow_source(spark):
             skip_null, _effective = self._make_cursor_resolver(
                 table_name, namespace, cursor_field, table_options
             )
-            for row in self._fetch_pages(url, auto_drains_short=False):
+            for row in self._fetch_pages(url):
                 if skip_null and row.get(cursor_field) is None:
                     continue
                 yield row
@@ -4553,25 +4603,16 @@ def register_lakeflow_source(spark):
                 params.append(f"$orderby={order_by}")
             return "&".join(params)
 
-        def _fetch_pages(self, url: str, auto_drains_short: bool = True) -> Iterator[dict]:
+        def _fetch_pages(self, url: str) -> Iterator[dict]:
             """Walk a collection's pages, yielding raw JSON dicts (no coercion).
 
             Thin row-flattening wrapper over :meth:`_fetch_pages_with_links`,
             which handles the pagination strategy (nextlink / keyset / skip /
-            auto). The whole collection is drained within this call.
-
-            ``auto_drains_short`` is forwarded to :meth:`_fetch_pages_with_links`
-            (see there). Snapshot reads and the contained leaf/ancestor cursor walks
-            leave it ``True`` so the default ``auto`` fully drains a server that
-            page-limits below ``$top`` without a continuation link. The *flat*
-            incremental read passes ``False`` here: its drain would emit the
-            compound ``(cursor gt v) or (cursor eq v and pk gt p)`` keyset seek,
-            which the bundled simulator can't parse, so it stays conservative and
-            relies on its cross-batch ``cursor gt`` resume (set ``pagination=keyset``
-            for a flat cursor read against a sub-``$top``-capping, link-omitting
-            server).
+            auto). The whole collection is drained within this call: under the
+            default ``auto`` a server that page-limits below ``$top`` without a
+            continuation link is still fully drained (keep seeking until empty).
             """
-            for page_rows, _ in self._fetch_pages_with_links(url, auto_drains_short):
+            for page_rows, _ in self._fetch_pages_with_links(url):
                 yield from page_rows
 
         def _parse_pagination(self, table_options: dict[str, str] | None) -> str:
@@ -4595,9 +4636,7 @@ def register_lakeflow_source(spark):
                 )
             return raw
 
-        def _fetch_pages_with_links(
-            self, url: str, auto_drains_short: bool = True
-        ) -> Iterator[tuple[list[dict], str | None]]:
+        def _fetch_pages_with_links(self, url: str) -> Iterator[tuple[list[dict], str | None]]:
             """Page-aware fetch: yields ``(page_rows, next_url)`` per response,
             where ``next_url`` resumes the next page (``None`` at the end).
 
@@ -4613,21 +4652,14 @@ def register_lakeflow_source(spark):
               ``$skip``), for servers that page-limit a response but omit the
               continuation link. See :meth:`_client_paginate_pages`.
 
-            ``auto_drains_short`` (default ``True``) governs only the ``auto`` mode
-            when the server has emitted no ``@odata.nextLink``: when ``True`` (the
-            full-drain callers — :meth:`_fetch_pages` and the like, which iterate
-            this generator to exhaustion with the no-progress guard intact) ``auto``
-            keeps seeking past a short link-less page until empty. Set ``False`` for
-            one-page-at-a-time callers (the ``$expand`` work-queue drainer via
-            :meth:`_fetch_one_expand_page`) that re-enter with a fresh generator per
-            page: there the in-generator guard can't span calls, so a synthesized
-            short-page seek isn't safe — ``auto`` reverts to the conservative
-            short-page-is-the-end behaviour (full link-less pages still continue;
-            the drainer has its own inner-continuation mechanism).
+            Under ``auto``, when the server has emitted no ``@odata.nextLink`` the
+            walk keeps seeking past a short link-less page until empty, so a server
+            that page-limits below ``$top`` while suppressing the continuation link
+            is still fully drained.
             """
             mode = getattr(self, "_pagination", "nextlink")
             if mode != "nextlink":
-                yield from self._client_paginate_pages(url, mode, auto_drains_short)
+                yield from self._client_paginate_pages(url, mode)
                 return
             session = self._get_session()
             next_url: str | None = url
@@ -4667,7 +4699,7 @@ def register_lakeflow_source(spark):
                 next_url = new_next
 
         def _client_paginate_pages(
-            self, url: str, mode: str, auto_drains_short: bool = True
+            self, url: str, mode: str
         ) -> Iterator[tuple[list[dict], str | None]]:
             """Client-driven pagination for servers that don't (always) emit
             ``@odata.nextLink``. Yields ``(page_rows, next_url)`` like
@@ -4788,15 +4820,6 @@ def register_lakeflow_source(spark):
                     # link. A *full* no-link page after we've seen links is still
                     # ambiguous (the server may have stopped linking mid-collection),
                     # so it falls through to the keyset/skip fallback below.
-                    yield page_rows, None
-                    return
-                if mode == "auto" and not auto_drains_short and len(page_rows) < top:
-                    # One-page-at-a-time caller (the $expand drainer): the in-generator
-                    # no-progress guard can't span its per-page re-entries, so a
-                    # synthesized short-page seek isn't safe here. Treat a short
-                    # link-less page as the end (the conservative pre-drain auto
-                    # behaviour); a FULL link-less page still continues below, and the
-                    # drainer's own inner-continuation handles nested collections.
                     yield page_rows, None
                     return
                 # auto (never saw a link) / keyset / skip: do NOT stop on a short

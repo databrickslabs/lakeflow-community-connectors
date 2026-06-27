@@ -320,10 +320,15 @@ def test_incremental_first_call_has_no_cursor_filter():
     per-call cap. This is what makes the connector usable for both
     continuous polling and non-timestamp cursor types."""
     _mock_metadata()
-    captured = {}
+    captured_urls = []
 
     def _callback(request):
-        captured["url"] = request.url
+        captured_urls.append(request.url)
+        # First (unfiltered) request returns the row; the default `auto`
+        # drain issues one confirming keyset seek (carrying `gt`) — the
+        # seek-honouring server returns empty, ending the collection.
+        if " gt " in request.url.replace("%20", " "):
+            return (200, {}, '{"value": []}')
         return (200, {}, '{"value": [{"Id": 1, "ModifiedAt": "2024-03-01T00:00:00Z"}]}')
 
     responses.add_callback(responses.GET, f"{SERVICE_URL}Customers", callback=_callback)
@@ -337,9 +342,9 @@ def test_incremental_first_call_has_no_cursor_filter():
     rows = list(records)
     assert rows == [{"Id": 1, "ModifiedAt": "2024-03-01T00:00:00Z"}]
     assert offset == {"cursor": "2024-03-01T00:00:00Z"}
-    # Neither `le` nor `gt` should appear in the URL — no cursor filter
-    # at all on the first call.
-    normalised = captured["url"].replace("%20", " ")
+    # Neither `le` nor `gt` should appear on the FIRST call — no cursor
+    # filter at all when resuming from an empty offset.
+    normalised = captured_urls[0].replace("%20", " ")
     assert " le " not in normalised
     assert " gt " not in normalised
 
@@ -401,47 +406,60 @@ def test_incremental_continuous_polling_picks_up_new_rows():
     sees fresh source state on each call. Mirrors what a continuous
     SDP pipeline does: one connector, many micro-batches, source
     growing under us. Each subsequent call should advance through the
-    new rows."""
+    new rows.
+
+    The mock is a seek-honouring server (the only faithful model now
+    that the default `auto` flat cursor read drains): it filters the
+    corpus by the connector's `ModifiedAt gt <v>` resume / keyset-seek
+    lower bound, so each batch returns exactly the rows above the
+    parked watermark."""
     _mock_metadata()
-    call_count = {"n": 0}
+    corpus = [
+        {"Id": 1, "ModifiedAt": "2024-03-01T00:00:00Z"},
+        {"Id": 2, "ModifiedAt": "2024-03-02T00:00:00Z"},
+    ]
 
     def _callback(request):
-        call_count["n"] += 1
-        if call_count["n"] == 1:
-            # Initial drain — two records already in the source.
-            return (
-                200,
-                {},
-                '{"value": ['
-                '{"Id": 1, "ModifiedAt": "2024-03-01T00:00:00Z"},'
-                '{"Id": 2, "ModifiedAt": "2024-03-02T00:00:00Z"}]}',
-            )
-        if call_count["n"] == 2:
-            # No data since the offset; mirrors the "caught up" state
-            # between bursts.
-            return (200, {}, '{"value": []}')
-        # New row arrived while the stream was idle.
-        return (
-            200,
-            {},
-            '{"value": [{"Id": 3, "ModifiedAt": "2024-03-05T00:00:00Z"}]}',
-        )
+        url = request.url.replace("%20", " ")
+        rows = corpus
+        # Honour every `ModifiedAt gt <v>` lower bound on the URL (the
+        # cross-batch resume filter and the in-batch keyset-seek drain
+        # both carry one); the tightest bound wins.
+        bounds = re.findall(r"ModifiedAt gt ([0-9T:\-Z]+)", url)
+        if bounds:
+            lo = max(bounds)
+            rows = [r for r in rows if r["ModifiedAt"] > lo]
+        rows = sorted(rows, key=lambda r: (r["ModifiedAt"], r["Id"]))
+        return (200, {}, json.dumps({"value": rows}))
 
     responses.add_callback(responses.GET, f"{SERVICE_URL}Customers", callback=_callback)
 
     c = _make()
-    # Batch 1: no offset, two rows drain. Trim of trailing single-cohort
-    # leaves [Id=1]; offset = 2024-03-01.
+    # Batch 1: no offset, both rows drain. Trim of the trailing distinct
+    # cursor cohort holds Id=2 back; emits [Id=1]; offset = 2024-03-01.
     rows1, offset1 = c.read_table("Customers", {}, {"cursor_field": "ModifiedAt"})
     assert [r["Id"] for r in rows1] == [1]
     assert offset1 == {"cursor": "2024-03-01T00:00:00Z"}
 
-    # Batch 2: feeding offset1 back. Source returned empty — stable
-    # offset signals "no more data" to Spark; the same connector
-    # instance handled the call without any cap-driven short-circuit.
+    # Batch 2: feeding offset1 back, the held-back Id=2 is re-read above
+    # the watermark and emitted; offset advances to 2024-03-02.
     rows2, offset2 = c.read_table("Customers", offset1, {"cursor_field": "ModifiedAt"})
-    assert list(rows2) == []
-    assert offset2 == offset1
+    assert [r["Id"] for r in rows2] == [2]
+    assert offset2 == {"cursor": "2024-03-02T00:00:00Z"}
+
+    # A new row arrives while the stream is idle.
+    corpus.append({"Id": 3, "ModifiedAt": "2024-03-05T00:00:00Z"})
+
+    # Batch 3: the same connector instance picks up the fresh row.
+    rows3, offset3 = c.read_table("Customers", offset2, {"cursor_field": "ModifiedAt"})
+    assert [r["Id"] for r in rows3] == [3]
+    assert offset3 == {"cursor": "2024-03-05T00:00:00Z"}
+
+    # Batch 4: caught up — no rows above the watermark, stable offset
+    # signals "no more data" to Spark.
+    rows4, offset4 = c.read_table("Customers", offset3, {"cursor_field": "ModifiedAt"})
+    assert list(rows4) == []
+    assert offset4 == offset3
 
     # Batch 3: new row appeared in the source. The continuous-polling
     # connector picks it up using only the `gt` filter — no frozen
@@ -753,6 +771,8 @@ def test_batch_mode_expand_streams_lazily_and_uncapped():
         },
         match_querystring=False,
     )
+    # Short top-level page → the drainer probes once more to confirm exhaustion.
+    responses.get(f"{SERVICE_URL}Parents", json={"value": []})
     c = _make()
     records, offset = c.read_table(
         "Parents__Children",
@@ -2823,6 +2843,108 @@ def test_pagination_keyset_continues_inner_expand_when_nextlink_omitted():
     assert "Id gt 20" in cont_urls[0]
     assert "$skip" not in cont_urls[0]
     assert len(cont_urls) == 2
+    # The continuation roots at Children with Parents(1) a fixed key, so the
+    # page_size budget is spent entirely on the one remaining collection level:
+    # $top=1000, NOT the [100, 10] root-level share (10) the initial request
+    # gave the inline Children expand.
+    assert "$top=1000" in cont_urls[0]
+
+
+@responses.activate
+def test_contained_expand_cursor_drains_capped_inner_collection_multi_parent():
+    """Regression (xmla_demo): ``expand_contained=true`` + cursor on a server
+    that caps every response BELOW the requested $top and omits the
+    continuation link. The deep-continuation $top budget can exceed the cap, so
+    each inner-collection continuation page is SHORT — the drainer must keep
+    seeking, not stop. If it stops, the inner collection is truncated AND (in
+    cursor mode) the watermark advances past the dropped rows, losing them
+    across batches. The two parents live in DISJOINT cursor ranges (parent 1
+    high, parent 2 low): when parent 1's continuation drains/stops, the global
+    watermark jumps into 2025; if parent 2's continuation then stops short, its
+    dropped 2024 rows fall below that watermark and the next batch's
+    ``cursor gt`` skips them forever. All rows must come through, exactly once."""
+    from urllib.parse import parse_qs, unquote, urlparse
+
+    _mock_nested_metadata()
+    # ``cap`` equals the inner-expand $top (page_size default 1000 -> Children
+    # $top=10), so the inline page is FULL and a continuation IS built; the
+    # continuation's $top is the full budget (1000) >> cap, so its pages are
+    # short and must be drained. Parent 1 in 2025 (high), parent 2 in 2024 (low).
+    cap = 10
+    kids = {
+        1: [
+            {"Id": 100 + i, "Label": f"a{i}", "ModifiedAt": f"2025-01-{i:02d}T00:00:00Z"}
+            for i in range(1, 26)
+        ],
+        2: [
+            {"Id": 200 + i, "Label": f"b{i}", "ModifiedAt": f"2024-01-{i:02d}T00:00:00Z"}
+            for i in range(1, 26)
+        ],
+    }
+
+    def _seek(flt):
+        """Return a predicate from a cursor/keyset $filter string."""
+        gt = re.search(r"ModifiedAt gt ([0-9T:\-Z]+)", flt)
+        eqid = re.search(r"ModifiedAt eq ([0-9T:\-Z]+) and Id gt (\d+)", flt)
+
+        def keep(r):
+            if not flt:
+                return True
+            if gt and r["ModifiedAt"] > gt.group(1):
+                return True
+            return bool(eqid and r["ModifiedAt"] == eqid.group(1) and r["Id"] > int(eqid.group(2)))
+
+        return keep
+
+    def _page(rows, flt):
+        kept = sorted((r for r in rows if _seek(flt)(r)), key=lambda r: (r["ModifiedAt"], r["Id"]))
+        return kept[:cap]  # capped, no nextLink
+
+    def _parents(request):
+        q = parse_qs(urlparse(request.url).query)
+        top_filter = unquote(q.get("$filter", [""])[0])  # Parents-level drain seek
+        if "Id gt" in top_filter:
+            return (200, {}, json.dumps({"value": []}))  # past the last parent
+        expand = unquote(q.get("$expand", [""])[0])  # Children(...;$filter=...;...)
+        m = re.search(r"\$filter=([^;)]*)", expand)
+        cflt = m.group(1) if m else ""
+        out = [{"Id": pid, "Name": f"P{pid}", "Children": _page(kids[pid], cflt)} for pid in (1, 2)]
+        return (200, {}, json.dumps({"value": out}))
+
+    def _children(pid):
+        def cb(request):
+            flt = unquote(parse_qs(urlparse(request.url).query).get("$filter", [""])[0])
+            return (200, {}, json.dumps({"value": _page(kids[pid], flt)}))
+
+        return cb
+
+    responses.add_callback(responses.GET, f"{SERVICE_URL}Parents", callback=_parents)
+    responses.add_callback(
+        responses.GET, f"{SERVICE_URL}Parents(1)/Children", callback=_children(1)
+    )
+    responses.add_callback(
+        responses.GET, f"{SERVICE_URL}Parents(2)/Children", callback=_children(2)
+    )
+
+    c = _make()
+    seen, dups, offset, b = [], 0, {}, 0
+    while b < 50:
+        b += 1
+        recs, new = c.read_table(
+            "Parents__Children", offset, {"cursor_field": "ModifiedAt", "expand_contained": "true"}
+        )
+        got = [(r["Parents_Id"], r["Id"]) for r in recs]
+        for k in got:
+            if k in seen:
+                dups += 1
+        seen.extend(got)
+        if not got or new == offset:
+            break
+        offset = new
+    assert dups == 0
+    assert sorted(set(seen)) == sorted(
+        [(1, 100 + i) for i in range(1, 26)] + [(2, 200 + i) for i in range(1, 26)]
+    )  # all 50 rows (25/parent), none dropped
 
 
 @responses.activate
@@ -3362,6 +3484,25 @@ def test_compute_dynamic_tops():
     assert compute_dynamic_tops(10, 3) == [5, 5, 5]
 
 
+def test_compute_expand_tops_for_root():
+    """A continuation rooted below level 0 budgets ``page_size`` across only its
+    own collection levels (root..leaf); the fixed-key ancestors above take no
+    share. Entries below the root are placeholders (never read)."""
+    from databricks.labs.community_connector.sources.odata._contained import (
+        compute_expand_tops_for_root,
+    )
+
+    # root_level=0 over a 4-segment chain == the full distribution.
+    assert compute_expand_tops_for_root(1000, 4, 0) == [8, 5, 5, 5]
+    # The xmla_demo case: a 4-segment chain, continuation rooted at level 2
+    # (Instances(k)/Projects(k)/WorkPackageDetails?...$expand=WorkPackagesStepDetails).
+    # Only levels 2,3 are collections → [100, 10] there, not the [5, 5] the
+    # whole-chain distribution would force. Levels 0,1 are placeholders.
+    assert compute_expand_tops_for_root(1000, 4, 2) == [0, 0, 100, 10]
+    # Continuation rooted at the leaf level gets the entire budget.
+    assert compute_expand_tops_for_root(1000, 4, 3) == [0, 0, 0, 1000]
+
+
 @responses.activate
 def test_build_expand_url_three_level():
     _mock_nested_metadata()
@@ -3546,6 +3687,10 @@ def test_contained_expand_two_level_flattens_nested_response():
             ]
         },
     )
+    # The top-level Parents page is short (2 < $top); under the default auto the
+    # drainer probes one more page to confirm exhaustion — a real server returns
+    # empty past the last parent.
+    responses.get(f"{SERVICE_URL}Parents", json={"value": []})
     c = _make()
     records, _ = c.read_table("Parents__Children", None, {"expand_contained": "true"})
     rows = list(records)
@@ -3578,6 +3723,7 @@ def test_contained_expand_three_level_flattens_nested():
             ]
         },
     )
+    responses.get(f"{SERVICE_URL}Parents", json={"value": []})  # drain probe past last parent
     c = _make()
     records, _ = c.read_table("Parents__Children__Notes", None, {"expand_contained": "true"})
     rows = list(records)
@@ -3610,6 +3756,7 @@ def test_contained_expand_strips_odata_annotations_on_leaf_rows():
             ]
         },
     )
+    responses.get(f"{SERVICE_URL}Parents", json={"value": []})  # drain probe past last parent
     c = _make()
     records, _ = c.read_table("Parents__Children", None, {"expand_contained": "true"})
     rows = list(records)
@@ -4099,7 +4246,10 @@ def test_contained_expand_batch_mode_null_cursor_rows_emit_without_raise():
     ``read_table``) breaks loudly."""
     _mock_nested_metadata()
 
-    def _initial(_req):
+    def _initial(req):
+        # Drain probe past the single short parent page → empty.
+        if "gt" in (req.url.split("$filter=", 1)[1] if "$filter=" in req.url else ""):
+            return (200, {}, json.dumps({"value": []}))
         return (
             200,
             {},
@@ -4264,6 +4414,7 @@ def test_contained_expand_follows_inner_collection_nextlink():
             ]
         },
     )
+    responses.get(f"{SERVICE_URL}Parents", json={"value": []})  # drain probe past last parent
     responses.get(
         inner_next,
         json={
@@ -4300,6 +4451,7 @@ def test_contained_expand_follows_inner_nextlink_chain():
             ]
         },
     )
+    responses.get(f"{SERVICE_URL}Parents", json={"value": []})  # drain probe past last parent
     responses.get(
         inner_p2,
         json={
@@ -4380,6 +4532,7 @@ def test_contained_expand_strips_inner_nextlink_annotation_from_leaf():
             ]
         },
     )
+    responses.get(f"{SERVICE_URL}Parents", json={"value": []})  # drain probe past last parent
     c = _make()
     records, _ = c.read_table("Parents__Children", None, {"expand_contained": "true"})
     rows = list(records)
@@ -5042,6 +5195,7 @@ def test_contained_expand_with_ancestor_cursor_injects_filter_into_expand():
         },
         match_querystring=False,
     )
+    responses.get(f"{SERVICE_URL}Parents", json={"value": []})  # drain probe past last parent
     c = _make()
     records, offset = c.read_table(
         "Parents__Children__Notes",

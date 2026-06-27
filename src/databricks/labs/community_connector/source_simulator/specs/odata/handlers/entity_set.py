@@ -132,23 +132,37 @@ def serve_entity_set(prep: PreparedRequest, spec: Any, corpus: Any) -> Response:
 
 
 def _matches_filter(record: Dict[str, Any], expr: str) -> bool:
-    """Evaluate a conjunction of simple ``field <op> value`` clauses.
+    """Evaluate a boolean ``$filter`` expression against a record.
 
-    The connector only emits ``and``-joined clauses with the six
-    standard comparison operators. Anything more elaborate raises so
-    a test mis-specification doesn't silently pass.
+    Supports ``and`` / ``or`` (``or`` lowest precedence), arbitrary
+    parenthesisation, and the six standard comparison operators on a
+    ``field <op> value`` leaf. The connector emits ``and``-joined
+    clauses, and — when draining a flat cursor read — a compound keyset
+    seek ``X and ((a gt v) or (a eq v and b gt p))``; a real OData
+    server evaluates that, so the simulator does too. Anything that
+    isn't a recognised clause raises so a test mis-specification doesn't
+    silently pass.
     """
-    clauses = _split_and(_strip_outer_parens(expr))
-    for clause in clauses:
-        m = _FILTER_CLAUSE_RE.fullmatch(_strip_outer_parens(clause))
-        if not m:
-            raise ValueError(f"Unsupported $filter clause: {clause!r}")
-        field = m.group("field")
-        op = m.group("op")
-        literal = _decode_literal(m.group("value"))
-        if not _compare(record.get(field), op, literal):
-            return False
-    return True
+    return _eval_filter(record, expr)
+
+
+def _eval_filter(record: Dict[str, Any], expr: str) -> bool:
+    """Recursively evaluate a boolean filter sub-expression."""
+    expr = expr.strip()
+    or_groups = _split_or(expr)
+    if len(or_groups) > 1:
+        return any(_eval_filter(record, g) for g in or_groups)
+    and_groups = _split_and(expr)
+    if len(and_groups) > 1:
+        return all(_eval_filter(record, g) for g in and_groups)
+    stripped = _strip_outer_parens(expr)
+    if stripped != expr:
+        # Parenthesised sub-expression — recurse on its contents.
+        return _eval_filter(record, stripped)
+    m = _FILTER_CLAUSE_RE.fullmatch(stripped)
+    if not m:
+        raise ValueError(f"Unsupported $filter clause: {expr!r}")
+    return _compare(record.get(m.group("field")), m.group("op"), _decode_literal(m.group("value")))
 
 
 def _strip_outer_parens(expr: str) -> str:
@@ -171,10 +185,22 @@ def _strip_outer_parens(expr: str) -> str:
 
 def _split_and(expr: str) -> List[str]:
     """Split on top-level ``and`` boundaries, preserving parenthesised clauses."""
+    return _split_on(expr, " and ")
+
+
+def _split_or(expr: str) -> List[str]:
+    """Split on top-level ``or`` boundaries, preserving parenthesised clauses."""
+    return _split_on(expr, " or ")
+
+
+def _split_on(expr: str, sep: str) -> List[str]:
+    """Split ``expr`` on top-level occurrences of ``sep`` (case-insensitive),
+    ignoring separators nested inside parentheses or string literals."""
     depth = 0
     out: List[str] = []
     start = 0
     i = 0
+    n = len(sep)
     expr_lower = expr.lower()
     while i < len(expr):
         ch = expr[i]
@@ -182,9 +208,9 @@ def _split_and(expr: str) -> List[str]:
             depth += 1
         elif ch == ")":
             depth -= 1
-        elif depth == 0 and expr_lower[i : i + 5] == " and " and i + 5 <= len(expr):
+        elif depth == 0 and expr_lower[i : i + n] == sep and i + n <= len(expr):
             out.append(expr[start:i])
-            i += 5
+            i += n
             start = i
             continue
         i += 1
