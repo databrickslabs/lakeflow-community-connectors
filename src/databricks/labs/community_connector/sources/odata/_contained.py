@@ -281,6 +281,48 @@ def _pg_with_extra_filter(url: str, clause: str) -> str:
     return _pg_set_query(url, "$filter", combined)
 
 
+# Connector-private query option carrying the stable base ``$filter`` across
+# cap-resume batches of a keyset walk. Stripped before any request is sent
+# (see ``_fetch_page_payload``), so the server never sees it.
+_PG_BASE = "__pgbase"
+
+
+def _pg_strip_query(url: str, name: str) -> str:
+    """Remove query option ``name`` from ``url`` (no-op if absent)."""
+    head, _sep, query = url.partition("?")
+    if not query:
+        return url
+    pref = name + "="
+    kept = [p for p in query.split("&") if not p.startswith(pref)]
+    return f"{head}?{'&'.join(kept)}" if kept else head
+
+
+def _pg_base_filter(url: str) -> str | None:
+    """The stable base ``$filter`` for a keyset walk: the stashed ``__pgbase``
+    if present (a resumed walk), else the URL's current ``$filter`` (the first
+    page, before any seek). An empty ``__pgbase`` marker means 'no base'."""
+    marker = _pg_get_query(url, _PG_BASE)
+    if marker is not None:
+        return marker or None
+    return _pg_get_query(url, "$filter")
+
+
+def _pg_keyset_seek_url(url: str, base_filter: str | None, seek: str) -> str:
+    """Build the next keyset page URL: ``$filter`` becomes
+    ``base_filter AND seek`` (or just ``seek`` when there's no base), with
+    ``base_filter`` stashed in the private ``__pgbase`` option.
+
+    Carrying the base separately lets a resumed walk REPLACE the seek instead
+    of AND-ing a fresh lower bound onto the previous one every cap-resume
+    batch — otherwise the ``$filter`` grows one keyset clause per batch and
+    eventually overflows the server's URL-length limit. The seeks are
+    monotonic so the accumulated form is merely redundant, never wrong, but it
+    is unbounded. ``__pgbase`` is stripped before the request is sent."""
+    combined = f"({base_filter}) and ({seek})" if base_filter else seek
+    out = _pg_set_query(url, "$filter", combined)
+    return _pg_set_query(out, _PG_BASE, base_filter or "")
+
+
 def _pg_page_fingerprint(page_rows: list[dict]) -> int:
     """Order-sensitive fingerprint of a page's rows for the no-progress
     guard. ``hash(repr(...))`` is process-stable — only ever compared within
@@ -1667,7 +1709,9 @@ class ContainedNavMixin:
         if mode in ("keyset", "auto") and order_keys:
             seek = _pg_keyset_filter(order_keys, last_child)
             if seek is not None:
-                return _pg_with_extra_filter(url, seek)
+                # Stash the clean child-level $filter as the keyset base so a
+                # cross-batch resume REPLACES the seek instead of accumulating.
+                return _pg_keyset_seek_url(url, _pg_get_query(url, "$filter"), seek)
         return _pg_set_query(url, "$skip", str(inline_count))
 
     def _leaf_cursor_order_by(

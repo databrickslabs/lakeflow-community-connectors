@@ -3115,6 +3115,57 @@ def test_delta_walk_guard_stops_self_referential_link():
 
 
 @responses.activate
+def test_pagination_keyset_does_not_accumulate_filter_across_batches():
+    """Regression: a contained leaf-cursor keyset walk that caps and resumes
+    across many batches must NOT AND a fresh seek onto the previous one each
+    batch (which grew the URL unboundedly toward HTTP 414). The base $filter
+    is carried out-of-band so each batch's seek REPLACES the prior one."""
+    _mock_nested_metadata()
+    responses.get(f"{SERVICE_URL}Parents", json={"value": [{"Id": 1}]})
+    universe = [
+        {"Id": 10 + i, "Label": chr(97 + i), "ModifiedAt": f"2024-01-0{i + 1}T00:00:00Z"}
+        for i in range(7)  # 7 children, all distinct cursor values
+    ]
+    seen_filters = []
+
+    def cb(req):
+        from urllib.parse import parse_qs, unquote, urlparse
+
+        assert "__pgbase" not in req.url  # private marker never reaches the server
+        q = parse_qs(urlparse(req.url).query)
+        flt = unquote(q.get("$filter", [""])[0])
+        seen_filters.append(flt)
+        top = int(q.get("$top", ["1000"])[0])
+        # Honor the keyset seek: rows strictly after the greatest lower bound.
+        gts = re.findall(r"ModifiedAt gt ([0-9T:\-Z]+)", flt)
+        floor = max(gts) if gts else ""
+        rows = [r for r in universe if r["ModifiedAt"] > floor]
+        return (200, {}, json.dumps({"value": rows[:top]}))  # NO nextLink
+
+    responses.add_callback(responses.GET, f"{SERVICE_URL}Parents(1)/Children", callback=cb)
+    c = _make()
+    opts = {
+        "cursor_field": "ModifiedAt",
+        "pagination": "keyset",
+        "page_size": "2",
+        "max_records_per_batch": "2",
+    }
+    seen, offset, batches = [], {}, 0
+    while True:
+        recs, offset = c.read_table("Parents__Children", offset, opts)
+        seen.extend(r["Id"] for r in list(recs))
+        batches += 1
+        if not offset.get("chain_next_link"):
+            break
+        assert batches < 12  # guard against a non-terminating resume loop
+    assert seen == [10, 11, 12, 13, 14, 15, 16]  # every child, in order, once
+    assert batches > 2  # genuinely resumed across several batches
+    # The fix: no request's $filter carries more than one keyset seek. The old
+    # behaviour AND-ed one disjunction per batch, so this would have grown to 3+.
+    assert max(f.count(" or (") for f in seen_filters) <= 1
+
+
+@responses.activate
 def test_build_contained_url_three_level():
     _mock_nested_metadata()
     c = _make()

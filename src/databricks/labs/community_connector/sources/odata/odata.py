@@ -88,11 +88,14 @@ from databricks.labs.community_connector.sources.odata._contained import (
     MAX_CONTAINED_DEPTH as _MAX_CONTAINED_DEPTH,
     ContainedNavMixin,
     _pg_get_query,
+    _pg_base_filter,
     _pg_keyset_filter,
+    _pg_keyset_seek_url,
     _pg_orderby_keys,
     _pg_page_fingerprint,
     _pg_parse_top,
     _pg_set_query,
+    _pg_strip_query,
     _pg_with_extra_filter,
     combine_filters as _combine_filters,
     contained_nav_props as _contained_nav_props,
@@ -1458,6 +1461,11 @@ class ODataLakeflowConnect(
         order_keys = _pg_orderby_keys(url)
         can_keyset = mode in ("keyset", "auto") and bool(order_keys)
         base_skip = int(_pg_get_query(url, "$skip") or _pg_get_query(url, "%24skip") or 0)
+        # Stable base $filter for keyset seeks — recovered from the private
+        # __pgbase marker on a resume URL, so each new seek REPLACES the prior
+        # one rather than AND-ing onto it across cap-resume batches (which
+        # would grow the URL unboundedly). See _pg_keyset_seek_url.
+        base_filter = _pg_base_filter(url)
         fetched = 0
         cur_url: str | None = url
         # Fingerprint of the page we last issued a client-computed continuation
@@ -1515,7 +1523,7 @@ class ODataLakeflowConnect(
             if can_keyset:
                 seek = _pg_keyset_filter(order_keys, page_rows[-1])
                 if seek is not None:
-                    nxt = _pg_with_extra_filter(url, seek)
+                    nxt = _pg_keyset_seek_url(url, base_filter, seek)
                 else:
                     # Null boundary value — no comparable keyset seek;
                     # commit to offset paging for the rest of this walk so
@@ -1586,6 +1594,10 @@ class ODataLakeflowConnect(
         the URL + truncated body in the message so the operator can
         escalate to the upstream owner.
         """
+        # Drop the connector-private keyset base marker before it can reach
+        # the server (it only exists to carry the stable base $filter across
+        # cap-resume batches; see _pg_keyset_seek_url).
+        url = _pg_strip_query(url, "__pgbase")
         attempts = self.max_retries + 1
         for attempt in range(attempts):
             resp = self._http_get(session, url)
