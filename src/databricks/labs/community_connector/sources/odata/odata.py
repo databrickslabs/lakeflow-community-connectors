@@ -1339,8 +1339,17 @@ class ODataLakeflowConnect(
             yield from page_rows
 
     def _parse_pagination(self, table_options: dict[str, str] | None) -> str:
-        """Parse + validate the ``pagination`` table option."""
-        raw = ((table_options or {}).get("pagination") or "nextlink").strip().lower()
+        """Parse + validate the ``pagination`` table option.
+
+        Defaults to ``auto``: follow ``@odata.nextLink`` while the server
+        emits it (identical to ``nextlink`` for spec-compliant servers), but
+        fall back to a keyset/skip continuation when a *full* page
+        (``len == $top``) arrives with no link — so a server that silently
+        page-limits a response without a continuation link doesn't drop the
+        remainder. ``auto`` needs a ``$top`` to detect a full page, so it
+        forces a default ``page_size`` (including on snapshot scans).
+        """
+        raw = ((table_options or {}).get("pagination") or "auto").strip().lower()
         if raw not in _PAGINATION_MODES:
             raise ValueError(
                 f"Invalid pagination={raw!r}. Expected one of: " f"{sorted(_PAGINATION_MODES)}."
