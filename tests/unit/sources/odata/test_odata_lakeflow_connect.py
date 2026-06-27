@@ -1105,7 +1105,9 @@ def test_oauth2_user_flow_refreshes_on_401_and_retries():
             "oauth2_refresh_token": "user-flow-refresh",
         }
     )
-    rows, _ = c.read_table("Customers", None, {})
+    # pagination=nextlink: focus on the 401-refresh-retry flow, not the
+    # default auto drain probe (which would add a GET after the short page).
+    rows, _ = c.read_table("Customers", None, {"pagination": "nextlink"})
     assert [r["Id"] for r in rows] == [1]
     assert call_count["n"] == 2
     assert len(captured_token_bodies) == 1
@@ -1485,8 +1487,9 @@ def test_oauth2_with_refresh_path_still_uses_existing_flow():
         }
     )
     # Refreshable 401 → resolves cleanly via the existing path. New
-    # PermissionError code path is bypassed.
-    rows, _ = c.read_table("Customers", None, {})
+    # PermissionError code path is bypassed. pagination=nextlink keeps the
+    # call count focused on the refresh-retry, not the default auto drain probe.
+    rows, _ = c.read_table("Customers", None, {"pagination": "nextlink"})
     assert [r["Id"] for r in list(rows)] == [1]
     assert call["n"] == 2  # 401 then 200 after refresh
 
@@ -2778,19 +2781,29 @@ def test_pagination_keyset_continues_inner_expand_when_nextlink_omitted():
         for i in range(11, 11 + child_top)  # 11..20 — a full page
     ]
 
-    def _parents(_request):
-        # Full inline child page, NO Children@odata.nextLink.
+    def _floor(request):
+        from urllib.parse import parse_qs, unquote, urlparse
+
+        flt = unquote(parse_qs(urlparse(request.url).query).get("$filter", [""])[0])
+        gts = re.findall(r"Id gt (\d+)", flt)
+        return max(int(g) for g in gts) if gts else None
+
+    def _parents(request):
+        # Full inline child page, NO Children@odata.nextLink. Honor the keyset
+        # seek so the top-level walk terminates (empty past the one parent).
+        if _floor(request) is not None:
+            return (200, {}, json.dumps({"value": []}))
         return (200, {}, json.dumps({"value": [{"Id": 1, "Name": "p", "Children": inline}]}))
 
     cont_urls = []
+    after = [
+        {"Id": i, "Label": f"c{i}", "ModifiedAt": "2024-01-02T00:00:00Z"} for i in range(21, 26)
+    ]
 
     def _children(request):
         cont_urls.append(request.url.replace("%20", " ").replace("%24", "$"))
-        # Remaining 5 children — short page (< $top) ⇒ collection exhausted.
-        rest = [
-            {"Id": i, "Label": f"c{i}", "ModifiedAt": "2024-01-02T00:00:00Z"} for i in range(21, 26)
-        ]
-        return (200, {}, json.dumps({"value": rest}))
+        floor = _floor(request) or 0
+        return (200, {}, json.dumps({"value": [r for r in after if r["Id"] > floor]}))
 
     responses.add_callback(responses.GET, f"{SERVICE_URL}Parents", callback=_parents)
     responses.add_callback(responses.GET, f"{SERVICE_URL}Parents(1)/Children", callback=_children)
@@ -2804,12 +2817,12 @@ def test_pagination_keyset_continues_inner_expand_when_nextlink_omitted():
     rows = list(records)
     assert [r["Id"] for r in rows] == list(range(11, 26))  # all 15, none dropped
     assert offset == {}
-    # One continuation hit the child collection directly with a keyset seek
-    # past the last inline child (Id 20), NOT a $skip.
-    assert len(cont_urls) == 1
+    # First continuation seeks past the last inline child (Id 20), NOT a $skip;
+    # a second (empty) request terminates the drain (keyset stops on empty).
     assert "Parents(1)/Children" in cont_urls[0]
     assert "Id gt 20" in cont_urls[0]
     assert "$skip" not in cont_urls[0]
+    assert len(cont_urls) == 2
 
 
 @responses.activate
@@ -2819,16 +2832,28 @@ def test_pagination_skip_continues_inner_expand_when_nextlink_omitted():
     a keyset seek."""
     _mock_nested_metadata()
     inline = [{"Id": i, "Label": f"c{i}"} for i in range(11, 21)]  # 10 == child $top
+    all_children = [{"Id": i, "Label": f"c{i}"} for i in range(11, 26)]  # full direct collection
 
-    def _parents(_request):
+    def _skip(request):
+        from urllib.parse import parse_qs, urlparse
+
+        return int(parse_qs(urlparse(request.url).query).get("$skip", ["0"])[0])
+
+    def _parents(request):
+        # Honor $skip so the top-level walk terminates past the one parent.
+        if _skip(request) > 0:
+            return (200, {}, json.dumps({"value": []}))
         return (200, {}, json.dumps({"value": [{"Id": 1, "Name": "p", "Children": inline}]}))
 
     cont_urls = []
 
     def _children(request):
         cont_urls.append(request.url.replace("%20", " ").replace("%24", "$"))
-        rest = [{"Id": i, "Label": f"c{i}"} for i in range(21, 26)]
-        return (200, {}, json.dumps({"value": rest}))
+        from urllib.parse import parse_qs, urlparse
+
+        top = int(parse_qs(urlparse(request.url).query).get("$top", ["1000"])[0])
+        skip = _skip(request)
+        return (200, {}, json.dumps({"value": all_children[skip : skip + top]}))
 
     responses.add_callback(responses.GET, f"{SERVICE_URL}Parents", callback=_parents)
     responses.add_callback(responses.GET, f"{SERVICE_URL}Parents(1)/Children", callback=_children)
@@ -2840,9 +2865,11 @@ def test_pagination_skip_continues_inner_expand_when_nextlink_omitted():
         {"expand_contained": "true", "pagination": "skip", "page_size": "1000"},
     )
     assert [r["Id"] for r in list(records)] == list(range(11, 26))
-    assert len(cont_urls) == 1
+    # First continuation skips past the inline page; a second (empty) request
+    # past the end terminates the drain.
     assert "$skip=10" in cont_urls[0]
     assert " gt " not in cont_urls[0]
+    assert len(cont_urls) == 2
 
 
 @responses.activate
@@ -2858,8 +2885,18 @@ def test_pagination_keyset_continued_inner_expand_reexpands_grandchildren():
         return {"Id": cid, "Label": f"c{cid}", "Notes": [{"Id": 1000 + cid, "Text": f"n{cid}"}]}
 
     inline_children = [_child(cid) for cid in range(11, 16)]  # 5 == Children $top → truncated
+    after_children = [_child(cid) for cid in (16, 17)]
 
-    def _parents(_request):
+    def _floor(request):
+        from urllib.parse import parse_qs, unquote, urlparse
+
+        flt = unquote(parse_qs(urlparse(request.url).query).get("$filter", [""])[0])
+        gts = re.findall(r"Id gt (\d+)", flt)
+        return max(int(g) for g in gts) if gts else None
+
+    def _parents(request):
+        if _floor(request) is not None:
+            return (200, {}, json.dumps({"value": []}))
         return (
             200,
             {},
@@ -2870,8 +2907,8 @@ def test_pagination_keyset_continued_inner_expand_reexpands_grandchildren():
 
     def _children(request):
         cont_urls.append(request.url.replace("%20", " ").replace("%24", "$"))
-        rest = [_child(cid) for cid in (16, 17)]  # short page ⇒ done
-        return (200, {}, json.dumps({"value": rest}))
+        floor = _floor(request) or 0
+        return (200, {}, json.dumps({"value": [c for c in after_children if c["Id"] > floor]}))
 
     responses.add_callback(responses.GET, f"{SERVICE_URL}Parents", callback=_parents)
     responses.add_callback(responses.GET, f"{SERVICE_URL}Parents(1)/Children", callback=_children)
@@ -2889,10 +2926,11 @@ def test_pagination_keyset_continued_inner_expand_reexpands_grandchildren():
     assert sorted(r["Children_Id"] for r in rows) == [11, 12, 13, 14, 15, 16, 17]
     assert all(r["Parents_Id"] == 1 for r in rows)
     assert {r["Id"] for r in rows} == {1000 + cid for cid in range(11, 18)}
-    # The continuation re-expanded the grandchildren and seeked past child 15.
-    assert len(cont_urls) == 1
+    # First continuation re-expands the grandchildren and seeks past child 15;
+    # a second (empty) request terminates the drain.
     assert "$expand=Notes" in cont_urls[0]
     assert "Id gt 15" in cont_urls[0]
+    assert len(cont_urls) == 2
 
 
 @responses.activate
@@ -2907,7 +2945,12 @@ def test_pagination_keyset_inner_expand_continuation_resumes_across_batches():
     # continuation going across multiple keyset seeks.
     universe = {i: {"Id": i, "Label": f"c{i}"} for i in range(11, 34)}  # 11..33
 
-    def _parents(_request):
+    def _parents(request):
+        from urllib.parse import parse_qs, unquote, urlparse
+
+        flt = unquote(parse_qs(urlparse(request.url).query).get("$filter", [""])[0])
+        if "Id gt" in flt:  # honor the keyset seek so the top-level walk ends
+            return (200, {}, json.dumps({"value": []}))
         inline = [universe[i] for i in range(11, 21)]  # full page → continuation
         return (200, {}, json.dumps({"value": [{"Id": 1, "Name": "p", "Children": inline}]}))
 
@@ -3163,6 +3206,86 @@ def test_pagination_keyset_does_not_accumulate_filter_across_batches():
     # The fix: no request's $filter carries more than one keyset seek. The old
     # behaviour AND-ed one disjunction per batch, so this would have grown to 3+.
     assert max(f.count(" or (") for f in seen_filters) <= 1
+
+
+@responses.activate
+def test_pagination_keyset_drains_server_pages_below_requested_top():
+    """Regression (xmla_demo mock): a server that caps each response BELOW the
+    requested ``$top`` and omits ``@odata.nextLink``. A short page is NOT proof
+    of exhaustion, so ``keyset`` keeps seeking until empty and reads every row.
+    ``nextlink``/``auto`` would stop at the first short page (see the auto
+    test below)."""
+    _mock_nested_metadata()
+    responses.get(f"{SERVICE_URL}Parents", json={"value": [{"Id": 1}]})
+    server_cap = 3  # server returns at most 3 rows/response, ignoring $top=1000
+    children = [
+        {"Id": 10 + i, "Label": f"c{i}", "ModifiedAt": f"2024-01-{i + 1:02d}T00:00:00Z"}
+        for i in range(7)
+    ]
+
+    def cb(request):
+        from urllib.parse import parse_qs, unquote, urlparse
+
+        flt = unquote(parse_qs(urlparse(request.url).query).get("$filter", [""])[0])
+        gt = re.search(r"ModifiedAt gt ([0-9T:\-Z]+)", flt)
+        eq_id = re.search(r"ModifiedAt eq ([0-9T:\-Z]+) and Id gt (\d+)", flt)
+
+        def keep(r):
+            if not flt:
+                return True
+            if gt and r["ModifiedAt"] > gt.group(1):
+                return True
+            return bool(
+                eq_id and r["ModifiedAt"] == eq_id.group(1) and r["Id"] > int(eq_id.group(2))
+            )
+
+        rows = [r for r in children if keep(r)]
+        # Capped below the requested $top, and NO @odata.nextLink.
+        return (200, {}, json.dumps({"value": rows[:server_cap]}))
+
+    responses.add_callback(responses.GET, f"{SERVICE_URL}Parents(1)/Children", callback=cb)
+    c = _make()
+    rows, offset = c.read_table(
+        "Parents__Children",
+        {},
+        {"cursor_field": "ModifiedAt", "pagination": "keyset", "page_size": "1000"},
+    )
+    assert [r["Id"] for r in rows] == [10, 11, 12, 13, 14, 15, 16]  # all 7, not just first 3
+    assert offset == {"cursor": "2024-01-07T00:00:00Z"}
+
+
+@responses.activate
+def test_pagination_auto_drains_snapshot_server_pages_below_top():
+    """The xmla_demo scenario: a SNAPSHOT read (no cursor_field) of a server
+    that caps each response below the requested ``$top`` and never emits an
+    ``@odata.nextLink``. With the default ``pagination=auto``, a snapshot read
+    falls back to the keyset seek and drains until empty — so every leaf row is
+    read with no per-table override. (Cursor/incremental reads stay conservative
+    here — see ``test_pagination_keyset_drains_server_pages_below_requested_top``
+    for the explicit-keyset path that drains those.)"""
+    _mock_nested_metadata()
+    # Parents enumeration: one short page, then the drain probe sees empty.
+    responses.get(f"{SERVICE_URL}Parents", json={"value": [{"Id": 1}]})
+    responses.get(f"{SERVICE_URL}Parents", json={"value": []})
+    children = [{"Id": 10 + i, "Label": f"c{i}"} for i in range(7)]
+
+    def cb(request):
+        from urllib.parse import parse_qs, unquote, urlparse
+
+        flt = unquote(parse_qs(urlparse(request.url).query).get("$filter", [""])[0])
+        gt = re.search(r"Id gt (\d+)", flt)  # snapshot keyset seeks on the PK
+        rows = [r for r in children if (not flt) or (gt and r["Id"] > int(gt.group(1)))]
+        return (200, {}, json.dumps({"value": rows[:3]}))  # cap 3, no nextLink
+
+    responses.add_callback(responses.GET, f"{SERVICE_URL}Parents(1)/Children", callback=cb)
+    c = _make()
+    rows, _ = c.read_table(
+        "Parents__Children",
+        None,
+        {"pagination": "auto", "page_size": "1000"},
+    )
+    # auto drains every capped page — all 7 leaf rows, not just the first 3.
+    assert [r["Id"] for r in rows] == [10, 11, 12, 13, 14, 15, 16]
 
 
 @responses.activate
@@ -4442,6 +4565,9 @@ def test_contained_npp_filter_at_top_prunes_parent_walk():
             )
         ],
     )
+    # auto drains link-omitting collections: the trailing keyset probe
+    # ((Id eq 5) and (Id gt 5)) falls through to this empty page and stops.
+    responses.get(f"{SERVICE_URL}Parents", json={"value": []})
     responses.get(
         f"{SERVICE_URL}Parents(5)/Children",
         json={"value": [{"Id": 11, "Label": "a", "ModifiedAt": "2024-01-01T00:00:00Z"}]},
@@ -4477,6 +4603,8 @@ def test_contained_npp_filter_at_middle_prunes_middle_walk():
             )
         ],
     )
+    # auto's trailing keyset probe falls through to this empty page.
+    responses.get(f"{SERVICE_URL}Parents(1)/Children", json={"value": []})
     responses.get(
         f"{SERVICE_URL}Parents(2)/Children",
         json={"value": []},
@@ -4517,6 +4645,8 @@ def test_contained_npp_filter_at_leaf_applies_at_leaf_url():
             )
         ],
     )
+    # auto's trailing keyset probe falls through to this empty page.
+    responses.get(f"{SERVICE_URL}Parents(1)/Children", json={"value": []})
     c = _make()
     records, _ = c.read_table("Parents__Children", None, {"filter_at_Children": "Label eq 'a'"})
     rows = list(records)
@@ -4542,6 +4672,8 @@ def test_contained_npp_filter_at_all_levels_cascades():
             )
         ],
     )
+    # auto's trailing keyset probe at each level falls through to an empty page.
+    responses.get(f"{SERVICE_URL}Parents", json={"value": []})
     responses.get(
         f"{SERVICE_URL}Parents(5)/Children",
         json={"value": [{"Id": 10}]},
@@ -4556,6 +4688,7 @@ def test_contained_npp_filter_at_all_levels_cascades():
             )
         ],
     )
+    responses.get(f"{SERVICE_URL}Parents(5)/Children", json={"value": []})
     responses.get(
         f"{SERVICE_URL}Parents(5)/Children(10)/Notes",
         json={"value": [{"Id": 100, "Text": "x"}]},
@@ -4565,6 +4698,7 @@ def test_contained_npp_filter_at_all_levels_cascades():
             )
         ],
     )
+    responses.get(f"{SERVICE_URL}Parents(5)/Children(10)/Notes", json={"value": []})
     c = _make()
     records, _ = c.read_table(
         "Parents__Children__Notes",
@@ -4596,6 +4730,7 @@ def test_contained_npp_filter_at_index_form_equivalent():
             )
         ],
     )
+    responses.get(f"{SERVICE_URL}Parents", json={"value": []})
     responses.get(
         f"{SERVICE_URL}Parents(5)/Children",
         json={"value": [{"Id": 11, "Label": "a", "ModifiedAt": "2024-01-01T00:00:00Z"}]},
@@ -4789,6 +4924,7 @@ def test_contained_npp_filter_at_composes_with_cursor_at_same_level():
             )
         ],
     )
+    responses.get(f"{SERVICE_URL}Parents(1)/Children", json={"value": []})
     c = _make()
     records, _ = c.read_table(
         "Parents__Children",
@@ -4822,6 +4958,7 @@ def test_contained_npp_filter_at_leaf_composes_with_user_filter():
             )
         ],
     )
+    responses.get(f"{SERVICE_URL}Parents(1)/Children", json={"value": []})
     c = _make()
     records, _ = c.read_table(
         "Parents__Children",
@@ -4853,6 +4990,7 @@ def test_flat_filter_at_segment_applies_to_flat_table_read():
             )
         ],
     )
+    responses.get(f"{SERVICE_URL}Customers", json={"value": []})
     c = _make()
     records, _ = c.read_table("Customers", None, {"filter_at_Customers": "CustomerID eq 'ALFKI'"})
     assert len(list(records)) == 1
@@ -5220,7 +5358,12 @@ def test_contained_incremental_truncation_trims_boundary_cohort():
     of the truncated chain is trimmed and the offset carries a
     ``truncated_chain_cursor`` so the resumed call re-picks up exactly
     that cohort without skipping it (Option A boundary trim, scoped to
-    the truncated chain only)."""
+    the truncated chain only).
+
+    Pinned to ``pagination=nextlink``: this cursor-only boundary trim is the
+    checkpoint used when a page carries no continuation link. Under the default
+    ``auto`` the walk instead drains the leaf and parks a compound keyset seek
+    (see ``test_contained_incremental_auto_drains_capped_leaf``)."""
     _mock_nested_metadata()
     responses.get(f"{SERVICE_URL}Parents", json={"value": [{"Id": 1}, {"Id": 2}]})
     responses.get(
@@ -5237,7 +5380,7 @@ def test_contained_incremental_truncation_trims_boundary_cohort():
     records, offset = c.read_table(
         "Parents__Children",
         {},
-        {"cursor_field": "ModifiedAt", "max_records_per_batch": "2"},
+        {"cursor_field": "ModifiedAt", "max_records_per_batch": "2", "pagination": "nextlink"},
     )
     rows = list(records)
     # Trim drops the c2 boundary cohort; only c1 is emitted.
@@ -5276,7 +5419,7 @@ def test_contained_incremental_complete_parent_single_cursor_emits_all():
     records, offset = c.read_table(
         "Parents__Children",
         {},
-        {"cursor_field": "ModifiedAt", "max_records_per_batch": "2"},
+        {"cursor_field": "ModifiedAt", "max_records_per_batch": "2", "pagination": "nextlink"},
     )
     rows = list(records)
     # All three same-cursor rows come through despite the cap of 2 ...
@@ -5323,7 +5466,7 @@ def test_contained_incremental_continues_past_single_cursor_parent_then_checkpoi
     records, offset = c.read_table(
         "Parents__Children",
         {},
-        {"cursor_field": "ModifiedAt", "max_records_per_batch": "2"},
+        {"cursor_field": "ModifiedAt", "max_records_per_batch": "2", "pagination": "nextlink"},
     )
     rows = list(records)
     # Parent 1's full cohort + parent 2's trimmed prefix (22's cohort dropped).
@@ -5333,6 +5476,61 @@ def test_contained_incremental_continues_past_single_cursor_parent_then_checkpoi
         "parent_idx": 1,
         "truncated_chain_cursor": "2024-02-01T00:00:00Z",
     }
+
+
+@responses.activate
+def test_contained_incremental_auto_drains_capped_leaf():
+    """The xmla_demo scenario: a CONTAINED CURSOR read (cursor_field set) of a
+    server that caps each leaf response below $top and omits @odata.nextLink.
+    Under the default ``pagination=auto`` the leaf-cursor walk now drains the
+    leaf via the keyset seek instead of stopping at the first short page, so the
+    full leaf is read across batches with no rows dropped — no per-table
+    pagination override needed. (Mirrors WorkPackageDetails on the live mock.)"""
+    _mock_nested_metadata()
+    responses.get(f"{SERVICE_URL}Parents", json={"value": [{"Id": 1}]})
+    responses.get(f"{SERVICE_URL}Parents", json={"value": []})
+    # One parent, a 7-row leaf, server caps every response at 3 rows and never
+    # emits a continuation link — but honors the compound keyset $filter.
+    children = [
+        {"Id": 10 + i, "Label": f"c{i}", "ModifiedAt": f"2024-01-{i + 1:02d}T00:00:00Z"}
+        for i in range(7)
+    ]
+
+    def cb(request):
+        from urllib.parse import parse_qs, unquote, urlparse
+
+        flt = unquote(parse_qs(urlparse(request.url).query).get("$filter", [""])[0])
+        gt = re.search(r"ModifiedAt gt ([0-9T:\-Z]+)", flt)
+        eq_id = re.search(r"ModifiedAt eq ([0-9T:\-Z]+) and Id gt (\d+)", flt)
+
+        def keep(r):
+            if not flt:
+                return True
+            if gt and r["ModifiedAt"] > gt.group(1):
+                return True
+            return bool(
+                eq_id and r["ModifiedAt"] == eq_id.group(1) and r["Id"] > int(eq_id.group(2))
+            )
+
+        rows = [r for r in children if keep(r)]
+        return (200, {}, json.dumps({"value": rows[:3]}))  # cap 3, no nextLink
+
+    responses.add_callback(responses.GET, f"{SERVICE_URL}Parents(1)/Children", callback=cb)
+    c = _make()
+    # Drive the cursor read to completion the way SDP does: feed the offset back
+    # until it stops advancing. Default pagination (auto), generous cap.
+    seen, offset, batches = [], {}, 0
+    while batches < 20:
+        batches += 1
+        recs, new = c.read_table("Parents__Children", offset, {"cursor_field": "ModifiedAt"})
+        got = [r["Id"] for r in recs]
+        seen.extend(got)
+        if not got or new == offset:
+            break
+        offset = new
+    # All 7 leaf rows, each exactly once.
+    assert sorted(seen) == [10, 11, 12, 13, 14, 15, 16]
+    assert len(seen) == len(set(seen))
 
 
 @responses.activate
@@ -5952,6 +6150,7 @@ def test_partition_get_partitions_applies_filter_at_top():
             )
         ],
     )
+    responses.get(f"{SERVICE_URL}Parents", json={"value": []})
     c = _make()
     parts = c.get_partitions(
         "Parents__Children",
@@ -5975,6 +6174,7 @@ def test_partition_read_partition_applies_filter_at_leaf():
             )
         ],
     )
+    responses.get(f"{SERVICE_URL}Parents(1)/Children", json={"value": []})
     c = _make()
     partition = {"top_parent_rows": [{"Id": 1}], "cursor_lower": None}
     rows = list(
@@ -6104,7 +6304,9 @@ def test_retry_honours_retry_after_seconds_header(monkeypatch):
 
     responses.add_callback(responses.GET, f"{SERVICE_URL}Customers", callback=_customers)
     c = _make({"token": "t"})
-    rows, _ = c.read_table("Customers", None, {})
+    # pagination=nextlink keeps this focused on retry: the default auto would
+    # add a trailing drain probe (an extra GET) after the short link-less page.
+    rows, _ = c.read_table("Customers", None, {"pagination": "nextlink"})
     assert [r["Id"] for r in rows] == [1]
     assert call_count["n"] == 2
     assert sleeps == [7.0]
@@ -6131,7 +6333,8 @@ def test_retry_honours_retry_after_http_date_header(monkeypatch):
 
     responses.add_callback(responses.GET, f"{SERVICE_URL}Customers", callback=_customers)
     c = _make({"token": "t"})
-    rows, _ = c.read_table("Customers", None, {})
+    # pagination=nextlink: focus on retry, skip the default auto drain probe.
+    rows, _ = c.read_table("Customers", None, {"pagination": "nextlink"})
     assert [r["Id"] for r in rows] == [1]
     assert call_count["n"] == 2
     # Allow ±5 s wiggle for test scheduling jitter; importantly it should
@@ -6155,7 +6358,8 @@ def test_retry_no_header_uses_exponential_backoff(monkeypatch):
 
     responses.add_callback(responses.GET, f"{SERVICE_URL}Customers", callback=_customers)
     c = _make({"token": "t"})
-    rows, _ = c.read_table("Customers", None, {})
+    # pagination=nextlink: focus on retry, skip the default auto drain probe.
+    rows, _ = c.read_table("Customers", None, {"pagination": "nextlink"})
     assert [r["Id"] for r in rows] == [1]
     assert call_count["n"] == 4
     assert sleeps == [1.0, 2.0, 4.0]

@@ -15,6 +15,11 @@ so the mixin requires no abstract-method declarations — it duck-types
 against the concrete class.
 """
 
+# Cohesive contained-navigation logic (snapshot N+1, nested $expand drainer,
+# leaf/ancestor cursor walks) keeps this mixin over pylint's 1500-line advisory
+# cap; splitting it further would fragment one tightly-coupled feature.
+# pylint: disable=too-many-lines
+
 import math
 import re
 from datetime import date, datetime
@@ -566,6 +571,7 @@ class ContainedNavMixin:
             for i, seg in enumerate(segments)
         )
 
+    # pylint: disable=too-many-arguments,too-many-positional-arguments
     def _build_contained_url(
         self,
         segments: list[str],
@@ -578,6 +584,7 @@ class ContainedNavMixin:
         base = join_url(self.service_url, self._build_contained_path(segments, key_chain))
         return f"{base}?{self._format_query_params(table_options, extra_filter, order_by)}"
 
+    # pylint: disable=too-many-arguments,too-many-positional-arguments
     def _build_expand_url(
         self,
         segments: list[str],
@@ -641,6 +648,7 @@ class ContainedNavMixin:
             per_level_tops,
         )
 
+    # pylint: disable=too-many-arguments,too-many-positional-arguments
     def _expand_level_order_by(
         self,
         segments: list[str],
@@ -1355,9 +1363,25 @@ class ContainedNavMixin:
     def _fetch_one_expand_page(self, url: str) -> tuple[list[dict], str | None]:
         """One HTTP GET; returns ``(page_rows, next_url)``. Thin wrapper
         over :meth:`_fetch_pages_with_links` that consumes a single
-        iteration so the caller can check the cap between fetches."""
-        for page_rows, page_next_url in self._fetch_pages_with_links(url):
-            return page_rows, page_next_url
+        iteration so the caller can check the cap between fetches.
+
+        No-progress guard for the work-queue drainers: those slice pagination
+        one page per call, so the in-generator guard in
+        :meth:`_client_paginate_pages` is bypassed. If a client-built
+        continuation doesn't advance (the resolved next URL equals the one we
+        just fetched — the server ignored the seek/``$skip``), drop the link so
+        the drainer stops this collection instead of looping forever.
+
+        ``auto_drains_short=False``: this caller re-enters with a fresh
+        :meth:`_fetch_pages_with_links` generator per page, so the in-generator
+        no-progress guard can't span calls. Under ``auto`` that makes a
+        synthesized short-page seek unsafe (it would re-fetch and re-emit the
+        page — duplicate rows), so ``auto`` here keeps the conservative
+        short-page-is-the-end behaviour. Full link-less pages still continue,
+        and a parent's truncated inner collection is drained by the dedicated
+        inner-``$expand`` continuation, not by this top-level walk."""
+        for page_rows, page_next_url in self._fetch_pages_with_links(url, auto_drains_short=False):
+            return page_rows, (None if page_next_url == url else page_next_url)
         return [], None
 
     def _build_expand_end_offset(
@@ -1738,6 +1762,7 @@ class ContainedNavMixin:
         leaf_et = self._entity_type_for(CONTAINED_PATH_SEP.join(segments), namespace)
         return _ancestor_pk_order_by(self._own_primary_keys_for_et(leaf_et))
 
+    # pylint: disable=too-many-statements
     def _walk_contained_with_cursor(
         self,
         segments: list[str],
@@ -1797,7 +1822,10 @@ class ContainedNavMixin:
         synthetic floor without mutating the emitted row. ``skip_null``
         drops rows with a real null cursor (``cursor_nulls=ignore``)."""
         if effective is None:
-            effective = lambda row: row.get(cursor_field)  # noqa: E731
+
+            def effective(row):
+                return row.get(cursor_field)
+
         emitted: list[dict] = []
         truncated = False
         parent_idx = 0
@@ -1837,6 +1865,17 @@ class ContainedNavMixin:
                 )
             cap_hit_in_page = False
             page_next_url: str | None = None
+            # auto_drains_short defaults True: under the default ``auto``, a
+            # server that page-limits a leaf below $top while omitting
+            # @odata.nextLink is still drained (keyset seek until empty), so a
+            # cursor read isn't silently truncated to one short page. The
+            # synthesized seek that surfaces as ``page_next_url`` when the cap is
+            # hit mid-leaf is itself the resume checkpoint: a compound
+            # ``(cursor gt v) or (cursor eq v and pk gt p)`` seek that re-enters
+            # this parent at the exact row, correctly continuing a same-cursor
+            # cohort that spans the cap (better than the cursor-only trim below,
+            # which is kept for nextlink mode / whole-leaf-in-one-response
+            # servers where ``page_next_url`` is None).
             for page_rows, page_next_url in self._fetch_pages_with_links(initial_url):
                 for row in page_rows:
                     if skip_null and row.get(cursor_field) is None:
@@ -2232,6 +2271,10 @@ class ContainedNavMixin:
                     order_by=leaf_order_by,
                 )
             page_next_url: str | None = None
+            # auto_drains_short defaults True (see the leaf-cursor walk): the
+            # default auto drains a link-omitting, sub-$top-capped leaf via the
+            # keyset seek, and the synthesized seek doubles as the cap-hit resume
+            # checkpoint.
             for page_rows, page_next_url in self._fetch_pages_with_links(initial_url):
                 for row in page_rows:
                     self._tag_with_ancestor_fks(row, segments, chain, fk_columns)
