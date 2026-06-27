@@ -16,6 +16,7 @@ Two layers:
 
 import json
 import logging
+import re
 import time
 
 import pytest
@@ -2545,10 +2546,11 @@ def test_top_emitted_when_page_size_set():
 
 @responses.activate
 def test_page_size_default_split_by_ingest_type():
-    """``read_table`` defaults ``page_size`` only for cursor-based ingest:
-    a ``cursor_field`` read with no ``page_size`` still sends ``$top=1000``
-    (bounded incremental pages), while a snapshot read with no
-    ``page_size`` sends no ``$top`` at all (server picks the page size)."""
+    """``read_table`` defaults ``page_size`` to ``1000`` (→ ``$top=1000``)
+    for both cursor-based and snapshot ingest, because the default
+    ``pagination=auto`` needs a ``$top`` to detect a full page. Setting
+    ``pagination=nextlink`` restores the $top-free snapshot scan (server
+    picks the page size)."""
     _mock_metadata()
     captured = []
 
@@ -2558,12 +2560,558 @@ def test_page_size_default_split_by_ingest_type():
 
     responses.add_callback(responses.GET, f"{SERVICE_URL}Customers", callback=cb)
     c = _make()
-    # Snapshot (no cursor_field, no page_size) → no $top.
+    # Snapshot under default pagination=auto → $top=1000.
     list(c.read_table("Customers", None, {})[0])
-    assert "$top" not in captured[-1]
+    assert "$top=1000" in captured[-1]
     # Cursor-based (cursor_field, no page_size) → default $top=1000.
     list(c.read_table("Customers", {}, {"cursor_field": "ModifiedAt"})[0])
     assert "$top=1000" in captured[-1]
+    # Opting back into nextlink drops $top on a snapshot scan.
+    list(c.read_table("Customers", None, {"pagination": "nextlink"})[0])
+    assert "$top" not in captured[-1]
+
+
+# --- client-driven pagination (keyset / skip / auto) ----------------------
+
+
+def test_pagination_url_helpers():
+    from databricks.labs.community_connector.sources.odata.odata import (
+        _pg_get_query,
+        _pg_orderby_keys,
+        _pg_parse_top,
+        _pg_set_query,
+        _pg_with_extra_filter,
+    )
+
+    u = "https://x/Set?$top=2&$orderby=ModifiedAt asc,Id asc"
+    assert _pg_parse_top(u) == 2
+    assert _pg_orderby_keys(u) == ["ModifiedAt", "Id"]
+    assert _pg_get_query(u, "$top") == "2"
+    # descending sort can't be walked with a `gt` seek
+    assert _pg_orderby_keys("https://x/S?$orderby=Id desc") == []
+    # set/replace/append $skip
+    assert _pg_set_query("https://x/S?$top=2", "$skip", "4").endswith("&$skip=4")
+    assert "$skip=6" in _pg_set_query("https://x/S?$top=2&$skip=4", "$skip", "6")
+    # add a $filter when none, AND into an existing one
+    assert (
+        _pg_with_extra_filter("https://x/S?$top=2", "Id gt 5")
+        == "https://x/S?$top=2&$filter=Id gt 5"
+    )
+    assert (
+        _pg_with_extra_filter("https://x/S?$filter=A eq 1&$top=2", "Id gt 5")
+        == "https://x/S?$filter=(A eq 1) and (Id gt 5)&$top=2"
+    )
+
+
+def test_pagination_keyset_filter_compound():
+    from databricks.labs.community_connector.sources.odata.odata import _pg_keyset_filter
+
+    assert _pg_keyset_filter(["Id"], {"Id": 2}) == "Id gt 2"
+    # compound seek continues *within* a same-cursor cohort
+    assert _pg_keyset_filter(
+        ["ModifiedAt", "Id"], {"ModifiedAt": "2024-01-01T00:00:00Z", "Id": 2}
+    ) == (
+        "(ModifiedAt gt 2024-01-01T00:00:00Z) or "
+        "(ModifiedAt eq 2024-01-01T00:00:00Z and Id gt 2)"
+    )
+    # null boundary value → no comparable seek (caller falls back to $skip)
+    assert _pg_keyset_filter(["ModifiedAt", "Id"], {"ModifiedAt": None, "Id": 2}) is None
+
+
+def _pagination_dataset():
+    return [{"Id": i, "ModifiedAt": f"2024-01-{i:02d}T00:00:00Z"} for i in range(1, 6)]
+
+
+@responses.activate
+def test_pagination_keyset_drains_collection_without_nextlink():
+    """A server that page-limits but never emits @odata.nextLink: keyset
+    mode seeks the next page via `Id gt <last>` and drains all rows."""
+    _mock_metadata()
+    data = _pagination_dataset()
+    seen_filters = []
+
+    def cb(req):
+        from urllib.parse import parse_qs, unquote, urlparse
+
+        q = parse_qs(urlparse(req.url).query)
+        top = int(q.get("$top", ["1000"])[0])
+        flt = unquote(q.get("$filter", [""])[0])
+        seen_filters.append(flt)
+        rows = data
+        if "Id gt" in flt:
+            n = int(re.search(r"Id gt (\d+)", flt).group(1))
+            rows = [r for r in data if r["Id"] > n]
+        return (200, {}, json.dumps({"value": rows[:top]}))  # NO nextLink
+
+    responses.add_callback(responses.GET, f"{SERVICE_URL}Customers", callback=cb)
+    c = _make()
+    rows, _ = c.read_table("Customers", None, {"pagination": "keyset", "page_size": "2"})
+    assert [r["Id"] for r in rows] == [1, 2, 3, 4, 5]
+    assert any("Id gt" in f for f in seen_filters)  # actually seeked, not one page
+
+
+@responses.activate
+def test_pagination_skip_drains_collection_without_nextlink():
+    """`skip` mode pages via $top + $skip for keyless/non-seekable sources."""
+    _mock_metadata()
+    data = _pagination_dataset()
+
+    def cb(req):
+        from urllib.parse import parse_qs, urlparse
+
+        q = parse_qs(urlparse(req.url).query)
+        top = int(q.get("$top", ["1000"])[0])
+        skip = int(q.get("$skip", ["0"])[0])
+        return (200, {}, json.dumps({"value": data[skip : skip + top]}))  # NO nextLink
+
+    responses.add_callback(responses.GET, f"{SERVICE_URL}Customers", callback=cb)
+    c = _make()
+    rows, _ = c.read_table("Customers", None, {"pagination": "skip", "page_size": "2"})
+    assert [r["Id"] for r in rows] == [1, 2, 3, 4, 5]
+
+
+@responses.activate
+def test_pagination_auto_follows_nextlink_then_falls_back_to_keyset():
+    """`auto`: trust @odata.nextLink while emitted; when a full page arrives
+    without one, fall back to keyset for the rest of the collection."""
+    _mock_metadata()
+    data = _pagination_dataset()
+
+    def cb(req):
+        from urllib.parse import parse_qs, unquote, urlparse
+
+        q = parse_qs(urlparse(req.url).query)
+        top = int(q.get("$top", ["2"])[0])
+        if "skiptoken" in req.url:
+            # page 2: server-paged, full, but NO nextLink → triggers fallback
+            return (200, {}, json.dumps({"value": data[2:4]}))
+        flt = unquote(q.get("$filter", [""])[0])
+        if "Id gt" in flt:
+            n = int(re.search(r"Id gt (\d+)", flt).group(1))
+            return (200, {}, json.dumps({"value": [r for r in data if r["Id"] > n][:top]}))
+        # page 1: full page WITH a nextLink the connector should follow
+        return (
+            200,
+            {},
+            json.dumps(
+                {
+                    "value": data[0:2],
+                    "@odata.nextLink": f"{SERVICE_URL}Customers?$skiptoken=p2&$top=2",
+                }
+            ),
+        )
+
+    responses.add_callback(responses.GET, f"{SERVICE_URL}Customers", callback=cb)
+    c = _make()
+    rows, _ = c.read_table("Customers", None, {"pagination": "auto", "page_size": "2"})
+    assert [r["Id"] for r in rows] == [1, 2, 3, 4, 5]
+
+
+@responses.activate
+def test_pagination_invalid_value_raises():
+    _mock_metadata()
+    c = _make()
+    with pytest.raises(ValueError, match="Invalid pagination"):
+        c.read_table("Customers", None, {"pagination": "bogus"})
+
+
+@responses.activate
+def test_pagination_keyset_splits_same_cursor_cohort_in_contained_leaf_walk():
+    """Phase 2: the contained leaf-cursor walk paginates via keyset too.
+    A parent whose leaf collection is a single cursor value larger than a
+    page — and a server that omits @odata.nextLink — is drained in full by
+    the compound ``(cursor eq V and pk gt last)`` seek. Under ``nextlink``
+    this same setup would silently stop after the first page."""
+    _mock_nested_metadata()
+    responses.get(f"{SERVICE_URL}Parents", json={"value": [{"Id": 1}]})
+    same = "2024-01-01T00:00:00Z"
+    children = [{"Id": i, "Label": chr(96 + i), "ModifiedAt": same} for i in (11, 12, 13)]
+
+    def cb(req):
+        from urllib.parse import parse_qs, unquote, urlparse
+
+        q = parse_qs(urlparse(req.url).query)
+        top = int(q.get("$top", ["1000"])[0])
+        flt = unquote(q.get("$filter", [""])[0])
+        rows = children
+        if flt:
+            # Our keyset predicate, possibly AND-ed with the cursor filter:
+            #   (ModifiedAt gt X) or (ModifiedAt eq X and Id gt N)
+            gt = re.search(r"ModifiedAt gt ([0-9T:\-Z]+)", flt)
+            eq_id = re.search(r"ModifiedAt eq ([0-9T:\-Z]+) and Id gt (\d+)", flt)
+
+            def keep(r):
+                if gt and r["ModifiedAt"] > gt.group(1):
+                    return True
+                if eq_id and r["ModifiedAt"] == eq_id.group(1) and r["Id"] > int(eq_id.group(2)):
+                    return True
+                return False
+
+            rows = [r for r in children if keep(r)]
+        return (200, {}, json.dumps({"value": rows[:top]}))  # NO nextLink
+
+    responses.add_callback(responses.GET, f"{SERVICE_URL}Parents(1)/Children", callback=cb)
+    c = _make()
+    rows, offset = c.read_table(
+        "Parents__Children",
+        {},
+        {"cursor_field": "ModifiedAt", "pagination": "keyset", "page_size": "2"},
+    )
+    assert [r["Id"] for r in rows] == [11, 12, 13]
+    assert offset == {"cursor": same}
+
+
+@responses.activate
+def test_pagination_keyset_continues_inner_expand_when_nextlink_omitted():
+    """Part B: ``expand_contained=true`` + ``pagination=keyset``. A parent's
+    inline child collection arrives as a FULL page (== inner ``$top``) with
+    NO ``Children@odata.nextLink``. The connector synthesizes a direct-nav
+    keyset continuation (``Parents(1)/Children?...&$filter=Id gt <last>``)
+    and drains the rest instead of silently dropping them — the inner-expand
+    hole that nextlink-only mode leaves open."""
+    _mock_nested_metadata()
+    # page_size=1000 over a 2-level expand → child $top = 10 (see
+    # compute_dynamic_tops). A 10-row inline page therefore looks truncated.
+    child_top = 10
+    inline = [
+        {"Id": i, "Label": f"c{i}", "ModifiedAt": "2024-01-01T00:00:00Z"}
+        for i in range(11, 11 + child_top)  # 11..20 — a full page
+    ]
+
+    def _parents(_request):
+        # Full inline child page, NO Children@odata.nextLink.
+        return (200, {}, json.dumps({"value": [{"Id": 1, "Name": "p", "Children": inline}]}))
+
+    cont_urls = []
+
+    def _children(request):
+        cont_urls.append(request.url.replace("%20", " ").replace("%24", "$"))
+        # Remaining 5 children — short page (< $top) ⇒ collection exhausted.
+        rest = [
+            {"Id": i, "Label": f"c{i}", "ModifiedAt": "2024-01-02T00:00:00Z"} for i in range(21, 26)
+        ]
+        return (200, {}, json.dumps({"value": rest}))
+
+    responses.add_callback(responses.GET, f"{SERVICE_URL}Parents", callback=_parents)
+    responses.add_callback(responses.GET, f"{SERVICE_URL}Parents(1)/Children", callback=_children)
+
+    c = _make()
+    records, offset = c.read_table(
+        "Parents__Children",
+        {},
+        {"expand_contained": "true", "pagination": "keyset", "page_size": "1000"},
+    )
+    rows = list(records)
+    assert [r["Id"] for r in rows] == list(range(11, 26))  # all 15, none dropped
+    assert offset == {}
+    # One continuation hit the child collection directly with a keyset seek
+    # past the last inline child (Id 20), NOT a $skip.
+    assert len(cont_urls) == 1
+    assert "Parents(1)/Children" in cont_urls[0]
+    assert "Id gt 20" in cont_urls[0]
+    assert "$skip" not in cont_urls[0]
+
+
+@responses.activate
+def test_pagination_skip_continues_inner_expand_when_nextlink_omitted():
+    """Part B, ``pagination=skip``: same inner-expand truncation, but the
+    synthesized continuation resumes via ``$skip=<inline_count>`` rather than
+    a keyset seek."""
+    _mock_nested_metadata()
+    inline = [{"Id": i, "Label": f"c{i}"} for i in range(11, 21)]  # 10 == child $top
+
+    def _parents(_request):
+        return (200, {}, json.dumps({"value": [{"Id": 1, "Name": "p", "Children": inline}]}))
+
+    cont_urls = []
+
+    def _children(request):
+        cont_urls.append(request.url.replace("%20", " ").replace("%24", "$"))
+        rest = [{"Id": i, "Label": f"c{i}"} for i in range(21, 26)]
+        return (200, {}, json.dumps({"value": rest}))
+
+    responses.add_callback(responses.GET, f"{SERVICE_URL}Parents", callback=_parents)
+    responses.add_callback(responses.GET, f"{SERVICE_URL}Parents(1)/Children", callback=_children)
+
+    c = _make()
+    records, _ = c.read_table(
+        "Parents__Children",
+        {},
+        {"expand_contained": "true", "pagination": "skip", "page_size": "1000"},
+    )
+    assert [r["Id"] for r in list(records)] == list(range(11, 26))
+    assert len(cont_urls) == 1
+    assert "$skip=10" in cont_urls[0]
+    assert " gt " not in cont_urls[0]
+
+
+@responses.activate
+def test_pagination_keyset_continued_inner_expand_reexpands_grandchildren():
+    """Part B, 3-level: when a truncated MID-level child collection is
+    continued, the synthesized URL re-expands the grandchildren
+    (``Parents(1)/Children?...&$expand=Notes(...)``) so leaf rows under the
+    continued children still flow, FK-tagged with the full ancestor chain."""
+    _mock_nested_metadata()
+
+    # page_size=1000 over a 3-level expand → Children $top = 5, Notes $top = 5.
+    def _child(cid):
+        return {"Id": cid, "Label": f"c{cid}", "Notes": [{"Id": 1000 + cid, "Text": f"n{cid}"}]}
+
+    inline_children = [_child(cid) for cid in range(11, 16)]  # 5 == Children $top → truncated
+
+    def _parents(_request):
+        return (
+            200,
+            {},
+            json.dumps({"value": [{"Id": 1, "Name": "p", "Children": inline_children}]}),
+        )
+
+    cont_urls = []
+
+    def _children(request):
+        cont_urls.append(request.url.replace("%20", " ").replace("%24", "$"))
+        rest = [_child(cid) for cid in (16, 17)]  # short page ⇒ done
+        return (200, {}, json.dumps({"value": rest}))
+
+    responses.add_callback(responses.GET, f"{SERVICE_URL}Parents", callback=_parents)
+    responses.add_callback(responses.GET, f"{SERVICE_URL}Parents(1)/Children", callback=_children)
+
+    c = _make()
+    records, _ = c.read_table(
+        "Parents__Children__Notes",
+        {},
+        {"expand_contained": "true", "pagination": "keyset", "page_size": "1000"},
+    )
+    rows = list(records)
+    # One leaf Note per child, for children 11..17 — including the four
+    # continued children (16, 17 from the continuation; 14, 15 were the tail
+    # of the inline page). Every leaf row carries the full ancestor chain.
+    assert sorted(r["Children_Id"] for r in rows) == [11, 12, 13, 14, 15, 16, 17]
+    assert all(r["Parents_Id"] == 1 for r in rows)
+    assert {r["Id"] for r in rows} == {1000 + cid for cid in range(11, 18)}
+    # The continuation re-expanded the grandchildren and seeked past child 15.
+    assert len(cont_urls) == 1
+    assert "$expand=Notes" in cont_urls[0]
+    assert "Id gt 15" in cont_urls[0]
+
+
+@responses.activate
+def test_pagination_keyset_inner_expand_continuation_resumes_across_batches():
+    """Part B, streaming: when ``max_records_per_batch`` fires partway
+    through a synthesized inner-expand continuation, the parked work queue
+    carries the keyset continuation URL so the next ``read()`` resumes the
+    child collection exactly where it stopped — no rows dropped, none
+    duplicated."""
+    _mock_nested_metadata()
+    # child $top = 10 at page_size=1000. Full pages of 10 keep the
+    # continuation going across multiple keyset seeks.
+    universe = {i: {"Id": i, "Label": f"c{i}"} for i in range(11, 34)}  # 11..33
+
+    def _parents(_request):
+        inline = [universe[i] for i in range(11, 21)]  # full page → continuation
+        return (200, {}, json.dumps({"value": [{"Id": 1, "Name": "p", "Children": inline}]}))
+
+    def _children(request):
+        from urllib.parse import parse_qs, unquote, urlparse
+
+        q = parse_qs(urlparse(request.url).query)
+        top = int(q.get("$top", ["10"])[0])
+        flt = unquote(q.get("$filter", [""])[0])
+        # The connector rebuilds the seek from the original continuation URL
+        # each page, so a parked seek (``Id gt 20``) gets the next page's seek
+        # AND-ed on (``... and Id gt 30``) — bounded at two clauses, strictest
+        # wins. Honour the max so the keyset advances.
+        floors = [int(m) for m in re.findall(r"Id gt (\d+)", flt)]
+        floor = max(floors) if floors else 0
+        rows = [universe[i] for i in sorted(universe) if i > floor]
+        return (200, {}, json.dumps({"value": rows[:top]}))
+
+    responses.add_callback(responses.GET, f"{SERVICE_URL}Parents", callback=_parents)
+    responses.add_callback(responses.GET, f"{SERVICE_URL}Parents(1)/Children", callback=_children)
+
+    c = _make()
+    opts = {
+        "expand_contained": "true",
+        "pagination": "keyset",
+        "page_size": "1000",
+        "max_records_per_batch": "15",
+    }
+    seen, offset, batches = [], {}, 0
+    while True:
+        records, offset = c.read_table("Parents__Children", offset, opts)
+        rows = list(records)
+        seen.extend(r["Id"] for r in rows)
+        batches += 1
+        if not offset.get("pending_fetches"):
+            break
+        assert batches < 10  # guard against a non-terminating resume loop
+    assert seen == list(range(11, 34))  # every child, in order, exactly once
+    assert batches > 1  # the cap genuinely forced a cross-batch resume
+
+
+@responses.activate
+def test_pagination_no_progress_guard_stops_repeated_keyset_page(caplog):
+    """A server that returns the same full page regardless of the keyset
+    seek would loop forever. The no-progress guard detects the identical
+    continuation page and stops, emitting each row exactly once and
+    logging a warning."""
+    _mock_metadata()
+    calls = []
+
+    def cb(req):
+        calls.append(req.url)
+        # Always the same full page (== $top=2), no nextLink, $filter ignored.
+        return (200, {}, json.dumps({"value": [{"Id": 1, "Name": "a"}, {"Id": 2, "Name": "b"}]}))
+
+    responses.add_callback(responses.GET, f"{SERVICE_URL}Customers", callback=cb)
+    c = _make()
+    with caplog.at_level(logging.WARNING):
+        records, _ = c.read_table("Customers", None, {"pagination": "keyset", "page_size": "2"})
+        rows = list(records)
+    assert [r["Id"] for r in rows] == [1, 2]  # emitted once, not duplicated/looped
+    assert len(calls) == 2  # page 1 + the one dup-detection fetch, then stop
+    assert "made no progress" in caplog.text
+
+
+@responses.activate
+def test_pagination_no_progress_guard_stops_ignored_skip():
+    """``skip`` against a server that ignores ``$skip`` returns the same
+    page each time; the guard stops instead of looping (no $orderby keys,
+    so the keyset path never engages — this exercises the skip branch)."""
+    _mock_metadata()
+    calls = []
+
+    def cb(req):
+        calls.append(req.url)
+        return (200, {}, json.dumps({"value": [{"Id": 1, "Name": "a"}, {"Id": 2, "Name": "b"}]}))
+
+    responses.add_callback(responses.GET, f"{SERVICE_URL}Customers", callback=cb)
+    c = _make()
+    records, _ = c.read_table("Customers", None, {"pagination": "skip", "page_size": "2"})
+    rows = list(records)
+    assert [r["Id"] for r in rows] == [1, 2]
+    assert len(calls) == 2
+
+
+@responses.activate
+def test_pagination_nextlink_guard_stops_self_referential_link():
+    """pagination=nextlink: a server that points @odata.nextLink back at the
+    just-fetched URL would loop forever; the guard stops after emitting the
+    current page."""
+    _mock_metadata()
+    calls = []
+
+    def cb(req):
+        calls.append(req.url)
+        n = len(calls)
+        return (
+            200,
+            {},
+            json.dumps(
+                {
+                    "value": [{"Id": n, "Name": "x"}],
+                    "@odata.nextLink": f"{SERVICE_URL}Customers?$skiptoken=x",
+                }
+            ),
+        )
+
+    responses.add_callback(responses.GET, f"{SERVICE_URL}Customers", callback=cb)
+    c = _make()
+    records, _ = c.read_table("Customers", None, {"pagination": "nextlink"})
+    rows = list(records)
+    assert [r["Id"] for r in rows] == [1, 2]  # page 1, then the self-referential page 2
+    assert len(calls) == 2
+
+
+@responses.activate
+def test_pagination_nextlink_guard_stops_identical_page_cycle():
+    """pagination=nextlink: a server that returns the same rows but a fresh
+    nextLink token each time (URL keeps changing) is caught by the page
+    fingerprint guard — the duplicate page is dropped, not re-emitted."""
+    _mock_metadata()
+    calls = []
+
+    def cb(req):
+        calls.append(req.url)
+        n = len(calls)
+        return (
+            200,
+            {},
+            json.dumps(
+                {
+                    "value": [{"Id": 1, "Name": "x"}],
+                    "@odata.nextLink": f"{SERVICE_URL}Customers?$skiptoken=t{n}",
+                }
+            ),
+        )
+
+    responses.add_callback(responses.GET, f"{SERVICE_URL}Customers", callback=cb)
+    c = _make()
+    records, _ = c.read_table("Customers", None, {"pagination": "nextlink"})
+    rows = list(records)
+    assert [r["Id"] for r in rows] == [1]
+    assert len(calls) == 2
+
+
+@responses.activate
+def test_pagination_auto_guard_stops_self_referential_link():
+    """pagination=auto: while following the server's @odata.nextLink, a
+    self-referential link is caught by the URL-equality backstop."""
+    _mock_metadata()
+    calls = []
+
+    def cb(req):
+        calls.append(req.url)
+        n = len(calls)
+        return (
+            200,
+            {},
+            json.dumps(
+                {
+                    "value": [{"Id": n, "Name": "x"}],
+                    "@odata.nextLink": f"{SERVICE_URL}Customers?$skiptoken=x",
+                }
+            ),
+        )
+
+    responses.add_callback(responses.GET, f"{SERVICE_URL}Customers", callback=cb)
+    c = _make()
+    records, _ = c.read_table("Customers", None, {"pagination": "auto"})
+    rows = list(records)
+    assert [r["Id"] for r in rows] == [1, 2]
+    assert len(calls) == 2
+
+
+@responses.activate
+def test_delta_walk_guard_stops_self_referential_link():
+    """The delta walk guards against a self-referential @odata.nextLink: the
+    server points the continuation back at the same URL. The walk stops after
+    emitting the page and resumes next run from the prior delta_link."""
+    _mock_metadata()
+    calls = []
+
+    def cb(req):
+        calls.append(req.url)
+        return (
+            200,
+            {},
+            json.dumps(
+                {
+                    "value": [{"Id": 10, "Name": "x", "ModifiedAt": "t"}],
+                    "@odata.nextLink": DELTA_LINK_V1,
+                }
+            ),
+        )
+
+    responses.add_callback(responses.GET, DELTA_LINK_V1, callback=cb)
+    c = _make()
+    records, offset = c.read_table(
+        "Customers", {"delta_link": DELTA_LINK_V1}, {"delta_tracking": "enabled"}
+    )
+    rows = list(records)
+    assert [r["Id"] for r in rows] == [10]
+    assert len(calls) == 1  # self-loop detected before re-fetching
+    assert offset == {"delta_link": DELTA_LINK_V1}
 
 
 @responses.activate
@@ -3835,6 +4383,7 @@ def test_contained_npp_filter_at_top_prunes_parent_walk():
         match=[
             responses.matchers.query_param_matcher(
                 {
+                    "$top": "1000",
                     "$select": "Id",
                     "$filter": "Id eq 5",
                     "$orderby": "Id asc",
@@ -3869,6 +4418,7 @@ def test_contained_npp_filter_at_middle_prunes_middle_walk():
         match=[
             responses.matchers.query_param_matcher(
                 {
+                    "$top": "1000",
                     "$select": "Id",
                     "$filter": "Id eq 10",
                     "$orderby": "Id asc",
@@ -3882,6 +4432,7 @@ def test_contained_npp_filter_at_middle_prunes_middle_walk():
         match=[
             responses.matchers.query_param_matcher(
                 {
+                    "$top": "1000",
                     "$select": "Id",
                     "$filter": "Id eq 10",
                     "$orderby": "Id asc",
@@ -3911,7 +4462,7 @@ def test_contained_npp_filter_at_leaf_applies_at_leaf_url():
         json={"value": [{"Id": 11, "Label": "a", "ModifiedAt": "2024-01-01T00:00:00Z"}]},
         match=[
             responses.matchers.query_param_matcher(
-                {"$filter": "Label eq 'a'", "$orderby": "Id asc"}
+                {"$top": "1000", "$filter": "Label eq 'a'", "$orderby": "Id asc"}
             )
         ],
     )
@@ -3932,6 +4483,7 @@ def test_contained_npp_filter_at_all_levels_cascades():
         match=[
             responses.matchers.query_param_matcher(
                 {
+                    "$top": "1000",
                     "$select": "Id",
                     "$filter": "Id eq 5",
                     "$orderby": "Id asc",
@@ -3945,6 +4497,7 @@ def test_contained_npp_filter_at_all_levels_cascades():
         match=[
             responses.matchers.query_param_matcher(
                 {
+                    "$top": "1000",
                     "$select": "Id",
                     "$filter": "Id eq 10",
                     "$orderby": "Id asc",
@@ -3956,7 +4509,9 @@ def test_contained_npp_filter_at_all_levels_cascades():
         f"{SERVICE_URL}Parents(5)/Children(10)/Notes",
         json={"value": [{"Id": 100, "Text": "x"}]},
         match=[
-            responses.matchers.query_param_matcher({"$filter": "Id eq 100", "$orderby": "Id asc"})
+            responses.matchers.query_param_matcher(
+                {"$top": "1000", "$filter": "Id eq 100", "$orderby": "Id asc"}
+            )
         ],
     )
     c = _make()
@@ -3982,6 +4537,7 @@ def test_contained_npp_filter_at_index_form_equivalent():
         match=[
             responses.matchers.query_param_matcher(
                 {
+                    "$top": "1000",
                     "$select": "Id",
                     "$filter": "Id eq 5",
                     "$orderby": "Id asc",
@@ -4033,9 +4589,9 @@ def test_contained_expand_user_filter_lands_in_leaf_expand_not_top():
     url = unquote(captured[0])
     # filter_at_Parents lands at the top URL; user `filter` lands
     # inside $expand=Children(...).
-    # Dynamic tops for N=2 page_size=1000: [100, 10].
-    assert "Parents?$filter=Id eq 1" in url
-    assert "$expand=Children($filter=Id eq 3" in url
+    # Dynamic tops for N=2 page_size=1000 (default pagination=auto): [100, 10].
+    assert "Parents?$top=100&$filter=Id eq 1" in url
+    assert "$expand=Children($top=10;$filter=Id eq 3" in url
     # User filter must NOT be at the top URL.
     assert "(Id eq 1) and (Id eq 3)" not in url
     assert "(Id eq 3) and (Id eq 1)" not in url
@@ -4115,7 +4671,7 @@ def test_contained_expand_filter_at_middle_lands_inside_expand():
     from urllib.parse import unquote
 
     # Dynamic tops for N=3 page_size=1000: [34, 5, 5]. Middle level = 5.
-    assert "Children($filter=Id eq 10" in unquote(captured[0])
+    assert "Children($top=5;$filter=Id eq 10" in unquote(captured[0])
 
 
 @responses.activate
@@ -4153,7 +4709,7 @@ def test_contained_expand_filter_at_leaf_lands_in_innermost_expand():
     from urllib.parse import unquote
 
     # Dynamic tops for N=3 page_size=1000: [34, 5, 5]. Leaf level = 5.
-    assert "Notes($filter=Id eq 100" in unquote(captured[0])
+    assert "Notes($top=5;$filter=Id eq 100" in unquote(captured[0])
 
 
 # --- Composition ---
@@ -4208,6 +4764,7 @@ def test_contained_npp_filter_at_leaf_composes_with_user_filter():
         match=[
             responses.matchers.query_param_matcher(
                 {
+                    "$top": "1000",
                     "$filter": "(Id lt 100) and (Label eq 'a')",
                     "$orderby": "Id asc",
                 }
@@ -4238,6 +4795,7 @@ def test_flat_filter_at_segment_applies_to_flat_table_read():
         match=[
             responses.matchers.query_param_matcher(
                 {
+                    "$top": "1000",
                     "$filter": "CustomerID eq 'ALFKI'",
                     "$orderby": "Id asc",
                 }
@@ -5335,6 +5893,7 @@ def test_partition_get_partitions_applies_filter_at_top():
         match=[
             responses.matchers.query_param_matcher(
                 {
+                    "$top": "1000",
                     "$select": "Id",
                     "$filter": "Id eq 5",
                     "$orderby": "Id asc",
@@ -5361,7 +5920,7 @@ def test_partition_read_partition_applies_filter_at_leaf():
         json={"value": [{"Id": 11, "Label": "a", "ModifiedAt": "2024-01-01T00:00:00Z"}]},
         match=[
             responses.matchers.query_param_matcher(
-                {"$filter": "Label eq 'a'", "$orderby": "Id asc"}
+                {"$top": "1000", "$filter": "Label eq 'a'", "$orderby": "Id asc"}
             )
         ],
     )

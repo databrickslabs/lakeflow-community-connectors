@@ -172,9 +172,11 @@ class PartitionMixin(SupportsPartitionedStream):
         segments = parse_contained_path(table_name) or [table_name]
         namespace = opts.get("namespace")
         cursor_field = opts.get("cursor_field")
-        if cursor_field:
-            # Cursor-based read: default page_size so a $top is sent.
-            # Snapshot partitioning leaves it unset → no $top.
+        self._pagination = self._parse_pagination(opts)
+        if cursor_field or self._pagination != "nextlink":
+            # Cursor-based read, or client-driven pagination (which needs a
+            # $top to size pages): default page_size so a $top is sent.
+            # Snapshot + nextlink leaves it unset → no $top.
             opts = {**opts, "page_size": opts.get("page_size", DEFAULT_PAGE_SIZE)}
         # ``cursor_lower`` is "what we've already read up to" — used
         # by read_partition as ``cursor gt cursor_lower``. ``end`` is
@@ -212,9 +214,11 @@ class PartitionMixin(SupportsPartitionedStream):
             return records
         segments = parse_contained_path(table_name) or [table_name]
         cursor_field = opts.get("cursor_field")
-        if cursor_field:
-            # Cursor-based read: default page_size so a $top is sent.
-            # Snapshot partitioning leaves it unset → no $top.
+        self._pagination = self._parse_pagination(opts)
+        if cursor_field or self._pagination != "nextlink":
+            # Cursor-based read, or client-driven pagination (needs a $top
+            # to size pages): default page_size so a $top is sent.
+            # Snapshot + nextlink leaves it unset → no $top.
             opts = {**opts, "page_size": opts.get("page_size", DEFAULT_PAGE_SIZE)}
         top_parent_rows = partition["top_parent_rows"]
         cursor_lower = partition.get("cursor_lower")

@@ -804,6 +804,112 @@ def register_lakeflow_source(spark):
         return "'" + s.replace("'", "''") + "'"
 
 
+    # --- client-side pagination URL helpers -----------------------------------
+    # These manipulate the connector's own generated URLs, where query options
+    # (``$top``/``$filter``/``$orderby``/``$skip``) are stored raw (un-encoded),
+    # one per ``&``-separated segment, and no generated value contains a literal
+    # ``&``. So splitting on ``&`` and matching on a ``$name=`` prefix is safe —
+    # the same convention ``rewrite_top_in_url`` relies on. requests url-encodes
+    # the values when the request is actually sent. They live here (rather than in
+    # ``odata.py``) so both the flat pager (``_client_paginate_pages``) and the
+    # inner-``$expand`` continuation builder can use them without an import cycle;
+    # ``odata.py`` re-exports them for callers that still import from there.
+
+
+    def _pg_get_query(url: str, name: str) -> str | None:
+        """Return the raw value of query option ``name`` (e.g. ``$filter``), or
+        ``None`` when absent."""
+        _, _, query = url.partition("?")
+        pref = name + "="
+        for part in query.split("&") if query else []:
+            if part.startswith(pref):
+                return part[len(pref) :]
+        return None
+
+
+    def _pg_set_query(url: str, name: str, value: str) -> str:
+        """Set/replace/append query option ``name`` to ``value``; preserves the
+        order of existing options."""
+        head, sep, query = url.partition("?")
+        pref = name + "="
+        parts = query.split("&") if query else []
+        out, found = [], False
+        for part in parts:
+            if part.startswith(pref):
+                out.append(f"{name}={value}")
+                found = True
+            else:
+                out.append(part)
+        if not found:
+            out.append(f"{name}={value}")
+        return f"{head}?{'&'.join(out)}" if (sep or out) else head
+
+
+    def _pg_parse_top(url: str) -> int | None:
+        """Parse ``$top`` (or ``%24top``) as an int; ``None`` when absent/bad."""
+        raw = _pg_get_query(url, "$top") or _pg_get_query(url, "%24top")
+        return int(raw) if raw and raw.isdigit() else None
+
+
+    def _pg_orderby_keys(url: str) -> list[str]:
+        """Column names from the URL's ``$orderby``, in order. Returns ``[]``
+        when there's no ``$orderby`` or any term is ``desc`` (a ``gt`` seek
+        only walks ascending order; the connector only ever emits ``asc``)."""
+        raw = _pg_get_query(url, "$orderby") or _pg_get_query(url, "%24orderby")
+        if not raw:
+            return []
+        keys = []
+        for term in raw.replace("%20", " ").split(","):
+            term = term.strip()
+            if term.endswith(" desc"):
+                return []
+            keys.append(term[:-4].strip() if term.endswith(" asc") else term)
+        return [k for k in keys if k]
+
+
+    def _pg_keyset_filter(order_keys: list[str], row: dict) -> str | None:
+        """Build the ascending seek predicate placing the cursor strictly after
+        ``row`` in ``order_keys`` order::
+
+            (k1 gt v1) or (k1 eq v1 and k2 gt v2) or …
+
+        Returns ``None`` if any key's value is null (no comparable boundary —
+        the caller falls back to ``$skip``)."""
+        vals = []
+        for k in order_keys:
+            v = row.get(k)
+            if v is None:
+                return None
+            vals.append((k, v))
+        clauses = []
+        for i, (k, v) in enumerate(vals):
+            terms = [f"{vals[j][0]} eq {odata_literal(vals[j][1])}" for j in range(i)]
+            terms.append(f"{k} gt {odata_literal(v)}")
+            clauses.append(" and ".join(terms))
+        if len(clauses) == 1:
+            return clauses[0]
+        return " or ".join(f"({c})" for c in clauses)
+
+
+    def _pg_with_extra_filter(url: str, clause: str) -> str:
+        """AND ``clause`` into the URL's ``$filter`` (replacing any prior seek —
+        the caller always rebuilds from the original base URL, so seeks never
+        accumulate)."""
+        existing = _pg_get_query(url, "$filter")
+        combined = f"({existing}) and ({clause})" if existing else clause
+        return _pg_set_query(url, "$filter", combined)
+
+
+    def _pg_page_fingerprint(page_rows: list[dict]) -> int:
+        """Order-sensitive fingerprint of a page's rows for the no-progress
+        guard. ``hash(repr(...))`` is process-stable — only ever compared within
+        a single walk — and costs one page's worth of work. Two consecutive
+        non-empty pages with the same fingerprint mean the server returned the
+        same data twice (it ignored our seek/``$skip`` or handed back a cyclic
+        ``@odata.nextLink``), so the walk has stalled."""
+        return hash(repr(page_rows))
+
+
     # Re-export of the EDM namespace prefix used by the main module.
     _NS_EDM = "{http://docs.oasis-open.org/odata/ns/edm}"
 
@@ -1088,47 +1194,8 @@ def register_lakeflow_source(spark):
             ``$expand`` ignore it — the wire format stays valid OData v4.
             """
             segment_filters = resolve_segment_filters(table_options, segments)
-            namespace = (table_options or {}).get("namespace")
-            top, *children = segments
-            base = join_url(self.service_url, top)
-
-            # ``$orderby`` at every level so server skiptoken paging is stable
-            # — for the top collection AND each expanded sub-collection. OData
-            # v4 §11.2.5.7 promises no stable default order across pages, so
-            # without a unique sort a value-based skiptoken can drop or
-            # duplicate rows (the same failure the N+1 path guards against via
-            # ``_ancestor_pk_order_by`` / ``_leaf_pk_order_by``). The
-            # cursor-owning level keeps its cursor-first composite
-            # (``cursor_order``); every other level falls back to PK-only.
-            # Servers that ignore ``$orderby`` inside ``$expand`` leave the
-            # wire format valid OData v4 — same contract as ``$top`` here. The
-            # server-generated ``<NavProp>@odata.nextLink`` continuations
-            # preserve these options per §11.2.6.1, so paging stays ordered.
-            def _level_order_by(level: int) -> str | None:
-                if level == cursor_level and cursor_order:
-                    return cursor_order
-                try:
-                    et = self._entity_type_for(
-                        CONTAINED_PATH_SEP.join(segments[: level + 1]), namespace
-                    )
-                except ValueError:
-                    # Segment isn't resolvable in $metadata. A real expand
-                    # path is validated upstream (``_read_contained_expand``
-                    # raises on a missing segment/PK before we get here), so
-                    # this only fires for synthetic paths. No resolvable key
-                    # ⇒ no stable order to add; degrade to the server default
-                    # rather than crash the URL build.
-                    return None
-                return _ancestor_pk_order_by(self._own_primary_keys_for_et(et)) or None
-
-            # The table's ``filter`` option is the leaf filter — same as
-            # N+1 mode, where it lands at the leaf URL — so strip it from
-            # the top-URL query params when there are children. It re-enters
-            # at the innermost ``$expand(...)`` clause below. Without this
-            # split, ``filter="Id eq 3"`` on a ``Instances__Projects`` table
-            # would land at Instances (wrong segment) and 400 the server.
+            base = join_url(self.service_url, segments[0])
             opts = table_options or {}
-            top_opts = {k: v for k, v in opts.items() if k != "filter"} if children else opts
             # ``$top`` is emitted across the expand levels only when the user
             # set ``page_size``; with none, no ``$top`` is sent at any level
             # and the server picks its own page size (see
@@ -1138,49 +1205,139 @@ def register_lakeflow_source(spark):
                 if opts.get("page_size")
                 else None
             )
-            if children and per_level_tops is not None:
+            return self._assemble_expand_url(
+                base,
+                segments,
+                0,
+                table_options,
+                segment_filters,
+                cursor_level,
+                cursor_filter,
+                cursor_order,
+                cursor_select,
+                per_level_tops,
+            )
+
+        def _expand_level_order_by(
+            self,
+            segments: list[str],
+            level: int,
+            namespace: str | None,
+            cursor_level: int | None,
+            cursor_order: str | None,
+        ) -> str | None:
+            """``$orderby`` for one expand level so server skiptoken paging is
+            stable — for the top collection AND each expanded sub-collection.
+            OData v4 §11.2.5.7 promises no stable default order across pages, so
+            without a unique sort a value-based skiptoken can drop or duplicate
+            rows (the same failure the N+1 path guards against via
+            ``_ancestor_pk_order_by`` / ``_leaf_pk_order_by``). The cursor-owning
+            level keeps its cursor-first composite (``cursor_order``); every
+            other level falls back to PK-only. Servers that ignore ``$orderby``
+            inside ``$expand`` leave the wire format valid OData v4 — same
+            contract as ``$top``. The server-generated
+            ``<NavProp>@odata.nextLink`` continuations preserve these options per
+            §11.2.6.1, so paging stays ordered.
+
+            Returns ``None`` when the segment isn't resolvable in ``$metadata``
+            (only fires for synthetic paths; a real expand path is validated
+            upstream) — degrade to the server default rather than crash the URL
+            build.
+            """
+            if level == cursor_level and cursor_order:
+                return cursor_order
+            try:
+                et = self._entity_type_for(CONTAINED_PATH_SEP.join(segments[: level + 1]), namespace)
+            except ValueError:
+                return None
+            return _ancestor_pk_order_by(self._own_primary_keys_for_et(et)) or None
+
+        # pylint: disable=too-many-arguments,too-many-positional-arguments,too-many-locals
+        def _assemble_expand_url(
+            self,
+            base: str,
+            segments: list[str],
+            start_level: int,
+            table_options: dict[str, str],
+            segment_filters: dict[int, str],
+            cursor_level: int | None,
+            cursor_filter: str | None,
+            cursor_order: str | None,
+            cursor_select: str | None,
+            per_level_tops: list[int] | None,
+        ) -> str:
+            """Render an expand URL rooted at ``base`` whose top collection is
+            ``segments[start_level]`` and whose nested ``$expand`` chain covers
+            ``segments[start_level + 1:]``.
+
+            ``start_level == 0`` reproduces the full top-level request (used by
+            :meth:`_build_expand_url`). ``start_level > 0`` roots the request at
+            a contained path — ``base`` already carries the ancestor keys — and
+            is used by :meth:`_build_expand_continuation_url` to page a single
+            parent's inner collection client-side when the server omits its
+            ``<NavProp>@odata.nextLink``.
+
+            Filters, ``$top``, ``$orderby`` and the cursor injection are all
+            keyed by ABSOLUTE segment level, so the same ``segment_filters`` /
+            ``cursor_level`` resolved against the full path stay correct for any
+            ``start_level``.
+            """
+            namespace = (table_options or {}).get("namespace")
+            opts = table_options or {}
+            has_children = start_level < len(segments) - 1
+            # The table's ``filter`` option is the leaf filter — same as N+1
+            # mode, where it lands at the leaf URL — so strip it from the
+            # start-level query params when there are deeper levels. It re-enters
+            # at the innermost ``$expand(...)`` clause below. Without this split,
+            # ``filter="Id eq 3"`` on a ``Instances__Projects`` table would land
+            # at Instances (wrong segment) and 400 the server.
+            top_opts = {k: v for k, v in opts.items() if k != "filter"} if has_children else dict(opts)
+            if per_level_tops is not None:
                 # Override page_size in the opts dict ``_format_query_params``
-                # reads from, so the top-URL ``$top`` reflects the dynamic
+                # reads from, so the start-level ``$top`` reflects the dynamic
                 # allocation instead of the unscaled budget.
                 top_opts = dict(top_opts)
-                top_opts["page_size"] = str(per_level_tops[0])
+                top_opts["page_size"] = str(per_level_tops[start_level])
             top_extra = combine_filters(
-                cursor_filter if cursor_level == 0 else None,
-                segment_filters.get(0),
+                cursor_filter if cursor_level == start_level else None,
+                segment_filters.get(start_level),
             )
             query = self._format_query_params(
                 top_opts,
                 top_extra,
-                _level_order_by(0),
+                self._expand_level_order_by(
+                    segments, start_level, namespace, cursor_level, cursor_order
+                ),
             )
-            if not children:
+            if not has_children:
                 return f"{base}?{query}"
             user_leaf_filter = opts.get("filter")
             inner = ""
-            for i in range(len(children) - 1, -1, -1):
-                is_leaf = i == len(children) - 1
-                # ``per_level_tops`` is indexed by segment (0 = top,
-                # 1 = first child, …). ``children[i]`` is segment i+1.
+            for i in range(len(segments) - 1, start_level, -1):
+                is_leaf = i == len(segments) - 1
+                # ``per_level_tops`` is indexed by absolute segment level.
                 parts: list[str] = []
                 if per_level_tops is not None:
-                    parts.append(f"$top={per_level_tops[i + 1]}")
+                    parts.append(f"$top={per_level_tops[i]}")
                 level_filter = combine_filters(
-                    cursor_filter if cursor_level == i + 1 else None,
-                    segment_filters.get(i + 1),
+                    cursor_filter if cursor_level == i else None,
+                    segment_filters.get(i),
                     user_leaf_filter if is_leaf else None,
                 )
-                if cursor_level == i + 1 and cursor_select:
+                if cursor_level == i and cursor_select:
                     parts.append(f"$select={cursor_select}")
                 if level_filter:
                     parts.append(f"$filter={level_filter}")
-                level_order = _level_order_by(i + 1)
+                level_order = self._expand_level_order_by(
+                    segments, i, namespace, cursor_level, cursor_order
+                )
                 if level_order:
                     parts.append(f"$orderby={level_order}")
                 if inner:
                     parts.append(f"$expand={inner}")
                 # No options at all (no $top/filter/select/orderby/expand) ⇒
                 # emit the bare nav-property name; ``Leaf()`` is not valid.
-                inner = f"{children[i]}({';'.join(parts)})" if parts else children[i]
+                inner = f"{segments[i]}({';'.join(parts)})" if parts else segments[i]
             return f"{base}?{query}&$expand={inner}"
 
         # --- read paths --------------------------------------------------------
@@ -1494,6 +1651,14 @@ def register_lakeflow_source(spark):
             cursor_level, cursor_filter, cursor_order, cursor_select = self._cursor_expand_clause(
                 segments, namespace, cursor_field, (start_offset or {}).get("cursor")
             )
+            # Read-scoped context the flatten recursion needs to synthesize a
+            # client-driven continuation for an inner collection whose
+            # ``<NavProp>@odata.nextLink`` the server omitted (see
+            # ``_build_expand_continuation_url``). Stashed on ``self`` — like
+            # ``self._pagination`` — so it survives into the lazy streaming
+            # generator without threading through every flatten call site.
+            self._expand_cont_opts = table_options
+            self._expand_cont_since = (start_offset or {}).get("cursor")
             if cursor_field and cursor_level == -1:
                 raise ValueError(
                     f"cursor_field={cursor_field!r} is not a property of any "
@@ -1972,6 +2137,18 @@ def register_lakeflow_source(spark):
                         page_budget *= t
                     new_top = max(MIN_DYNAMIC_TOP, page_budget // max(1, inner_product))
                     resolved = rewrite_top_in_url(resolved, new_top)
+            else:
+                # No ``<NavProp>@odata.nextLink``. In a client-driven pagination
+                # mode (keyset/skip/auto), synthesize a direct-navigation
+                # continuation when the inline page is a FULL page (== $top) and
+                # so plausibly truncated; otherwise the inline page is taken as
+                # the whole collection — today's nextlink-only behaviour. This
+                # closes the inner-``$expand`` hole for servers that page-limit a
+                # response but never emit the continuation link.
+                resolved = self._inner_expand_continuation_url(
+                    level, row, segments, chain, next_ctx, per_level_tops
+                )
+            if resolved is not None:
                 if pending_fetches is not None:
                     # Defer the follow: the outer drainer pops one fetch
                     # at a time and checks the cap between them. Snapshot
@@ -1989,7 +2166,10 @@ def register_lakeflow_source(spark):
                     chain.pop()
                     return
                 # Track the URL that fetched each follow-up page so its
-                # children resolve THEIR relative nextLinks correctly.
+                # children resolve THEIR relative nextLinks correctly. In
+                # keyset/skip mode ``_fetch_pages_with_links`` drives the
+                # continuation via ``_client_paginate_pages`` (the synthesized
+                # URL carries the seek/skip), draining the whole collection.
                 inner_current = resolved
                 for page_rows, page_next in self._fetch_pages_with_links(resolved):
                     for child in page_rows:
@@ -2007,6 +2187,107 @@ def register_lakeflow_source(spark):
                         )
                     inner_current = page_next or inner_current
             chain.pop()
+
+        def _inner_expand_continuation_url(
+            self,
+            level: int,
+            row: dict,
+            segments: list[str],
+            chain: list[dict[str, Any]],
+            cursor_ctx: tuple[str | None, int, Any] | None,
+            per_level_tops: list[int] | None,
+        ) -> str | None:
+            """Synthesize a client-driven continuation for a parent's inner
+            collection when the server returned a *full* inline page but omitted
+            its ``<NavProp>@odata.nextLink``.
+
+            Returns ``None`` unless ``pagination`` is keyset/skip/auto, ``$top``
+            is in force (``per_level_tops`` set), and the inline child page is
+            exactly ``$top`` rows (so it's plausibly truncated). A short page is
+            proof the collection is complete, so it's taken at face value.
+            """
+            mode = getattr(self, "_pagination", "nextlink")
+            if mode == "nextlink" or per_level_tops is None:
+                return None
+            child_level = level + 1
+            if child_level >= len(segments):
+                return None
+            children = row.get(segments[child_level]) or []
+            if not children or len(children) < per_level_tops[child_level]:
+                return None
+            cur_field = cursor_ctx[0] if cursor_ctx else None
+            return self._build_expand_continuation_url(
+                segments, level, chain, cur_field, per_level_tops, mode, children[-1], len(children)
+            )
+
+        # pylint: disable=too-many-arguments,too-many-positional-arguments,too-many-locals
+        def _build_expand_continuation_url(
+            self,
+            segments: list[str],
+            level: int,
+            chain: list[dict[str, Any]],
+            cursor_field: str | None,
+            per_level_tops: list[int],
+            mode: str,
+            last_child: dict,
+            inline_count: int,
+        ) -> str:
+            """Direct-navigation URL paging the inner collection at ``level + 1``
+            under the single parent identified by the current flatten ``chain``
+            (keys for levels ``0..level``), with the grandchildren still
+            ``$expand``-ed::
+
+                Parent(k0)/.../Child?$top=N&$orderby=...&$expand=<grandchildren>
+
+            plus a continuation marker that resumes *after* the inline page: a
+            ``(k gt last_child)`` keyset seek on the ``$orderby`` keys (keyset /
+            auto), or ``$skip=<inline_count>`` (skip, or keyset with a null
+            boundary value). Fed back through :meth:`_fetch_pages_with_links`,
+            which — in these modes — drives the rest of the collection via
+            :meth:`_client_paginate_pages`.
+
+            The cursor ``$filter``/``$orderby`` are re-derived from the read's
+            stashed options so a child-level cursor stays applied across the
+            continuation; the keyset seek subsumes ``cursor gt since`` for keyset
+            mode, and the explicit cursor ``$filter`` keeps the filtered set
+            intact for ``$skip``.
+            """
+            table_options = getattr(self, "_expand_cont_opts", None) or {}
+            since = getattr(self, "_expand_cont_since", None)
+            namespace = table_options.get("namespace")
+            if cursor_field:
+                cursor_level, cursor_filter, cursor_order, cursor_select = self._cursor_expand_clause(
+                    segments, namespace, cursor_field, since
+                )
+            else:
+                cursor_level, cursor_filter, cursor_order, cursor_select = -1, None, None, None
+            child_level = level + 1
+            # ``chain`` holds keys for levels 0..level (== child_level - 1), so it
+            # has exactly the prefix-key count ``_build_contained_path`` needs to
+            # root the request at this parent's child collection.
+            contained_base = join_url(
+                self.service_url,
+                self._build_contained_path(segments[: child_level + 1], chain),
+            )
+            segment_filters = resolve_segment_filters(table_options, segments)
+            url = self._assemble_expand_url(
+                contained_base,
+                segments,
+                child_level,
+                table_options,
+                segment_filters,
+                cursor_level,
+                cursor_filter,
+                cursor_order,
+                cursor_select,
+                per_level_tops,
+            )
+            order_keys = _pg_orderby_keys(url)
+            if mode in ("keyset", "auto") and order_keys:
+                seek = _pg_keyset_filter(order_keys, last_child)
+                if seek is not None:
+                    return _pg_with_extra_filter(url, seek)
+            return _pg_set_query(url, "$skip", str(inline_count))
 
         def _leaf_cursor_order_by(
             self, table_name: str, namespace: str | None, cursor_field: str
@@ -2709,9 +2990,11 @@ def register_lakeflow_source(spark):
             segments = parse_contained_path(table_name) or [table_name]
             namespace = opts.get("namespace")
             cursor_field = opts.get("cursor_field")
-            if cursor_field:
-                # Cursor-based read: default page_size so a $top is sent.
-                # Snapshot partitioning leaves it unset → no $top.
+            self._pagination = self._parse_pagination(opts)
+            if cursor_field or self._pagination != "nextlink":
+                # Cursor-based read, or client-driven pagination (which needs a
+                # $top to size pages): default page_size so a $top is sent.
+                # Snapshot + nextlink leaves it unset → no $top.
                 opts = {**opts, "page_size": opts.get("page_size", DEFAULT_PAGE_SIZE)}
             # ``cursor_lower`` is "what we've already read up to" — used
             # by read_partition as ``cursor gt cursor_lower``. ``end`` is
@@ -2749,9 +3032,11 @@ def register_lakeflow_source(spark):
                 return records
             segments = parse_contained_path(table_name) or [table_name]
             cursor_field = opts.get("cursor_field")
-            if cursor_field:
-                # Cursor-based read: default page_size so a $top is sent.
-                # Snapshot partitioning leaves it unset → no $top.
+            self._pagination = self._parse_pagination(opts)
+            if cursor_field or self._pagination != "nextlink":
+                # Cursor-based read, or client-driven pagination (needs a $top
+                # to size pages): default page_size so a $top is sent.
+                # Snapshot + nextlink leaves it unset → no $top.
                 opts = {**opts, "page_size": opts.get("page_size", DEFAULT_PAGE_SIZE)}
             top_parent_rows = partition["top_parent_rows"]
             cursor_lower = partition.get("cursor_lower")
@@ -3000,6 +3285,22 @@ def register_lakeflow_source(spark):
     # only ever compares ``<= len(emitted)``; any value larger than what a
     # single ingestion could plausibly buffer works.
     _BATCH_UNCAPPED = 10**12
+
+    # Pagination strategy for walking a collection's pages:
+    #   * nextlink (default) — follow the server's ``@odata.nextLink``; the
+    #     spec-compliant default, byte-identical to historical behaviour.
+    #   * keyset — ignore ``@odata.nextLink``; seek the next page via a
+    #     ``(k gt last)`` predicate on the ``$orderby`` key set. For servers
+    #     that page-limit a response but omit the continuation link.
+    #   * skip — ignore ``@odata.nextLink``; page via ``$top`` + ``$skip``.
+    #     The keyless fallback (entities with no unique sort key); O(n)
+    #     offsets and fragile under concurrent writes.
+    #   * auto — follow ``@odata.nextLink`` while emitted; if a *full* page
+    #     (``len == $top``) arrives with no link, fall back to keyset (when
+    #     the ``$orderby`` has keys) or skip for the rest of that collection.
+    # keyset/skip/auto require a ``$top`` to size pages and detect
+    # truncation, so they force a default ``page_size`` when none is set.
+    _PAGINATION_MODES = frozenset({"nextlink", "keyset", "skip", "auto"})
     # Monotonic across the whole process — guarantees each emitted record
     # has a strictly increasing sequence value, so apply_changes can pick a
     # deterministic winner when the same primary key appears multiple times
@@ -3426,6 +3727,16 @@ def register_lakeflow_source(spark):
             # ``_read_contained_expand``) so an uncapped batch doesn't
             # materialise the whole result set in memory.
             opts = dict(table_options or {})
+            # Pagination strategy for this read. keyset/skip/auto drive
+            # pagination client-side (for servers that omit @odata.nextLink)
+            # and need a $top to size pages, so force a default page_size when
+            # the user left it unset. Held on ``self`` for the duration of the
+            # read so the shared fetch primitives pick it up without threading
+            # it through every call site; defaults to nextlink (today's
+            # behaviour) for any path that doesn't set it.
+            self._pagination = self._parse_pagination(opts)
+            if self._pagination != "nextlink":
+                opts.setdefault("page_size", _DEFAULT_PAGE_SIZE)
             if start_offset is None:
                 if "max_records_per_batch" in opts:
                     _LOG.warning(
@@ -3866,6 +4177,7 @@ def register_lakeflow_source(spark):
                     sparse_checked=sparse_checked,
                     max_records=max_records,
                 )
+                fetched_url = resp.url
                 current_url, new_delta_link, carry_next_link = self._delta_advance_links(
                     payload=payload,
                     resp_url=resp.url,
@@ -3874,6 +4186,17 @@ def register_lakeflow_source(spark):
                     new_delta_link=new_delta_link,
                     carry_next_link=carry_next_link,
                 )
+                if current_url is not None and current_url == fetched_url:
+                    # Self-referential ``@odata.nextLink`` — the server handed back
+                    # the URL we just fetched. Stop rather than loop forever; the
+                    # caller persists ``new_delta_link`` (or falls back to the prior
+                    # one) so the next run still resumes.
+                    _LOG.warning(
+                        "delta walk: server returned a self-referential "
+                        "@odata.nextLink for %r; stopping to avoid an infinite loop.",
+                        fetched_url,
+                    )
+                    break
                 page_index += 1
 
             return records, new_delta_link, carry_next_link, False
@@ -4149,41 +4472,190 @@ def register_lakeflow_source(spark):
             return "&".join(params)
 
         def _fetch_pages(self, url: str) -> Iterator[dict]:
-            """Walk @odata.nextLink, yielding raw JSON dicts (no coercion).
+            """Walk a collection's pages, yielding raw JSON dicts (no coercion).
 
-            The OData v4 spec allows @odata.nextLink to be either an absolute
-            URL or a relative one (resolved against the request URL). Some
-            services (e.g. SAP NetWeaver Gateway, certain self-hosted Olingo
-            deployments) return just ``Customers?$skiptoken=...`` and rely on
-            the client to prepend the service root. urljoin handles both
-            cases — absolutes pass through unchanged.
+            Thin row-flattening wrapper over :meth:`_fetch_pages_with_links`,
+            which handles the pagination strategy (nextlink / keyset / skip /
+            auto). The whole collection is drained within this call.
             """
             for page_rows, _ in self._fetch_pages_with_links(url):
                 yield from page_rows
 
-        def _fetch_pages_with_links(self, url: str) -> Iterator[tuple[list[dict], str | None]]:
-            """Page-aware variant of ``_fetch_pages``: yields
-            ``(page_rows, next_url)`` for each HTTP response.
+        def _parse_pagination(self, table_options: dict[str, str] | None) -> str:
+            """Parse + validate the ``pagination`` table option.
 
-            Lets callers checkpoint at page boundaries — the yielded
-            ``next_url`` is the resolved @odata.nextLink (or ``None`` when
-            the chain is exhausted). Resuming from that link on a later
-            call hands the server back its own opaque skiptoken; the server
-            picks up exactly where it left off without the caller needing
-            to reconstruct ``$filter``/``$orderby``/``$select`` state.
+            Defaults to ``auto``: follow ``@odata.nextLink`` while the server
+            emits it (identical to ``nextlink`` for spec-compliant servers), but
+            fall back to a keyset/skip continuation when a *full* page
+            (``len == $top``) arrives with no link — so a server that silently
+            page-limits a response without a continuation link doesn't drop the
+            remainder. ``auto`` needs a ``$top`` to detect a full page, so it
+            forces a default ``page_size`` (including on snapshot scans).
             """
+            raw = ((table_options or {}).get("pagination") or "auto").strip().lower()
+            if raw not in _PAGINATION_MODES:
+                raise ValueError(
+                    f"Invalid pagination={raw!r}. Expected one of: " f"{sorted(_PAGINATION_MODES)}."
+                )
+            return raw
+
+        def _fetch_pages_with_links(self, url: str) -> Iterator[tuple[list[dict], str | None]]:
+            """Page-aware fetch: yields ``(page_rows, next_url)`` per response,
+            where ``next_url`` resumes the next page (``None`` at the end).
+
+            The yielded ``next_url`` is an opaque resume checkpoint — callers
+            park it to continue across batches without reconstructing query
+            state. What it *is* depends on ``pagination`` (``self._pagination``,
+            default ``nextlink``):
+
+            * ``nextlink`` — the server's resolved ``@odata.nextLink`` (its own
+              opaque skiptoken). Spec-compliant default.
+            * ``keyset`` / ``skip`` / ``auto`` — a connector-built URL (a
+              ``(k gt last)`` seek on the ``$orderby`` key set, or ``$top`` +
+              ``$skip``), for servers that page-limit a response but omit the
+              continuation link. See :meth:`_client_paginate_pages`.
+            """
+            mode = getattr(self, "_pagination", "nextlink")
+            if mode != "nextlink":
+                yield from self._client_paginate_pages(url, mode)
+                return
             session = self._get_session()
             next_url: str | None = url
+            # No-progress guard: a server that hands back a self-referential or
+            # cyclic ``@odata.nextLink`` would loop forever. Stop if the resolved
+            # link points back at the URL we just fetched, or if a non-empty page
+            # repeats the one before it.
+            prev_fp: int | None = None
             while next_url:
                 resp, payload = self._fetch_page_payload(session, next_url)
                 page_rows = [
                     {k: v for k, v in item.items() if not k.startswith("@odata.")}
                     for item in payload.get("value", [])
                 ]
+                fp = _pg_page_fingerprint(page_rows)
+                if page_rows and prev_fp is not None and fp == prev_fp:
+                    _LOG.warning(
+                        "pagination=nextlink made no progress on %r: the server "
+                        "returned an identical page (cyclic @odata.nextLink). "
+                        "Stopping to avoid an infinite loop; some rows may be "
+                        "unread.",
+                        next_url,
+                    )
+                    return
+                prev_fp = fp
                 raw_next = payload.get("@odata.nextLink")
                 new_next = self._resolve_next_link(resp.url, raw_next) if raw_next else None
+                if new_next is not None and new_next == next_url:
+                    _LOG.warning(
+                        "pagination=nextlink: server returned a self-referential "
+                        "@odata.nextLink for %r; stopping to avoid an infinite loop.",
+                        next_url,
+                    )
+                    yield page_rows, None
+                    return
                 yield page_rows, new_next
                 next_url = new_next
+
+        def _client_paginate_pages(
+            self, url: str, mode: str
+        ) -> Iterator[tuple[list[dict], str | None]]:
+            """Client-driven pagination for servers that don't (always) emit
+            ``@odata.nextLink``. Yields ``(page_rows, next_url)`` like
+            :meth:`_fetch_pages_with_links`, where ``next_url`` is a
+            connector-built resume URL (``None`` at the end):
+
+            * ``keyset`` — seek the next page with a ``(k gt last)`` predicate
+              on the ``$orderby`` key set, rebuilt from the original URL each
+              page (so a same-collection walk never accumulates seeks). Commits
+              to ``$skip`` for the rest of the collection if a boundary value is
+              null (no comparable seek).
+            * ``skip`` — ``$top`` + ``$skip`` offset paging, continuing from any
+              ``$skip`` already on the URL (so a parked checkpoint resumes at
+              the right offset).
+            * ``auto`` — trust ``@odata.nextLink`` whenever the server emits it;
+              when a *full* page (``len == $top``) arrives with no link, fall
+              back to keyset (when the ``$orderby`` has keys) or skip.
+
+            Termination is a short page (``len < $top``); ``$top`` must be
+            present (callers force a default ``page_size`` in these modes). A
+            no-progress guard also stops the walk if a client-computed
+            continuation returns a page identical to the one it continued from —
+            a server that ignores the seek/``$skip`` would otherwise loop
+            forever.
+            """
+            session = self._get_session()
+            top = _pg_parse_top(url)
+            order_keys = _pg_orderby_keys(url)
+            can_keyset = mode in ("keyset", "auto") and bool(order_keys)
+            base_skip = int(_pg_get_query(url, "$skip") or _pg_get_query(url, "%24skip") or 0)
+            fetched = 0
+            cur_url: str | None = url
+            # Fingerprint of the page we last issued a client-computed continuation
+            # from. If the next fetch returns an identical page, the server is
+            # ignoring our seek/$skip and we'd loop forever — stop instead (without
+            # re-yielding the duplicate, which was already emitted last iteration).
+            # No-progress guard, shared across all client-driven steps: a server
+            # that ignores our seek/$skip (keyset/skip) or hands back a cyclic
+            # @odata.nextLink (auto) would loop forever. Stop when a non-empty page
+            # repeats the previous one — those rows were already emitted, so the
+            # duplicate is dropped rather than re-yielded.
+            prev_fp: int | None = None
+            while cur_url is not None:
+                resp, payload = self._fetch_page_payload(session, cur_url)
+                page_rows = [
+                    {k: v for k, v in item.items() if not k.startswith("@odata.")}
+                    for item in payload.get("value", [])
+                ]
+                fp = _pg_page_fingerprint(page_rows)
+                if page_rows and prev_fp is not None and fp == prev_fp:
+                    _LOG.warning(
+                        "pagination=%s made no progress on %r: an identical page "
+                        "came back (server ignoring the seek/$skip, or a cyclic "
+                        "@odata.nextLink). Stopping this collection to avoid an "
+                        "infinite loop; some rows may be unread. Use "
+                        "pagination=nextlink if the server pages correctly.",
+                        mode,
+                        cur_url,
+                    )
+                    return
+                prev_fp = fp
+                fetched += len(page_rows)
+                raw_next = payload.get("@odata.nextLink")
+                if mode == "auto" and raw_next:
+                    # Server is paginating — defer to its link for this step.
+                    nxt = self._resolve_next_link(resp.url, raw_next)
+                    if nxt == cur_url:
+                        # Self-referential link (catches the empty-page case the
+                        # fingerprint guard skips). Emit this page, then stop.
+                        _LOG.warning(
+                            "pagination=auto: server returned a self-referential "
+                            "@odata.nextLink for %r; stopping to avoid an infinite "
+                            "loop.",
+                            cur_url,
+                        )
+                        yield page_rows, None
+                        return
+                    yield page_rows, nxt
+                    cur_url = nxt
+                    continue
+                if top is None or not page_rows or len(page_rows) < top:
+                    # Short page (or unsized) ⇒ collection exhausted.
+                    yield page_rows, None
+                    return
+                if can_keyset:
+                    seek = _pg_keyset_filter(order_keys, page_rows[-1])
+                    if seek is not None:
+                        nxt = _pg_with_extra_filter(url, seek)
+                    else:
+                        # Null boundary value — no comparable keyset seek;
+                        # commit to offset paging for the rest of this walk so
+                        # keyset and skip positions can't interleave.
+                        can_keyset = False
+                        nxt = _pg_set_query(url, "$skip", str(base_skip + fetched))
+                else:
+                    nxt = _pg_set_query(url, "$skip", str(base_skip + fetched))
+                yield page_rows, nxt
+                cur_url = nxt
 
         def _resolve_next_link(self, request_url: str, raw_next: str) -> str:
             """Resolve an ``@odata.nextLink`` against the request URL.
