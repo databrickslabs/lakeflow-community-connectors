@@ -791,6 +791,30 @@ class ContainedNavMixin:
 
     # --- read paths --------------------------------------------------------
 
+    def _set_excluded_ancestor_columns(self, table_options: dict[str, str] | None) -> None:
+        """Parse the ``exclude_ancestor_columns`` table option (a
+        comma-separated list of FK column names) onto ``self`` for the
+        duration of a schema/metadata/read call.
+
+        Held on ``self`` — mirroring ``self._pagination`` — so the shared
+        ``_resolve_fk_columns`` primitive (and everything that derives from
+        it: schema, primary keys, row tagging) sees the exclusion without
+        threading it through every internal call site. Reset on every
+        entry point, so one table's exclusion can't leak into the next.
+        """
+        raw = (table_options or {}).get("exclude_ancestor_columns") or ""
+        self._excluded_ancestor_columns = frozenset(c.strip() for c in raw.split(",") if c.strip())
+
+    def _all_fk_column_names(self, segments: list[str], namespace: str | None) -> set[str]:
+        """Full set of ancestor-FK column names for a contained path,
+        BEFORE any ``exclude_ancestor_columns`` filtering — so callers can
+        validate the option's names against what the path actually emits."""
+        if len(segments) < 2:
+            return set()
+        self._resolve_fk_columns(segments, namespace)  # ensure cache populated
+        full = self._metadata_state().fk_columns.get((tuple(segments), namespace)) or {}
+        return set(full.values())
+
     def _resolve_fk_columns(
         self, segments: list[str], namespace: str | None
     ) -> dict[tuple[str, str], str]:
@@ -802,34 +826,47 @@ class ContainedNavMixin:
         the full ancestor chain to be globally unique. Default name is
         ``<segment>_<pk>``; collisions get a leading ``_`` until unique.
         Empty mapping for flat tables.
+
+        FK columns named in the ``exclude_ancestor_columns`` table option
+        (parsed onto ``self._excluded_ancestor_columns`` at each entry
+        point) are dropped from the returned mapping, so they vanish from
+        the leaf schema, the composite primary key, and the stamped rows
+        alike. A lone ``*`` drops every ancestor-FK column at once. The
+        full mapping is cached untouched; the exclusion is a cheap
+        post-filter so the same contained path can be read with different
+        exclusions without poisoning the cache.
         """
         if len(segments) < 2:
             return {}
         state = self._metadata_state()
         cache_key = (tuple(segments), namespace)
-        cached = state.fk_columns.get(cache_key)
-        if cached is not None:
-            return cached
-        leaf_field_names = {
-            f.name
-            for f in self._own_fields_for_et(
-                self._entity_type_for(CONTAINED_PATH_SEP.join(segments), namespace)
-            )
-        }
-        used = set(leaf_field_names)
-        resolved: dict[tuple[str, str], str] = {}
-        for idx in range(len(segments) - 1):
-            ancestor_et = self._entity_type_for(
-                CONTAINED_PATH_SEP.join(segments[: idx + 1]), namespace
-            )
-            seg = segments[idx]
-            for pk in self._own_primary_keys_for_et(ancestor_et):
-                candidate = fk_column_name(seg, pk)
-                while candidate in used:
-                    candidate = "_" + candidate
-                resolved[(seg, pk)] = candidate
-                used.add(candidate)
-        state.fk_columns[cache_key] = resolved
+        resolved = state.fk_columns.get(cache_key)
+        if resolved is None:
+            leaf_field_names = {
+                f.name
+                for f in self._own_fields_for_et(
+                    self._entity_type_for(CONTAINED_PATH_SEP.join(segments), namespace)
+                )
+            }
+            used = set(leaf_field_names)
+            resolved = {}
+            for idx in range(len(segments) - 1):
+                ancestor_et = self._entity_type_for(
+                    CONTAINED_PATH_SEP.join(segments[: idx + 1]), namespace
+                )
+                seg = segments[idx]
+                for pk in self._own_primary_keys_for_et(ancestor_et):
+                    candidate = fk_column_name(seg, pk)
+                    while candidate in used:
+                        candidate = "_" + candidate
+                    resolved[(seg, pk)] = candidate
+                    used.add(candidate)
+            state.fk_columns[cache_key] = resolved
+        excluded = getattr(self, "_excluded_ancestor_columns", frozenset())
+        if "*" in excluded:
+            return {}
+        if excluded:
+            return {k: v for k, v in resolved.items() if v not in excluded}
         return resolved
 
     def _tag_with_ancestor_fks(

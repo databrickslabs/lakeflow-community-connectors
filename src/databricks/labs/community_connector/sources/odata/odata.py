@@ -530,7 +530,43 @@ class ODataLakeflowConnect(
 
     def get_table_schema(self, table_name: str, table_options: dict[str, str]) -> StructType:
         namespace = (table_options or {}).get("namespace")
+        self._set_excluded_ancestor_columns(table_options)
+        excluded = self._excluded_ancestor_columns
         fields = self._fields_for(table_name, namespace)
+        # ``exclude_ancestor_columns`` can ONLY drop synthetic ancestor-FK
+        # columns (the filter in ``_resolve_fk_columns`` iterates the FK
+        # mapping alone) — a leaf/own table column named here is left in
+        # place. Validate against the path's real FK columns, but only for
+        # contained paths: a flat table has none, so a connection-wide
+        # default applied to it is a silent no-op rather than warning noise.
+        if excluded and "*" not in excluded and _parse_contained_path(table_name) is not None:
+            segments = _parse_contained_path(table_name)
+            all_fk = self._all_fk_column_names(segments, namespace)
+            non_fk = excluded - all_fk
+            if non_fk:
+                # Split into "names a real table column (kept on purpose)"
+                # vs "matches nothing (likely a typo)" so the message is
+                # actionable either way.
+                own_cols = {f.name for f in fields} - all_fk
+                kept = sorted(non_fk & own_cols)
+                typos = sorted(non_fk - own_cols)
+                if kept:
+                    _LOG.warning(
+                        "exclude_ancestor_columns for %r names %s, which are "
+                        "table columns, not synthetic ancestor-FK columns; they "
+                        "are kept (only ancestor-FK columns can be excluded).",
+                        table_name,
+                        kept,
+                    )
+                if typos:
+                    _LOG.warning(
+                        "exclude_ancestor_columns for %r names %s, which match "
+                        "no column of this path (FK columns: %s); they have no "
+                        "effect. Check for typos.",
+                        table_name,
+                        typos,
+                        sorted(all_fk),
+                    )
         select = (table_options or {}).get("select")
         if select:
             wanted = {c.strip() for c in select.split(",")}
@@ -565,6 +601,7 @@ class ODataLakeflowConnect(
 
     def read_table_metadata(self, table_name: str, table_options: dict[str, str]) -> dict:
         namespace = (table_options or {}).get("namespace")
+        self._set_excluded_ancestor_columns(table_options)
         primary_keys = self._primary_keys_for(table_name, namespace)
         user_cursor = (table_options or {}).get("cursor_field")
         # Contained paths skip the delta probe (server delta is for
@@ -614,6 +651,7 @@ class ODataLakeflowConnect(
         # it through every call site; defaults to nextlink (today's
         # behaviour) for any path that doesn't set it.
         self._pagination = self._parse_pagination(opts)
+        self._set_excluded_ancestor_columns(opts)
         if self._pagination != "nextlink":
             opts.setdefault("page_size", _DEFAULT_PAGE_SIZE)
         if start_offset is None:

@@ -2505,6 +2505,184 @@ def test_primary_keys_for_composite_leaf_in_contained():
     assert meta["primary_keys"] == ["Parents_Id", "Category", "Value"]
 
 
+# --- exclude_ancestor_columns ---------------------------------------------
+
+
+@responses.activate
+def test_exclude_ancestor_columns_drops_from_schema():
+    """A named ancestor-FK column is removed from the leaf schema; the
+    other ancestor FK and the leaf's own fields are untouched."""
+    _mock_nested_metadata()
+    c = _make()
+    schema = c.get_table_schema(
+        "Parents__Children__Notes", {"exclude_ancestor_columns": "Parents_Id"}
+    )
+    names = [f.name for f in schema.fields]
+    assert names == ["Children_Id", "Id", "Text"]
+
+
+@responses.activate
+def test_exclude_ancestor_columns_drops_from_primary_key():
+    """The excluded column also leaves the composite primary key — schema
+    and key stay consistent (a key column can't reference a dropped
+    schema field)."""
+    _mock_nested_metadata()
+    c = _make()
+    meta = c.read_table_metadata(
+        "Parents__Children__Notes", {"exclude_ancestor_columns": "Parents_Id"}
+    )
+    assert meta["primary_keys"] == ["Children_Id", "Id"]
+
+
+@responses.activate
+def test_exclude_ancestor_columns_multiple_names():
+    """A comma-separated list drops every named FK column at once."""
+    _mock_nested_metadata()
+    c = _make()
+    opts = {"exclude_ancestor_columns": "Parents_Id, Children_Id"}
+    schema = c.get_table_schema("Parents__Children__Notes", opts)
+    assert [f.name for f in schema.fields] == ["Id", "Text"]
+    meta = c.read_table_metadata("Parents__Children__Notes", opts)
+    assert meta["primary_keys"] == ["Id"]
+
+
+@responses.activate
+def test_exclude_ancestor_columns_not_stamped_on_rows():
+    """Emitted rows omit the excluded FK column — the exclusion reaches
+    the row-tagging path, not just schema/metadata."""
+    _mock_nested_metadata()
+    responses.get(f"{SERVICE_URL}Parents", json={"value": [{"Id": 1}]})
+    responses.get(
+        f"{SERVICE_URL}Parents(1)/Children",
+        json={"value": [{"Id": 11, "Label": "a", "ModifiedAt": "2024-01-01T00:00:00Z"}]},
+    )
+    c = _make()
+    rows, _ = c.read_table(
+        "Parents__Children",
+        None,
+        {"exclude_ancestor_columns": "Parents_Id", "pagination": "nextlink"},
+    )
+    rows = list(rows)
+    assert rows == [{"Id": 11, "Label": "a", "ModifiedAt": "2024-01-01T00:00:00Z"}]
+    assert all("Parents_Id" not in r for r in rows)
+
+
+@responses.activate
+def test_exclude_ancestor_columns_keeps_leaf_table_column(caplog):
+    """Only synthetic ancestor-FK columns can be dropped — naming a real
+    leaf/own table column leaves it in place (and warns that it's kept)."""
+    _mock_nested_metadata()
+    c = _make()
+    with caplog.at_level(logging.WARNING):
+        schema = c.get_table_schema(
+            # ``Label`` is one of Children's own properties, not an FK.
+            "Parents__Children",
+            {"exclude_ancestor_columns": "Label"},
+        )
+    names = [f.name for f in schema.fields]
+    # Leaf column survives; the FK column is untouched too.
+    assert "Label" in names
+    assert "Parents_Id" in names
+    assert names == ["Parents_Id", "Id", "Label", "ModifiedAt"]
+    assert any(
+        "table columns" in r.getMessage() and "Label" in r.getMessage() for r in caplog.records
+    )
+
+
+@responses.activate
+def test_exclude_ancestor_columns_keeps_leaf_column_in_primary_key(caplog):
+    """A leaf column that is part of the composite PK is never removed
+    from the key by exclude_ancestor_columns — only ancestor FKs are."""
+    _mock_nested_metadata()
+    c = _make()
+    with caplog.at_level(logging.WARNING):
+        # ``Category`` is one of the Tag leaf's own PK columns.
+        meta = c.read_table_metadata("Parents__Tags", {"exclude_ancestor_columns": "Category"})
+    assert meta["primary_keys"] == ["Parents_Id", "Category", "Value"]
+
+
+@responses.activate
+def test_exclude_ancestor_columns_unknown_name_warns_and_noops(caplog):
+    """A name matching no FK column has no effect and logs a warning so a
+    typo doesn't silently leave the column in place."""
+    _mock_nested_metadata()
+    c = _make()
+    with caplog.at_level(logging.WARNING):
+        schema = c.get_table_schema("Parents__Children", {"exclude_ancestor_columns": "Nope_Id"})
+    assert [f.name for f in schema.fields] == ["Parents_Id", "Id", "Label", "ModifiedAt"]
+    assert any(
+        "exclude_ancestor_columns" in r.getMessage() and "Nope_Id" in r.getMessage()
+        for r in caplog.records
+    )
+
+
+@responses.activate
+def test_exclude_ancestor_columns_ignored_on_flat_table(caplog):
+    """Flat tables have no ancestor FK columns; the option is a harmless
+    no-op and doesn't warn (a connection-wide default shouldn't spam the
+    log for every flat table it touches)."""
+    _mock_metadata()
+    c = _make()
+    with caplog.at_level(logging.WARNING):
+        schema = c.get_table_schema("Customers", {"exclude_ancestor_columns": "Parents_Id"})
+    # Same as the unadorned Customers schema — option has no effect.
+    assert [f.name for f in schema.fields] == [
+        f.name for f in c.get_table_schema("Customers", {}).fields
+    ]
+    assert not any("exclude_ancestor_columns" in r.getMessage() for r in caplog.records)
+
+
+@responses.activate
+def test_exclude_ancestor_columns_wildcard_drops_all_fk_columns():
+    """A lone ``*`` drops every synthetic ancestor-FK column at once,
+    leaving only the leaf's own fields in the schema."""
+    _mock_nested_metadata()
+    c = _make()
+    schema = c.get_table_schema("Parents__Children__Notes", {"exclude_ancestor_columns": "*"})
+    assert [f.name for f in schema.fields] == ["Id", "Text"]
+
+
+@responses.activate
+def test_exclude_ancestor_columns_wildcard_drops_all_from_primary_key():
+    """``*`` also strips every ancestor FK from the composite key, leaving
+    just the leaf's own PK."""
+    _mock_nested_metadata()
+    c = _make()
+    meta = c.read_table_metadata("Parents__Children__Notes", {"exclude_ancestor_columns": "*"})
+    assert meta["primary_keys"] == ["Id"]
+
+
+@responses.activate
+def test_exclude_ancestor_columns_wildcard_does_not_warn(caplog):
+    """``*`` is an intentional drop-all, not a typo — no warning."""
+    _mock_nested_metadata()
+    c = _make()
+    with caplog.at_level(logging.WARNING):
+        c.get_table_schema("Parents__Children", {"exclude_ancestor_columns": "*"})
+    assert not any("exclude_ancestor_columns" in r.getMessage() for r in caplog.records)
+
+
+@responses.activate
+def test_exclude_ancestor_columns_wildcard_keeps_leaf_columns_in_rows():
+    """Even under ``*`` the leaf's own columns are never dropped from the
+    emitted rows — only ancestor FKs are."""
+    _mock_nested_metadata()
+    responses.get(f"{SERVICE_URL}Parents", json={"value": [{"Id": 1}]})
+    responses.get(
+        f"{SERVICE_URL}Parents(1)/Children",
+        json={"value": [{"Id": 11, "Label": "a", "ModifiedAt": "2024-01-01T00:00:00Z"}]},
+    )
+    c = _make()
+    rows, _ = c.read_table(
+        "Parents__Children",
+        None,
+        {"exclude_ancestor_columns": "*", "pagination": "nextlink"},
+    )
+    rows = list(rows)
+    assert rows == [{"Id": 11, "Label": "a", "ModifiedAt": "2024-01-01T00:00:00Z"}]
+    assert all("Parents_Id" not in r for r in rows)
+
+
 @responses.activate
 def test_entity_type_for_invalid_nav_prop_raises():
     _mock_nested_metadata()

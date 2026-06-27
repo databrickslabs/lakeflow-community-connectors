@@ -150,9 +150,9 @@ w.api_client.do(
             "token": "<bearer-token>",
             "externalOptionsAllowList": (
                 "namespace,cursor_field,select,filter,"
-                "filter_at_*,page_size,"
-                "max_records_per_batch,delta_tracking,expand_contained,"
-                "num_partitions"
+                "filter_at_*,page_size,max_records_per_batch,cursor_nulls,"
+                "delta_tracking,expand_contained,num_partitions,pagination,"
+                "exclude_ancestor_columns"
             ),
         },
     },
@@ -173,9 +173,9 @@ the matching OAuth2 keys. Client credentials:
     "oauth2_scope": "read:everything",
     "externalOptionsAllowList": (
         "namespace,cursor_field,select,filter,"
-        "filter_at_*,page_size,"
-        "max_records_per_batch,delta_tracking,expand_contained,"
-        "num_partitions"
+        "filter_at_*,page_size,max_records_per_batch,cursor_nulls,"
+        "delta_tracking,expand_contained,num_partitions,pagination,"
+        "exclude_ancestor_columns"
     ),
 }
 ```
@@ -302,6 +302,7 @@ build_pipeline(
 | `delta_tracking`        | disabled | Opt-in OData v4 delta queries. Values: `disabled` (default — no behavior change), `auto` (probe once, fall back to cursor/snapshot if the server doesn't acknowledge), `enabled` (require support; error if the server doesn't acknowledge). See [Delta tracking](#delta-tracking) below. |
 | `expand_contained`      | false   | For contained-collection tables (`Parent__Child__...` paths). When `true`, the connector issues a single `GET Parent?$expand=Child($expand=...)` per pipeline trigger instead of the default N+1 traversal (one parent fetch + one per-parent leaf fetch). See [Contained navigation properties](#contained-navigation-properties) below. |
 | `num_partitions`        | 4       | Number of Spark partitions for parallel reads of contained-collection tables. Honored only when the table qualifies for `SupportsPartitionedStream` (contained path, `expand_contained=false`, `delta_tracking=disabled`, and any `cursor_field` lives on the top-level entity). Top-level rows are bin-packed into this many contiguous slices; each Spark task walks only its assigned subtrees. Ignored for non-partitionable tables (they fall back to single-task reads). |
+| `exclude_ancestor_columns` | | Comma-separated list of synthetic ancestor-FK column names to **drop from the destination** for a contained-collection table. By default every non-leaf ancestor's PK is prepended as a `<segment>_<pkname>` column (see [Contained navigation properties](#contained-navigation-properties)); list the resolved column names here (e.g. `Instances_Id,Projects_Id`) to omit them, or a lone `*` to drop **all** ancestor-FK columns at once. Excluded columns disappear from the table schema, the stamped rows, **and the composite primary key** alike — so only exclude columns not needed for destination-key uniqueness, otherwise distinct leaf rows under different ancestors can collide on MERGE. **Only synthetic ancestor-FK columns can be excluded** — naming a real leaf/own table column (or a name that matches nothing) leaves the schema untouched and logs a warning, so the option can never drop an actual source column. No effect on flat tables. |
 
 ## Delta tracking
 
@@ -436,6 +437,14 @@ Concretely, a row emitted from ``Parents__Children__Notes`` looks like:
 primary key as the connector walks the chain; downstream Delta tables
 get these columns as ordinary columns and the destination MERGE keys
 on the composite PK.
+
+To omit one or more of these synthetic columns from the destination,
+list them in the `exclude_ancestor_columns` table option (e.g.
+`exclude_ancestor_columns=Parents_Id`). Excluded columns are dropped
+from the schema, the emitted rows, and the composite primary key
+together — only exclude a column when the remaining key columns still
+uniquely identify each leaf row, otherwise sibling branches collide on
+MERGE.
 
 ### Read modes
 
