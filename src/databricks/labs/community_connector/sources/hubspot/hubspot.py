@@ -1,8 +1,7 @@
 import json
-import random
 import time
 from datetime import datetime, timezone
-from typing import Any, Dict, Iterator, List, Tuple
+from typing import Dict, Iterator, List, Tuple
 
 import requests
 from pyspark.sql.types import (

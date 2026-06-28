@@ -48,7 +48,6 @@ from pyspark.sql.types import (
     VariantVal,
 )
 import base64
-import random
 import requests
 
 
