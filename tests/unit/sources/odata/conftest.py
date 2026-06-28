@@ -1,0 +1,22 @@
+"""Test fixtures for the OData connector.
+
+The connector keeps a process-wide CSDL cache keyed by ``service_url``
+so SDP doesn't re-fetch + re-parse multi-MB ``$metadata`` documents
+for every table during pipeline INITIALIZING. Tests reuse a single
+``SERVICE_URL`` across cases with different mocked ``$metadata``
+bodies — clear the cache between tests so one case can't leak its
+parsed tree into the next.
+"""
+
+import pytest
+
+from databricks.labs.community_connector.sources.odata.odata import (
+    _clear_metadata_cache,
+)
+
+
+@pytest.fixture(autouse=True)
+def _reset_odata_metadata_cache():
+    _clear_metadata_cache()
+    yield
+    _clear_metadata_cache()

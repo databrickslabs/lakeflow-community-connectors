@@ -1,0 +1,334 @@
+{
+  "version": 1,
+  "endpoints": [
+    {
+      "method": "GET",
+      "url": "https://services.odata.org/V4/Northwind/Northwind.svc/$metadata",
+      "count": 1,
+      "param_shapes": [
+        []
+      ]
+    },
+    {
+      "method": "GET",
+      "url": "https://services.odata.org/V4/Northwind/Northwind.svc/Alphabetical_list_of_products",
+      "count": 3,
+      "param_shapes": [
+        [
+          "$top"
+        ]
+      ]
+    },
+    {
+      "method": "GET",
+      "url": "https://services.odata.org/V4/Northwind/Northwind.svc/Categories",
+      "count": 3,
+      "param_shapes": [
+        [
+          "$top"
+        ]
+      ]
+    },
+    {
+      "method": "GET",
+      "url": "https://services.odata.org/V4/Northwind/Northwind.svc/Category_Sales_for_1997",
+      "count": 3,
+      "param_shapes": [
+        [
+          "$top"
+        ]
+      ]
+    },
+    {
+      "method": "GET",
+      "url": "https://services.odata.org/V4/Northwind/Northwind.svc/Current_Product_Lists",
+      "count": 3,
+      "param_shapes": [
+        [
+          "$top"
+        ]
+      ]
+    },
+    {
+      "method": "GET",
+      "url": "https://services.odata.org/V4/Northwind/Northwind.svc/CustomerDemographics",
+      "count": 3,
+      "param_shapes": [
+        [
+          "$top"
+        ]
+      ]
+    },
+    {
+      "method": "GET",
+      "url": "https://services.odata.org/V4/Northwind/Northwind.svc/Customer_and_Suppliers_by_Cities",
+      "count": 6,
+      "param_shapes": [
+        [
+          "$top"
+        ],
+        [
+          "$skiptoken",
+          "$top"
+        ]
+      ]
+    },
+    {
+      "method": "GET",
+      "url": "https://services.odata.org/V4/Northwind/Northwind.svc/Customers",
+      "count": 15,
+      "param_shapes": [
+        [
+          "$top"
+        ],
+        [
+          "$skiptoken",
+          "$top"
+        ]
+      ]
+    },
+    {
+      "method": "GET",
+      "url": "https://services.odata.org/V4/Northwind/Northwind.svc/Employees",
+      "count": 3,
+      "param_shapes": [
+        [
+          "$top"
+        ]
+      ]
+    },
+    {
+      "method": "GET",
+      "url": "https://services.odata.org/V4/Northwind/Northwind.svc/Invoices",
+      "count": 6,
+      "param_shapes": [
+        [
+          "$top"
+        ],
+        [
+          "$skiptoken",
+          "$top"
+        ]
+      ]
+    },
+    {
+      "method": "GET",
+      "url": "https://services.odata.org/V4/Northwind/Northwind.svc/Order_Details",
+      "count": 6,
+      "param_shapes": [
+        [
+          "$top"
+        ],
+        [
+          "$skiptoken",
+          "$top"
+        ]
+      ]
+    },
+    {
+      "method": "GET",
+      "url": "https://services.odata.org/V4/Northwind/Northwind.svc/Order_Details_Extendeds",
+      "count": 30,
+      "param_shapes": [
+        [
+          "$top"
+        ],
+        [
+          "$skiptoken",
+          "$top"
+        ]
+      ]
+    },
+    {
+      "method": "GET",
+      "url": "https://services.odata.org/V4/Northwind/Northwind.svc/Order_Subtotals",
+      "count": 27,
+      "param_shapes": [
+        [
+          "$top"
+        ],
+        [
+          "$skiptoken",
+          "$top"
+        ]
+      ]
+    },
+    {
+      "method": "GET",
+      "url": "https://services.odata.org/V4/Northwind/Northwind.svc/Orders",
+      "count": 12,
+      "param_shapes": [
+        [
+          "$orderby",
+          "$top"
+        ],
+        [
+          "$orderby",
+          "$skiptoken",
+          "$top"
+        ],
+        [
+          "$filter",
+          "$orderby",
+          "$top"
+        ]
+      ]
+    },
+    {
+      "method": "GET",
+      "url": "https://services.odata.org/V4/Northwind/Northwind.svc/Orders_Qries",
+      "count": 27,
+      "param_shapes": [
+        [
+          "$top"
+        ],
+        [
+          "$skiptoken",
+          "$top"
+        ]
+      ]
+    },
+    {
+      "method": "GET",
+      "url": "https://services.odata.org/V4/Northwind/Northwind.svc/Product_Sales_for_1997",
+      "count": 3,
+      "param_shapes": [
+        [
+          "$top"
+        ]
+      ]
+    },
+    {
+      "method": "GET",
+      "url": "https://services.odata.org/V4/Northwind/Northwind.svc/Products",
+      "count": 12,
+      "param_shapes": [
+        [
+          "$top"
+        ],
+        [
+          "$skiptoken",
+          "$top"
+        ]
+      ]
+    },
+    {
+      "method": "GET",
+      "url": "https://services.odata.org/V4/Northwind/Northwind.svc/Products_Above_Average_Prices",
+      "count": 3,
+      "param_shapes": [
+        [
+          "$top"
+        ]
+      ]
+    },
+    {
+      "method": "GET",
+      "url": "https://services.odata.org/V4/Northwind/Northwind.svc/Products_by_Categories",
+      "count": 3,
+      "param_shapes": [
+        [
+          "$top"
+        ]
+      ]
+    },
+    {
+      "method": "GET",
+      "url": "https://services.odata.org/V4/Northwind/Northwind.svc/Regions",
+      "count": 3,
+      "param_shapes": [
+        [
+          "$top"
+        ]
+      ]
+    },
+    {
+      "method": "GET",
+      "url": "https://services.odata.org/V4/Northwind/Northwind.svc/Sales_Totals_by_Amounts",
+      "count": 3,
+      "param_shapes": [
+        [
+          "$top"
+        ]
+      ]
+    },
+    {
+      "method": "GET",
+      "url": "https://services.odata.org/V4/Northwind/Northwind.svc/Sales_by_Categories",
+      "count": 3,
+      "param_shapes": [
+        [
+          "$top"
+        ]
+      ]
+    },
+    {
+      "method": "GET",
+      "url": "https://services.odata.org/V4/Northwind/Northwind.svc/Shippers",
+      "count": 3,
+      "param_shapes": [
+        [
+          "$top"
+        ]
+      ]
+    },
+    {
+      "method": "GET",
+      "url": "https://services.odata.org/V4/Northwind/Northwind.svc/Summary_of_Sales_by_Quarters",
+      "count": 27,
+      "param_shapes": [
+        [
+          "$top"
+        ],
+        [
+          "$skiptoken",
+          "$top"
+        ]
+      ]
+    },
+    {
+      "method": "GET",
+      "url": "https://services.odata.org/V4/Northwind/Northwind.svc/Summary_of_Sales_by_Years",
+      "count": 27,
+      "param_shapes": [
+        [
+          "$top"
+        ],
+        [
+          "$skiptoken",
+          "$top"
+        ]
+      ]
+    },
+    {
+      "method": "GET",
+      "url": "https://services.odata.org/V4/Northwind/Northwind.svc/Suppliers",
+      "count": 3,
+      "param_shapes": [
+        [
+          "$top"
+        ]
+      ]
+    },
+    {
+      "method": "GET",
+      "url": "https://services.odata.org/V4/Northwind/Northwind.svc/Territories",
+      "count": 3,
+      "param_shapes": [
+        [
+          "$top"
+        ]
+      ]
+    },
+    {
+      "method": "GET",
+      "url": "https://services.odata.org/V4/Northwind/Northwind.svc/__nonexistent_table_$$_9z9z9z__",
+      "count": 1,
+      "param_shapes": [
+        [
+          "$top"
+        ]
+      ]
+    }
+  ]
+}
