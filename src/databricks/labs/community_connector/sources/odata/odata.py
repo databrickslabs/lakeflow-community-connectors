@@ -49,7 +49,7 @@ import pickle
 import tempfile
 import time
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from email.utils import parsedate_to_datetime
 from typing import Any, Iterator
 from urllib.parse import urljoin, urlparse
@@ -180,6 +180,19 @@ _BATCH_UNCAPPED = 10**12
 # keyset/skip/auto require a ``$top`` to size pages and detect
 # truncation, so they force a default ``page_size`` when none is set.
 _PAGINATION_MODES = frozenset({"nextlink", "keyset", "skip", "auto"})
+
+# ``cursor_lookback_seconds=auto`` self-sizes the overlap window from the
+# **max** measured walk duration over the last ``_LOOKBACK_AUTO_WINDOW``
+# completed walks (the worst recent walk is the robust ceiling on how long a
+# walk runs — far less hand-wavy than last-value × a big fudge factor, and
+# resistant to a single slow spike skewing the estimate). That max is then
+# multiplied by ``cursor_lookback_factor`` (small margin for a walk worse
+# than any seen recently) and clamped to ``cursor_lookback_max_seconds`` — a
+# runaway backstop. Both the factor and ceiling are per-table options; these
+# are their defaults.
+_LOOKBACK_AUTO_WINDOW = 5
+_LOOKBACK_AUTO_DEFAULT_FACTOR = 1.5
+_LOOKBACK_AUTO_DEFAULT_CEILING_SECONDS = 3600
 # Monotonic across the whole process — guarantees each emitted record
 # has a strictly increasing sequence value, so apply_changes can pick a
 # deterministic winner when the same primary key appears multiple times
@@ -652,6 +665,38 @@ class ODataLakeflowConnect(
         # behaviour) for any path that doesn't set it.
         self._pagination = self._parse_pagination(opts)
         self._set_excluded_ancestor_columns(opts)
+        # Overlap re-read window for non-atomic walks. Held on ``self`` for
+        # the read's duration (like ``_pagination``); the floor is applied
+        # only to the read filter in ``_cursor_expand_clause``, never to the
+        # committed offset. Currently scoped to ``expand_contained=true``
+        # cursor reads — the only path whose walk is long enough and which
+        # has no client-side cursor re-filter to also floor.
+        self._cursor_lookback = self._parse_cursor_lookback(opts)
+        # ``auto`` tuning knobs (ignored for static/off modes).
+        self._cursor_lookback_factor = self._parse_cursor_lookback_factor(opts)
+        self._cursor_lookback_max_seconds = self._parse_cursor_lookback_ceiling(opts)
+        # Resolved per-read in the expand-cursor path (see
+        # ``_read_contained_expand``); stays 0 for every other read.
+        self._active_lookback_seconds = 0
+        # Only an EXPLICIT positive window is validated against the read
+        # config — the default ``auto`` is a no-op outside the expand-cursor
+        # path, so leaving it on for flat / N+1 / snapshot tables must not
+        # raise.
+        if (
+            isinstance(self._cursor_lookback, int)
+            and self._cursor_lookback > 0
+            and not (
+                _parse_contained_path(table_name) is not None
+                and self._expand_contained_active(opts)
+                and opts.get("cursor_field")
+            )
+        ):
+            raise ValueError(
+                "cursor_lookback_seconds (an explicit value) is supported "
+                "only with expand_contained=true and a cursor_field on a "
+                "contained path. Use 'auto' (default) or 'off' for other "
+                "read configurations."
+            )
         if self._pagination != "nextlink":
             opts.setdefault("page_size", _DEFAULT_PAGE_SIZE)
         if start_offset is None:
@@ -2552,6 +2597,174 @@ class ODataLakeflowConnect(
         if since is None:
             return None
         return f"{cursor_field} gt {_odata_literal(since)}"
+
+    def _parse_cursor_lookback(self, table_options: dict[str, str] | None):
+        """Parse the ``cursor_lookback_seconds`` table option.
+
+        Returns the mode: the string ``"auto"`` (default), or a non-negative
+        ``int`` of explicit seconds (``0`` disables the overlap).
+
+        The overlap re-reads a window behind the committed watermark on each
+        incremental ``expand_contained=true`` batch, so rows inserted *during*
+        a long (non-atomic) walk — which land with a cursor below the walk's
+        final max and would otherwise be skipped by ``cursor gt <max>`` — are
+        re-scanned and captured on the next progressing batch (deduped at the
+        destination by ``apply_changes`` MERGE).
+
+        * ``auto`` (default): size the window from the measured duration of
+          the previous completed walk (persisted in the offset), times a
+          safety factor, clamped to a ceiling. Self-tuning; no manual guess.
+          A no-op outside the expand-cursor path and for non-timestamp
+          cursors, so defaulting it on is safe.
+        * an explicit integer: a fixed window in cursor units (seconds for a
+          timestamp cursor). Set it at or above the worst-case walk duration.
+        * ``0`` / ``off``: disabled (exact prior behaviour).
+        """
+        raw = (table_options or {}).get("cursor_lookback_seconds")
+        if raw is None or str(raw).strip() == "":
+            return "auto"
+        norm = str(raw).strip().lower()
+        if norm == "auto":
+            return "auto"
+        if norm == "off":
+            return 0
+        try:
+            val = int(norm)
+        except ValueError as exc:
+            raise ValueError(
+                f"Invalid cursor_lookback_seconds={raw!r}; expected 'auto', "
+                f"'off', or a non-negative integer (seconds)."
+            ) from exc
+        if val < 0:
+            raise ValueError(f"cursor_lookback_seconds must be >= 0; got {val}.")
+        return val
+
+    def _parse_cursor_lookback_factor(self, table_options: dict[str, str] | None) -> float:
+        """Parse ``cursor_lookback_factor`` — the ``auto`` safety multiplier
+        applied to the max recent walk duration (default 1.5). Must be > 0;
+        values < 1 risk under-covering the overlap (dropped rows)."""
+        raw = (table_options or {}).get("cursor_lookback_factor")
+        if raw is None or str(raw).strip() == "":
+            return _LOOKBACK_AUTO_DEFAULT_FACTOR
+        try:
+            val = float(str(raw).strip())
+        except ValueError as exc:
+            raise ValueError(
+                f"Invalid cursor_lookback_factor={raw!r}; expected a positive number."
+            ) from exc
+        if val <= 0:
+            raise ValueError(f"cursor_lookback_factor must be > 0; got {val}.")
+        return val
+
+    def _parse_cursor_lookback_ceiling(self, table_options: dict[str, str] | None) -> int:
+        """Parse ``cursor_lookback_max_seconds`` — the ``auto`` ceiling clamp
+        (runaway backstop) on the overlap window (default 3600). Must be > 0."""
+        raw = (table_options or {}).get("cursor_lookback_max_seconds")
+        if raw is None or str(raw).strip() == "":
+            return _LOOKBACK_AUTO_DEFAULT_CEILING_SECONDS
+        try:
+            val = int(str(raw).strip())
+        except ValueError as exc:
+            raise ValueError(
+                f"Invalid cursor_lookback_max_seconds={raw!r}; expected a positive integer."
+            ) from exc
+        if val <= 0:
+            raise ValueError(f"cursor_lookback_max_seconds must be > 0; got {val}.")
+        return val
+
+    def _resolve_active_lookback(self, start_offset: dict | None) -> int:
+        """Seconds to subtract from the committed watermark for THIS read.
+
+        Static mode → the configured integer. ``auto`` → the **max** walk
+        duration over the last ``_LOOKBACK_AUTO_WINDOW`` completed walks
+        (``lb_history`` in the offset) × ``cursor_lookback_factor``, clamped
+        to ``cursor_lookback_max_seconds``; ``0`` until the first walk has
+        been measured. Held on ``self`` for the read so
+        ``_apply_cursor_lookback`` can read it without threading the offset
+        through ``_cursor_expand_clause``."""
+        mode = getattr(self, "_cursor_lookback", "auto")
+        if mode != "auto":
+            return int(mode)
+        history = (start_offset or {}).get("lb_history") or []
+        if not history:
+            return 0
+        factor = getattr(self, "_cursor_lookback_factor", _LOOKBACK_AUTO_DEFAULT_FACTOR)
+        ceiling = getattr(
+            self, "_cursor_lookback_max_seconds", _LOOKBACK_AUTO_DEFAULT_CEILING_SECONDS
+        )
+        return min(round(max(history) * factor), ceiling)
+
+    def _attach_lookback_state(
+        self, out_offset: dict, start_offset: dict | None, in_flight: bool, elapsed: float
+    ) -> dict:
+        """Maintain the ``auto`` walk-duration history on the returned offset.
+        No-op for static/off modes (nothing to measure).
+
+        ``lb_history`` is a rolling list of the last ``_LOOKBACK_AUTO_WINDOW``
+        completed-walk durations (seconds); ``_resolve_active_lookback`` sizes
+        the window from its max.
+
+        * In-flight (the walk spans more cap-resume batches): carry the prior
+          history unchanged so the read floor stays stable until completion.
+        * Idled (``out_offset is start_offset`` — quiescent overlap re-read):
+          keep the prior history; a quiescent walk only re-reads the small
+          overlap and would under-represent a real walk.
+        * Completed a progressing walk >= 1s: append this batch's wall-clock
+          ``elapsed`` (capped to the last N). Sub-second walks aren't
+          recorded — the offset stays minimal and a fast source behaves like
+          the no-overlap default.
+        """
+        if getattr(self, "_cursor_lookback", "auto") != "auto":
+            return out_offset
+        if out_offset is start_offset:
+            return out_offset
+        history = list((start_offset or {}).get("lb_history") or [])
+        if not in_flight:
+            measured = round(elapsed)
+            if measured >= 1:
+                history.append(measured)
+                history = history[-_LOOKBACK_AUTO_WINDOW:]
+        if not history:
+            return out_offset
+        return {**out_offset, "lb_history": history}
+
+    def _apply_cursor_lookback(self, since: Any) -> Any:
+        """Return the read floor: ``since`` minus the active lookback window.
+
+        Unchanged when the active window is 0 or ``since`` is ``None`` (the
+        first read stays unfiltered). For a positive window the cursor must be
+        a timestamp — ISO-8601 string or ``datetime``; the result is a
+        tz-aware ``datetime`` that ``_odata_literal`` renders to an OData
+        timestamp literal, so the server compares datetimes regardless of the
+        rendered format. The committed watermark is never floored — only the
+        read filter is — so the offset still advances to the true max seen.
+
+        A non-timestamp cursor under ``auto`` is a no-op (auto is the default
+        and must not break such tables); under an explicit window it raises."""
+        seconds = getattr(self, "_active_lookback_seconds", 0)
+        if not seconds or since is None:
+            return since
+        dt = since
+        if isinstance(since, str):
+            try:
+                dt = datetime.fromisoformat(since.replace("Z", "+00:00"))
+            except ValueError as exc:
+                if getattr(self, "_cursor_lookback", "auto") == "auto":
+                    return since
+                raise ValueError(
+                    f"cursor_lookback_seconds={seconds} requires a timestamp "
+                    f"cursor_field, but the cursor value {since!r} is not "
+                    f"ISO-8601. Unset cursor_lookback_seconds or pick a "
+                    f"timestamp cursor."
+                ) from exc
+        if not isinstance(dt, datetime):
+            if getattr(self, "_cursor_lookback", "auto") == "auto":
+                return since
+            raise ValueError(
+                f"cursor_lookback_seconds={seconds} requires a datetime/"
+                f"timestamp cursor; got {type(since).__name__} {since!r}."
+            )
+        return dt - timedelta(seconds=seconds)
 
     # ------------------------------------------------------------------
     # Null-cursor policy (``cursor_nulls``)

@@ -152,7 +152,7 @@ w.api_client.do(
                 "namespace,cursor_field,select,filter,"
                 "filter_at_*,page_size,max_records_per_batch,cursor_nulls,"
                 "delta_tracking,expand_contained,num_partitions,pagination,"
-                "exclude_ancestor_columns"
+                "exclude_ancestor_columns,cursor_lookback_seconds"
             ),
         },
     },
@@ -175,7 +175,7 @@ the matching OAuth2 keys. Client credentials:
         "namespace,cursor_field,select,filter,"
         "filter_at_*,page_size,max_records_per_batch,cursor_nulls,"
         "delta_tracking,expand_contained,num_partitions,pagination,"
-        "exclude_ancestor_columns"
+        "exclude_ancestor_columns,cursor_lookback_seconds"
     ),
 }
 ```
@@ -302,6 +302,9 @@ build_pipeline(
 | `delta_tracking`        | disabled | Opt-in OData v4 delta queries. Values: `disabled` (default — no behavior change), `auto` (probe once, fall back to cursor/snapshot if the server doesn't acknowledge), `enabled` (require support; error if the server doesn't acknowledge). See [Delta tracking](#delta-tracking) below. |
 | `expand_contained`      | false   | For contained-collection tables (`Parent__Child__...` paths). When `true`, the connector issues a single `GET Parent?$expand=Child($expand=...)` per pipeline trigger instead of the default N+1 traversal (one parent fetch + one per-parent leaf fetch). See [Contained navigation properties](#contained-navigation-properties) below. |
 | `num_partitions`        | 4       | Number of Spark partitions for parallel reads of contained-collection tables. Honored only when the table qualifies for `SupportsPartitionedStream` (contained path, `expand_contained=false`, `delta_tracking=disabled`, and any `cursor_field` lives on the top-level entity). Top-level rows are bin-packed into this many contiguous slices; each Spark task walks only its assigned subtrees. Ignored for non-partitionable tables (they fall back to single-task reads). |
+| `cursor_lookback_seconds` | auto | Overlap window for incremental `expand_contained=true` cursor reads over a **continuously-changing** source. A full nested-`$expand` walk is not a consistent snapshot — it can take many seconds, during which the source keeps changing — and the connector commits the watermark as the max cursor it saw. A row inserted *during* the walk under a parent the walk already passed lands with a cursor below that final max and would be skipped forever by the next `cursor gt <max>`. With a window set, each batch reads from `cursor gt (committed − window)` instead, re-scanning the overlap so those mid-walk arrivals are captured on the next progressing batch (re-read rows are idempotent at the destination via `apply_changes` MERGE on the primary key). The committed watermark is **never** floored — only the read filter is — so the offset still advances to the true max; a quiescent trigger (no row beyond the watermark) idles instead of looping. Values: **`auto`** (default) self-sizes the window from the **max** walk duration over the last few completed walks (persisted in the offset as `lb_history`) × `cursor_lookback_factor` (default 1.5), clamped to `cursor_lookback_max_seconds` (default 3600). Using the max of recent walks — rather than the last value × a large fudge — makes the estimate robust to a single slow spike — no manual guess, and a no-op until the first walk is measured, outside the expand-cursor path, and for non-timestamp cursors; **an integer** sets a fixed window in cursor units (seconds for a timestamp cursor) — set it at or above the worst-case walk duration, and it requires `expand_contained=true` + a timestamp `cursor_field` (else raises); **`off`** (or `0`) disables the overlap (exact prior behaviour). Trade-off: a non-zero window re-reads (and re-MERGEs) the trailing overlap each batch — `auto` keeps that proportional to the actual walk time. |
+| `cursor_lookback_factor` | 1.5 | `auto`-mode only: multiplier applied to the max recent walk duration when sizing the overlap window (see `cursor_lookback_seconds`). Margin for a walk slower than any recently observed. Must be > 0; values < 1 risk under-covering (dropped rows). Ignored unless `cursor_lookback_seconds=auto`. |
+| `cursor_lookback_max_seconds` | 3600 | `auto`-mode only: ceiling clamp (runaway backstop) on the computed overlap window, in seconds. Must be > 0. Ignored unless `cursor_lookback_seconds=auto`. |
 | `exclude_ancestor_columns` | | Comma-separated list of synthetic ancestor-FK column names to **drop from the destination** for a contained-collection table. By default every non-leaf ancestor's PK is prepended as a `<segment>_<pkname>` column (see [Contained navigation properties](#contained-navigation-properties)); list the resolved column names here (e.g. `Instances_Id,Projects_Id`) to omit them, or a lone `*` to drop **all** ancestor-FK columns at once. Excluded columns disappear from the table schema, the stamped rows, **and the composite primary key** alike — so only exclude columns not needed for destination-key uniqueness, otherwise distinct leaf rows under different ancestors can collide on MERGE. **Only synthetic ancestor-FK columns can be excluded** — naming a real leaf/own table column (or a name that matches nothing) leaves the schema untouched and logs a warning, so the option can never drop an actual source column. No effect on flat tables. |
 
 ## Delta tracking

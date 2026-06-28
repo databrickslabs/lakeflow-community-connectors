@@ -23,6 +23,7 @@ against the concrete class.
 import logging
 import math
 import re
+import time
 from datetime import date, datetime
 from decimal import Decimal
 from typing import Any, Iterator
@@ -1167,6 +1168,10 @@ class ContainedNavMixin:
             raise ValueError(f"expand_contained requires a contained path; {table_name!r} is flat.")
         namespace = (table_options or {}).get("namespace")
         cursor_field = (table_options or {}).get("cursor_field")
+        # Resolve the read-floor window for THIS read (static value, or the
+        # ``auto`` measurement carried in the offset) before building the
+        # cursor clause — ``_apply_cursor_lookback`` reads it off ``self``.
+        self._active_lookback_seconds = self._resolve_active_lookback(start_offset)
         cursor_level, cursor_filter, cursor_order, cursor_select = self._cursor_expand_clause(
             segments, namespace, cursor_field, (start_offset or {}).get("cursor")
         )
@@ -1244,6 +1249,9 @@ class ContainedNavMixin:
                 {},
             )
         emitted: list[dict] = []
+        # Wall-clock around the eager drain measures this batch's walk time,
+        # feeding the ``auto`` lookback window (see ``_attach_lookback_state``).
+        drain_start = time.monotonic()
         remaining_queue = self._drain_expand_pages(
             initial_queue,
             max_records,
@@ -1254,6 +1262,7 @@ class ContainedNavMixin:
             ctx,
             page_size,
         )
+        drain_elapsed = time.monotonic() - drain_start
         end_offset = self._build_expand_end_offset(
             emitted, cursor_field, start_offset, remaining_queue
         )
@@ -1261,8 +1270,11 @@ class ContainedNavMixin:
             return iter(emitted), end_offset
         if not emitted and not resuming:
             return iter([]), start_offset or {}
-        return self._finalize_cursor_read(
+        records, out_offset = self._finalize_cursor_read(
             start_offset, end_offset, emitted, table_name, cursor_field
+        )
+        return records, self._attach_lookback_state(
+            out_offset, start_offset, bool(remaining_queue), drain_elapsed
         )
 
     # pylint: disable=too-many-arguments,too-many-positional-arguments,too-many-locals
@@ -1577,9 +1589,16 @@ class ContainedNavMixin:
         # the user didn't opt out of — particularly harmful when the
         # cursor segment is also the leaf (2-segment paths). Users who
         # want to trim can set ``select`` themselves on the leaf side.
+        # Read floor lags the committed watermark by ``cursor_lookback_seconds``
+        # so a non-atomic ``expand_contained=true`` walk re-scans rows that
+        # arrived mid-walk and landed below the walk's final max (see
+        # ``_apply_cursor_lookback``). Only the read filter is floored; the
+        # committed watermark stays the true max of emitted rows
+        # (``_build_expand_end_offset``), so the offset still advances.
+        read_since = self._apply_cursor_lookback(since)
         return (
             cursor_level,
-            self._cursor_filter(cursor_field, since),
+            self._cursor_filter(cursor_field, read_since),
             ",".join(order_terms),
             None,
         )
@@ -2121,8 +2140,28 @@ class ContainedNavMixin:
         the raise branch."""
         if start_offset is None:
             return iter(emitted), end_offset
-        if start_offset == end_offset:
+
+        # Compare progress on the cursor/continuation state only — strip the
+        # ``lb_*`` auto-lookback bookkeeping, whose measurement can fluctuate
+        # batch-to-batch without representing real cursor progress.
+        def _progress_view(off: dict | None) -> dict:
+            return {k: v for k, v in (off or {}).items() if not k.startswith("lb_")}
+
+        if _progress_view(start_offset) == _progress_view(end_offset):
             if emitted:
+                # With cursor_lookback the read floor lags the committed
+                # watermark by the overlap window, so a quiescent trigger
+                # re-reads the trailing overlap rows (cursor <= committed)
+                # without the watermark advancing. That is expected, not a
+                # stall: a row with cursor > committed (forward progress)
+                # would have advanced end_offset and skipped this branch. So
+                # idle — suppress the overlap re-reads (idempotent under
+                # apply_changes MERGE anyway) rather than raising. The
+                # late-arriver rows the overlap exists to catch are emitted on
+                # the next PROGRESSING batch, when end_offset advances past
+                # the prior watermark.
+                if getattr(self, "_active_lookback_seconds", 0) > 0:
+                    return iter([]), start_offset
                 raise self._no_progress_cursor_error(table_name, cursor_field, len(emitted))
             return iter([]), start_offset
         return iter(emitted), end_offset

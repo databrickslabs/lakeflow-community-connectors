@@ -3129,6 +3129,238 @@ def test_contained_expand_auto_mode_no_inner_truncation_warning(caplog):
 
 
 @responses.activate
+def test_expand_cursor_lookback_floors_read_filter_not_offset():
+    """``cursor_lookback_seconds`` floors the read filter by the overlap
+    window (so a non-atomic walk re-scans mid-walk arrivals) but commits the
+    TRUE max watermark, not the floored value."""
+    from urllib.parse import unquote
+
+    _mock_nested_metadata()
+    captured: list[str] = []
+
+    def _parents(req):
+        captured.append(unquote(req.url))
+        if "Id gt" in unquote(req.url):  # top-level auto drain probe
+            return (200, {}, json.dumps({"value": []}))
+        return (
+            200,
+            {},
+            json.dumps(
+                {
+                    "value": [
+                        {
+                            "Id": 1,
+                            "Children": [
+                                {"Id": 11, "Label": "a", "ModifiedAt": "2024-01-02T12:00:00Z"},
+                                {"Id": 12, "Label": "b", "ModifiedAt": "2024-01-03T00:00:00Z"},
+                            ],
+                        }
+                    ]
+                }
+            ),
+        )
+
+    responses.add_callback(responses.GET, f"{SERVICE_URL}Parents", callback=_parents)
+    responses.add_callback(
+        responses.GET,
+        f"{SERVICE_URL}Parents(1)/Children",
+        callback=lambda r: (200, {}, json.dumps({"value": []})),
+    )
+    c = _make()
+    records, offset = c.read_table(
+        "Parents__Children",
+        {"cursor": "2024-01-02T00:00:00Z"},
+        {
+            "expand_contained": "true",
+            "cursor_field": "ModifiedAt",
+            "cursor_lookback_seconds": "3600",  # 1h overlap
+        },
+    )
+    rows = list(records)
+    # Read filter floored by 1h behind the committed 2024-01-02T00:00:00Z.
+    assert any("ModifiedAt gt 2024-01-01T23:00:00" in u for u in captured), captured
+    # Committed offset is the TRUE max emitted, NOT the floored read value.
+    assert offset == {"cursor": "2024-01-03T00:00:00Z"}
+    assert [r["Id"] for r in rows] == [11, 12]
+
+
+@responses.activate
+def test_expand_cursor_lookback_idles_on_no_progress_instead_of_raising():
+    """Quiescent re-read: the floored filter re-returns the overlap rows
+    (cursor <= committed) but no row exceeds the watermark. With lookback
+    this idles (empty, offset unchanged) instead of raising the no-progress
+    error — which is what the plain ``cursor gt`` path would do."""
+    from urllib.parse import unquote
+
+    _mock_nested_metadata()
+
+    def _parents(req):
+        if "Id gt" in unquote(req.url):
+            return (200, {}, json.dumps({"value": []}))
+        return (
+            200,
+            {},
+            json.dumps(
+                {
+                    "value": [
+                        {
+                            "Id": 1,
+                            "Children": [
+                                {"Id": 11, "Label": "a", "ModifiedAt": "2024-01-02T00:00:00Z"},
+                            ],
+                        }
+                    ]
+                }
+            ),
+        )
+
+    responses.add_callback(responses.GET, f"{SERVICE_URL}Parents", callback=_parents)
+    responses.add_callback(
+        responses.GET,
+        f"{SERVICE_URL}Parents(1)/Children",
+        callback=lambda r: (200, {}, json.dumps({"value": []})),
+    )
+    c = _make()
+    start = {"cursor": "2024-01-02T00:00:00Z"}  # == the only child's cursor
+    records, offset = c.read_table(
+        "Parents__Children",
+        start,
+        {
+            "expand_contained": "true",
+            "cursor_field": "ModifiedAt",
+            "cursor_lookback_seconds": "3600",
+        },
+    )
+    assert list(records) == []  # overlap re-read suppressed
+    assert offset == start  # idled, no advance, no RuntimeError
+
+
+@responses.activate
+def test_cursor_lookback_requires_expand_contained():
+    _mock_nested_metadata()
+    c = _make()
+    with pytest.raises(ValueError, match="explicit value.*supported only with expand_contained"):
+        c.read_table(
+            "Parents__Children",
+            {"cursor": "2024-01-01T00:00:00Z"},
+            {"cursor_field": "ModifiedAt", "cursor_lookback_seconds": "300"},  # no expand_contained
+        )
+
+
+@responses.activate
+def test_cursor_lookback_non_timestamp_cursor_raises():
+    _mock_nested_metadata()
+    c = _make()
+    with pytest.raises(ValueError, match="datetime/timestamp cursor|not ISO-8601"):
+        c.read_table(
+            "Parents__Children",
+            {"cursor": 11},  # int cursor value
+            {
+                "expand_contained": "true",
+                "cursor_field": "Id",
+                "cursor_lookback_seconds": "300",
+            },
+        )
+
+
+@responses.activate
+def test_cursor_lookback_invalid_value_raises():
+    _mock_nested_metadata()
+    c = _make()
+    with pytest.raises(ValueError, match="Invalid cursor_lookback_seconds|must be >= 0"):
+        c.read_table(
+            "Parents__Children",
+            {"cursor": "2024-01-01T00:00:00Z"},
+            {
+                "expand_contained": "true",
+                "cursor_field": "ModifiedAt",
+                "cursor_lookback_seconds": "-5",
+            },
+        )
+
+
+def test_cursor_lookback_parse_modes():
+    """Default is ``auto``; ``off`` disables; an integer is static seconds."""
+    c = _make()
+    assert c._parse_cursor_lookback({}) == "auto"
+    assert c._parse_cursor_lookback({"cursor_lookback_seconds": "auto"}) == "auto"
+    assert c._parse_cursor_lookback({"cursor_lookback_seconds": "off"}) == 0
+    assert c._parse_cursor_lookback({"cursor_lookback_seconds": "0"}) == 0
+    assert c._parse_cursor_lookback({"cursor_lookback_seconds": "300"}) == 300
+
+
+def test_cursor_lookback_factor_and_ceiling_parse():
+    """``auto`` tuning knobs parse with defaults and validate positivity."""
+    c = _make()
+    assert c._parse_cursor_lookback_factor({}) == 1.5
+    assert c._parse_cursor_lookback_factor({"cursor_lookback_factor": "2.5"}) == 2.5
+    assert c._parse_cursor_lookback_ceiling({}) == 3600
+    assert c._parse_cursor_lookback_ceiling({"cursor_lookback_max_seconds": "600"}) == 600
+    with pytest.raises(ValueError, match="cursor_lookback_factor must be > 0"):
+        c._parse_cursor_lookback_factor({"cursor_lookback_factor": "0"})
+    with pytest.raises(ValueError, match="Invalid cursor_lookback_factor"):
+        c._parse_cursor_lookback_factor({"cursor_lookback_factor": "abc"})
+    with pytest.raises(ValueError, match="cursor_lookback_max_seconds must be > 0"):
+        c._parse_cursor_lookback_ceiling({"cursor_lookback_max_seconds": "0"})
+
+
+def test_cursor_lookback_auto_resolve_max_of_recent_scaled_clamped():
+    """``auto`` sizes the window from the MAX of the last-N walk durations
+    × factor, clamped to the ceiling; static mode ignores the history."""
+    c = _make()
+    c._cursor_lookback = "auto"
+    c._cursor_lookback_factor = 1.5
+    c._cursor_lookback_max_seconds = 3600
+    assert c._resolve_active_lookback({}) == 0  # no history yet
+    assert c._resolve_active_lookback({"lb_history": [40, 100, 60]}) == 150  # max(100) × 1.5
+    assert c._resolve_active_lookback({"lb_history": [100000]}) == 3600  # clamped
+    # custom factor / ceiling
+    c._cursor_lookback_factor = 3.0
+    c._cursor_lookback_max_seconds = 250
+    assert c._resolve_active_lookback({"lb_history": [50, 80]}) == 240  # max(80) × 3.0
+    assert c._resolve_active_lookback({"lb_history": [200]}) == 250  # clamped to custom ceiling
+    c._cursor_lookback = 50
+    assert c._resolve_active_lookback({"lb_history": [100]}) == 50  # static ignores history
+
+
+def test_cursor_lookback_auto_attach_history():
+    """``auto`` appends a >=1s walk to a rolling last-N history, omits
+    sub-second walks, carries prior while in-flight, leaves idle/static
+    offsets untouched."""
+    c = _make()
+    c._cursor_lookback = "auto"
+    # completed progressing walk >= 1s -> append
+    assert c._attach_lookback_state({"cursor": "X"}, {}, False, 12.0) == {
+        "cursor": "X",
+        "lb_history": [12],
+    }
+    # append onto prior, capped to the window (5) — oldest dropped
+    assert c._attach_lookback_state(
+        {"cursor": "X"}, {"lb_history": [1, 2, 3, 4, 5]}, False, 9.0
+    ) == {
+        "cursor": "X",
+        "lb_history": [2, 3, 4, 5, 9],
+    }
+    # sub-second walk -> not recorded; empty prior stays clean, prior carried
+    assert c._attach_lookback_state({"cursor": "X"}, {}, False, 0.2) == {"cursor": "X"}
+    assert c._attach_lookback_state({"cursor": "X"}, {"lb_history": [7]}, False, 0.2) == {
+        "cursor": "X",
+        "lb_history": [7],
+    }
+    # in-flight carries the prior history unchanged
+    assert c._attach_lookback_state({"pending_fetches": []}, {"lb_history": [9]}, True, 0.0) == {
+        "pending_fetches": [],
+        "lb_history": [9],
+    }
+    # idle (out is the same object as start) -> untouched
+    start = {"cursor": "X", "lb_history": [7]}
+    assert c._attach_lookback_state(start, start, False, 5.0) is start
+    # static mode never writes bookkeeping
+    c._cursor_lookback = 50
+    assert c._attach_lookback_state({"cursor": "X"}, {}, False, 12.0) == {"cursor": "X"}
+
+
+@responses.activate
 def test_contained_expand_cursor_drains_capped_inner_collection_multi_parent():
     """Regression (xmla_demo): ``expand_contained=true`` + cursor on a server
     that caps every response BELOW the requested $top and omits the

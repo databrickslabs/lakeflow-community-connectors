@@ -180,4 +180,4 @@ connection:
         high-throughput pipelines.
 
 # Per-table options the pipeline may pass through.
-external_options_allowlist: "namespace,cursor_field,select,filter,filter_at_*,page_size,max_records_per_batch,cursor_nulls,delta_tracking,expand_contained,num_partitions,pagination,exclude_ancestor_columns"
+external_options_allowlist: "namespace,cursor_field,select,filter,filter_at_*,page_size,max_records_per_batch,cursor_nulls,delta_tracking,expand_contained,num_partitions,pagination,exclude_ancestor_columns,cursor_lookback_seconds,cursor_lookback_factor,cursor_lookback_max_seconds"
