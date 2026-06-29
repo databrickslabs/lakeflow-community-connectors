@@ -55,11 +55,11 @@ connection:
 
   # OAuth 2.0 authorization-code flow (see Gmail connector for the shape).
   #   flow — u2m: a single human authorizes once at connection creation.
-  #   pkce — false: Google's Web-application client is confidential and does
-  #          not require PKCE for the labs authenticate CLI.
+  #   pkce — true: e2-demo UC U2M connections require pkce_verifier on the
+  #          connection. PKCE is supported for Google's Web-application client.
   oauth:
     flow: u2m
-    pkce: false
+    pkce: true
     scopes: https://www.googleapis.com/auth/youtube.readonly
     authorization_url: https://accounts.google.com/o/oauth2/v2/auth
     token_url: https://oauth2.googleapis.com/token
