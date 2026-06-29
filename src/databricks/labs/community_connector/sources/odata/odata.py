@@ -747,6 +747,9 @@ class ODataLakeflowConnect(
         # batch from streaming and skip the no-progress raise when the
         # framework will discard the returned offset anyway.
         offset = start_offset or {}
+        # Seed per-instance capability verdicts from the resume offset so a
+        # reader the framework recreates each microbatch skips re-probing.
+        self._seed_capability_caches(start_offset)
         if _parse_contained_path(table_name) is not None:
             if self._delta_setting(opts) == "enabled":
                 raise ValueError(
@@ -760,15 +763,19 @@ class ODataLakeflowConnect(
                 # snapshot expand omits $top when page_size is unset.
                 if opts.get("cursor_field"):
                     opts.setdefault("page_size", _DEFAULT_PAGE_SIZE)
-                return self._read_contained_expand(table_name, start_offset, opts)
+                return self._with_capabilities(
+                    self._read_contained_expand(table_name, start_offset, opts)
+                )
             if opts.get("cursor_field"):
                 # Cursor-based read: default page_size so a $top is sent.
                 # Snapshot (the branch below) leaves it unset → no $top.
                 opts.setdefault("page_size", _DEFAULT_PAGE_SIZE)
-                return self._read_contained_incremental(
-                    table_name, start_offset, opts, opts["cursor_field"]
+                return self._with_capabilities(
+                    self._read_contained_incremental(
+                        table_name, start_offset, opts, opts["cursor_field"]
+                    )
                 )
-            return self._read_contained_snapshot(table_name, opts)
+            return self._with_capabilities(self._read_contained_snapshot(table_name, opts))
         # Offset-shape check ahead of the delta predicate so a resumed
         # delta stream (offset carries delta_link / next_link) takes the
         # delta path even if delta_tracking is no longer set in options.
@@ -784,8 +791,48 @@ class ODataLakeflowConnect(
             # Cursor-based read: default page_size so a $top is sent.
             # Snapshot (the branch below) leaves it unset → no $top.
             opts.setdefault("page_size", _DEFAULT_PAGE_SIZE)
-            return self._read_incremental(table_name, start_offset, opts, opts["cursor_field"])
+            return self._with_capabilities(
+                self._read_incremental(table_name, start_offset, opts, opts["cursor_field"])
+            )
         return self._read_snapshot(table_name, opts)
+
+    def _seed_capability_caches(self, start_offset: dict | None) -> None:
+        """Seed per-instance capability verdicts from the resume offset so a
+        reader the framework recreates each microbatch skips re-probing.
+
+        Mirrors ``cursor_probe_ok`` (which the leaf-cursor path threads itself),
+        but for the **OR-across-columns** verdict (``or_filter_ok``) and the
+        **$batch** verdict (``batch_ok``, shared with the leaf-cursor path and
+        the ``contained_fetch`` snapshot/stream walks). Both verdicts are
+        server-wide, so a single cached value serves every table this instance
+        reads. Persisted back by :meth:`_merge_capability_caches`."""
+        off = start_offset or {}
+        if "or_filter_ok" in off:
+            self.__dict__["_or_filter_ok"] = bool(off["or_filter_ok"])
+        if "batch_ok" in off:
+            self.__dict__["_batch_supported"] = bool(off["batch_ok"])
+
+    def _merge_capability_caches(self, offset: dict) -> dict:
+        """Thread the per-instance OR / $batch verdicts into the returned offset
+        so they survive the framework recreating the reader each microbatch.
+        Only adds a flag once actually **determined** this instance (the probe
+        ran), and never overwrites one a read path already wrote. Excluded from
+        the no-progress comparison (see ``_finalize_cursor_read``), so baking in
+        a verdict never reads as forward progress."""
+        if not isinstance(offset, dict):
+            return offset
+        add: dict = {}
+        if "_or_filter_ok" in self.__dict__ and "or_filter_ok" not in offset:
+            add["or_filter_ok"] = self.__dict__["_or_filter_ok"]
+        if "_batch_supported" in self.__dict__ and "batch_ok" not in offset:
+            add["batch_ok"] = self.__dict__["_batch_supported"]
+        return {**offset, **add} if add else offset
+
+    def _with_capabilities(self, result: tuple) -> tuple:
+        """Wrap a ``(records, offset)`` read result, threading capability
+        verdicts into the offset (see :meth:`_merge_capability_caches`)."""
+        records, offset = result
+        return records, self._merge_capability_caches(offset)
 
     # ------------------------------------------------------------------
     # Snapshot + incremental read paths
@@ -1552,6 +1599,48 @@ class ODataLakeflowConnect(
             yield page_rows, new_next
             next_url = new_next
 
+    def _verify_or_filter_support(
+        self, base_url: str, order_keys: list[str], sample_row: dict
+    ) -> bool:
+        """One-shot, per-instance probe: does the server accept an
+        OR-across-**different-columns** ``$filter`` — the composite keyset-seek
+        shape ``(k1 eq v1 and k2 gt v2) or (k1 gt v1)``?
+
+        A single-key ``$orderby`` never builds an OR, so this short-circuits to
+        ``True`` for ``len(order_keys) < 2``. For a composite seek it issues ONE
+        ``$top=1`` probe carrying the OR filter, built from ``sample_row`` so the
+        literals are correctly typed. A definitive **4xx** ⇒ the server rejects
+        OR across columns (e.g. Hexagon Smart API: "on different columns, only
+        AND operators are supported") and the caller falls back to ``$skip``
+        (pagination mode B). A transport error or any non-4xx outcome is **not**
+        evidence of non-support, so it fails **open** (assume supported) — the
+        real seek then runs and surfaces any genuine error itself. The verdict
+        is cached per instance (the capability is server-wide)."""
+        if len(order_keys) < 2:
+            return True
+        cached = self.__dict__.get("_or_filter_ok")
+        if cached is not None:
+            return cached
+        ok = True
+        seek = _pg_keyset_filter(order_keys, sample_row)
+        if seek is not None and " or " in seek:
+            probe = _pg_strip_query(
+                _pg_set_query(
+                    _pg_keyset_seek_url(base_url, _pg_base_filter(base_url), seek),
+                    "$top",
+                    "1",
+                ),
+                "__pgbase",
+            )
+            try:
+                resp = self._get_session().get(probe, timeout=self.timeout)
+                if 400 <= resp.status_code < 500:
+                    ok = False  # server explicitly rejected the OR-across-columns filter
+            except Exception:  # transport error ≠ unsupported — defer to the real seek
+                ok = True
+        self.__dict__["_or_filter_ok"] = ok
+        return ok
+
     def _client_paginate_pages(
         self, url: str, mode: str
     ) -> Iterator[tuple[list[dict], str | None]]:
@@ -1701,6 +1790,20 @@ class ODataLakeflowConnect(
             # no-progress guard above bounds a server that ignores the
             # seek/$skip — auto then stops with this page's rows, exactly as the
             # old short-page default did, minus the dropped duplicate.
+            if can_keyset and not self._verify_or_filter_support(url, order_keys, page_rows[-1]):
+                # Composite keyset seek would build an OR-across-columns filter
+                # the server rejects (Hexagon Smart API). Drop to $skip (mode B)
+                # for the rest of this collection — and, via the cached verdict,
+                # every later walk this instance.
+                _LOG.warning(
+                    "pagination=%s: server rejected an OR-across-columns keyset "
+                    "seek (composite $orderby %s); using $skip for %r. Set "
+                    "pagination=skip to skip this probe.",
+                    mode,
+                    order_keys,
+                    cur_url,
+                )
+                can_keyset = False
             if can_keyset:
                 seek = _pg_keyset_filter(order_keys, page_rows[-1])
                 if seek is not None:

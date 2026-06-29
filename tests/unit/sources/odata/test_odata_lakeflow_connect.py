@@ -108,11 +108,14 @@ def _make(options=None):
 
 
 def _drop_lb(offset):
-    """Strip the ``auto`` cursor_lookback bookkeeping (``lb_history``) from an
-    offset for stable equality asserts. Its value is the measured wall-clock of
-    the (now sub-second-recorded) walk, so it's non-deterministic across runs —
-    tests assert the cursor/resume state, not the timing bookkeeping."""
-    return {k: v for k, v in (offset or {}).items() if k != "lb_history"}
+    """Strip non-logical bookkeeping from an offset for stable equality asserts:
+    the ``auto`` cursor_lookback history (``lb_history``, non-deterministic
+    wall-clock) and the persisted capability verdicts (``cursor_probe_ok`` /
+    ``batch_ok`` / ``or_filter_ok``, one-time-set markers threaded across
+    microbatches). Tests assert the cursor/resume state, not this bookkeeping —
+    mirrors the production no-progress comparison in ``_finalize_cursor_read``."""
+    _bookkeeping = {"lb_history", "cursor_probe_ok", "batch_ok", "or_filter_ok"}
+    return {k: v for k, v in (offset or {}).items() if k not in _bookkeeping}
 
 
 # ---------------------------------------------------------------------------
@@ -217,7 +220,7 @@ def test_snapshot_walks_nextlink_and_strips_control_props():
     c = _make()
     records, offset = c.read_table("Customers", None, {})
     rows = list(records)
-    assert offset == {}
+    assert _drop_lb(offset) == {}
     assert rows == [
         {"Id": 1, "Name": "A", "ModifiedAt": "2024-01-01T00:00:00Z"},
         {"Id": 2, "Name": "B", "ModifiedAt": "2024-02-01T00:00:00Z"},
@@ -389,7 +392,7 @@ def test_snapshot_auto_drains_server_that_propagates_top_through_skiptokens():
     c = _make()
     records, offset = c.read_table("Customers", None, {"page_size": "4"})
     rows = list(records)
-    assert offset == {}
+    assert _drop_lb(offset) == {}
     # The whole collection drains despite the $top-budget chain ending at
     # every 4th row. (Pre-fix: stopped at the first short link-less page → 4.)
     assert [r["Id"] for r in rows] == list(range(1, 11))
@@ -429,7 +432,7 @@ def test_incremental_first_call_has_no_cursor_filter():
     )
     rows = list(records)
     assert rows == [{"Id": 1, "ModifiedAt": "2024-03-01T00:00:00Z"}]
-    assert offset == {"cursor": "2024-03-01T00:00:00Z"}
+    assert _drop_lb(offset) == {"cursor": "2024-03-01T00:00:00Z"}
     # Neither `le` nor `gt` should appear on the FIRST call — no cursor
     # filter at all when resuming from an empty offset.
     normalised = captured_urls[0].replace("%20", " ")
@@ -527,13 +530,13 @@ def test_incremental_continuous_polling_picks_up_new_rows():
     # cursor cohort holds Id=2 back; emits [Id=1]; offset = 2024-03-01.
     rows1, offset1 = c.read_table("Customers", {}, {"cursor_field": "ModifiedAt"})
     assert [r["Id"] for r in rows1] == [1]
-    assert offset1 == {"cursor": "2024-03-01T00:00:00Z"}
+    assert _drop_lb(offset1) == {"cursor": "2024-03-01T00:00:00Z"}
 
     # Batch 2: feeding offset1 back, the held-back Id=2 is re-read above
     # the watermark and emitted; offset advances to 2024-03-02.
     rows2, offset2 = c.read_table("Customers", offset1, {"cursor_field": "ModifiedAt"})
     assert [r["Id"] for r in rows2] == [2]
-    assert offset2 == {"cursor": "2024-03-02T00:00:00Z"}
+    assert _drop_lb(offset2) == {"cursor": "2024-03-02T00:00:00Z"}
 
     # A new row arrives while the stream is idle.
     corpus.append({"Id": 3, "ModifiedAt": "2024-03-05T00:00:00Z"})
@@ -541,7 +544,7 @@ def test_incremental_continuous_polling_picks_up_new_rows():
     # Batch 3: the same connector instance picks up the fresh row.
     rows3, offset3 = c.read_table("Customers", offset2, {"cursor_field": "ModifiedAt"})
     assert [r["Id"] for r in rows3] == [3]
-    assert offset3 == {"cursor": "2024-03-05T00:00:00Z"}
+    assert _drop_lb(offset3) == {"cursor": "2024-03-05T00:00:00Z"}
 
     # Batch 4: caught up — no rows above the watermark, stable offset
     # signals "no more data" to Spark.
@@ -554,7 +557,7 @@ def test_incremental_continuous_polling_picks_up_new_rows():
     # snapshot ceiling getting in the way.
     rows3, offset3 = c.read_table("Customers", offset2, {"cursor_field": "ModifiedAt"})
     assert [r["Id"] for r in rows3] == [3]
-    assert offset3 == {"cursor": "2024-03-05T00:00:00Z"}
+    assert _drop_lb(offset3) == {"cursor": "2024-03-05T00:00:00Z"}
 
 
 @responses.activate
@@ -587,7 +590,7 @@ def test_incremental_trims_trailing_same_cursor_cohort_when_truncated():
     )
     rows = list(records)
     assert [r["Id"] for r in rows] == [1, 2]
-    assert offset == {"cursor": "2024-05-02T00:00:00Z"}
+    assert _drop_lb(offset) == {"cursor": "2024-05-02T00:00:00Z"}
 
 
 @responses.activate
@@ -619,7 +622,7 @@ def test_incremental_trims_boundary_cohort_on_natural_exhaustion_too():
     )
     rows = list(records)
     assert [r["Id"] for r in rows] == [1]
-    assert offset == {"cursor": "2024-05-01T00:00:00Z"}
+    assert _drop_lb(offset) == {"cursor": "2024-05-01T00:00:00Z"}
 
 
 @responses.activate
@@ -680,7 +683,7 @@ def test_incremental_all_same_cursor_natural_exhaustion_emits_as_is():
     )
     rows = list(records)
     assert [r["Id"] for r in rows] == [1, 2, 3]
-    assert offset == {"cursor": "2024-05-01T00:00:00Z"}
+    assert _drop_lb(offset) == {"cursor": "2024-05-01T00:00:00Z"}
 
 
 @responses.activate
@@ -788,7 +791,7 @@ def test_batch_mode_flat_cursor_drains_fully_despite_explicit_cap():
         "Customers", None, {"cursor_field": "ModifiedAt", "max_records_per_batch": "1"}
     )
     assert [r["Id"] for r in records] == [1, 2, 3]
-    assert offset == {}
+    assert _drop_lb(offset) == {}
 
 
 @responses.activate
@@ -831,7 +834,7 @@ def test_batch_mode_contained_cursor_streams_lazily_per_parent():
     rest = [r["Id"] for r in it]
     assert rest == [12]
     assert any("Parents(2)/Children" in u for u in fetched)
-    assert offset == {}
+    assert _drop_lb(offset) == {}
 
 
 @responses.activate
@@ -871,7 +874,7 @@ def test_batch_mode_expand_streams_lazily_and_uncapped():
         {"expand_contained": "true", "max_records_per_batch": "1"},
     )
     assert [r["Id"] for r in records] == [11, 12, 13]
-    assert offset == {}
+    assert _drop_lb(offset) == {}
 
 
 @responses.activate
@@ -954,7 +957,7 @@ def test_incremental_ignore_skips_null_rows():
     )
     rows = list(records)
     assert [r["Id"] for r in rows] == [2]
-    assert offset == {"cursor": "2024-01-01T00:00:00Z"}
+    assert _drop_lb(offset) == {"cursor": "2024-01-01T00:00:00Z"}
 
 
 @responses.activate
@@ -1038,7 +1041,7 @@ def test_incremental_client_strict_gt_drops_boundary_row():
     # cohort at 2024-05-03) is then trimmed so the next call's
     # `cursor gt 2024-05-02` re-fetches it.
     assert [r["Id"] for r in rows] == [2]
-    assert offset == {"cursor": "2024-05-02T00:00:00Z"}
+    assert _drop_lb(offset) == {"cursor": "2024-05-02T00:00:00Z"}
 
 
 @responses.activate
@@ -1068,7 +1071,7 @@ def test_incremental_max_records_caps_batch_with_boundary_trim():
     )
     rows = list(records)
     assert [r["Id"] for r in rows] == [1]
-    assert offset == {"cursor": "2024-04-01T00:00:00Z"}
+    assert _drop_lb(offset) == {"cursor": "2024-04-01T00:00:00Z"}
 
 
 # ---------------------------------------------------------------------------
@@ -2028,7 +2031,7 @@ def test_delta_auto_probe_positive_routes_through_delta_path():
     assert rows[0]["Id"] == 1
     assert rows[0]["_deleted"] is False
     assert "_lc_sequence" in rows[0]
-    assert offset == {"delta_link": DELTA_LINK_V1}
+    assert _drop_lb(offset) == {"delta_link": DELTA_LINK_V1}
 
 
 @responses.activate
@@ -2052,7 +2055,7 @@ def test_delta_auto_probe_silent_ignore_falls_back():
     rows = list(records)
     assert rows == [{"Id": 1, "Name": "A", "ModifiedAt": "x"}]
     # Empty offset = snapshot mode. No delta_link in there.
-    assert offset == {}
+    assert _drop_lb(offset) == {}
 
 
 @responses.activate
@@ -2121,7 +2124,7 @@ def test_delta_bootstrap_emits_full_snapshot_with_deleted_false():
     seqs = [r["_lc_sequence"] for r in rows]
     assert seqs == sorted(seqs)
     assert len(set(seqs)) == 2
-    assert offset == {"delta_link": DELTA_LINK_V1}
+    assert _drop_lb(offset) == {"delta_link": DELTA_LINK_V1}
 
 
 @responses.activate
@@ -2155,7 +2158,7 @@ def test_delta_resume_emits_changes_and_removes_via_in_band_deleted_flag():
     assert change["Name"] == "E"
     assert change["_deleted"] is False
     assert tombstone == {"Id": 2, "_deleted": True, "_lc_sequence": tombstone["_lc_sequence"]}
-    assert offset == {"delta_link": DELTA_LINK_V2}
+    assert _drop_lb(offset) == {"delta_link": DELTA_LINK_V2}
 
 
 @responses.activate
@@ -2189,7 +2192,7 @@ def test_delta_resume_walks_nextlink_chain_to_captured_deltalink():
     )
     rows = list(records)
     assert [r["Id"] for r in rows] == [10, 11]
-    assert offset == {"delta_link": DELTA_LINK_V2}
+    assert _drop_lb(offset) == {"delta_link": DELTA_LINK_V2}
 
 
 @responses.activate
@@ -2218,7 +2221,7 @@ def test_delta_no_op_response_preserves_prior_delta_link():
         {"delta_tracking": "enabled"},
     )
     assert list(records) == []
-    assert offset == {"delta_link": DELTA_LINK_V1}
+    assert _drop_lb(offset) == {"delta_link": DELTA_LINK_V1}
 
 
 @responses.activate
@@ -2248,7 +2251,7 @@ def test_delta_410_triggers_full_rebootstrap():
     rows = list(records)
     assert [r["Id"] for r in rows] == [99]
     assert all(r["_deleted"] is False for r in rows)
-    assert offset == {"delta_link": DELTA_LINK_V2}
+    assert _drop_lb(offset) == {"delta_link": DELTA_LINK_V2}
 
 
 @responses.activate
@@ -2336,7 +2339,7 @@ def test_delta_max_records_caps_and_stashes_next_link():
     assert [r["Id"] for r in rows] == [1, 2]
     # Offset carries both prior delta_link (fallback) AND next_link
     # (preferred resume point).
-    assert offset == {"delta_link": DELTA_LINK_V1, "next_link": next_link}
+    assert _drop_lb(offset) == {"delta_link": DELTA_LINK_V1, "next_link": next_link}
 
 
 @responses.activate
@@ -2370,7 +2373,7 @@ def test_delta_resume_via_next_link_continues_pagination():
     )
     rows = list(records)
     assert [r["Id"] for r in rows] == [3]
-    assert offset == {"delta_link": DELTA_LINK_V2}
+    assert _drop_lb(offset) == {"delta_link": DELTA_LINK_V2}
     # Resume must not re-send the bootstrap-only Prefer header.
     assert all("Prefer" not in h for h in captured_headers)
 
@@ -2396,7 +2399,7 @@ def test_delta_dispatch_recognizes_delta_link_offset_without_enabled_flag():
     records, offset = c.read_table("Customers", {"delta_link": DELTA_LINK_V1}, {})
     assert list(records) == []
     # Rotation guard: prior link preserved on no-op.
-    assert offset == {"delta_link": DELTA_LINK_V1}
+    assert _drop_lb(offset) == {"delta_link": DELTA_LINK_V1}
 
 
 # ---------------------------------------------------------------------------
@@ -3105,7 +3108,7 @@ def test_pagination_keyset_continues_inner_expand_when_nextlink_omitted():
     )
     rows = list(records)
     assert [r["Id"] for r in rows] == list(range(11, 26))  # all 15, none dropped
-    assert offset == {}
+    assert _drop_lb(offset) == {}
     # First continuation seeks past the last inline child (Id 20), NOT a $skip;
     # a second (empty) request terminates the drain (keyset stops on empty).
     assert "Parents(1)/Children" in cont_urls[0]
@@ -3268,7 +3271,7 @@ def test_expand_cursor_lookback_floors_read_filter_not_offset():
     # Read filter floored by 1h behind the committed 2024-01-02T00:00:00Z.
     assert any("ModifiedAt gt 2024-01-01T23:00:00" in u for u in captured), captured
     # Committed offset is the TRUE max emitted, NOT the floored read value.
-    assert offset == {"cursor": "2024-01-03T00:00:00Z"}
+    assert _drop_lb(offset) == {"cursor": "2024-01-03T00:00:00Z"}
     assert [r["Id"] for r in rows] == [11, 12]
 
 
@@ -3320,7 +3323,7 @@ def test_expand_cursor_lookback_idles_on_no_progress_instead_of_raising():
         },
     )
     assert list(records) == []  # overlap re-read suppressed
-    assert offset == start  # idled, no advance, no RuntimeError
+    assert _drop_lb(offset) == start  # idled, no advance, no RuntimeError
 
 
 @responses.activate
@@ -3896,7 +3899,7 @@ def test_delta_walk_guard_stops_self_referential_link():
     rows = list(records)
     assert [r["Id"] for r in rows] == [10]
     assert len(calls) == 1  # self-loop detected before re-fetching
-    assert offset == {"delta_link": DELTA_LINK_V1}
+    assert _drop_lb(offset) == {"delta_link": DELTA_LINK_V1}
 
 
 @responses.activate
@@ -4227,7 +4230,7 @@ def test_contained_snapshot_two_level_walks_parents_and_tags_fks():
     c = _make()
     records, offset = c.read_table("Parents__Children", None, {})
     rows = list(records)
-    assert offset == {}
+    assert _drop_lb(offset) == {}
     assert len(rows) == 3
     # FK column populated correctly
     assert rows[0]["Parents_Id"] == 1
@@ -4656,7 +4659,7 @@ def test_contained_expand_resumes_from_pending_fetches_skip():
     rows = list(records)
     assert [r["Id"] for r in rows] == [33]
     # Page exhausted, no next_url → terminal snapshot offset.
-    assert offset == {}
+    assert _drop_lb(offset) == {}
 
 
 @responses.activate
@@ -4694,7 +4697,7 @@ def test_contained_expand_resumes_from_pending_fetches_url():
     rows = list(records)
     assert len(rows) == 1 and rows[0]["Id"] == 33
     assert captured == [resume_url]
-    assert offset == {}
+    assert _drop_lb(offset) == {}
 
 
 @responses.activate
@@ -6026,7 +6029,7 @@ def test_contained_incremental_terminates_when_offset_unchanged():
         {"cursor_field": "ModifiedAt"},
     )
     assert list(records) == []
-    assert offset == {"cursor": "2024-01-02T00:00:00Z"}
+    assert _drop_lb(offset) == {"cursor": "2024-01-02T00:00:00Z"}
 
 
 @responses.activate
@@ -6208,7 +6211,7 @@ def test_contained_incremental_truncation_trims_boundary_cohort():
     assert len(rows) == 1
     assert rows[0]["ModifiedAt"] == "2024-01-01T00:00:00Z"
     # Resume re-fetches parent 0 from cursor gt c1, picking up c2 + beyond.
-    assert offset == {
+    assert _drop_lb(offset) == {
         "parent_idx": 0,
         "truncated_chain_cursor": "2024-01-01T00:00:00Z",
     }
@@ -6293,7 +6296,7 @@ def test_contained_incremental_continues_past_single_cursor_parent_then_checkpoi
     # Parent 1's full cohort + parent 2's trimmed prefix (22's cohort dropped).
     assert [r["Id"] for r in rows] == [11, 12, 21]
     # Checkpoint lands on parent 2 (index 1) at its last distinct cursor.
-    assert offset == {
+    assert _drop_lb(offset) == {
         "parent_idx": 1,
         "truncated_chain_cursor": "2024-02-01T00:00:00Z",
     }
@@ -6425,7 +6428,7 @@ def test_contained_incremental_truncation_uses_nextlink_at_page_boundary():
     rows = list(records)
     # Whole page emitted (page-boundary truncation; no Option A trim).
     assert len(rows) == 2
-    assert offset == {
+    assert _drop_lb(offset) == {
         "parent_idx": 0,
         "chain_next_link": next_link,
     }
@@ -6624,7 +6627,7 @@ def test_ancestor_cursor_incremental_filters_at_ancestor_level():
     notes_under_10 = [r for r in rows if r["Children_Id"] == 10]
     assert all(r["ModifiedAt"] == "2024-01-01T00:00:00Z" for r in notes_under_10)
     # Offset advances to max ancestor cursor.
-    assert offset == {"cursor": "2024-01-02T00:00:00Z"}
+    assert _drop_lb(offset) == {"cursor": "2024-01-02T00:00:00Z"}
     # Children call carries $orderby + ModifiedAt in $select.
     # First call has no $filter because since=None (the resume test covers that).
     # Call order: 0=$metadata, 1=Parents (PKs), 2=Children (cursor level), 3,4=leaf fetches.
@@ -6663,7 +6666,7 @@ def test_ancestor_cursor_incremental_resume_filters_with_since():
     rows = list(records)
     assert len(rows) == 1
     assert rows[0]["ModifiedAt"] == "2024-01-02T00:00:00Z"
-    assert offset == {"cursor": "2024-01-02T00:00:00Z"}
+    assert _drop_lb(offset) == {"cursor": "2024-01-02T00:00:00Z"}
     # Cursor filter present on the Children call (call index 2).
     children_call = responses.calls[2].request.url
     assert "ModifiedAt%20gt%20" in children_call or "ModifiedAt+gt+" in children_call
@@ -7061,7 +7064,7 @@ def test_partition_latest_offset_probes_top_level_max_cursor():
         {"cursor_field": "Name"},
         None,
     )
-    assert offset == {"cursor": "z"}
+    assert _drop_lb(offset) == {"cursor": "z"}
 
 
 @responses.activate
@@ -8562,7 +8565,9 @@ def test_cursor_probe_batch_falls_back_to_plain_walk_when_unsupported():
     rows = [(r["Roots_Id"], r["Mids_Id"], r["Id"]) for r in recs]
     assert rows == [(1, 10, 1001)]
     assert offset["cursor"] == "2020-06-01T00:00:00Z"
-    assert offset.get("batch_ok") is None  # never marked supported
+    # Probed and found unsupported → persisted False (not True) so later
+    # microbatches skip the probe and go straight to the plain walk.
+    assert offset.get("batch_ok") is False
     # A real GET hydrate happened (plain walk fallback).
     assert any(
         call.request.method == "GET" and "Mids(10)/Leaves" in call.request.url
@@ -8647,7 +8652,7 @@ def test_contained_fetch_batch_snapshot_hydrates_via_batch():
     recs, offset = c.read_table("Parents__Children", {}, {})  # no cursor → snapshot
     rows = sorted((r["Parents_Id"], r["Id"]) for r in recs)
     assert rows == [(1, 11), (2, 21)]
-    assert offset == {}
+    assert _drop_lb(offset) == {}
     # Both leaf collections hydrated via $batch; NO per-parent GET to /Children.
     assert any("Parents(1)/Children" in u for u in responder.seen)
     assert any("Parents(2)/Children" in u for u in responder.seen)
@@ -8722,7 +8727,7 @@ def test_contained_fetch_batch_reader_stream_hydrates_via_batch():
     # start_offset=None → LakeflowBatchReader path → _stream_contained_incremental
     recs, offset = c.read_table("Parents__Children", None, {"cursor_field": "ModifiedAt"})
     assert [(r["Parents_Id"], r["Id"]) for r in recs] == [(1, 11)]
-    assert offset == {}  # batch reader discards the offset
+    assert _drop_lb(offset) == {}  # batch reader discards the offset
     assert any("Parents(1)/Children" in u for u in responder.seen)
     assert not any(
         call.request.method == "GET" and "/Children" in call.request.url for call in responses.calls
@@ -8735,3 +8740,124 @@ def test_contained_fetch_invalid_value_raises():
     c = _make()
     with pytest.raises(ValueError, match="Invalid contained_fetch"):
         c.read_table("Parents__Children", {}, {"contained_fetch": "maybe"})
+
+
+# ---------------------------------------------------------------------------
+# OR-across-columns keyset-seek preflight → fall back to $skip (mode B)
+# ---------------------------------------------------------------------------
+
+
+def _leaves_or_probe_callback(seen, reject_or):
+    """Callback for the leaf collection under `auto` pagination. Page 1 returns
+    one row with no `@odata.nextLink` (forces the client-driven seek). The
+    composite `(cursor,pk)` seek builds an OR-across-columns `$filter`; the
+    `$top=1` probe carrying that OR is answered 400 when `reject_or`, and the
+    subsequent `$skip` drain returns empty. Records what shapes were seen."""
+    from urllib.parse import parse_qs, unquote, urlparse
+
+    def _cb(request):
+        qs = parse_qs(urlparse(request.url).query)
+        flt = unquote(qs.get("$filter", [""])[0])
+        top = qs.get("$top", [""])[0]
+        has_skip = "$skip" in qs
+        if " or " in flt and top == "1":
+            seen["or_probe"] += 1
+            if reject_or:
+                return (
+                    400,
+                    {},
+                    json.dumps({"error": {"message": "on different columns, only AND"}}),
+                )
+            return (200, {}, json.dumps({"value": []}))
+        if " or " in flt:
+            seen["keyset_seek"] += 1
+            return (200, {}, json.dumps({"value": []}))  # keyset drain → empty
+        if has_skip:
+            seen["skip_seek"] += 1
+            return (200, {}, json.dumps({"value": []}))  # $skip drain → empty
+        return (
+            200,
+            {},
+            json.dumps({"value": [{"Id": 1001, "RecordLastModified": "2020-06-01T00:00:00Z"}]}),
+        )
+
+    return _cb
+
+
+@responses.activate
+def test_or_filter_preflight_falls_back_to_skip_when_rejected():
+    """When the composite keyset seek's OR-across-columns probe is rejected
+    (400), the walk drops to `$skip` paging (mode B) instead — no data lost,
+    no crash."""
+    _mock_probe_metadata()
+    responses.get(f"{SERVICE_URL}Roots", json={"value": [{"Id": 1}]})
+    responses.get(f"{SERVICE_URL}Roots(1)/Mids", json={"value": [{"Id": 10}]})
+    seen = {"or_probe": 0, "keyset_seek": 0, "skip_seek": 0}
+    responses.add_callback(
+        responses.GET,
+        f"{SERVICE_URL}Roots(1)/Mids(10)/Leaves",
+        callback=_leaves_or_probe_callback(seen, reject_or=True),
+    )
+    c = _make()
+    recs, _ = c.read_table(
+        PROBE_TABLE,
+        {"cursor": "2020-01-01T00:00:00Z"},
+        {"cursor_field": "RecordLastModified", "cursor_probe": "false", "pagination": "auto"},
+    )
+    assert [(r["Roots_Id"], r["Mids_Id"], r["Id"]) for r in recs] == [(1, 10, 1001)]
+    assert seen["or_probe"] == 1  # OR preflight fired and was rejected
+    assert seen["skip_seek"] >= 1  # fell back to $skip (mode B)
+    assert seen["keyset_seek"] == 0  # never issued the rejected OR seek for real
+
+
+@responses.activate
+def test_or_filter_preflight_uses_keyset_when_supported():
+    """When the OR probe succeeds, the walk uses the composite keyset seek as
+    before (no `$skip` fallback)."""
+    _mock_probe_metadata()
+    responses.get(f"{SERVICE_URL}Roots", json={"value": [{"Id": 1}]})
+    responses.get(f"{SERVICE_URL}Roots(1)/Mids", json={"value": [{"Id": 10}]})
+    seen = {"or_probe": 0, "keyset_seek": 0, "skip_seek": 0}
+    responses.add_callback(
+        responses.GET,
+        f"{SERVICE_URL}Roots(1)/Mids(10)/Leaves",
+        callback=_leaves_or_probe_callback(seen, reject_or=False),
+    )
+    c = _make()
+    recs, _ = c.read_table(
+        PROBE_TABLE,
+        {"cursor": "2020-01-01T00:00:00Z"},
+        {"cursor_field": "RecordLastModified", "cursor_probe": "false", "pagination": "auto"},
+    )
+    assert [(r["Roots_Id"], r["Mids_Id"], r["Id"]) for r in recs] == [(1, 10, 1001)]
+    assert seen["or_probe"] == 1  # probe fired
+    assert seen["keyset_seek"] >= 1  # used the keyset OR seek
+    assert seen["skip_seek"] == 0  # no $skip fallback
+
+
+@responses.activate
+def test_capability_verdicts_thread_through_offset():
+    """The OR / $batch capability verdicts ride the resume offset so a reader
+    the framework recreates each microbatch skips re-probing. Seed-from-offset,
+    seeded-verdict-skips-the-probe, merge-into-offset, and never-overwrite."""
+    _mock_probe_metadata()
+    c = _make()
+    # Seed instance caches from a prior batch's offset.
+    c._seed_capability_caches({"cursor": "x", "or_filter_ok": False, "batch_ok": True})
+    assert c.__dict__["_or_filter_ok"] is False
+    assert c.__dict__["_batch_supported"] is True
+    # A seeded OR verdict is returned WITHOUT issuing a probe (cached short-circuit).
+    assert c._verify_or_filter_support("https://x/Coll", ["a", "b"], {"a": 1, "b": 2}) is False
+    assert not responses.calls  # no network for the seeded verdict
+    # Merge threads the verdicts back into a fresh offset...
+    merged = c._merge_capability_caches({"cursor": "y"})
+    assert merged == {"cursor": "y", "or_filter_ok": False, "batch_ok": True}
+    # ...but never overwrites a value a read path already wrote.
+    assert c._merge_capability_caches({"batch_ok": True, "or_filter_ok": True}) == {
+        "batch_ok": True,
+        "or_filter_ok": True,
+    }
+    # Single-key $orderby never builds an OR → never probed (short-circuits True).
+    c.__dict__.pop("_or_filter_ok", None)
+    assert c._verify_or_filter_support("https://x/Coll", ["a"], {"a": 1}) is True
+    assert not responses.calls

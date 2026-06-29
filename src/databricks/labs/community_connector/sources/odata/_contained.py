@@ -2502,7 +2502,14 @@ class ContainedNavMixin:
             cont_tops,
         )
         order_keys = _pg_orderby_keys(url)
-        if mode in ("keyset", "auto") and order_keys:
+        # Skip the OR-across-columns keyset seek on servers that reject it
+        # (preflight, cached) — fall through to $skip (mode B). Single-key
+        # $orderby never builds an OR, so the probe short-circuits there.
+        if (
+            mode in ("keyset", "auto")
+            and order_keys
+            and self._verify_or_filter_support(url, order_keys, last_child)
+        ):
             seek = _pg_keyset_filter(order_keys, last_child)
             if seek is not None:
                 # Stash the clean child-level $filter as the keyset base so a
@@ -2874,7 +2881,8 @@ class ContainedNavMixin:
             return {
                 k: v
                 for k, v in (off or {}).items()
-                if not k.startswith("lb_") and k not in ("cursor_probe_ok", "batch_ok")
+                if not k.startswith("lb_")
+                and k not in ("cursor_probe_ok", "batch_ok", "or_filter_ok")
             }
 
         if _progress_view(start_offset) == _progress_view(end_offset):
