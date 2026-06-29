@@ -7,20 +7,31 @@ This documentation describes how to configure and use the **YouTube** Lakeflow c
 - **Google Cloud project**: A project in [Google Cloud Console](https://console.cloud.google.com/) with the YouTube Data API v3 enabled.
 - **Authentication** (choose one):
   - **API key**: For public data only (channels by ID, playlists, videos, search). Create an API key in Google Cloud Console → APIs & Services → Credentials.
-  - **OAuth 2.0**: For private or user-specific data (`mine=true`, subscriptions, activities for the authenticated user). Create OAuth 2.0 client credentials (Web application) and use the authenticate script to obtain a refresh token.
+  - **OAuth 2.0**: For private or user-specific data (`mine=true`, subscriptions, activities for the authenticated user). Create a Google OAuth Web application client (`client_id` + `client_secret`); Databricks runs the authorization flow at connection creation and injects a short-lived `access_token` at query time.
 - **Network access**: The environment running the connector must be able to reach `https://www.googleapis.com/youtube/v3`.
 - **Lakeflow / Databricks environment**: A workspace where you can register a Lakeflow community connector and run ingestion pipelines.
+
+## Authentication model
+
+Provide **one** authentication method when configuring the connection.
+
+| Method | When to use | What you supply |
+|--------|-------------|-----------------|
+| **api_key** | Public data (channels by ID, playlists, videos, search) | `api_key` |
+| **OAuth (`u2m`)** | Private / user data (`mine=true`, subscriptions, activities) | `client_id` + `client_secret`; sign in via the connection UI |
+
+For OAuth, Databricks owns the authorization-code exchange and token refresh. The connector receives only a runtime `access_token` and treats it as opaque — no manual refresh-token steps. The connector spec defines the Google OAuth endpoints and `youtube.readonly` scope in `connection.oauth`.
+
+Older connections that store `client_id`, `client_secret`, and `refresh_token` continue to work (in-code refresh).
 
 ## Setup
 
 ### Required Connection Parameters
 
-Provide **one** authentication method when configuring the connection (`connector_spec.yaml` defines two groups):
-
-| Auth method | Parameters (all required within the group) | Use for |
-|-------------|--------------------------------------------|---------|
-| **api_key** | `api_key` | Public data (channels by ID, playlists, videos, search) |
-| **oauth** | `client_id`, `client_secret`, `refresh_token` | Private / user data (`mine=true`, subscriptions, activities) |
+| Auth method | Parameters | Use for |
+|-------------|------------|---------|
+| **api_key** | `api_key` | Public data |
+| **oauth** | `client_id`, `client_secret` | Private / user data (UC runs OAuth; injects `access_token`) |
 
 Also set `externalOptionsAllowList` on the connection (comma-separated table option names). This connector requires table-specific options, so this parameter must be set. See list below.
 
@@ -42,18 +53,13 @@ The full list of supported table-specific options for `externalOptionsAllowList`
 **OAuth (for mine=true, subscriptions, activities, etc.):**
 
 1. In Google Cloud Console, enable YouTube Data API v3 as above.
-2. Go to **APIs & Services → Credentials** → Create credentials → OAuth client ID.
-3. Choose **Web application**. Add the redirect URI: **`http://localhost:9876/oauth/callback`** (or the port shown when you run the authenticate script in browser mode).
-4. Note the **Client ID** and **Client secret**.
-5. Run the authenticate script to obtain a refresh token:
+2. Configure the **OAuth consent screen** and add test users if the app is in Testing mode.
+3. Go to **APIs & Services → Credentials** → Create credentials → OAuth client ID.
+4. Choose **Web application**. For the Databricks community-connector CLI, add **`http://localhost`** to authorized redirect URIs (the CLI uses `http://127.0.0.1:<port>/callback` at runtime).
+5. Copy the **Client ID** and **Client secret**.
+6. Create a Unity Catalog **COMMUNITY** connection with OAuth flow `u2m` and supply `client_id` + `client_secret`. Complete the in-browser Google sign-in when prompted.
 
-   ```bash
-   python tools/scripts/authenticate.py -s youtube -m browser
-   ```
-
-   The script starts a local web server and prints the redirect URI to register. Open the URL in a browser, enter your client ID and client secret, complete the Google sign-in and consent, and the script will output a JSON object containing `refresh_token`. Store `client_id`, `client_secret`, and `refresh_token` in your connection configuration.
-
-**Redirect URI for Google OAuth:** When using browser mode, the script uses **`http://localhost:9876/oauth/callback`** by default (port 9876). You must add this exact URI to your OAuth 2.0 client's authorized redirect URIs in Google Cloud Console.
+**Local development (optional):** run `python tools/scripts/authenticate.py -s youtube -m browser` to obtain a `refresh_token` for `--auth-type static` testing. This path is for dev only; production connections should use the UC `u2m` flow above.
 
 ### Create a Unity Catalog Connection
 

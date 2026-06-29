@@ -2,8 +2,9 @@
 
 Implements LakeflowConnect for ingesting channels, playlists, playlist_items,
 videos, search, activities, comment_threads, subscriptions, and video_categories.
-Supports API key (public data) or OAuth 2.0 (client_id, client_secret, refresh_token)
-for private/mine data. All tables are snapshot: each read drains API pages internally
+Supports API key (public data) or OAuth 2.0 for private/mine data. OAuth accepts
+either a UC-injected access_token (u2m / u2m_per_user) or legacy refresh-token
+credentials. All tables are snapshot: each read drains API pages internally
 and returns ``None`` offset for framework termination.
 """
 
@@ -325,35 +326,51 @@ def _flatten_video_category(item: dict) -> dict:
 class YouTubeLakeflowConnect(LakeflowConnect):
     """LakeflowConnect implementation for YouTube Data API v3.
 
-    Uses either api_key (for public data) or OAuth (client_id, client_secret,
-    refresh_token) for private/mine data.
+    Uses either api_key (for public data) or OAuth for private/mine data.
+    OAuth supports a UC-injected access_token (preferred) or in-code refresh.
     """
 
     def __init__(self, options: dict[str, str]) -> None:
         super().__init__(options)
         self._api_key = (options.get("api_key") or "").strip()
+        self._injected_access_token = (options.get("access_token") or "").strip() or None
         self._client_id = (options.get("client_id") or "").strip()
         self._client_secret = (options.get("client_secret") or "").strip()
         self._refresh_token = (options.get("refresh_token") or "").strip()
-        has_oauth = bool(self._client_id and self._client_secret and self._refresh_token)
+        has_refresh_oauth = bool(
+            self._refresh_token and self._client_id and self._client_secret
+        )
+        has_injected_oauth = bool(self._injected_access_token)
+        has_oauth = has_refresh_oauth or has_injected_oauth
+
         if self._api_key and has_oauth:
             raise ValueError(
-                "YouTube connector requires either 'api_key' or all of "
-                "'client_id', 'client_secret', 'refresh_token' in options, not both"
+                "YouTube connector requires either 'api_key' or OAuth credentials "
+                "in options, not both"
             )
         if not self._api_key and not has_oauth:
             raise ValueError(
-                "YouTube connector requires either 'api_key' or all of "
-                "'client_id', 'client_secret', 'refresh_token' in options"
+                "YouTube connector requires either 'api_key' (public data) or an "
+                "OAuth credential: 'access_token' (the Unity Catalog COMMUNITY "
+                "connection's u2m / u2m_per_user OAuth flow injects it at query "
+                "time) or 'refresh_token' plus 'client_id' and 'client_secret' "
+                "(in-code refresh for older connections)."
             )
-        self._access_token = None
+        if self._refresh_token and not (self._client_id and self._client_secret):
+            raise ValueError(
+                "YouTube refresh-token auth requires 'client_id' and "
+                "'client_secret' alongside 'refresh_token' in options."
+            )
+        self._refreshed_token: str | None = None
         self._token_expires_at = 0.0
         self._session = requests.Session()
 
     def _get_access_token(self) -> str:
-        """Return Bearer token from cache or refresh via OAuth."""
-        if self._access_token and time.time() < self._token_expires_at - 60:
-            return self._access_token
+        """Return Bearer token: opaque UC token or refresh-exchange cache."""
+        if self._injected_access_token:
+            return self._injected_access_token
+        if self._refreshed_token and time.time() < self._token_expires_at - 60:
+            return self._refreshed_token
         resp = self._session.post(
             TOKEN_URL,
             data={
@@ -384,9 +401,9 @@ class YouTubeLakeflowConnect(LakeflowConnect):
                 pass
         resp.raise_for_status()
         data = resp.json()
-        self._access_token = data["access_token"]
+        self._refreshed_token = data["access_token"]
         self._token_expires_at = time.time() + data.get("expires_in", 3600)
-        return self._access_token
+        return self._refreshed_token
 
     def _request(self, path: str, params: dict[str, Any] | None = None) -> requests.Response:
         """Issue GET with auth and retry on 429/5xx; honor Retry-After when present."""

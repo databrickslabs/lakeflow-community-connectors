@@ -10,7 +10,10 @@
   - API key: query parameter `key` on every request.
   - OAuth: obtain access token via Google OAuth 2.0 (e.g. authorization code or refresh flow); send as header `Authorization: Bearer <access_token>`.
 
-- **Connector preference**: For connector development, prefer **OAuth 2.0** with `client_id`, `client_secret`, and `refresh_token`. The connector stores these and exchanges the refresh token for an access token at runtime; it does **not** run user-facing OAuth consent flows. Use scope `https://www.googleapis.com/auth/youtube.readonly` for read-only ingestion.
+- **Connector auth modes**
+  - **API key**: `api_key` connection option; passed as query parameter `key`.
+  - **OAuth (preferred)**: Unity Catalog COMMUNITY connection with `u2m` flow injects a short-lived `access_token` at query time. The connector treats it as opaque.
+  - **OAuth (legacy)**: `client_id`, `client_secret`, and `refresh_token`; the connector exchanges the refresh token at Google's token endpoint. Use scope `https://www.googleapis.com/auth/youtube.readonly`.
 
 - **Example (API key)**  
   `GET https://www.googleapis.com/youtube/v3/channels?part=snippet,statistics&id=UC_x5XG1OV2P6uZZ5FSM9Ttw&key=YOUR_API_KEY`
