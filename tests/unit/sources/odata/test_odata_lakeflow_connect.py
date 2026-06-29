@@ -8735,11 +8735,68 @@ def test_contained_fetch_batch_reader_stream_hydrates_via_batch():
 
 
 @responses.activate
+def test_contained_fetch_one_uses_per_parent_gets():
+    """``contained_fetch=1`` is equivalent to ``single``: one GET per leaf-parent,
+    and never touches ``$batch``."""
+    _mock_nested_metadata()
+    responses.get(f"{SERVICE_URL}Parents", json={"value": [{"Id": 1}]})
+    responses.get(
+        f"{SERVICE_URL}Parents(1)/Children",
+        json={"value": [{"Id": 11, "Label": "a"}]},
+        match_querystring=False,
+    )
+    c = _make()
+    recs, _ = c.read_table("Parents__Children", {}, {"contained_fetch": "1"})
+    assert [(r["Parents_Id"], r["Id"]) for r in recs] == [(1, 11)]
+    assert not any(call.request.method == "POST" for call in responses.calls)
+    assert any(
+        call.request.method == "GET" and "Parents(1)/Children" in call.request.url
+        for call in responses.calls
+    )
+
+
+@responses.activate
+def test_contained_fetch_numeric_chunks_batch_by_size():
+    """``contained_fetch=2`` hydrates via ``$batch`` like ``batch`` but caps each
+    request at 2 leaf-parent ops: 3 parents → two hydrate rounds (2 + 1)."""
+    _mock_nested_metadata()
+    responses.get(f"{SERVICE_URL}Parents", json={"value": [{"Id": 1}, {"Id": 2}, {"Id": 3}]})
+    responder = _batch_responder(
+        [
+            ("Parents(1)/Children", {"value": [{"Id": 11}]}),
+            ("Parents(2)/Children", {"value": [{"Id": 21}]}),
+            ("Parents(3)/Children", {"value": [{"Id": 31}]}),
+            ("Parents?$top=1", {"value": [{"Id": 1}]}),  # capability preflight
+        ]
+    )
+    responses.add_callback(responses.POST, f"{SERVICE_URL}$batch", callback=responder)
+
+    c = _make()
+    recs, _ = c.read_table("Parents__Children", {}, {"contained_fetch": "2"})
+    assert sorted((r["Parents_Id"], r["Id"]) for r in recs) == [(1, 11), (2, 21), (3, 31)]
+    # No per-parent GET to /Children — all hydration went through $batch.
+    assert not any(
+        call.request.method == "GET" and "/Children" in call.request.url for call in responses.calls
+    )
+    # Ops per hydrate $batch POST (the ones carrying /Children) are capped at 2:
+    # 3 leaf-parents, chunk size 2 → rounds of 2 then 1.
+    op_counts = []
+    for call in responses.calls:
+        if call.request.method != "POST":
+            continue
+        reqs = json.loads(call.request.body)["requests"]
+        if any("Children" in r["url"] for r in reqs):
+            op_counts.append(len(reqs))
+    assert sorted(op_counts) == [1, 2]
+
+
+@responses.activate
 def test_contained_fetch_invalid_value_raises():
     _mock_nested_metadata()
     c = _make()
-    with pytest.raises(ValueError, match="Invalid contained_fetch"):
-        c.read_table("Parents__Children", {}, {"contained_fetch": "maybe"})
+    for bad in ("maybe", "0", "-1", "2.5"):
+        with pytest.raises(ValueError, match="Invalid contained_fetch"):
+            c.read_table("Parents__Children", {}, {"contained_fetch": bad})
 
 
 # ---------------------------------------------------------------------------
