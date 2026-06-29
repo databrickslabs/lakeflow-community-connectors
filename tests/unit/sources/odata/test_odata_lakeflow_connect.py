@@ -6001,10 +6001,13 @@ def test_contained_incremental_resume_applies_cursor_filter():
     rows = list(records)
     assert len(rows) == 1
     assert _drop_lb(offset) == {"cursor": "2024-01-03T00:00:00Z"}
-    # Cursor filter present on the leaf call. Call order:
-    # 0: $metadata, 1: Parents (PK walk), 2: Parents(1)/Children (leaf).
-    leaf_call = responses.calls[2].request.url
-    assert "ModifiedAt%20gt%20" in leaf_call or "ModifiedAt+gt+" in leaf_call
+    # Cursor filter present on the leaf call. Located by URL rather than a fixed
+    # index: under the default ``cursor_probe=auto`` a one-shot ``$batch``
+    # capability preflight (POST, fails closed on this no-$batch mock) precedes
+    # the plain leaf walk, so the leaf call isn't at a fixed position.
+    leaf_calls = [c.request.url for c in responses.calls if "Parents(1)/Children" in c.request.url]
+    assert leaf_calls, "expected a leaf fetch under Parents(1)/Children"
+    assert any("ModifiedAt%20gt%20" in u or "ModifiedAt+gt+" in u for u in leaf_calls)
 
 
 @responses.activate
@@ -7778,7 +7781,11 @@ def test_cursor_probe_hydrates_only_dirty_parents():
     recs, offset = c.read_table(
         PROBE_TABLE,
         {"cursor": since},
-        {"cursor_field": "RecordLastModified", "cursor_probe": "true", "pagination": "nextlink"},
+        {
+            "cursor_field": "RecordLastModified",
+            "cursor_probe": "nested-expand",
+            "pagination": "nextlink",
+        },
     )
     rows = list(recs)
     # Only the two dirty leaves, each with the full ancestor FK chain.
@@ -7835,7 +7842,11 @@ def test_cursor_probe_first_batch_no_watermark_reads_all():
     recs, offset = c.read_table(
         PROBE_TABLE,
         {},  # streaming first batch: no cursor
-        {"cursor_field": "RecordLastModified", "cursor_probe": "true", "pagination": "nextlink"},
+        {
+            "cursor_field": "RecordLastModified",
+            "cursor_probe": "nested-expand",
+            "pagination": "nextlink",
+        },
     )
     rows = list(recs)
     assert sorted(r["Id"] for r in rows) == [1001, 1101]
@@ -7911,7 +7922,7 @@ def test_cursor_probe_resumes_across_cap_with_dirty_chain_iterator():
     _skip_probe_preflight(c)
     opts = {
         "cursor_field": "RecordLastModified",
-        "cursor_probe": "true",
+        "cursor_probe": "nested-expand",
         "pagination": "nextlink",
         "max_records_per_batch": "1",
     }
@@ -7955,7 +7966,7 @@ def test_cursor_probe_conflicts_with_expand_contained():
             {},
             {
                 "cursor_field": "RecordLastModified",
-                "cursor_probe": "true",
+                "cursor_probe": "nested-expand",
                 "expand_contained": "true",
             },
         )
@@ -7966,7 +7977,9 @@ def test_cursor_probe_on_flat_table_raises():
     _mock_metadata()
     c = _make()
     with pytest.raises(ValueError, match="only on contained-collection paths"):
-        c.read_table("Customers", {}, {"cursor_field": "ModifiedAt", "cursor_probe": "true"})
+        c.read_table(
+            "Customers", {}, {"cursor_field": "ModifiedAt", "cursor_probe": "nested-expand"}
+        )
 
 
 @responses.activate
@@ -7974,7 +7987,7 @@ def test_cursor_probe_without_cursor_field_raises():
     _mock_probe_metadata()
     c = _make()
     with pytest.raises(ValueError, match="requires a cursor_field"):
-        c.read_table(PROBE_TABLE, {}, {"cursor_probe": "true"})
+        c.read_table(PROBE_TABLE, {}, {"cursor_probe": "nested-expand"})
 
 
 @responses.activate
@@ -7987,7 +8000,7 @@ def test_cursor_probe_with_ancestor_cursor_raises():
         c.read_table(
             PROBE_TABLE,
             {},
-            {"cursor_field": "MidOnly", "cursor_probe": "true"},
+            {"cursor_field": "MidOnly", "cursor_probe": "nested-expand"},
         )
 
 
@@ -8004,7 +8017,7 @@ def test_cursor_probe_explicit_raises_when_leaf_parent_is_snapshot():
         c.read_table(
             "Roots__Plains__Items",
             {},
-            {"cursor_field": "RecordLastModified", "cursor_probe": "true"},
+            {"cursor_field": "RecordLastModified", "cursor_probe": "nested-expand"},
         )
 
 
@@ -8037,7 +8050,8 @@ def test_cursor_probe_default_inert_when_leaf_parent_is_snapshot():
 
 @responses.activate
 def test_cursor_probe_default_on_engages_without_opt_in():
-    """cursor_probe defaults to TRUE: on a probe-eligible deep path it engages
+    """cursor_probe defaults to AUTO: on a probe-eligible deep path whose server
+    honours inner-$expand ordering, the cascade uses the nested-$expand probe
     with no option set — the probe runs and only dirty leaf-parents are
     hydrated. (Preflight pre-seeded; covered separately.)"""
     _mock_probe_metadata()
@@ -8100,7 +8114,11 @@ def test_cursor_probe_skips_parent_whose_newest_leaf_predates_watermark():
     recs, _ = c.read_table(
         PROBE_TABLE,
         {"cursor": since},
-        {"cursor_field": "RecordLastModified", "cursor_probe": "true", "pagination": "nextlink"},
+        {
+            "cursor_field": "RecordLastModified",
+            "cursor_probe": "nested-expand",
+            "pagination": "nextlink",
+        },
     )
     rows = list(recs)
     assert [(r["Mids_Id"], r["Id"]) for r in rows] == [(10, 1001)]
@@ -8177,12 +8195,13 @@ def test_cursor_probe_preflight_passes_when_inner_orderby_honored():
         },
     )
     c = _make()
-    verified = c._verify_cursor_probe_support(
+    supported, conclusive = c._verify_cursor_probe_support(
         ["Roots", "Mids", "Leaves"], None, {"page_size": "1000"}, "RecordLastModified"
     )
     # Conclusive pass: the discriminating sample's inner-$expand matched the
     # trusted direct-nav max, so the caller may persist the verdict.
-    assert verified is True
+    assert supported is True
+    assert conclusive is True
     assert c.__dict__["_cursor_probe_verified"][(("Roots", "Mids", "Leaves"), None)] == (None, True)
 
 
@@ -8214,7 +8233,7 @@ def test_cursor_probe_read_table_raises_when_server_misorders_inner_expand():
             {"cursor": "2020-01-01T00:00:00Z"},
             {
                 "cursor_field": "RecordLastModified",
-                "cursor_probe": "true",
+                "cursor_probe": "nested-expand",
                 "pagination": "nextlink",
             },
         )
@@ -8247,7 +8266,11 @@ def test_cursor_probe_conclusive_pass_persists_ok_flag_in_offset():
     _, offset = c.read_table(
         PROBE_TABLE,
         {"cursor": since},
-        {"cursor_field": "RecordLastModified", "cursor_probe": "true", "pagination": "nextlink"},
+        {
+            "cursor_field": "RecordLastModified",
+            "cursor_probe": "nested-expand",
+            "pagination": "nextlink",
+        },
     )
     assert offset.get("cursor_probe_ok") is True
 
@@ -8281,7 +8304,11 @@ def test_cursor_probe_offset_flag_skips_preflight_requests():
     recs, offset = c.read_table(
         PROBE_TABLE,
         {"cursor": since, "cursor_probe_ok": True},
-        {"cursor_field": "RecordLastModified", "cursor_probe": "true", "pagination": "nextlink"},
+        {
+            "cursor_field": "RecordLastModified",
+            "cursor_probe": "nested-expand",
+            "pagination": "nextlink",
+        },
     )
     rows = list(recs)
     assert [(r["Mids_Id"], r["Id"]) for r in rows] == [(10, 1001)]
@@ -8339,7 +8366,7 @@ def test_cursor_probe_lookback_floors_filter_and_reincludes_overlap_parent():
         {"cursor": since},
         {
             "cursor_field": "RecordLastModified",
-            "cursor_probe": "true",
+            "cursor_probe": "nested-expand",
             "pagination": "nextlink",
             "cursor_lookback_seconds": "86400",  # 1 day
         },
@@ -8393,3 +8420,203 @@ def test_leaf_cursor_plain_walk_lookback_keeps_overlap_rows():
     assert offset["cursor"] == "2020-06-11T00:00:00Z"
     # No probe was issued (cursor_probe=false).
     assert not any("$expand" in c.request.url for c in responses.calls)
+
+
+# ---------------------------------------------------------------------------
+# cursor_probe=batch — $batch hydrate fallback + auto cascade
+# ---------------------------------------------------------------------------
+
+
+def _batch_responder(route_map):
+    """Build a ``responses`` POST callback for the OData ``$batch`` endpoint.
+
+    ``route_map`` is a list of ``(url_substring, body_dict)`` pairs; for each
+    posted sub-request the first substring that occurs in its ``url`` wins and
+    its ``body`` is returned with sub-status 200 (404 + empty when none match).
+    Records every posted sub-request URL on ``.seen`` for assertions."""
+    seen: list[str] = []
+
+    def _cb(request):
+        reqs = json.loads(request.body)["requests"]
+        out = []
+        for r in reqs:
+            url = r["url"]
+            seen.append(url)
+            body = next((b for sub, b in route_map if sub in url), None)
+            status = 200 if body is not None else 404
+            out.append({"id": r["id"], "status": status, "body": body or {}})
+        return (200, {"Content-Type": "application/json"}, json.dumps({"responses": out}))
+
+    _cb.seen = seen
+    return _cb
+
+
+@responses.activate
+def test_cursor_probe_batch_hydrates_via_batch_endpoint():
+    """``cursor_probe=batch`` skips the nested-$expand probe and hydrates the
+    per-leaf-parent ``cursor gt since`` reads through OData ``$batch``: no probe
+    ``$expand``, no per-leaf-parent GET, and ``batch_ok`` is persisted."""
+    _mock_probe_metadata()
+    since = "2020-01-01T00:00:00Z"
+    responses.get(f"{SERVICE_URL}Roots", json={"value": [{"Id": 1}]})
+    responses.get(f"{SERVICE_URL}Roots(1)/Mids", json={"value": [{"Id": 10}, {"Id": 11}]})
+    responder = _batch_responder(
+        [
+            # dirty leaf-parent → one changed leaf
+            (
+                "Mids(10)/Leaves",
+                {"value": [{"Id": 1001, "RecordLastModified": "2020-06-01T00:00:00Z"}]},
+            ),
+            # clean leaf-parent → server-filtered empty page
+            ("Mids(11)/Leaves", {"value": []}),
+            # $batch capability preflight
+            ("Roots?$top=1", {"value": [{"Id": 1}]}),
+        ]
+    )
+    responses.add_callback(responses.POST, f"{SERVICE_URL}$batch", callback=responder)
+
+    c = _make()
+    recs, offset = c.read_table(
+        PROBE_TABLE,
+        {"cursor": since},
+        {"cursor_field": "RecordLastModified", "cursor_probe": "batch", "pagination": "nextlink"},
+    )
+    rows = list(recs)
+    assert [(r["Roots_Id"], r["Mids_Id"], r["Id"]) for r in rows] == [(1, 10, 1001)]
+    assert offset["cursor"] == "2020-06-01T00:00:00Z"
+    assert offset.get("batch_ok") is True
+    # No nested-$expand probe anywhere, and the leaf hydrate went through
+    # $batch — never a per-leaf-parent GET to /Leaves.
+    assert not any("$expand" in call.request.url for call in responses.calls)
+    assert not any(
+        call.request.method == "GET" and "/Leaves" in call.request.url for call in responses.calls
+    )
+    # Both leaf-parents were hydrated via the batch (filter pushed server-side).
+    assert any("Mids(10)/Leaves" in u for u in responder.seen)
+    assert any("Mids(11)/Leaves" in u for u in responder.seen)
+    # No $top on the hydrate sub-requests (server-driven paging).
+    assert not any("Mids(10)/Leaves" in u and "$top=" in u for u in responder.seen)
+
+
+@responses.activate
+def test_cursor_probe_batch_follows_nextlink_continuation():
+    """A batched leaf sub-response carrying ``@odata.nextLink`` is re-batched
+    until the collection drains — all pages are collected."""
+    _mock_probe_metadata()
+    since = "2020-01-01T00:00:00Z"
+    responses.get(f"{SERVICE_URL}Roots", json={"value": [{"Id": 1}]})
+    responses.get(f"{SERVICE_URL}Roots(1)/Mids", json={"value": [{"Id": 10}]})
+    responder = _batch_responder(
+        [
+            # continuation page (matched first — more specific)
+            (
+                "$skiptoken=p2",
+                {"value": [{"Id": 1002, "RecordLastModified": "2020-07-01T00:00:00Z"}]},
+            ),
+            # first page emits a service-relative nextLink
+            (
+                "Mids(10)/Leaves",
+                {
+                    "value": [{"Id": 1001, "RecordLastModified": "2020-06-01T00:00:00Z"}],
+                    "@odata.nextLink": "Roots(1)/Mids(10)/Leaves?$skiptoken=p2",
+                },
+            ),
+            ("Roots?$top=1", {"value": [{"Id": 1}]}),
+        ]
+    )
+    responses.add_callback(responses.POST, f"{SERVICE_URL}$batch", callback=responder)
+
+    c = _make()
+    recs, offset = c.read_table(
+        PROBE_TABLE,
+        {"cursor": since},
+        {"cursor_field": "RecordLastModified", "cursor_probe": "batch", "pagination": "nextlink"},
+    )
+    rows = sorted(r["Id"] for r in recs)
+    assert rows == [1001, 1002]  # both pages collected across batch rounds
+    assert offset["cursor"] == "2020-07-01T00:00:00Z"
+    assert any("$skiptoken=p2" in u for u in responder.seen)
+
+
+@responses.activate
+def test_cursor_probe_batch_falls_back_to_plain_walk_when_unsupported():
+    """``cursor_probe=batch`` against a server that rejects ``$batch`` (405)
+    degrades to the plain N+1 GET walk — never raises, rows still correct."""
+    _mock_probe_metadata()
+    since = "2020-01-01T00:00:00Z"
+    responses.get(f"{SERVICE_URL}Roots", json={"value": [{"Id": 1}]})
+    responses.get(f"{SERVICE_URL}Roots(1)/Mids", json={"value": [{"Id": 10}]})
+    # $batch unsupported.
+    responses.post(f"{SERVICE_URL}$batch", json={"detail": "Method Not Allowed"}, status=405)
+    # Plain N+1 leaf GET still serves the hydrate.
+    responses.get(
+        f"{SERVICE_URL}Roots(1)/Mids(10)/Leaves",
+        json={"value": [{"Id": 1001, "RecordLastModified": "2020-06-01T00:00:00Z"}]},
+    )
+    c = _make()
+    recs, offset = c.read_table(
+        PROBE_TABLE,
+        {"cursor": since},
+        {"cursor_field": "RecordLastModified", "cursor_probe": "batch", "pagination": "nextlink"},
+    )
+    rows = [(r["Roots_Id"], r["Mids_Id"], r["Id"]) for r in recs]
+    assert rows == [(1, 10, 1001)]
+    assert offset["cursor"] == "2020-06-01T00:00:00Z"
+    assert offset.get("batch_ok") is None  # never marked supported
+    # A real GET hydrate happened (plain walk fallback).
+    assert any(
+        call.request.method == "GET" and "Mids(10)/Leaves" in call.request.url
+        for call in responses.calls
+    )
+
+
+@responses.activate
+def test_cursor_probe_auto_cascades_to_batch_when_server_misorders_inner_expand():
+    """DEFAULT (unset → auto): when the probe preflight finds the server
+    mis-orders inner ``$expand``, ``auto`` does NOT raise — it cascades to the
+    ``$batch`` hydrate (drop-safe) and persists ``batch_ok``."""
+    _mock_probe_metadata()
+    since = "2020-01-01T00:00:00Z"
+    responses.get(f"{SERVICE_URL}Roots", json={"value": [{"Id": 1}]})
+    # Probe enumeration: inner-$expand newest is WRONG (server mis-orders);
+    # plain enumeration (no $expand) lists Mid 10 for the hydrate.
+    responses.add_callback(
+        responses.GET,
+        f"{SERVICE_URL}Roots(1)/Mids",
+        callback=_probe_mids_callback("2020-02-01T00:00:00Z"),  # not the true max
+    )
+    # Preflight direct-nav reference: 2 distinct cursors, true max 2020-09 →
+    # discriminating, and != the inner-$expand newest → mis-order verdict.
+    responses.get(
+        f"{SERVICE_URL}Roots(1)/Mids(10)/Leaves",
+        json={
+            "value": [
+                {"RecordLastModified": "2020-09-01T00:00:00Z"},
+                {"RecordLastModified": "2020-05-01T00:00:00Z"},
+            ]
+        },
+    )
+    responder = _batch_responder(
+        [
+            (
+                "Mids(10)/Leaves",
+                {"value": [{"Id": 1001, "RecordLastModified": "2020-09-01T00:00:00Z"}]},
+            ),
+            ("Roots?$top=1", {"value": [{"Id": 1}]}),
+        ]
+    )
+    responses.add_callback(responses.POST, f"{SERVICE_URL}$batch", callback=responder)
+
+    c = _make()
+    # No cursor_probe key → default auto. Must NOT raise.
+    recs, offset = c.read_table(
+        PROBE_TABLE,
+        {"cursor": since},
+        {"cursor_field": "RecordLastModified", "pagination": "nextlink"},
+    )
+    rows = [(r["Roots_Id"], r["Mids_Id"], r["Id"]) for r in recs]
+    assert rows == [(1, 10, 1001)]
+    assert offset["cursor"] == "2020-09-01T00:00:00Z"
+    assert offset.get("batch_ok") is True
+    # Cascaded: the leaf hydrate went through $batch, not the probe.
+    assert any("Mids(10)/Leaves" in u for u in responder.seen)

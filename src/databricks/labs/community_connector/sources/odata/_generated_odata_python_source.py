@@ -699,6 +699,13 @@ def register_lakeflow_source(spark):
     # allowing the read (inconclusive). Bounds the preflight's request cost.
     _CURSOR_PROBE_PREFLIGHT_SCAN = 50
 
+    # Max GET sub-requests packed into one OData ``$batch`` request by the
+    # ``cursor_probe=batch`` / ``auto``-fallback hydrate. A hard cap — some Smart
+    # API servers (Hexagon) reject batches above 100 operations — so the batched
+    # walk chunks leaf-parent reads (and their @odata.nextLink continuations) into
+    # groups of this size.
+    _BATCH_MAX_OPS = 100
+
 
     def rewrite_top_in_url(url: str, new_top: int) -> str:
         """Rewrite the ``$top=<N>`` (or url-encoded ``%24top=<N>``) parameter
@@ -1200,42 +1207,48 @@ def register_lakeflow_source(spark):
                 raise ValueError(f"Invalid expand_contained={raw!r}. Expected one of: true, false.")
             return raw == "true"
 
-        def _cursor_probe_active(self, table_options: dict[str, str] | None) -> bool:
-            """Parse the boolean ``cursor_probe`` table option (default **false**).
+        def _cursor_probe_mode(self, table_options: dict[str, str] | None) -> str:
+            """Parse the ``cursor_probe`` table option into a leaf-cursor read
+            acceleration mode. One of:
 
-            When active, a leaf-owned cursor read first issues one shallow
-            ``$expand(<leaf>($orderby=cursor desc;$top=1;$select=cursor))`` probe
-            per leaf-grandparent tuple to find the newest leaf under each
-            leaf-parent, marks the leaf-parent dirty when that leaf's cursor is
-            ``> since`` (compared client-side), then runs the normal N+1 leaf walk
-            over only the dirty leaf-parents — replacing "one leaf fetch per
-            leaf-parent" with "one probe per parent + one hydrate per dirty
-            parent". A request-count optimisation for deep paths with sparse
-            changes; the hydrate is a normal N+1 walk, so the rows emitted are
-            identical to ``cursor_probe=false`` *provided the probe identifies the
-            dirty parents correctly*.
+            * ``auto`` (**default**, when the option is unset) — best-effort
+              cascade. Use the nested-``$expand`` change-probe where it can pay off
+              *and* the server is verified to honour ``$orderby``/``$top`` inside
+              ``$expand``; otherwise fall back to an OData ``$batch`` hydrate (when
+              the server supports ``$batch``); otherwise the plain N+1 walk. Never
+              raises on a server-capability shortfall — it degrades to a correct,
+              slower strategy.
+            * ``nested-expand`` → ``probe`` — strict nested-``$expand`` probe.
+              **Raises** if the path can't use it or the server mis-orders inner
+              ``$expand`` (the original fail-fast semantics): "I require the probe."
+            * ``batch`` — skip the probe; hydrate the changed leaves via OData
+              ``$batch`` (server-driven paging, no ``$top``, ``@odata.nextLink``
+              follow-up, chunked to :data:`_BATCH_MAX_OPS` ops/request), falling
+              back to the plain N+1 walk if the server doesn't support ``$batch``.
+            * ``false`` → ``off`` — force the plain N+1 walk.
 
-            **Default on**, but guarded: the identify step relies on the server
-            honouring ``$orderby``/``$top`` *inside* ``$expand`` (optional OData v4
-            features). A server that ignores ``$orderby`` could return a non-newest
-            leaf and under-report a dirty parent → dropped rows. Rather than risk
-            that silently, the connector runs a one-time behavioural capability
-            check before engaging (:meth:`_verify_cursor_probe_support`) and
-            **raises** a clear error if the server mishandles inner-``$expand``
-            ordering — so misuse fails fast instead of losing data. (An earlier
-            ``$top=1;$filter`` shape was worse still: servers that slice ``$top``
-            before applying the inner ``$filter`` dropped any parent whose changed
-            leaf wasn't first by default order — ordering by the cursor and
-            comparing client-side removes that trap.) Set ``cursor_probe=false`` to
-            force the plain N+1 walk (e.g. when the check fails, or when changes are
-            dense and the per-parent probe is pure overhead). It engages only where
-            it can pay off (see :meth:`_cursor_probe_applicable`); an explicit
-            ``cursor_probe=true`` on a config that can't use it raises to catch the
-            misconfig."""
-            raw = ((table_options or {}).get("cursor_probe") or "true").strip().lower()
-            if raw not in {"true", "false"}:
-                raise ValueError(f"Invalid cursor_probe={raw!r}. Expected one of: true, false.")
-            return raw == "true"
+            The change-probe issues one shallow
+            ``$expand(<leaf>($orderby=cursor desc;$top=1;$select=cursor))`` per
+            leaf-grandparent to find each leaf-parent's newest leaf, marks it dirty
+            when that cursor is ``> since`` (client-side), then runs the normal N+1
+            walk over only the dirty leaf-parents. The ``$batch`` hydrate skips the
+            identify step entirely: it issues the plain per-leaf-parent
+            ``cursor gt since`` reads, but packs them into ``$batch`` requests so M
+            leaf-parent round-trips collapse to ``ceil(M / _BATCH_MAX_OPS)``. Both
+            emit rows identical to ``off`` (the plain walk) — the probe relies on
+            inner-``$expand`` ordering (hence the capability check), while ``$batch``
+            relies only on top-level single-column ``cursor gt`` filters, so it is
+            safe on servers (e.g. Hexagon Smart API) that reject nested ``$expand``
+            options. See :meth:`_cursor_probe_applicable` and
+            :meth:`_verify_batch_support`."""
+            raw = ((table_options or {}).get("cursor_probe") or "auto").strip().lower()
+            aliases = {"nested-expand": "probe", "false": "off", "batch": "batch", "auto": "auto"}
+            if raw not in aliases:
+                raise ValueError(
+                    f"Invalid cursor_probe={raw!r}. Expected one of: "
+                    "nested-expand, batch, auto, false."
+                )
+            return aliases[raw]
 
         def _cursor_probe_applicable(
             self,
@@ -1893,9 +1906,17 @@ def register_lakeflow_source(spark):
             table_options: dict[str, str] | None,
             cursor_field: str,
             start_offset: dict | None = None,
-        ) -> bool:
-            """Raise if this server can't be trusted to run the probe correctly;
-            return whether the verdict is a *conclusive* pass the caller may persist.
+            strict: bool = True,
+        ) -> tuple[bool, bool]:
+            """Behavioural capability check for the nested-``$expand`` probe.
+
+            Returns ``(supported, conclusive)``. ``supported`` is whether the
+            server can be trusted to run the probe correctly; ``conclusive`` is
+            whether the verdict is a *conclusive* pass the caller may persist.
+            When ``strict`` (``cursor_probe=nested-expand``) and the server mis-orders inner
+            ``$expand``, **raises** with the actionable message. When not strict
+            (``auto`` cascade), a mis-ordering server returns ``(False, False)`` so
+            the caller can fall back to ``$batch`` / the plain walk instead.
 
             ``cursor_probe`` (default on) silently drops rows on a server that
             mishandles ``$orderby``/``$top`` inside ``$expand``. This behavioural
@@ -1914,12 +1935,14 @@ def register_lakeflow_source(spark):
             re-checked every batch, so a server that begins to mis-order once its
             data grows discriminating is still caught.
 
-            Returns ``True`` when the server is trusted (via the persisted offset
-            flag or a conclusive preflight pass) so the caller can persist
-            ``cursor_probe_ok``; ``False`` on an inconclusive verdict (don't
-            persist — re-check next batch). Raises on a mis-ordering server."""
+            ``(supported, conclusive)``: ``supported`` is ``True`` via the persisted
+            offset flag or any non-mis-ordering preflight verdict; ``conclusive`` is
+            ``True`` only on a conclusive pass the caller may persist as
+            ``cursor_probe_ok`` (an *inconclusive* scan is re-checked every batch).
+            Raises (``strict``) or returns ``(False, False)`` (non-strict) on a
+            mis-ordering server."""
             if (start_offset or {}).get("cursor_probe_ok"):
-                return True
+                return (True, True)
             cache = self.__dict__.setdefault("_cursor_probe_verified", {})
             cache_key = (tuple(segments), namespace)
             if cache_key not in cache:
@@ -1928,8 +1951,10 @@ def register_lakeflow_source(spark):
                 )
             problem, conclusive = cache[cache_key]
             if problem:
-                raise ValueError(problem)
-            return conclusive
+                if strict:
+                    raise ValueError(problem)
+                return (False, False)
+            return (True, conclusive)
 
         def _run_cursor_probe_preflight(
             self,
@@ -2038,12 +2063,13 @@ def register_lakeflow_source(spark):
                 return ("ok", None)
             return (
                 "error",
-                "cursor_probe=true requires the source to honour $orderby/$top "
+                "cursor_probe=nested-expand requires the source to honour $orderby/$top "
                 f"inside $expand, but {self._build_contained_path(segments, full_chain)!r} "
                 f"returned {inner_max!r} as its newest {leaf_nav} via $expand when the "
                 f"true newest is {direct_max!r} (direct navigation). This server "
                 "silently mis-orders inner $expand, so cursor_probe would drop changed "
-                "rows. Set cursor_probe=false to use the robust N+1 walk.",
+                "rows. Use cursor_probe=batch or cursor_probe=auto (which falls back to "
+                "$batch / the plain N+1 walk), or cursor_probe=false for the plain walk.",
             )
 
         def _with_probe_ok(self, offset: dict) -> dict:
@@ -2060,6 +2086,112 @@ def register_lakeflow_source(spark):
             if offset.get("cursor_probe_ok"):
                 return offset
             return {**offset, "cursor_probe_ok": True}
+
+        def _with_batch_ok(self, offset: dict) -> dict:
+            """Return ``offset`` carrying the persisted ``batch_ok`` flag — the
+            ``$batch`` analogue of :meth:`_with_probe_ok`. Records that the server
+            accepts OData ``$batch`` so a per-batch-recreated reader skips the
+            capability POST next batch. Never mutates the input; no-op when already
+            present. The flag carries no cursor progress (excluded from the
+            no-progress comparison in :meth:`_finalize_cursor_read`)."""
+            if offset.get("batch_ok"):
+                return offset
+            return {**offset, "batch_ok": True}
+
+        def _batch_relative(self, url: str) -> str:
+            """Make ``url`` service-root-relative for a JSON ``$batch`` sub-request.
+
+            The OData v4 JSON batch format resolves a sub-request ``url`` against the
+            service root, so an absolute URL under the root is stripped to its
+            remainder; an already-relative URL (e.g. a resolved ``@odata.nextLink``
+            that came back service-relative) is returned without a leading slash."""
+            root = self.service_url if self.service_url.endswith("/") else self.service_url + "/"
+            if url.startswith(root):
+                return url[len(root) :]
+            parsed = urlparse(url)
+            if parsed.scheme:
+                return parsed.path.lstrip("/") + (f"?{parsed.query}" if parsed.query else "")
+            return url.lstrip("/")
+
+        def _post_batch(self, urls: list[str]) -> list[dict]:
+            """POST one OData v4 JSON ``$batch`` of GET sub-requests; return the
+            per-sub-request response objects in the SAME order as ``urls``.
+
+            Routes through :meth:`_http_get` with ``method="POST"`` so the batch
+            shares the connector's throttle / transient / token-refresh retry path.
+            Caller must keep ``len(urls) <= _BATCH_MAX_OPS``. Raises if the batch
+            envelope itself fails (non-2xx, malformed JSON, or a missing sub-response
+            id); per-sub-request HTTP errors are carried inside the envelope for the
+            caller to inspect."""
+            session = self._get_session()
+            payload = {
+                "requests": [
+                    {"id": str(i), "method": "GET", "url": self._batch_relative(u)}
+                    for i, u in enumerate(urls)
+                ]
+            }
+            batch_url = join_url(self.service_url, "$batch")
+            resp = self._http_get(session, batch_url, method="POST", json=payload)
+            if resp.status_code >= 400:
+                raise RuntimeError(
+                    f"OData $batch POST to {batch_url!r} failed: "
+                    f"{resp.status_code} {(resp.text or '')[:300]}"
+                )
+            data = resp.json()
+            by_id = {str(r.get("id")): r for r in data.get("responses", [])}
+            out = []
+            for i in range(len(urls)):
+                if str(i) not in by_id:
+                    raise RuntimeError(
+                        f"OData $batch response from {batch_url!r} is missing "
+                        f"sub-response id {i!r}; got ids {sorted(by_id)}."
+                    )
+                out.append(by_id[str(i)])
+            return out
+
+        def _verify_batch_support(
+            self,
+            segments: list[str],
+            table_options: dict[str, str] | None,
+            start_offset: dict | None = None,
+        ) -> bool:
+            """Whether the server supports OData ``$batch`` (fail-closed).
+
+            Used by ``cursor_probe=batch`` and the ``auto`` cascade to decide
+            between a ``$batch`` hydrate and the plain N+1 walk. A pass is cached per
+            connector instance and persisted in the resume offset as ``batch_ok``
+            (mirrors ``cursor_probe_ok``) so a per-batch-recreated reader skips the
+            capability POST. ANY failure — 405/404, a malformed envelope, a non-200
+            sub-response, or a transport error — returns ``False`` (never raises);
+            the caller degrades to the plain walk."""
+            if (start_offset or {}).get("batch_ok"):
+                return True
+            cached = self.__dict__.get("_batch_supported")
+            if cached is not None:
+                return cached
+            probe_url = join_url(self.service_url, segments[0]) + "?$top=1"
+            ok = False
+            try:
+                session = self._get_session()
+                payload = {
+                    "requests": [{"id": "0", "method": "GET", "url": self._batch_relative(probe_url)}]
+                }
+                # SINGLE attempt (not the retrying ``_http_get``): a capability probe
+                # must fail FAST. A server that lacks ``$batch`` returns 405/404 (or
+                # the transport errors), and running the transient-retry/backoff loop
+                # on that would stall every ``auto`` read by tens of seconds before
+                # giving up. A transient blip here just falls back to the plain walk
+                # for this batch and is re-probed next batch (nothing is persisted).
+                resp = session.post(
+                    join_url(self.service_url, "$batch"), json=payload, timeout=self.timeout
+                )
+                if resp.status_code < 400:
+                    subs = resp.json().get("responses") or []
+                    ok = bool(subs) and int(subs[0].get("status", 0) or 0) < 400
+            except Exception:  # capability probe — any failure means "unsupported"
+                ok = False
+            self.__dict__["_batch_supported"] = ok
+            return ok
 
         def _read_contained_snapshot(
             self, table_name: str, table_options: dict[str, str]
@@ -3080,6 +3212,115 @@ def register_lakeflow_source(spark):
                 truncated_chain_cursor_out,
             )
 
+        # pylint: disable=too-many-arguments,too-many-positional-arguments
+        def _batch_walk_contained_with_cursor(
+            self,
+            segments: list[str],
+            chains_iter: Iterator[list[dict[str, Any]]],
+            parent_idx_start: int,
+            table_options: dict[str, str],
+            order_by: str,
+            cursor_field: str,
+            since: Any,
+            max_records: int,
+            fk_columns: dict[tuple[str, str], str],
+            leaf_segment_filter: str | None = None,
+            effective=None,
+            skip_null: bool = False,
+        ) -> tuple[list[dict], bool, int, None, None]:
+            """OData ``$batch`` counterpart to :meth:`_walk_contained_with_cursor`.
+
+            Hydrates leaf collections via ``$batch`` instead of one GET per
+            leaf-parent: chains are buffered into groups of :data:`_BATCH_MAX_OPS`,
+            each group sent as a single ``$batch`` of ``cursor gt since`` reads with
+            **no ``$top``** (server-driven paging), and every per-sub-response
+            ``@odata.nextLink`` is re-batched (also capped at ``_BATCH_MAX_OPS``)
+            until each collection is drained. Rows go through the same null-skip /
+            below-floor trim / FK-tag pipeline as the plain walk, so the emitted set
+            is identical — only the request shape differs.
+
+            Resume + cap are **chunk-aligned**: the cap is checked after each
+            fully-drained group, so truncation parks ``parent_idx`` at the next group
+            boundary. ``chain_next_link`` / ``truncated_chain_cursor`` are unused
+            (returned ``None``) — a resumed batch re-enumerates ancestors and skips
+            ``parent_idx`` chains exactly like the plain walk. The cap is overshot by
+            at most one group's worth of changed rows (the same bounded-overshoot
+            tolerance the plain walk applies to a single complete parent).
+
+            Returns the 5-tuple ``(emitted, truncated, parent_idx, None, None)``."""
+            if effective is None:
+
+                def effective(row):
+                    return row.get(cursor_field)
+
+            emitted: list[dict] = []
+            truncated = False
+            parent_idx = 0
+            group: list[list[dict[str, Any]]] = []
+            # Drop ``page_size`` so the per-leaf-parent sub-requests carry NO ``$top``
+            # — the server drives paging and emits ``@odata.nextLink`` for any
+            # overflow (the keyset/$skip drain the plain ``auto`` walk would use to
+            # continue a short link-less page can't run inside a batch sub-request).
+            leaf_opts = {k: v for k, v in (table_options or {}).items() if k != "page_size"}
+
+            def _drain_group(buffered: list[list[dict[str, Any]]]) -> None:
+                # idx-keyed initial URLs (no $top → server pages + emits nextLink).
+                pending: list[tuple[int, str]] = []
+                chain_by_key: dict[int, list[dict[str, Any]]] = {}
+                for key, chain in enumerate(buffered):
+                    pending.append(
+                        (
+                            key,
+                            self._build_contained_url(
+                                segments,
+                                chain,
+                                leaf_opts,
+                                extra_filter=combine_filters(
+                                    self._cursor_filter(cursor_field, since), leaf_segment_filter
+                                ),
+                                order_by=order_by,
+                            ),
+                        )
+                    )
+                    chain_by_key[key] = chain
+                while pending:
+                    round_ = pending[:_BATCH_MAX_OPS]
+                    pending = pending[_BATCH_MAX_OPS:]
+                    responses = self._post_batch([u for _, u in round_])
+                    for (key, req_url), resp in zip(round_, responses):
+                        body = resp.get("body") if isinstance(resp, dict) else None
+                        rows = body.get("value", []) if isinstance(body, dict) else []
+                        chain = chain_by_key[key]
+                        for row in rows:
+                            if skip_null and row.get(cursor_field) is None:
+                                continue
+                            rec_cursor = effective(row)
+                            if since is not None and rec_cursor is not None and rec_cursor <= since:
+                                continue
+                            clean = {k: v for k, v in row.items() if not k.startswith("@odata.")}
+                            self._tag_with_ancestor_fks(clean, segments, chain, fk_columns)
+                            emitted.append(clean)
+                        raw_next = body.get("@odata.nextLink") if isinstance(body, dict) else None
+                        if raw_next:
+                            pending.append((key, self._resolve_next_link(req_url, raw_next)))
+
+            for chain in chains_iter:
+                if parent_idx < parent_idx_start:
+                    parent_idx += 1
+                    continue
+                group.append(chain)
+                parent_idx += 1
+                if len(group) >= _BATCH_MAX_OPS:
+                    _drain_group(group)
+                    group = []
+                    if len(emitted) >= max_records:
+                        truncated = True
+                        break
+            else:
+                if group:
+                    _drain_group(group)
+            return (emitted, truncated, parent_idx, None, None)
+
         def _no_progress_cursor_error(
             self, table_name: str, cursor_field: str, n_emitted: int
         ) -> RuntimeError:
@@ -3130,14 +3371,14 @@ def register_lakeflow_source(spark):
             # Compare progress on the cursor/continuation state only. Strip the
             # ``lb_*`` auto-lookback bookkeeping (its measurement fluctuates batch
             # to batch without representing real cursor progress) and the persisted
-            # ``cursor_probe_ok`` capability flag (a one-time-set marker, not
-            # progress) — otherwise a batch that merely bakes in the flag would read
-            # as forward progress and bypass the no-progress guard.
+            # ``cursor_probe_ok`` / ``batch_ok`` capability flags (one-time-set
+            # markers, not progress) — otherwise a batch that merely bakes in a flag
+            # would read as forward progress and bypass the no-progress guard.
             def _progress_view(off: dict | None) -> dict:
                 return {
                     k: v
                     for k, v in (off or {}).items()
-                    if not k.startswith("lb_") and k != "cursor_probe_ok"
+                    if not k.startswith("lb_") and k not in ("cursor_probe_ok", "batch_ok")
                 }
 
             if _progress_view(start_offset) == _progress_view(end_offset):
@@ -3180,32 +3421,39 @@ def register_lakeflow_source(spark):
                     f"{table_name!r} or any of its ancestors. Pick a column "
                     f"declared on the leaf or one of the parent segments."
                 )
-            cursor_probe = self._cursor_probe_active(table_options)
-            probe_applicable = cursor_probe and self._cursor_probe_applicable(
+            mode = self._cursor_probe_mode(table_options)  # auto | probe | batch | off
+            explicit = "cursor_probe" in (table_options or {})
+            is_leaf_cursor = cursor_level == len(segments) - 1
+            probe_applicable = is_leaf_cursor and self._cursor_probe_applicable(
                 segments, namespace, cursor_field, cursor_level
             )
-            # Strict checks apply only to an EXPLICIT opt-in — the default-on
-            # value is a hint that silently no-ops where it can't engage (see
-            # ``_cursor_probe_active``), so it must not raise on the many reads
-            # that legitimately default it on but can't use it.
-            probe_explicit = "cursor_probe" in (table_options or {})
-            if cursor_probe and probe_explicit and not probe_applicable:
-                if cursor_level != len(segments) - 1:
+            # Strict misconfig raises apply only to an EXPLICIT opt-in that names a
+            # strategy this path structurally can't run. ``auto`` (the default) and
+            # ``off`` never raise — they degrade to a correct fallback.
+            if explicit and mode == "probe" and not probe_applicable:
+                if not is_leaf_cursor:
                     raise ValueError(
-                        "cursor_probe=true requires cursor_field on the leaf segment "
-                        f"(it lives on ancestor segment {segments[cursor_level]!r} of "
-                        f"{table_name!r}). cursor_probe only accelerates leaf-owned "
+                        "cursor_probe=nested-expand requires cursor_field on the leaf "
+                        f"segment (it lives on ancestor segment {segments[cursor_level]!r} "
+                        f"of {table_name!r}). cursor_probe only accelerates leaf-owned "
                         "cursor reads; an ancestor cursor already filters whole "
                         "subtrees, so drop cursor_probe for this table."
                     )
                 raise ValueError(
-                    f"cursor_probe=true won't help on {table_name!r}: its leaf-parent "
+                    f"cursor_probe=nested-expand won't help on {table_name!r}: its leaf-parent "
                     f"collection {segments[-2]!r} is a batch-snapshot level (it does "
                     f"not declare {cursor_field!r}), so the distance from the leaf to "
                     "the nearest snapshot ancestor is 1 — every leaf-parent is fetched "
                     "anyway and there are no clean ones to skip. cursor_probe pays off "
                     "only when the leaf's parent is itself an incremental, "
                     "high-cardinality collection. Drop cursor_probe here."
+                )
+            if explicit and mode == "batch" and not is_leaf_cursor:
+                raise ValueError(
+                    f"cursor_probe=batch only accelerates leaf-owned cursor reads, but "
+                    f"{cursor_field!r} lives on ancestor segment {segments[cursor_level]!r} "
+                    f"of {table_name!r} — an ancestor cursor already filters whole "
+                    "subtrees. Drop cursor_probe for this table."
                 )
             if start_offset is None:
                 # Batch reader: offset discarded, ``since`` is None (no cursor
@@ -3238,32 +3486,52 @@ def register_lakeflow_source(spark):
                 # either way, so default-on cursor_probe stays inert there.
                 chains_iter = None
                 persist_probe_ok = False
-                if probe_applicable:
-                    # Fail fast (default-on, but verified): raise if this server
-                    # mishandles inner-$expand ordering rather than silently
-                    # dropping rows. A conclusive pass — or a verdict a prior batch
-                    # already persisted in the offset — lets a per-batch-recreated
-                    # reader skip the preflight's requests next time.
-                    verified = self._verify_cursor_probe_support(
-                        segments, namespace, table_options, cursor_field, start_offset
+                use_batch = False
+                persist_batch_ok = False
+                used_probe = False
+                if mode in ("probe", "auto") and probe_applicable:
+                    # Capability-verify the nested-$expand probe. ``probe`` (explicit
+                    # ``true``) is STRICT — ``_verify_cursor_probe_support`` raises if
+                    # the server mis-orders inner $expand. ``auto`` is non-strict — a
+                    # mis-ordering verdict returns ``supported=False`` so we cascade
+                    # to $batch below instead of failing the read. A conclusive pass
+                    # (or a flag a prior batch persisted) lets a per-batch-recreated
+                    # reader skip the preflight next time.
+                    supported, conclusive = self._verify_cursor_probe_support(
+                        segments,
+                        namespace,
+                        table_options,
+                        cursor_field,
+                        start_offset,
+                        strict=(mode == "probe"),
                     )
-                    persist_probe_ok = verified or bool((start_offset or {}).get("cursor_probe_ok"))
-                    # The probe prunes nothing until a watermark exists: with
-                    # ``read_since`` None (first batch) every leaf-parent reads as
-                    # dirty, so the per-grandparent probe round-trips would only add
-                    # overhead with nothing to skip. Fall back to the plain
-                    # enumerator then — identical rows, fewer requests — and engage
-                    # the probe once a watermark is established. ``read_since``
-                    # (floored) so the probe re-flags leaf-parents whose newest leaf
-                    # is inside the overlap window as dirty.
-                    if read_since is not None:
-                        chains_iter = self._iter_dirty_leaf_parent_chains(
-                            segments,
-                            namespace,
-                            table_options,
-                            cursor_field,
-                            read_since,
+                    if supported:
+                        used_probe = True
+                        persist_probe_ok = conclusive or bool(
+                            (start_offset or {}).get("cursor_probe_ok")
                         )
+                        # The probe prunes nothing until a watermark exists: with
+                        # ``read_since`` None (first batch) every leaf-parent reads as
+                        # dirty, so the per-grandparent probe round-trips would only
+                        # add overhead with nothing to skip. Fall back to the plain
+                        # enumerator then — identical rows, fewer requests — and
+                        # engage the probe once a watermark is established.
+                        if read_since is not None:
+                            chains_iter = self._iter_dirty_leaf_parent_chains(
+                                segments,
+                                namespace,
+                                table_options,
+                                cursor_field,
+                                read_since,
+                            )
+                # Cascade: ``auto`` (probe didn't apply / server mis-orders) and
+                # ``batch`` hydrate via $batch when the server supports it; otherwise
+                # both fall through to the plain N+1 walk. ``probe`` never reaches
+                # here without having engaged (it raised on an unsupported server).
+                if not used_probe and mode in ("auto", "batch"):
+                    if self._verify_batch_support(segments, table_options, start_offset):
+                        use_batch = True
+                        persist_batch_ok = True
                 return self._read_contained_incremental_leaf_cursor(
                     table_name,
                     segments,
@@ -3272,6 +3540,8 @@ def register_lakeflow_source(spark):
                     cursor_field,
                     chains_iter=chains_iter,
                     persist_probe_ok=persist_probe_ok,
+                    use_batch=use_batch,
+                    persist_batch_ok=persist_batch_ok,
                 )
             return self._read_contained_incremental_ancestor_cursor(
                 table_name, segments, start_offset, table_options, cursor_field, cursor_level
@@ -3338,8 +3608,16 @@ def register_lakeflow_source(spark):
             cursor_field: str,
             chains_iter: Iterator[list[dict[str, Any]]] | None = None,
             persist_probe_ok: bool = False,
+            use_batch: bool = False,
+            persist_batch_ok: bool = False,
         ) -> tuple[Iterator[dict], dict]:
             """Cursor lives on the leaf entity — filter at the leaf fetch.
+
+            ``use_batch`` hydrates via :meth:`_batch_walk_contained_with_cursor`
+            (OData ``$batch``, chunk-aligned resume) instead of the per-parent
+            :meth:`_walk_contained_with_cursor`; ``persist_batch_ok`` stamps the
+            ``batch_ok`` capability flag into the resume offset (mirrors
+            ``persist_probe_ok`` / ``cursor_probe_ok``).
 
             ``chains_iter`` lets a caller substitute the parent-key source
             (default: every chain via :meth:`_iter_parent_key_chains`). The
@@ -3392,28 +3670,50 @@ def register_lakeflow_source(spark):
             # Wall-clock around the walk feeds the ``auto`` lookback window
             # (see ``_attach_lookback_state``), exactly as the expand path does.
             walk_start = time.monotonic()
-            (
-                emitted,
-                truncated,
-                parent_idx,
-                chain_next_link_out,
-                truncated_chain_cursor_out,
-            ) = self._walk_contained_with_cursor(
-                segments,
-                chains_iter,
-                int((start_offset or {}).get("parent_idx", 0)),
-                table_options,
-                order_by,
-                cursor_field,
-                read_since,
-                truncated_chain_cursor_in,
-                chain_next_link_in,
-                max_records,
-                self._resolve_fk_columns(segments, namespace),
-                leaf_segment_filter=segment_filters.get(len(segments) - 1),
-                effective=effective,
-                skip_null=skip_null,
-            )
+            if use_batch:
+                (
+                    emitted,
+                    truncated,
+                    parent_idx,
+                    chain_next_link_out,
+                    truncated_chain_cursor_out,
+                ) = self._batch_walk_contained_with_cursor(
+                    segments,
+                    chains_iter,
+                    int((start_offset or {}).get("parent_idx", 0)),
+                    table_options,
+                    order_by,
+                    cursor_field,
+                    read_since,
+                    max_records,
+                    self._resolve_fk_columns(segments, namespace),
+                    leaf_segment_filter=segment_filters.get(len(segments) - 1),
+                    effective=effective,
+                    skip_null=skip_null,
+                )
+            else:
+                (
+                    emitted,
+                    truncated,
+                    parent_idx,
+                    chain_next_link_out,
+                    truncated_chain_cursor_out,
+                ) = self._walk_contained_with_cursor(
+                    segments,
+                    chains_iter,
+                    int((start_offset or {}).get("parent_idx", 0)),
+                    table_options,
+                    order_by,
+                    cursor_field,
+                    read_since,
+                    truncated_chain_cursor_in,
+                    chain_next_link_in,
+                    max_records,
+                    self._resolve_fk_columns(segments, namespace),
+                    leaf_segment_filter=segment_filters.get(len(segments) - 1),
+                    effective=effective,
+                    skip_null=skip_null,
+                )
             walk_elapsed = time.monotonic() - walk_start
             if truncated:
                 # The walk has already chosen the checkpoint and trimmed
@@ -3423,16 +3723,24 @@ def register_lakeflow_source(spark):
                 # with a single cursor value never truncates — the walk emits
                 # it in full and continues — so there's no failure case here.)
                 end_offset: dict = {"parent_idx": parent_idx}
-                if chain_next_link_out is not None:
-                    end_offset["chain_next_link"] = chain_next_link_out
-                else:
-                    end_offset["truncated_chain_cursor"] = truncated_chain_cursor_out
+                # The ``$batch`` walk resumes purely on ``parent_idx`` (chunk-aligned)
+                # — it never parks a mid-collection checkpoint — so its truncation
+                # offset carries neither continuation key.
+                if not use_batch:
+                    if chain_next_link_out is not None:
+                        end_offset["chain_next_link"] = chain_next_link_out
+                    else:
+                        end_offset["truncated_chain_cursor"] = truncated_chain_cursor_out
                 if since is not None:
                     end_offset["cursor"] = since
             else:
                 if not emitted:
                     empty = start_offset or {}
-                    return iter([]), (self._with_probe_ok(empty) if persist_probe_ok else empty)
+                    if persist_probe_ok:
+                        empty = self._with_probe_ok(empty)
+                    if persist_batch_ok:
+                        empty = self._with_batch_ok(empty)
+                    return iter([]), empty
                 cursors = [effective(r) for r in emitted if effective(r) is not None]
                 # Mirror ``_build_expand_end_offset`` /
                 # ``_ancestor_cursor_offset``: when there's no cursor data this
@@ -3454,6 +3762,10 @@ def register_lakeflow_source(spark):
             # carries the flag returns ``start_offset`` unchanged.
             if persist_probe_ok:
                 out_offset = self._with_probe_ok(out_offset)
+            # Same treatment for the ``$batch`` capability flag (excluded from the
+            # no-progress comparison alongside ``cursor_probe_ok``).
+            if persist_batch_ok:
+                out_offset = self._with_batch_ok(out_offset)
             return records, out_offset
 
         def _read_contained_incremental_ancestor_cursor(
@@ -4563,30 +4875,31 @@ def register_lakeflow_source(spark):
                     "the leaf-cursor N+1 / cursor_probe walk. Use 'auto' (default) "
                     "or 'off' for other read configurations."
                 )
-            # cursor_probe is default-on (a hint that no-ops where it can't
-            # engage), so these conflict checks fire only on an EXPLICIT
-            # ``cursor_probe=true`` — otherwise every flat / snapshot /
-            # expand_contained read would trip them.
-            if "cursor_probe" in opts and self._cursor_probe_active(opts):
+            # ``auto`` (the default) is a best-effort hint that no-ops where it can't
+            # engage, so these conflict checks fire only on an EXPLICIT strategy
+            # opt-in (``cursor_probe=nested-expand`` or ``cursor_probe=batch``) — otherwise
+            # every flat / snapshot / expand_contained read would trip them.
+            cursor_probe_raw = (opts.get("cursor_probe") or "").strip().lower()
+            if "cursor_probe" in opts and self._cursor_probe_mode(opts) in ("probe", "batch"):
                 if _parse_contained_path(table_name) is None:
                     raise ValueError(
-                        "cursor_probe=true is supported only on contained-collection "
-                        f"paths; {table_name!r} is a flat entity set, which is "
-                        "already a single filtered request per batch."
+                        f"cursor_probe={cursor_probe_raw} is supported only on "
+                        f"contained-collection paths; {table_name!r} is a flat entity "
+                        "set, which is already a single filtered request per batch."
                     )
                 if self._expand_contained_active(opts):
                     raise ValueError(
-                        "cursor_probe=true conflicts with expand_contained=true: "
-                        "both push the leaf cursor filter down to fetch only changed "
-                        "leaves, by different strategies. Pick one (expand_contained "
-                        "for shallow trees, cursor_probe for deep trees with sparse "
+                        f"cursor_probe={cursor_probe_raw} conflicts with "
+                        "expand_contained=true: both fetch only changed leaves, by "
+                        "different strategies. Pick one (expand_contained for shallow "
+                        "trees; cursor_probe=nested-expand/batch for deep trees with sparse "
                         "changes)."
                     )
                 if not opts.get("cursor_field"):
                     raise ValueError(
-                        "cursor_probe=true requires a cursor_field (it only changes "
-                        "how a leaf-owned cursor read is executed). Set cursor_field "
-                        "or drop cursor_probe."
+                        f"cursor_probe={cursor_probe_raw} requires a cursor_field (it "
+                        "only changes how a leaf-owned cursor read is executed). Set "
+                        "cursor_field or drop cursor_probe."
                     )
             if self._pagination != "nextlink":
                 opts.setdefault("page_size", _DEFAULT_PAGE_SIZE)
@@ -5669,8 +5982,14 @@ def register_lakeflow_source(spark):
                 f"Exhausted retries decoding JSON for {url!r}."
             )
 
-        def _http_get(self, session: requests.Session, url: str, **kwargs: Any) -> requests.Response:
-            """GET with auth-aware 401/403 handling + transient-failure retry.
+        def _http_get(
+            self, session: requests.Session, url: str, method: str = "GET", **kwargs: Any
+        ) -> requests.Response:
+            """GET (or other ``method``) with auth-aware 401/403 handling + transient-failure retry.
+
+            ``method`` defaults to ``GET``; a ``POST`` (with ``json=``) routes the
+            ``$batch`` endpoint through the same throttle/transient/token-refresh
+            retry path as every read.
 
             Outer loop retries on two classes of transient failure, both
             capped by ``retry_max_delay_seconds`` per attempt:
@@ -5718,7 +6037,7 @@ def register_lakeflow_source(spark):
             attempts = self.max_retries + 1
             for attempt in range(attempts):
                 try:
-                    resp = self._http_get_once(session, url, **kwargs)
+                    resp = self._http_get_once(session, url, method=method, **kwargs)
                 except _TRANSIENT_NETWORK_ERRORS as exc:
                     # Server closed the TCP connection / DNS failed / read
                     # timed out — no HTTP response, so no Retry-After to
@@ -5732,8 +6051,9 @@ def register_lakeflow_source(spark):
                             f"source needs more retries)"
                         ) from exc
                     _LOG.warning(
-                        "OData transient %s on GET %s — retrying (%d/%d)",
+                        "OData transient %s on %s %s — retrying (%d/%d)",
                         type(exc).__name__,
+                        method,
                         url,
                         attempt + 1,
                         self.max_retries,
@@ -5746,8 +6066,9 @@ def register_lakeflow_source(spark):
                             self._transient_status_exhausted_error(resp, url, attempt + 1)
                         )
                     _LOG.warning(
-                        "OData %d on GET %s — retrying (%d/%d)",
+                        "OData %d on %s %s — retrying (%d/%d)",
                         resp.status_code,
+                        method,
                         url,
                         attempt + 1,
                         self.max_retries,
@@ -5797,19 +6118,19 @@ def register_lakeflow_source(spark):
             return min(float(2**attempt), float(self.retry_max_delay_seconds))
 
         def _http_get_once(
-            self, session: requests.Session, url: str, **kwargs: Any
+            self, session: requests.Session, url: str, method: str = "GET", **kwargs: Any
         ) -> requests.Response:
-            """One auth-aware GET attempt; throttle handling lives in `_http_get`."""
+            """One auth-aware request attempt; throttle handling lives in `_http_get`."""
             if self._should_preemptively_refresh():
                 session.headers["Authorization"] = f"Bearer {self._oauth2_token()}"
-            self._log_http_request("GET", url)
-            resp = session.get(url, timeout=self.timeout, **kwargs)
-            self._log_http_response("GET", url, resp)
+            self._log_http_request(method, url)
+            resp = session.request(method, url, timeout=self.timeout, **kwargs)
+            self._log_http_response(method, url, resp)
             if resp.status_code == 401 and self._has_oauth_refresh_path():
                 session.headers["Authorization"] = f"Bearer {self._oauth2_token()}"
-                self._log_http_request("GET", url)
-                resp = session.get(url, timeout=self.timeout, **kwargs)
-                self._log_http_response("GET", url, resp)
+                self._log_http_request(method, url)
+                resp = session.request(method, url, timeout=self.timeout, **kwargs)
+                self._log_http_response(method, url, resp)
                 if resp.status_code == 401:
                     # We just minted a token straight from the OAuth provider
                     # and the source still rejected it — the access token isn't

@@ -700,30 +700,31 @@ class ODataLakeflowConnect(
                 "the leaf-cursor N+1 / cursor_probe walk. Use 'auto' (default) "
                 "or 'off' for other read configurations."
             )
-        # cursor_probe is default-on (a hint that no-ops where it can't
-        # engage), so these conflict checks fire only on an EXPLICIT
-        # ``cursor_probe=true`` — otherwise every flat / snapshot /
-        # expand_contained read would trip them.
-        if "cursor_probe" in opts and self._cursor_probe_active(opts):
+        # ``auto`` (the default) is a best-effort hint that no-ops where it can't
+        # engage, so these conflict checks fire only on an EXPLICIT strategy
+        # opt-in (``cursor_probe=nested-expand`` or ``cursor_probe=batch``) — otherwise
+        # every flat / snapshot / expand_contained read would trip them.
+        cursor_probe_raw = (opts.get("cursor_probe") or "").strip().lower()
+        if "cursor_probe" in opts and self._cursor_probe_mode(opts) in ("probe", "batch"):
             if _parse_contained_path(table_name) is None:
                 raise ValueError(
-                    "cursor_probe=true is supported only on contained-collection "
-                    f"paths; {table_name!r} is a flat entity set, which is "
-                    "already a single filtered request per batch."
+                    f"cursor_probe={cursor_probe_raw} is supported only on "
+                    f"contained-collection paths; {table_name!r} is a flat entity "
+                    "set, which is already a single filtered request per batch."
                 )
             if self._expand_contained_active(opts):
                 raise ValueError(
-                    "cursor_probe=true conflicts with expand_contained=true: "
-                    "both push the leaf cursor filter down to fetch only changed "
-                    "leaves, by different strategies. Pick one (expand_contained "
-                    "for shallow trees, cursor_probe for deep trees with sparse "
+                    f"cursor_probe={cursor_probe_raw} conflicts with "
+                    "expand_contained=true: both fetch only changed leaves, by "
+                    "different strategies. Pick one (expand_contained for shallow "
+                    "trees; cursor_probe=nested-expand/batch for deep trees with sparse "
                     "changes)."
                 )
             if not opts.get("cursor_field"):
                 raise ValueError(
-                    "cursor_probe=true requires a cursor_field (it only changes "
-                    "how a leaf-owned cursor read is executed). Set cursor_field "
-                    "or drop cursor_probe."
+                    f"cursor_probe={cursor_probe_raw} requires a cursor_field (it "
+                    "only changes how a leaf-owned cursor read is executed). Set "
+                    "cursor_field or drop cursor_probe."
                 )
         if self._pagination != "nextlink":
             opts.setdefault("page_size", _DEFAULT_PAGE_SIZE)
@@ -1806,8 +1807,14 @@ class ODataLakeflowConnect(
             f"Exhausted retries decoding JSON for {url!r}."
         )
 
-    def _http_get(self, session: requests.Session, url: str, **kwargs: Any) -> requests.Response:
-        """GET with auth-aware 401/403 handling + transient-failure retry.
+    def _http_get(
+        self, session: requests.Session, url: str, method: str = "GET", **kwargs: Any
+    ) -> requests.Response:
+        """GET (or other ``method``) with auth-aware 401/403 handling + transient-failure retry.
+
+        ``method`` defaults to ``GET``; a ``POST`` (with ``json=``) routes the
+        ``$batch`` endpoint through the same throttle/transient/token-refresh
+        retry path as every read.
 
         Outer loop retries on two classes of transient failure, both
         capped by ``retry_max_delay_seconds`` per attempt:
@@ -1855,7 +1862,7 @@ class ODataLakeflowConnect(
         attempts = self.max_retries + 1
         for attempt in range(attempts):
             try:
-                resp = self._http_get_once(session, url, **kwargs)
+                resp = self._http_get_once(session, url, method=method, **kwargs)
             except _TRANSIENT_NETWORK_ERRORS as exc:
                 # Server closed the TCP connection / DNS failed / read
                 # timed out — no HTTP response, so no Retry-After to
@@ -1869,8 +1876,9 @@ class ODataLakeflowConnect(
                         f"source needs more retries)"
                     ) from exc
                 _LOG.warning(
-                    "OData transient %s on GET %s — retrying (%d/%d)",
+                    "OData transient %s on %s %s — retrying (%d/%d)",
                     type(exc).__name__,
+                    method,
                     url,
                     attempt + 1,
                     self.max_retries,
@@ -1883,8 +1891,9 @@ class ODataLakeflowConnect(
                         self._transient_status_exhausted_error(resp, url, attempt + 1)
                     )
                 _LOG.warning(
-                    "OData %d on GET %s — retrying (%d/%d)",
+                    "OData %d on %s %s — retrying (%d/%d)",
                     resp.status_code,
+                    method,
                     url,
                     attempt + 1,
                     self.max_retries,
@@ -1934,19 +1943,19 @@ class ODataLakeflowConnect(
         return min(float(2**attempt), float(self.retry_max_delay_seconds))
 
     def _http_get_once(
-        self, session: requests.Session, url: str, **kwargs: Any
+        self, session: requests.Session, url: str, method: str = "GET", **kwargs: Any
     ) -> requests.Response:
-        """One auth-aware GET attempt; throttle handling lives in `_http_get`."""
+        """One auth-aware request attempt; throttle handling lives in `_http_get`."""
         if self._should_preemptively_refresh():
             session.headers["Authorization"] = f"Bearer {self._oauth2_token()}"
-        self._log_http_request("GET", url)
-        resp = session.get(url, timeout=self.timeout, **kwargs)
-        self._log_http_response("GET", url, resp)
+        self._log_http_request(method, url)
+        resp = session.request(method, url, timeout=self.timeout, **kwargs)
+        self._log_http_response(method, url, resp)
         if resp.status_code == 401 and self._has_oauth_refresh_path():
             session.headers["Authorization"] = f"Bearer {self._oauth2_token()}"
-            self._log_http_request("GET", url)
-            resp = session.get(url, timeout=self.timeout, **kwargs)
-            self._log_http_response("GET", url, resp)
+            self._log_http_request(method, url)
+            resp = session.request(method, url, timeout=self.timeout, **kwargs)
+            self._log_http_response(method, url, resp)
             if resp.status_code == 401:
                 # We just minted a token straight from the OAuth provider
                 # and the source still rejected it — the access token isn't
