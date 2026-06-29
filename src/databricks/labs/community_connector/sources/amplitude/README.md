@@ -131,6 +131,7 @@ These settings are **optional** — all tables work without them. To use them, a
 | Option | Applies to | Default | Description |
 |--------|-----------|---------|-------------|
 | `window_hours` | `events` | `24` | Width (in hours) of each Export API request. Reduce to `1`–`6` for high-volume projects that hit Export API timeouts or the 4 GB per-window limit. |
+| `lookback_hours` | `events` | `2` | How far back from "now" to stop reading, so the connector never queries hours whose data has not been published yet. Amplitude's Export API makes an hour's data available ~2 hours after the server receives it, so the default `2` avoids silently skipping not-yet-available events. Increase if you still see gaps; set `0` to read right up to the current hour. |
 | `window_days` | `active_users_counts`, `average_session_length`, `sessions_per_user`, `session_length_distribution` | `30` | Width (in days) of each date window. |
 | `m` | `active_users_counts` | `active` | User metric — `active` or `new`. |
 | `i` | `active_users_counts` | `1` | Interval — `1` (daily), `7` (weekly), or `30` (monthly). |

@@ -204,12 +204,25 @@ class AmplitudeLakeflowConnect(LakeflowConnect):
         """Sliding hourly-window read over the Export API.
 
         One window per call: query ``[since, window_end]``, parse every event
-        in the response, then advance the cursor to ``window_end`` (capped at
-        the init-time snapshot).  Append-only tables must never truncate a
-        server response, so the whole window is returned; ``window_hours``
-        bounds the work per call instead of ``max_records_per_batch``.
+        in the response, then advance the cursor past ``window_end``.  Append-only
+        tables must never truncate a server response, so the whole window is
+        returned; ``window_hours`` bounds the work per call instead of
+        ``max_records_per_batch``.
+
+        Availability lookback: Amplitude's Export API only makes an hour's data
+        available ~2 hours after the server receives it (per the Export API
+        docs).  Reading right up to "now" would query hours whose data has not
+        published yet and then advance the cursor past them, silently dropping
+        those events.  The readable ceiling is therefore ``init - lookback_hours``
+        (default 2).  Override per table via the ``lookback_hours`` option;
+        set ``0`` to read up to the init-time snapshot.
         """
         init_dt = self._parse_dt(self._init_ts)
+        lookback_hours = self._non_negative_int_option(
+            table_options, "lookback_hours", 2
+        )
+        ceiling_dt = init_dt - timedelta(hours=lookback_hours)
+        window_hours = self._positive_int_option(table_options, "window_hours", 24)
 
         cursor = start_offset.get("cursor")
         if cursor:
@@ -217,19 +230,15 @@ class AmplitudeLakeflowConnect(LakeflowConnect):
         elif self._start_date:
             since_dt = self._parse_dt(self._start_date)
         else:
-            # Default backfill: only the most recent window.  Set ``start_date``
-            # (connection option) for deeper history.
-            window_hours_default = self._positive_int_option(
-                table_options, "window_hours", 24
-            )
-            since_dt = init_dt - timedelta(hours=window_hours_default)
+            # Default backfill: only the most recent available window.  Set
+            # ``start_date`` (connection option) for deeper history.
+            since_dt = ceiling_dt - timedelta(hours=window_hours)
 
-        # Caught up to the init-time cap — signal "no more data".
-        if since_dt >= init_dt:
+        # Caught up to the availability ceiling — signal "no more data".
+        if since_dt >= ceiling_dt:
             return iter([]), start_offset
 
-        window_hours = self._positive_int_option(table_options, "window_hours", 24)
-        window_end_dt = min(since_dt + timedelta(hours=window_hours), init_dt)
+        window_end_dt = min(since_dt + timedelta(hours=window_hours), ceiling_dt)
 
         params = {
             "start": since_dt.strftime("%Y%m%dT%H"),
@@ -402,6 +411,24 @@ class AmplitudeLakeflowConnect(LakeflowConnect):
         if value <= 0:
             raise ValueError(
                 f"Amplitude option '{key}' must be a positive integer; got {raw_value!r}"
+            )
+        return value
+
+    @staticmethod
+    def _non_negative_int_option(
+        table_options: dict[str, str], key: str, default_value: int
+    ) -> int:
+        """Parse a non-negative integer option (``0`` allowed; e.g. lookback)."""
+        raw_value = table_options.get(key, str(default_value))
+        try:
+            value = int(raw_value)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(
+                f"Amplitude option '{key}' must be a non-negative integer; got {raw_value!r}"
+            ) from exc
+        if value < 0:
+            raise ValueError(
+                f"Amplitude option '{key}' must be a non-negative integer; got {raw_value!r}"
             )
         return value
 

@@ -180,7 +180,9 @@ def test_read_events_404_at_init_ts_cap_terminates():
     with patch.object(connector, "_request_with_retry", return_value=resp_404):
         records, offset = connector._read_events(
             {"cursor": "2026-06-20T04:00:00+00:00"},
-            {"window_hours": "6"},  # would reach 10:00, but cap is 06:00
+            # lookback_hours=0 isolates the init_ts cap from the availability
+            # lookback (covered separately below).
+            {"window_hours": "6", "lookback_hours": "0"},  # would reach 10:00, cap is 06:00
         )
 
     assert list(records) == []
@@ -227,12 +229,76 @@ def test_read_events_cursor_at_init_ts_returns_empty_without_api_call():
 
     with patch.object(connector, "_request_with_retry") as mocked_request:
         records, offset = connector._read_events(
-            {"cursor": "2026-06-20T06:00:00+00:00"}, {}
+            {"cursor": "2026-06-20T06:00:00+00:00"}, {"lookback_hours": "0"}
         )
 
     assert list(records) == []
     assert offset == {"cursor": "2026-06-20T06:00:00+00:00"}
     mocked_request.assert_not_called()
+
+
+def test_read_events_applies_default_2h_lookback():
+    """With no lookback option, the readable ceiling is init_ts - 2h, so the
+    query never reaches the in-progress hours whose data has not published yet."""
+    connector = _connector()
+    connector._init_ts = "2026-06-20T12:00:00+00:00"
+    resp_404 = _mock_response(404)
+
+    with patch.object(connector, "_request_with_retry", return_value=resp_404) as mocked:
+        records, offset = connector._read_events(
+            {"cursor": "2026-06-20T00:00:00+00:00"},
+            {"window_hours": "24"},  # would reach 24:00, but ceiling is 10:00
+        )
+
+    assert list(records) == []
+    # Query end capped at 12:00 - 2h = 10:00; cursor advances one hour past it.
+    assert mocked.call_args.kwargs["params"]["end"] == "20260620T10"
+    assert offset == {"cursor": "2026-06-20T11:00:00+00:00"}
+
+
+def test_read_events_lookback_overridable():
+    """lookback_hours overrides the default 2h availability buffer."""
+    connector = _connector()
+    connector._init_ts = "2026-06-20T12:00:00+00:00"
+    resp_404 = _mock_response(404)
+
+    with patch.object(connector, "_request_with_retry", return_value=resp_404) as mocked:
+        records, offset = connector._read_events(
+            {"cursor": "2026-06-20T00:00:00+00:00"},
+            {"window_hours": "24", "lookback_hours": "5"},
+        )
+
+    assert list(records) == []
+    # Ceiling = 12:00 - 5h = 07:00.
+    assert mocked.call_args.kwargs["params"]["end"] == "20260620T07"
+    assert offset == {"cursor": "2026-06-20T08:00:00+00:00"}
+
+
+def test_read_events_lookback_zero_reads_to_init():
+    """lookback_hours=0 disables the buffer and reads up to the init_ts snapshot."""
+    connector = _connector()
+    connector._init_ts = "2026-06-20T12:00:00+00:00"
+    resp_404 = _mock_response(404)
+
+    with patch.object(connector, "_request_with_retry", return_value=resp_404) as mocked:
+        records, offset = connector._read_events(
+            {"cursor": "2026-06-20T00:00:00+00:00"},
+            {"window_hours": "24", "lookback_hours": "0"},
+        )
+
+    assert list(records) == []
+    assert mocked.call_args.kwargs["params"]["end"] == "20260620T12"
+    assert offset == {"cursor": "2026-06-20T13:00:00+00:00"}
+
+
+def test_read_events_rejects_negative_lookback():
+    connector = _connector()
+    connector._init_ts = "2026-06-20T12:00:00+00:00"
+
+    with pytest.raises(ValueError, match="lookback_hours"):
+        connector._read_events(
+            {"cursor": "2026-06-20T00:00:00+00:00"}, {"lookback_hours": "-1"}
+        )
 
 
 def test_flatten_user_counts_multiple_segments_unique_per_date():
