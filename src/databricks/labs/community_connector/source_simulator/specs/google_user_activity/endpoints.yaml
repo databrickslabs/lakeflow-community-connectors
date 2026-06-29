@@ -1,0 +1,49 @@
+# Simulator endpoints for Google Workspace Reports API User Activity
+api_version: "1.0"
+
+endpoints:
+  - path: "/admin/reports/v1/activity/users/all/applications/{applicationName}"
+    description: "List user activity events for a specific application"
+    method: GET
+    parameters:
+      - name: "applicationName"
+        type: "string"
+        location: "path"
+        enum:
+          - "admin"
+          - "login"
+          - "saml"
+          - "user_accounts"
+          - "groups"
+          - "groups_enterprise"
+      - name: "startTime"
+        type: "string"
+        location: "query"
+        description: "RFC 3339 format start time"
+      - name: "endTime"
+        type: "string"
+        location: "query"
+        description: "RFC 3339 format end time"
+      - name: "maxResults"
+        type: "integer"
+        location: "query"
+        default: 500
+      - name: "pageToken"
+        type: "string"
+        location: "query"
+        nullable: true
+    response:
+      status_code: 200
+      body_shape:
+        type: "object"
+        properties:
+          kind:
+            type: "string"
+            default: "admin#reports#activities"
+          items:
+            type: "array"
+            items:
+              type: "object"
+          nextPageToken:
+            type: "string"
+            nullable: true
