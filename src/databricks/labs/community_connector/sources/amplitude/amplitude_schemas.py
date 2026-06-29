@@ -326,11 +326,6 @@ TABLE_METADATA = {
         "cursor_field": "date",
         "ingestion_type": "cdc",
     },
-    "cohorts": {
-        "primary_keys": ["id"],
-        "cursor_field": None,
-        "ingestion_type": "snapshot",
-    },
     "annotations": {
         "primary_keys": ["id"],
         "cursor_field": None,

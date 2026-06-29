@@ -1,15 +1,19 @@
 """Lakeflow community connector for Amplitude.
 
-Covers six objects exposed across Amplitude's Analytics APIs:
+Covers ten objects exposed across Amplitude's Analytics APIs:
 
-| Table                    | API                  | Ingestion | Cursor              |
-|--------------------------|----------------------|-----------|---------------------|
-| ``events``               | Export API           | append    | server_upload_time  |
-| ``events_list``          | Dashboard REST API   | snapshot  | —                   |
-| ``active_users_counts``  | Dashboard REST API   | cdc       | date                |
-| ``average_session_length``| Dashboard REST API  | cdc       | date                |
-| ``cohorts``              | Behavioral Cohorts   | snapshot  | —                   |
-| ``annotations``          | Chart Annotations    | snapshot  | —                   |
+| Table                          | API                  | Ingestion | Cursor              |
+|--------------------------------|----------------------|-----------|---------------------|
+| ``events``                     | Export API           | append    | server_upload_time  |
+| ``events_list``                | Dashboard REST API   | snapshot  | —                   |
+| ``active_users_counts``        | Dashboard REST API   | cdc       | date                |
+| ``average_session_length``     | Dashboard REST API   | cdc       | date                |
+| ``session_length_distribution``| Dashboard REST API   | snapshot  | —                   |
+| ``sessions_per_user``          | Dashboard REST API   | cdc       | date                |
+| ``cohorts``                    | Behavioral Cohorts   | snapshot  | —                   |
+| ``annotations``                | Chart Annotations    | snapshot  | —                   |
+| ``taxonomy_events``            | Taxonomy API         | snapshot  | —                   |
+| ``taxonomy_user_properties``   | Taxonomy API         | snapshot  | —                   |
 
 Authentication is HTTP Basic (``api_key`` : ``secret_key``).  The base URL
 switches between the standard and EU data-residency hosts via the
@@ -245,7 +249,11 @@ class AmplitudeLakeflowConnect(LakeflowConnect):
         else:
             records = self._parse_export_body(resp.content)
 
-        end_offset = {"cursor": window_end_dt.isoformat()}
+        # The Export API treats ``end`` as *inclusive* at hourly resolution, so
+        # the next window must start one hour past ``window_end_dt`` — otherwise
+        # the boundary hour is fetched in both windows and, because ``events`` is
+        # append-only (no load-time dedup), every record in it is ingested twice.
+        end_offset = {"cursor": (window_end_dt + timedelta(hours=1)).isoformat()}
         return iter(records), end_offset
 
     @staticmethod

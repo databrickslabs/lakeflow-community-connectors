@@ -63,12 +63,16 @@ Amplitude exposes the following objects through its REST APIs that are relevant 
 |---|---|---|---|
 | `events` | Export API | Incremental (append) | `uuid` |
 | `events_list` | Dashboard REST API | Full Refresh (snapshot) | `value` |
-| `active_users_counts` | Dashboard REST API | Incremental | `date` |
+| `active_users_counts` | Dashboard REST API | Incremental | `date`, `segment` |
 | `average_session_length` | Dashboard REST API | Incremental | `date` |
+| `session_length_distribution` | Dashboard REST API | Full Refresh (snapshot) | `bucket` |
+| `sessions_per_user` | Dashboard REST API | Incremental | `date` |
 | `cohorts` | Behavioral Cohorts API | Full Refresh (snapshot) | `id` |
 | `annotations` | Chart Annotations API | Full Refresh (snapshot) | `id` |
+| `taxonomy_events` | Taxonomy API | Full Refresh (snapshot) | `event_type` |
+| `taxonomy_user_properties` | Taxonomy API | Full Refresh (snapshot) | `user_property` |
 
-**Coverage note:** These six objects are supported by both Airbyte (connector v0.7.31) and Fivetran for Amplitude. The `events` table is the most important — it contains all raw product analytics event data.
+**Coverage note:** The first six objects are supported by both Airbyte (connector v0.7.31) and Fivetran for Amplitude. The `events` table is the most important — it contains all raw product analytics event data. The session metrics (`session_length_distribution`, `sessions_per_user`) extend the Dashboard REST coverage, and the Taxonomy objects (`taxonomy_events`, `taxonomy_user_properties`) expose the project's governed event/property plan.
 
 ---
 
@@ -288,16 +292,100 @@ Chart annotations marking events in Amplitude charts (e.g., releases, incidents)
 
 ---
 
+### 7. `session_length_distribution` (Dashboard REST API)
+
+Distribution of session lengths over the requested window, returned as a count per pre-defined length bucket (e.g. `"0s-60s"`, `"60s-300s"`). There is no date dimension — it is a snapshot aggregate over the window, so the bucket label is the primary key. The connector flattens the `{series, xValues}` histogram to one row per bucket.
+
+| Field | Type | Description |
+|---|---|---|
+| `bucket` | string | Session-length bucket label (primary key, e.g. `"0s-60s"`). |
+| `count` | integer | Number of sessions that fell in this bucket over the window. |
+
+**Raw API response structure:**
+```json
+{
+  "data": {
+    "series": [[1204, 845, 410, 96]],
+    "xValues": ["0s-60s", "60s-300s", "300s-1200s", "1200s+"]
+  }
+}
+```
+
+---
+
+### 8. `sessions_per_user` (Dashboard REST API)
+
+Average number of sessions per active user per day. The API returns a `{series, xValues}` time series; the connector flattens it to one row per date.
+
+| Field | Type | Description |
+|---|---|---|
+| `date` | string (YYYY-MM-DD) | The date (primary key). |
+| `avg_sessions` | float | Average sessions per active user on that date. |
+
+**Raw API response structure:**
+```json
+{
+  "data": {
+    "series": [[1.42, 1.51]],
+    "xValues": ["2024-03-14", "2024-03-15"]
+  }
+}
+```
+
+---
+
+### 9. `taxonomy_events` (Taxonomy API)
+
+The project's governed event taxonomy — one row per planned event type. Hidden/deleted events are excluded by default (Amplitude API behaviour). The connector flattens the nested `category` struct to `category_name`.
+
+| Field | Type | Description |
+|---|---|---|
+| `event_type` | string | Event type name (primary key). |
+| `category_name` | string | Name of the category the event belongs to (flattened from the `category` object). |
+| `description` | string | Event description from the taxonomy. |
+| `display_name` | string | Display name shown in the Amplitude UI. |
+| `is_active` | boolean | Whether the event is active. |
+| `is_hidden_from_dropdowns` | boolean | Hidden from event-picker dropdowns. |
+| `is_hidden_from_persona_results` | boolean | Hidden from Personas results. |
+| `is_hidden_from_pathfinder` | boolean | Hidden from Pathfinder. |
+| `is_hidden_from_timeline` | boolean | Hidden from the user timeline. |
+| `tags` | array[string] | Tags attached to the event. |
+| `owner` | string | Owner of the event definition. |
+
+---
+
+### 10. `taxonomy_user_properties` (Taxonomy API)
+
+The project's governed user-property taxonomy — one row per planned user property. Custom properties carry a `gp:` prefix in `user_property`. Hidden/deleted properties are excluded by default.
+
+| Field | Type | Description |
+|---|---|---|
+| `user_property` | string | User property name (primary key; custom props prefixed `gp:`). |
+| `description` | string | Property description from the taxonomy. |
+| `type` | string | Declared value type of the property. |
+| `enum_values` | array[string] | Allowed enum values, if the property is an enum. |
+| `regex` | string | Validation regex, if defined. |
+| `is_array_type` | boolean | Whether the property holds an array of values. |
+| `is_hidden` | boolean | Whether the property is hidden. |
+| `classifications` | array[string] | Data classifications applied to the property. |
+| `deleted` | boolean | Whether the property is marked deleted. |
+
+---
+
 ## Get Object Primary Keys
 
 | Object | Primary Key | Notes |
 |---|---|---|
 | `events` | `uuid` | Globally unique UUID per event. Fivetran alternatively uses composite `(event_id, device_id, server_upload_time)`. |
 | `events_list` | `value` | Raw event name is unique per project. |
-| `active_users_counts` | `date` | One row per day after flattening. |
+| `active_users_counts` | `date`, `segment` | Composite key — `segment` is `"Totals"` by default, or the group-by value when `g=` is set, so distinct segments on the same date don't collide. |
 | `average_session_length` | `date` | One row per day after flattening. |
+| `session_length_distribution` | `bucket` | One row per pre-defined length bucket; stable across runs. |
+| `sessions_per_user` | `date` | One row per day after flattening. |
 | `cohorts` | `id` | String cohort ID. |
 | `annotations` | `id` | Integer annotation ID. |
+| `taxonomy_events` | `event_type` | Event type name is unique per project. |
+| `taxonomy_user_properties` | `user_property` | Property name is unique per project (custom props prefixed `gp:`). |
 
 ---
 
@@ -309,8 +397,12 @@ Chart annotations marking events in Amplitude charts (e.g., releases, incidents)
 | `events_list` | `snapshot` | Full refresh; no cursor field. Totals reflect the current week only. |
 | `active_users_counts` | `cdc` | Time series; can be read incrementally by advancing the date cursor. New data is non-destructive. |
 | `average_session_length` | `cdc` | Time series; can be read incrementally by advancing the date cursor. |
+| `session_length_distribution` | `snapshot` | Aggregate distribution over the configured window; no date dimension and no cursor. Full refresh per run. |
+| `sessions_per_user` | `cdc` | Time series; can be read incrementally by advancing the date cursor. |
 | `cohorts` | `snapshot` | No reliable cursor field (lastMod is a Unix int and filtering is not supported by the list endpoint). Full refresh is safest. |
 | `annotations` | `snapshot` | No offset/cursor pagination; filtered by `start`/`end` time but full list is small. |
+| `taxonomy_events` | `snapshot` | Governed taxonomy list; no cursor. Small, full-refresh each run. |
+| `taxonomy_user_properties` | `snapshot` | Governed taxonomy list; no cursor. Small, full-refresh each run. |
 
 ---
 
@@ -619,6 +711,154 @@ curl --location --request GET 'https://amplitude.com/api/3/annotations' \
 **Pagination:** None. Returns all annotations in a single response.
 
 **Sync:** Full refresh. Volume is typically very low (tens to hundreds of annotations per project).
+
+---
+
+### G. `session_length_distribution` — Dashboard REST API
+
+**Endpoint:**
+```
+GET https://amplitude.com/api/2/sessions/length
+```
+
+**Authentication:** HTTP Basic
+
+**Query Parameters:**
+
+| Name | Required | Description |
+|---|---|---|
+| `start` | Yes | Start date `YYYYMMDD` |
+| `end` | Yes | End date `YYYYMMDD` |
+| `timeHistogramConfigBinTimeUnit` | No | Bin time unit for the histogram. |
+| `timeHistogramConfigBinMin` | No | Minimum bin value. |
+| `timeHistogramConfigBinMax` | No | Maximum bin value. |
+| `timeHistogramConfigBinSize` | No | Bin size. |
+
+**Example:**
+```bash
+curl --location --request GET \
+  'https://amplitude.com/api/2/sessions/length?start=20240301&end=20240315' \
+  -u '{api_key}:{secret_key}'
+```
+
+**Response:** A `{series, xValues}` histogram where `xValues` are the bucket labels and `series[0]` are the per-bucket counts.
+
+**Flatten logic:** Zip `xValues` (bucket labels) with `series[0]` (counts) → one row per bucket.
+
+**Sync:** Full refresh (snapshot). `window_days` (default 30) controls the lookback window the distribution is computed over.
+
+---
+
+### H. `sessions_per_user` — Dashboard REST API
+
+**Endpoint:**
+```
+GET https://amplitude.com/api/2/sessions/peruser
+```
+
+**Authentication:** HTTP Basic
+
+**Query Parameters:**
+
+| Name | Required | Description |
+|---|---|---|
+| `start` | Yes | Start date `YYYYMMDD` |
+| `end` | Yes | End date `YYYYMMDD` |
+
+**Example:**
+```bash
+curl --location --request GET \
+  'https://amplitude.com/api/2/sessions/peruser?start=20240301&end=20240315' \
+  -u '{api_key}:{secret_key}'
+```
+
+**Response:** A `{series, xValues}` time series — `xValues` are dates and `series[0]` are average sessions per user.
+
+**Flatten logic:** Zip `xValues` with `series[0]` → one row per date.
+
+**Incremental strategy:** Same as `active_users_counts` — cursor on `date`, request from `last_synced_date` to today.
+
+---
+
+### I. `taxonomy_events` — Taxonomy API
+
+**Endpoint:**
+```
+GET https://amplitude.com/api/2/taxonomy/event
+```
+
+**Authentication:** HTTP Basic
+
+**No query parameters required.**
+
+**Example:**
+```bash
+curl --location --request GET 'https://amplitude.com/api/2/taxonomy/event' \
+-u '{api_key}:{secret_key}'
+```
+
+**Response:**
+```json
+{
+  "data": [
+    {
+      "event_type": "Purchase Completed",
+      "category": {"id": 1, "name": "Revenue"},
+      "description": "Fires when an order is completed",
+      "display_name": "Purchase Completed",
+      "is_active": true,
+      "tags": ["checkout"],
+      "owner": "data-team@example.com"
+    }
+  ]
+}
+```
+
+**Flatten logic:** The nested `category` object is flattened to `category_name`.
+
+**Pagination:** None. Returns the full event taxonomy in a single response.
+
+**Sync:** Full refresh. Hidden/deleted events are excluded by default.
+
+---
+
+### J. `taxonomy_user_properties` — Taxonomy API
+
+**Endpoint:**
+```
+GET https://amplitude.com/api/2/taxonomy/user-property
+```
+
+**Authentication:** HTTP Basic
+
+**No query parameters required.**
+
+**Example:**
+```bash
+curl --location --request GET 'https://amplitude.com/api/2/taxonomy/user-property' \
+-u '{api_key}:{secret_key}'
+```
+
+**Response:**
+```json
+{
+  "data": [
+    {
+      "user_property": "gp:plan",
+      "description": "Subscription plan",
+      "type": "enum",
+      "enum_values": ["free", "pro", "enterprise"],
+      "is_array_type": false,
+      "is_hidden": false,
+      "deleted": false
+    }
+  ]
+}
+```
+
+**Pagination:** None. Returns the full user-property taxonomy in a single response.
+
+**Sync:** Full refresh. Custom properties carry a `gp:` prefix in `user_property`. Hidden/deleted properties are excluded by default.
 
 ---
 

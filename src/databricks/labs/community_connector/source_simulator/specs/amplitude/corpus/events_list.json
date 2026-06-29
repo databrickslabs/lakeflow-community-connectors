@@ -13,7 +13,7 @@
     "waitroom_approved": null,
     "name": "add_to_cart",
     "totals": 76,
-    "totals_delta": 5.27086288481043
+    "totals_delta": 5
   },
   {
     "autohidden": false,
@@ -29,7 +29,7 @@
     "waitroom_approved": null,
     "name": "button_click",
     "totals": 87,
-    "totals_delta": 12.331477298346986
+    "totals_delta": 12
   },
   {
     "autohidden": false,
@@ -61,7 +61,7 @@
     "waitroom_approved": null,
     "name": "checkout_complete",
     "totals": 60,
-    "totals_delta": 9.726475987175737
+    "totals_delta": 10
   },
   {
     "autohidden": false,
@@ -77,7 +77,7 @@
     "waitroom_approved": null,
     "name": "login",
     "totals": 99,
-    "totals_delta": 14.1703017532914
+    "totals_delta": 14
   },
   {
     "autohidden": false,
@@ -93,7 +93,7 @@
     "waitroom_approved": null,
     "name": "page_view",
     "totals": 113,
-    "totals_delta": 7.080611910339055
+    "totals_delta": 7
   },
   {
     "autohidden": false,
@@ -109,7 +109,7 @@
     "waitroom_approved": null,
     "name": "purchase",
     "totals": 69,
-    "totals_delta": 7.223631590168065
+    "totals_delta": 7
   },
   {
     "autohidden": false,
@@ -125,7 +125,7 @@
     "waitroom_approved": null,
     "name": "search",
     "totals": 74,
-    "totals_delta": 6.937592230510044
+    "totals_delta": 7
   },
   {
     "autohidden": false,
@@ -141,6 +141,6 @@
     "waitroom_approved": null,
     "name": "sign_up",
     "totals": 73,
-    "totals_delta": 5.525272892198573
+    "totals_delta": 6
   }
 ]

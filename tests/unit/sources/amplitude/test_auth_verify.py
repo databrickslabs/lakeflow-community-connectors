@@ -11,6 +11,7 @@ import os
 import sys
 from pathlib import Path
 
+import pytest
 import requests
 from requests.auth import HTTPBasicAuth
 
@@ -25,8 +26,11 @@ def _load_config() -> dict:
         assert p.exists(), f"CONNECTOR_TEST_CONFIG_PATH not found: {p}"
         with open(p) as f:
             return json.load(f)
-    raise AssertionError(
-        "No credentials found. Set CONNECTOR_TEST_CONFIG_PATH or CONNECTOR_TEST_CONFIG_JSON."
+    # Live-only test: with no credentials (e.g. the default simulate-mode CI
+    # run) there is nothing to verify, so skip rather than fail.
+    pytest.skip(
+        "No credentials found. Set CONNECTOR_TEST_CONFIG_PATH or "
+        "CONNECTOR_TEST_CONFIG_JSON to run the live Amplitude auth check."
     )
 
 

@@ -900,11 +900,6 @@ def register_lakeflow_source(spark):
             "cursor_field": "date",
             "ingestion_type": "cdc",
         },
-        "cohorts": {
-            "primary_keys": ["id"],
-            "cursor_field": None,
-            "ingestion_type": "snapshot",
-        },
         "annotations": {
             "primary_keys": ["id"],
             "cursor_field": None,
@@ -1123,7 +1118,11 @@ def register_lakeflow_source(spark):
             else:
                 records = self._parse_export_body(resp.content)
 
-            end_offset = {"cursor": window_end_dt.isoformat()}
+            # The Export API treats ``end`` as *inclusive* at hourly resolution, so
+            # the next window must start one hour past ``window_end_dt`` — otherwise
+            # the boundary hour is fetched in both windows and, because ``events`` is
+            # append-only (no load-time dedup), every record in it is ingested twice.
+            end_offset = {"cursor": (window_end_dt + timedelta(hours=1)).isoformat()}
             return iter(records), end_offset
 
         @staticmethod

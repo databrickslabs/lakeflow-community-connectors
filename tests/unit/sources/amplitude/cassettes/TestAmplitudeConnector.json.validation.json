@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated_at": "2026-06-21T12:38:06.695140Z",
+  "generated_at": "2026-06-29T11:52:02.037762Z",
   "endpoints": [
     {
       "method": "GET",
@@ -16,7 +16,7 @@
     {
       "method": "GET",
       "spec_path": "/api/2/export",
-      "sample_url": "https://amplitude.com/api/2/export?start=20260620T12&end=20260621T12",
+      "sample_url": "https://amplitude.com/api/2/export?start=20260628T11&end=20260629T11",
       "status": "validated",
       "calls": 2,
       "matched": 2,
@@ -27,7 +27,7 @@
     {
       "method": "GET",
       "spec_path": "/api/2/sessions/average",
-      "sample_url": "https://amplitude.com/api/2/sessions/average?start=20260614&end=20260621",
+      "sample_url": "https://amplitude.com/api/2/sessions/average?start=20260622&end=20260629",
       "status": "validated",
       "calls": 2,
       "matched": 2,
@@ -37,8 +37,52 @@
     },
     {
       "method": "GET",
+      "spec_path": "/api/2/sessions/length",
+      "sample_url": "https://amplitude.com/api/2/sessions/length?start=20260530&end=20260629",
+      "status": "validated",
+      "calls": 3,
+      "matched": 3,
+      "mismatched": 0,
+      "no_spec": 0,
+      "issues": []
+    },
+    {
+      "method": "GET",
+      "spec_path": "/api/2/sessions/peruser",
+      "sample_url": "https://amplitude.com/api/2/sessions/peruser?start=20260622&end=20260629",
+      "status": "validated",
+      "calls": 2,
+      "matched": 2,
+      "mismatched": 0,
+      "no_spec": 0,
+      "issues": []
+    },
+    {
+      "method": "GET",
+      "spec_path": "/api/2/taxonomy/event",
+      "sample_url": "https://amplitude.com/api/2/taxonomy/event",
+      "status": "validated",
+      "calls": 3,
+      "matched": 3,
+      "mismatched": 0,
+      "no_spec": 0,
+      "issues": []
+    },
+    {
+      "method": "GET",
+      "spec_path": "/api/2/taxonomy/user-property",
+      "sample_url": "https://amplitude.com/api/2/taxonomy/user-property",
+      "status": "validated",
+      "calls": 3,
+      "matched": 3,
+      "mismatched": 0,
+      "no_spec": 0,
+      "issues": []
+    },
+    {
+      "method": "GET",
       "spec_path": "/api/2/users",
-      "sample_url": "https://amplitude.com/api/2/users?start=20260614&end=20260621&m=active&i=1",
+      "sample_url": "https://amplitude.com/api/2/users?start=20260622&end=20260629&m=active&i=1",
       "status": "validated",
       "calls": 2,
       "matched": 2,
@@ -70,8 +114,8 @@
     }
   ],
   "summary": {
-    "endpoints_total": 6,
-    "endpoints_validated": 6,
+    "endpoints_total": 10,
+    "endpoints_validated": 10,
     "endpoints_mismatched": 0,
     "endpoints_missing_spec": 0
   }

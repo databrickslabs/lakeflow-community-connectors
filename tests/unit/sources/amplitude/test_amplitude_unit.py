@@ -113,7 +113,10 @@ def test_read_events_advances_cursor_by_window():
         )
 
     assert list(records) == []
-    assert offset == {"cursor": "2026-06-20T06:00:00+00:00"}
+    # Cursor advances one hour past the inclusive window end (06:00) so the next
+    # window starts at 07:00 and does not re-fetch the boundary hour. The query
+    # itself still ends at the inclusive 06:00 boundary.
+    assert offset == {"cursor": "2026-06-20T07:00:00+00:00"}
     mocked_request.assert_called_once_with(
         "/api/2/export",
         params={"start": "20260620T00", "end": "20260620T06"},
@@ -165,10 +168,11 @@ def test_flatten_session_length_coerces_strings_and_invalid_values():
     ]
 
 
-def test_read_events_404_at_init_ts_cap_does_not_advance_cursor():
-    """When the current window reaches the _init_ts cap, the cursor returned
-    must equal init_ts, not init_ts + window.  A 404 in that last window must
-    still cap the offset correctly so the connector terminates."""
+def test_read_events_404_at_init_ts_cap_terminates():
+    """When the current window reaches the _init_ts cap, the query end must be
+    capped at init_ts (not init_ts + window).  The returned cursor is one hour
+    past the inclusive cap boundary, which is >= init_ts so the next call
+    terminates immediately.  A 404 in that last window must not break this."""
     connector = _connector()
     connector._init_ts = "2026-06-20T06:00:00+00:00"
     resp_404 = _mock_response(404)
@@ -180,8 +184,10 @@ def test_read_events_404_at_init_ts_cap_does_not_advance_cursor():
         )
 
     assert list(records) == []
-    # cursor must be capped at init_ts, not at 04:00 + 6h = 10:00
-    assert offset == {"cursor": "2026-06-20T06:00:00+00:00"}
+    # Query was capped at init_ts (06:00), not 04:00 + 6h = 10:00; cursor then
+    # advances one hour past the inclusive boundary (07:00 >= init_ts) so the
+    # next call returns empty and the read terminates.
+    assert offset == {"cursor": "2026-06-20T07:00:00+00:00"}
 
 
 def test_read_events_404_then_200_returns_records_on_second_call():
@@ -203,12 +209,14 @@ def test_read_events_404_then_200_returns_records_on_second_call():
             {"cursor": "2026-06-20T00:00:00+00:00"}, {"window_hours": "2"}
         )
         assert list(records1) == []
-        assert offset1 == {"cursor": "2026-06-20T02:00:00+00:00"}
+        # Window end 02:00 is inclusive; cursor advances to 03:00 so the next
+        # window does not re-fetch the 02:00 boundary hour.
+        assert offset1 == {"cursor": "2026-06-20T03:00:00+00:00"}
 
         # Second call — window has data
         records2, offset2 = connector._read_events(offset1, {"window_hours": "2"})
         assert list(records2) == [event]
-        assert offset2 == {"cursor": "2026-06-20T04:00:00+00:00"}
+        assert offset2 == {"cursor": "2026-06-20T06:00:00+00:00"}
 
 
 def test_read_events_cursor_at_init_ts_returns_empty_without_api_call():
