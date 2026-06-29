@@ -1225,6 +1225,9 @@ def register_lakeflow_source(spark):
               ``$batch`` (server-driven paging, no ``$top``, ``@odata.nextLink``
               follow-up, chunked to :data:`_BATCH_MAX_OPS` ops/request), falling
               back to the plain N+1 walk if the server doesn't support ``$batch``.
+              The ``batch:<N>`` form tunes the chunk size to ``N`` ops/request (a
+              positive integer) — e.g. ``batch:50`` for servers that reject
+              100-op batches; see :meth:`_cursor_probe_batch_size`.
             * ``false`` → ``off`` — force the plain N+1 walk.
 
             The change-probe issues one shallow
@@ -1243,12 +1246,45 @@ def register_lakeflow_source(spark):
             :meth:`_verify_batch_support`."""
             raw = ((table_options or {}).get("cursor_probe") or "auto").strip().lower()
             aliases = {"nested-expand": "probe", "false": "off", "batch": "batch", "auto": "auto"}
+            base, sep, _suffix = raw.partition(":")
+            if sep:
+                # Only ``batch`` carries a ``:<N>`` chunk-size suffix.
+                if base != "batch":
+                    raise ValueError(
+                        f"Invalid cursor_probe={raw!r}. Only 'batch' accepts a "
+                        "':<N>' size suffix (e.g. batch:50)."
+                    )
+                self._cursor_probe_batch_size(table_options)  # validate N (raises on bad)
+                return "batch"
             if raw not in aliases:
                 raise ValueError(
                     f"Invalid cursor_probe={raw!r}. Expected one of: "
-                    "nested-expand, batch, auto, false."
+                    "nested-expand, batch, batch:<N>, auto, false."
                 )
             return aliases[raw]
+
+        def _cursor_probe_batch_size(self, table_options: dict[str, str] | None) -> int:
+            """Ops per ``$batch`` request for ``cursor_probe=batch``. Defaults to
+            :data:`_BATCH_MAX_OPS` (100); the ``batch:<N>`` form overrides it with a
+            positive integer ``N`` (``ceil(M / N)`` requests for M leaf-parents).
+            Returns :data:`_BATCH_MAX_OPS` for every non-``batch:`` value."""
+            raw = ((table_options or {}).get("cursor_probe") or "auto").strip().lower()
+            base, sep, suffix = raw.partition(":")
+            if not sep or base != "batch":
+                return _BATCH_MAX_OPS
+            try:
+                size = int(suffix)
+            except ValueError:
+                raise ValueError(
+                    f"Invalid cursor_probe={raw!r}. The batch size suffix must be a "
+                    "positive integer (e.g. batch:50)."
+                ) from None
+            if size < 1:
+                raise ValueError(
+                    f"Invalid cursor_probe={raw!r}. The batch size suffix must be a "
+                    "positive integer (>= 1)."
+                )
+            return size
 
         def _cursor_probe_applicable(
             self,
@@ -3376,14 +3412,16 @@ def register_lakeflow_source(spark):
             leaf_segment_filter: str | None = None,
             effective=None,
             skip_null: bool = False,
+            batch_size: int = _BATCH_MAX_OPS,
         ) -> tuple[list[dict], bool, int, None, None]:
             """OData ``$batch`` counterpart to :meth:`_walk_contained_with_cursor`.
 
             Hydrates leaf collections via ``$batch`` instead of one GET per
-            leaf-parent: chains are buffered into groups of :data:`_BATCH_MAX_OPS`,
-            each group sent as a single ``$batch`` of ``cursor gt since`` reads with
+            leaf-parent: chains are buffered into groups of ``batch_size`` (default
+            :data:`_BATCH_MAX_OPS`, tunable via ``cursor_probe=batch:<N>``), each
+            group sent as a single ``$batch`` of ``cursor gt since`` reads with
             **no ``$top``** (server-driven paging), and every per-sub-response
-            ``@odata.nextLink`` is re-batched (also capped at ``_BATCH_MAX_OPS``)
+            ``@odata.nextLink`` is re-batched (also capped at ``batch_size``)
             until each collection is drained. Rows go through the same null-skip /
             below-floor trim / FK-tag pipeline as the plain walk, so the emitted set
             is identical — only the request shape differs.
@@ -3433,8 +3471,8 @@ def register_lakeflow_source(spark):
                     )
                     chain_by_key[key] = chain
                 while pending:
-                    round_ = pending[:_BATCH_MAX_OPS]
-                    pending = pending[_BATCH_MAX_OPS:]
+                    round_ = pending[:batch_size]
+                    pending = pending[batch_size:]
                     responses = self._post_batch([u for _, u in round_])
                     for (key, req_url), resp in zip(round_, responses):
                         body = resp.get("body") if isinstance(resp, dict) else None
@@ -3459,7 +3497,7 @@ def register_lakeflow_source(spark):
                     continue
                 group.append(chain)
                 parent_idx += 1
-                if len(group) >= _BATCH_MAX_OPS:
+                if len(group) >= batch_size:
                     _drain_group(group)
                     group = []
                     if len(emitted) >= max_records:
@@ -3843,6 +3881,7 @@ def register_lakeflow_source(spark):
                     leaf_segment_filter=segment_filters.get(len(segments) - 1),
                     effective=effective,
                     skip_null=skip_null,
+                    batch_size=self._cursor_probe_batch_size(table_options),
                 )
             else:
                 (

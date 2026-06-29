@@ -8502,6 +8502,67 @@ def test_cursor_probe_batch_hydrates_via_batch_endpoint():
 
 
 @responses.activate
+def test_cursor_probe_batch_size_suffix_chunks_requests():
+    """``cursor_probe=batch:2`` hydrates via ``$batch`` like ``batch`` but caps
+    each request at 2 leaf-parent ops: 3 leaf-parents → rounds of 2 + 1."""
+    _mock_probe_metadata()
+    since = "2020-01-01T00:00:00Z"
+    responses.get(f"{SERVICE_URL}Roots", json={"value": [{"Id": 1}]})
+    responses.get(
+        f"{SERVICE_URL}Roots(1)/Mids",
+        json={"value": [{"Id": 10}, {"Id": 11}, {"Id": 12}]},
+    )
+    responder = _batch_responder(
+        [
+            (
+                "Mids(10)/Leaves",
+                {"value": [{"Id": 1001, "RecordLastModified": "2020-06-01T00:00:00Z"}]},
+            ),
+            ("Mids(11)/Leaves", {"value": []}),
+            (
+                "Mids(12)/Leaves",
+                {"value": [{"Id": 1201, "RecordLastModified": "2020-06-02T00:00:00Z"}]},
+            ),
+            ("Roots?$top=1", {"value": [{"Id": 1}]}),  # capability preflight
+        ]
+    )
+    responses.add_callback(responses.POST, f"{SERVICE_URL}$batch", callback=responder)
+
+    c = _make()
+    recs, _ = c.read_table(
+        PROBE_TABLE,
+        {"cursor": since},
+        {"cursor_field": "RecordLastModified", "cursor_probe": "batch:2", "pagination": "nextlink"},
+    )
+    assert sorted(r["Id"] for r in recs) == [1001, 1201]
+    # Hydrate $batch POSTs (those carrying /Leaves) are capped at 2 ops:
+    # 3 leaf-parents, chunk size 2 → rounds of 2 then 1.
+    op_counts = []
+    for call in responses.calls:
+        if call.request.method != "POST":
+            continue
+        reqs = json.loads(call.request.body)["requests"]
+        if any("/Leaves" in r["url"] for r in reqs):
+            op_counts.append(len(reqs))
+    assert sorted(op_counts) == [1, 2]
+
+
+@responses.activate
+def test_cursor_probe_batch_size_invalid_suffix_raises():
+    """A non-positive / non-integer ``:N`` suffix, or a suffix on a non-batch
+    mode, is rejected before any network call."""
+    _mock_probe_metadata()
+    c = _make()
+    for bad in ("batch:0", "batch:-1", "batch:abc", "auto:2", "nested-expand:5"):
+        with pytest.raises(ValueError, match="Invalid cursor_probe"):
+            c.read_table(
+                PROBE_TABLE,
+                {"cursor": "2020-01-01T00:00:00Z"},
+                {"cursor_field": "RecordLastModified", "cursor_probe": bad},
+            )
+
+
+@responses.activate
 def test_cursor_probe_batch_follows_nextlink_continuation():
     """A batched leaf sub-response carrying ``@odata.nextLink`` is re-batched
     until the collection drains — all pages are collected."""
