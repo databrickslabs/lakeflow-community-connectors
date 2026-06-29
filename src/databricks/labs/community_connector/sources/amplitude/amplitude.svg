@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" fill="none">
+  <!-- Amplitude brand: navy background pill + white "A" wordmark waveform -->
+  <rect width="100" height="100" rx="20" fill="#1A1F71"/>
+  <!-- Stylised "A" made of three bars with waveform peak  matches Amplitude's mark -->
+  <rect x="18" y="60" width="12" height="22" rx="3" fill="#F06C00"/>
+  <rect x="35" y="42" width="12" height="40" rx="3" fill="white"/>
+  <rect x="52" y="28" width="12" height="54" rx="3" fill="white"/>
+  <rect x="69" y="48" width="12" height="34" rx="3" fill="white"/>
+  <!-- Horizontal connecting bar across tops of white bars -->
+  <rect x="35" y="28" width="46" height="8" rx="3" fill="white"/>
+</svg>
