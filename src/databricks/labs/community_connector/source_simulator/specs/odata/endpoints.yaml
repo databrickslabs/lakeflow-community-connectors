@@ -28,10 +28,14 @@ endpoints:
     method: GET
     corpus: Orders
     handler: databricks.labs.community_connector.source_simulator.specs.odata.handlers.entity_set:serve_entity_set
-    # Inject future-dated clones of the tail record so the connector's
-    # ``OrderDate le _init_ts`` cap is exercised. Without the cap, the
-    # connector would chase these forever and test_read_terminates would
-    # never converge.
+    # Inject 3 future-dated clones of the tail record so the Orders cursor
+    # read advances across multiple batches before terminating. The connector
+    # has NO wall-clock/`_init_time` cursor cap — termination is via
+    # `max_records_per_batch` + the no-progress guard over a finite source
+    # (see ``odata.py`` ``_finalize_cursor_read`` and the comment at the
+    # incremental dispatch). The clone set is finite, so test_read_terminates
+    # exercises multi-batch cursor advance and then converges once no row
+    # exceeds the committed watermark.
     synthesize_future_records:
       cursor_field: OrderDate
       count: 3

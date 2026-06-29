@@ -236,9 +236,12 @@ The third row's remediation depends on the configured auth mode:
 
 | Option                        | Default | Description |
 | ----------------------------- | ------- | ----------- |
+| `timeout_seconds`             | 180     | Per-request HTTP timeout (seconds) applied to every call to the OData service (`$metadata` fetch and all entity reads). Raise it for slow services or large `$metadata`; lower it to fail fast. |
 | `metadata_cache_ttl_seconds`  | 60      | TTL (seconds) for the on-disk cache of the parsed `$metadata` document, shared across forked workers so the fetch + parse cost is paid once per pipeline init. Set to `0` to disable. |
 | `max_retries`                 | 5       | Retry budget for transient failures. Two classes covered: (1) **HTTP 429 / 503** — throttling or service unavailable; honours the server's `Retry-After` header when present (integer seconds or HTTP-date), otherwise exponential backoff (1, 2, 4, 8, 16 s …). (2) **Connection-level exceptions** — TCP reset / remote disconnect, read or connect timeout, mid-body chunked-encoding error (the server returned no HTTP response at all); always exponential backoff. After `max_retries` consecutive failures the batch raises — `RuntimeError` for 429/503, the original exception type (`ConnectionError`/`Timeout`/`ChunkedEncodingError`) for network failures. Set to `0` to opt out. |
 | `retry_max_delay_seconds`     | 60      | Per-retry sleep cap (seconds). Applied to both server-supplied `Retry-After` values and the exponential-backoff fallback, so a misbehaving source emitting an hour-long `Retry-After` can't pin a Spark task. |
+| `verbose_http_logging`        | false   | When `true`, logs each HTTP request/response (method, URL, status, timing) at INFO for troubleshooting. Off by default to keep logs quiet and avoid leaking URL query values. |
+| `verbose_http_log_body_chars` | 500     | When `verbose_http_logging` is on, the maximum number of response-body characters logged per request (truncated beyond this). Only consulted when verbose logging is enabled. |
 
 ## Pipeline (ingest.py)
 

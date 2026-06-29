@@ -26,9 +26,10 @@ from databricks.labs.community_connector.sources.odata import ODataLakeflowConne
 from databricks.labs.community_connector.sources.odata.odata import _odata_literal
 from pyspark.sql.types import IntegerType, StringType, TimestampType
 from tests.unit.sources.test_suite import LakeflowConnectTests
+from tests.unit.sources.test_partition_suite import SupportsPartitionedStreamTests
 
 
-class TestODataConnector(LakeflowConnectTests):
+class TestODataConnector(LakeflowConnectTests, SupportsPartitionedStreamTests):
     """Contract test suite for the OData connector against the simulator.
 
     The simulator stands up a Northwind-shaped service at
@@ -37,6 +38,16 @@ class TestODataConnector(LakeflowConnectTests):
     flow through the simulator's custom OData handler (entity_set.py)
     which implements just enough ``$top``/``$skip``/``$filter``/
     ``$orderby``/``@odata.nextLink`` semantics to drive the suite.
+
+    ``SupportsPartitionedStreamTests`` is mounted because the connector
+    implements ``SupportsPartitionedStream`` (``PartitionMixin``). Its
+    partitioned-table contract tests ``skip`` here — the connector only
+    partitions *contained* N+1 snapshot paths (``Parent__Child``), and the
+    flat Northwind corpus (Customers/Orders) has no partitionable table — so
+    ``test_is_partitioned`` runs against the simulator while the contained
+    partitioning behaviour is covered by the bespoke ``test_partition_*``
+    tests below (which build nested ``$metadata`` fixtures the flat corpus
+    can't express).
     """
 
     connector_class = ODataLakeflowConnect

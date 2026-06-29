@@ -15,6 +15,7 @@
       "count": 3,
       "param_shapes": [
         [
+          "$orderby",
           "$top"
         ]
       ]
@@ -22,9 +23,15 @@
     {
       "method": "GET",
       "url": "https://services.odata.org/V4/Northwind/Northwind.svc/Categories",
-      "count": 3,
+      "count": 6,
       "param_shapes": [
         [
+          "$orderby",
+          "$top"
+        ],
+        [
+          "$filter",
+          "$orderby",
           "$top"
         ]
       ]
@@ -32,9 +39,15 @@
     {
       "method": "GET",
       "url": "https://services.odata.org/V4/Northwind/Northwind.svc/Category_Sales_for_1997",
-      "count": 3,
+      "count": 6,
       "param_shapes": [
         [
+          "$orderby",
+          "$top"
+        ],
+        [
+          "$filter",
+          "$orderby",
           "$top"
         ]
       ]
@@ -45,6 +58,7 @@
       "count": 3,
       "param_shapes": [
         [
+          "$orderby",
           "$top"
         ]
       ]
@@ -55,6 +69,7 @@
       "count": 3,
       "param_shapes": [
         [
+          "$orderby",
           "$top"
         ]
       ]
@@ -62,13 +77,10 @@
     {
       "method": "GET",
       "url": "https://services.odata.org/V4/Northwind/Northwind.svc/Customer_and_Suppliers_by_Cities",
-      "count": 6,
+      "count": 3,
       "param_shapes": [
         [
-          "$top"
-        ],
-        [
-          "$skiptoken",
+          "$orderby",
           "$top"
         ]
       ]
@@ -76,12 +88,14 @@
     {
       "method": "GET",
       "url": "https://services.odata.org/V4/Northwind/Northwind.svc/Customers",
-      "count": 15,
+      "count": 9,
       "param_shapes": [
         [
+          "$orderby",
           "$top"
         ],
         [
+          "$orderby",
           "$skiptoken",
           "$top"
         ]
@@ -90,9 +104,15 @@
     {
       "method": "GET",
       "url": "https://services.odata.org/V4/Northwind/Northwind.svc/Employees",
-      "count": 3,
+      "count": 6,
       "param_shapes": [
         [
+          "$orderby",
+          "$top"
+        ],
+        [
+          "$filter",
+          "$orderby",
           "$top"
         ]
       ]
@@ -100,13 +120,10 @@
     {
       "method": "GET",
       "url": "https://services.odata.org/V4/Northwind/Northwind.svc/Invoices",
-      "count": 6,
+      "count": 3,
       "param_shapes": [
         [
-          "$top"
-        ],
-        [
-          "$skiptoken",
+          "$orderby",
           "$top"
         ]
       ]
@@ -114,13 +131,10 @@
     {
       "method": "GET",
       "url": "https://services.odata.org/V4/Northwind/Northwind.svc/Order_Details",
-      "count": 6,
+      "count": 3,
       "param_shapes": [
         [
-          "$top"
-        ],
-        [
-          "$skiptoken",
+          "$orderby",
           "$top"
         ]
       ]
@@ -128,13 +142,10 @@
     {
       "method": "GET",
       "url": "https://services.odata.org/V4/Northwind/Northwind.svc/Order_Details_Extendeds",
-      "count": 30,
+      "count": 3,
       "param_shapes": [
         [
-          "$top"
-        ],
-        [
-          "$skiptoken",
+          "$orderby",
           "$top"
         ]
       ]
@@ -142,13 +153,10 @@
     {
       "method": "GET",
       "url": "https://services.odata.org/V4/Northwind/Northwind.svc/Order_Subtotals",
-      "count": 27,
+      "count": 3,
       "param_shapes": [
         [
-          "$top"
-        ],
-        [
-          "$skiptoken",
+          "$orderby",
           "$top"
         ]
       ]
@@ -156,7 +164,7 @@
     {
       "method": "GET",
       "url": "https://services.odata.org/V4/Northwind/Northwind.svc/Orders",
-      "count": 12,
+      "count": 13,
       "param_shapes": [
         [
           "$orderby",
@@ -177,13 +185,10 @@
     {
       "method": "GET",
       "url": "https://services.odata.org/V4/Northwind/Northwind.svc/Orders_Qries",
-      "count": 27,
+      "count": 3,
       "param_shapes": [
         [
-          "$top"
-        ],
-        [
-          "$skiptoken",
+          "$orderby",
           "$top"
         ]
       ]
@@ -194,6 +199,7 @@
       "count": 3,
       "param_shapes": [
         [
+          "$orderby",
           "$top"
         ]
       ]
@@ -201,12 +207,14 @@
     {
       "method": "GET",
       "url": "https://services.odata.org/V4/Northwind/Northwind.svc/Products",
-      "count": 12,
+      "count": 9,
       "param_shapes": [
         [
+          "$orderby",
           "$top"
         ],
         [
+          "$orderby",
           "$skiptoken",
           "$top"
         ]
@@ -215,9 +223,15 @@
     {
       "method": "GET",
       "url": "https://services.odata.org/V4/Northwind/Northwind.svc/Products_Above_Average_Prices",
-      "count": 3,
+      "count": 6,
       "param_shapes": [
         [
+          "$orderby",
+          "$top"
+        ],
+        [
+          "$filter",
+          "$orderby",
           "$top"
         ]
       ]
@@ -228,6 +242,7 @@
       "count": 3,
       "param_shapes": [
         [
+          "$orderby",
           "$top"
         ]
       ]
@@ -235,9 +250,15 @@
     {
       "method": "GET",
       "url": "https://services.odata.org/V4/Northwind/Northwind.svc/Regions",
-      "count": 3,
+      "count": 6,
       "param_shapes": [
         [
+          "$orderby",
+          "$top"
+        ],
+        [
+          "$filter",
+          "$orderby",
           "$top"
         ]
       ]
@@ -248,6 +269,7 @@
       "count": 3,
       "param_shapes": [
         [
+          "$orderby",
           "$top"
         ]
       ]
@@ -258,6 +280,7 @@
       "count": 3,
       "param_shapes": [
         [
+          "$orderby",
           "$top"
         ]
       ]
@@ -265,9 +288,15 @@
     {
       "method": "GET",
       "url": "https://services.odata.org/V4/Northwind/Northwind.svc/Shippers",
-      "count": 3,
+      "count": 6,
       "param_shapes": [
         [
+          "$orderby",
+          "$top"
+        ],
+        [
+          "$filter",
+          "$orderby",
           "$top"
         ]
       ]
@@ -275,13 +304,10 @@
     {
       "method": "GET",
       "url": "https://services.odata.org/V4/Northwind/Northwind.svc/Summary_of_Sales_by_Quarters",
-      "count": 27,
+      "count": 3,
       "param_shapes": [
         [
-          "$top"
-        ],
-        [
-          "$skiptoken",
+          "$orderby",
           "$top"
         ]
       ]
@@ -289,13 +315,10 @@
     {
       "method": "GET",
       "url": "https://services.odata.org/V4/Northwind/Northwind.svc/Summary_of_Sales_by_Years",
-      "count": 27,
+      "count": 3,
       "param_shapes": [
         [
-          "$top"
-        ],
-        [
-          "$skiptoken",
+          "$orderby",
           "$top"
         ]
       ]
@@ -303,9 +326,15 @@
     {
       "method": "GET",
       "url": "https://services.odata.org/V4/Northwind/Northwind.svc/Suppliers",
-      "count": 3,
+      "count": 6,
       "param_shapes": [
         [
+          "$orderby",
+          "$top"
+        ],
+        [
+          "$filter",
+          "$orderby",
           "$top"
         ]
       ]
@@ -316,16 +345,7 @@
       "count": 3,
       "param_shapes": [
         [
-          "$top"
-        ]
-      ]
-    },
-    {
-      "method": "GET",
-      "url": "https://services.odata.org/V4/Northwind/Northwind.svc/__nonexistent_table_$$_9z9z9z__",
-      "count": 1,
-      "param_shapes": [
-        [
+          "$orderby",
           "$top"
         ]
       ]
