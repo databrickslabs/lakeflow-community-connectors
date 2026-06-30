@@ -8454,12 +8454,12 @@ def _batch_responder(route_map):
     return _cb
 
 
-def _too_many_parts_responder(route_map, max_parts):
+def _too_many_parts_responder(route_map, max_parts, message="contains too many parts"):
     """``$batch`` callback that rejects any POST carrying more than ``max_parts``
-    sub-requests with a 400 "OData batch message contains too many parts" (the
-    adaptive-shrink trigger), and otherwise behaves like :func:`_batch_responder`.
-    Records the sub-request count of each *accepted* POST on ``.accepted`` and the
-    number of rejections on ``.rejections``."""
+    sub-requests with a 400 carrying ``message`` (the adaptive-shrink trigger),
+    and otherwise behaves like :func:`_batch_responder`. Records the sub-request
+    count of each *accepted* POST on ``.accepted`` and the number of rejections
+    on ``.rejections``."""
     seen: list[str] = []
     accepted: list[int] = []
     rejections = [0]
@@ -8471,7 +8471,7 @@ def _too_many_parts_responder(route_map, max_parts):
             return (
                 400,
                 {"Content-Type": "application/json"},
-                json.dumps({"error": {"message": "OData batch message contains too many parts"}}),
+                json.dumps({"error": {"message": message}}),
             )
         accepted.append(len(reqs))
         out = []
@@ -8781,9 +8781,9 @@ def test_contained_fetch_single_uses_per_parent_gets():
 
 
 @responses.activate
-def test_contained_fetch_batch_falls_back_to_single_when_unsupported():
-    """``contained_fetch=batch`` (default) against a server that rejects
-    ``$batch`` (405) degrades to the per-parent GET walk — never raises."""
+def test_contained_fetch_auto_falls_back_to_single_when_unsupported():
+    """``auto`` (the default) against a server that rejects ``$batch`` (405)
+    degrades to the per-parent GET walk — never raises."""
     _mock_nested_metadata()
     responses.get(f"{SERVICE_URL}Parents", json={"value": [{"Id": 1}]})
     responses.post(f"{SERVICE_URL}$batch", json={"detail": "Method Not Allowed"}, status=405)
@@ -8793,12 +8793,28 @@ def test_contained_fetch_batch_falls_back_to_single_when_unsupported():
         match_querystring=False,
     )
     c = _make()
-    recs, _ = c.read_table("Parents__Children", {}, {})  # batch default → 405 → single
+    recs, _ = c.read_table("Parents__Children", {}, {})  # unset → auto → 405 → single
     assert [(r["Parents_Id"], r["Id"]) for r in recs] == [(1, 11)]
     assert any(
         call.request.method == "GET" and "Parents(1)/Children" in call.request.url
         for call in responses.calls
     )
+
+
+@responses.activate
+def test_contained_fetch_batch_strict_raises_when_unsupported():
+    """``contained_fetch=batch`` is strict: a server that fails the ``$batch``
+    capability preflight raises (no silent fall-back). An integer ``N > 1`` is
+    likewise strict."""
+    _mock_nested_metadata()
+    responses.get(f"{SERVICE_URL}Parents", json={"value": [{"Id": 1}]})
+    responses.post(f"{SERVICE_URL}$batch", json={"detail": "Method Not Allowed"}, status=405)
+    c = _make()
+    with pytest.raises(ValueError, match="requires OData .batch"):
+        list(c.read_table("Parents__Children", {}, {"contained_fetch": "batch"})[0])
+    c2 = _make()
+    with pytest.raises(ValueError, match="requires OData .batch"):
+        list(c2.read_table("Parents__Children", {}, {"contained_fetch": "5"})[0])
 
 
 @responses.activate
@@ -8890,9 +8906,71 @@ def test_contained_fetch_numeric_chunks_batch_by_size():
 def test_contained_fetch_invalid_value_raises():
     _mock_nested_metadata()
     c = _make()
-    for bad in ("maybe", "0", "-1", "2.5"):
+    for bad in ("maybe", "0", "-1", "2.5", "auto:0", "batch:abc", "single:5", "5:2"):
         with pytest.raises(ValueError, match="Invalid contained_fetch"):
             c.read_table("Parents__Children", {}, {"contained_fetch": bad})
+
+
+@responses.activate
+def test_contained_fetch_auto_size_suffix_chunks_by_n():
+    """``auto:2`` hydrates via ``$batch`` capped at 2 ops/request: 3 parents →
+    two hydrate rounds (2 + 1)."""
+    _mock_nested_metadata()
+    responses.get(f"{SERVICE_URL}Parents", json={"value": [{"Id": 1}, {"Id": 2}, {"Id": 3}]})
+    responder = _batch_responder(
+        [
+            ("Parents(1)/Children", {"value": [{"Id": 11}]}),
+            ("Parents(2)/Children", {"value": [{"Id": 21}]}),
+            ("Parents(3)/Children", {"value": [{"Id": 31}]}),
+            ("Parents?$top=1", {"value": [{"Id": 1}]}),  # capability preflight
+        ]
+    )
+    responses.add_callback(responses.POST, f"{SERVICE_URL}$batch", callback=responder)
+
+    c = _make()
+    recs, _ = c.read_table("Parents__Children", {}, {"contained_fetch": "auto:2"})
+    assert sorted((r["Parents_Id"], r["Id"]) for r in recs) == [(1, 11), (2, 21), (3, 31)]
+    op_counts = []
+    for call in responses.calls:
+        if call.request.method != "POST":
+            continue
+        reqs = json.loads(call.request.body)["requests"]
+        if any("Children" in r["url"] for r in reqs):
+            op_counts.append(len(reqs))
+    assert sorted(op_counts) == [1, 2]
+
+
+@responses.activate
+def test_contained_fetch_auto_size_suffix_falls_back_when_unsupported():
+    """``auto:<N>`` keeps ``auto``'s fall-back: a server without ``$batch`` (405)
+    degrades to the per-parent GET walk — never raises."""
+    _mock_nested_metadata()
+    responses.get(f"{SERVICE_URL}Parents", json={"value": [{"Id": 1}]})
+    responses.post(f"{SERVICE_URL}$batch", json={"detail": "Method Not Allowed"}, status=405)
+    responses.get(
+        f"{SERVICE_URL}Parents(1)/Children",
+        json={"value": [{"Id": 11}]},
+        match_querystring=False,
+    )
+    c = _make()
+    recs, _ = c.read_table("Parents__Children", {}, {"contained_fetch": "auto:50"})
+    assert [(r["Parents_Id"], r["Id"]) for r in recs] == [(1, 11)]
+    assert any(
+        call.request.method == "GET" and "Parents(1)/Children" in call.request.url
+        for call in responses.calls
+    )
+
+
+@responses.activate
+def test_contained_fetch_batch_size_suffix_strict_raises_when_unsupported():
+    """``batch:<N>`` keeps ``batch``'s strictness: a server that fails the
+    ``$batch`` preflight raises (no fall-back)."""
+    _mock_nested_metadata()
+    responses.get(f"{SERVICE_URL}Parents", json={"value": [{"Id": 1}]})
+    responses.post(f"{SERVICE_URL}$batch", json={"detail": "Method Not Allowed"}, status=405)
+    c = _make()
+    with pytest.raises(ValueError, match="requires OData .batch"):
+        list(c.read_table("Parents__Children", {}, {"contained_fetch": "batch:200"})[0])
 
 
 @responses.activate
@@ -9062,6 +9140,206 @@ def test_batch_too_many_parts_converges_below_100_cap():
     # Converged below the cap and kept batching — NOT the give-up sentinel (1).
     assert 1 < c.__dict__["_batch_size_cap"] <= 100
     assert all(s <= 100 for s in accepted)
+
+
+@responses.activate
+def test_batch_overflow_detects_exceeds_maximum_message():
+    """The shrink trigger matches phrasing variants, not just "too many parts":
+    a server that rejects with "$batch exceeds the maximum of 100 operations"
+    (the live Hexagon Smart API wording) still shrinks instead of hard-failing."""
+    _mock_nested_metadata()
+    responses.get(f"{SERVICE_URL}Parents", json={"value": [{"Id": i} for i in range(1, 6)]})
+    responder = _too_many_parts_responder(
+        [(f"Parents({i})/Children", {"value": [{"Id": i * 10 + 1}]}) for i in range(1, 6)]
+        + [("Parents?$top=1", {"value": [{"Id": 1}]})],
+        max_parts=2,
+        message="$batch exceeds the maximum of 100 operations",
+    )
+    responses.add_callback(responses.POST, f"{SERVICE_URL}$batch", callback=responder)
+
+    c = _make()
+    recs, _ = c.read_table("Parents__Children", {}, {})
+    assert sorted(r["Id"] for r in recs) == [11, 21, 31, 41, 51]
+    assert responder.rejections[0] >= 1  # the message was recognized → shrank
+    assert all(n <= 2 for n in responder.accepted)
+    assert c.__dict__["_batch_size_cap"] == 2
+
+
+# ---------------------------------------------------------------------------
+# cursor_probe=nested-expand → $batch hydrate of the probe's dirty parents
+# ---------------------------------------------------------------------------
+
+
+@responses.activate
+def test_cursor_probe_nested_expand_hydrates_dirty_via_batch():
+    """nested-expand identifies dirty leaf-parents via the nested-``$expand``
+    probe, then — when the server supports ``$batch`` — hydrates ONLY those via
+    ``$batch`` (no per-parent GET). Both verdicts (cursor_probe_ok, batch_ok)
+    persist."""
+    from urllib.parse import unquote
+
+    _mock_probe_metadata()
+    since = "2020-01-01T00:00:00Z"
+    responses.get(f"{SERVICE_URL}Roots", json={"value": [{"Id": 1}, {"Id": 2}]})
+    responses.get(
+        f"{SERVICE_URL}Roots(1)/Mids",
+        json={
+            "value": [
+                {"Id": 10, "Leaves": [{"RecordLastModified": "2020-06-01T00:00:00Z"}]},
+                {"Id": 11, "Leaves": [{"RecordLastModified": "2019-06-01T00:00:00Z"}]},
+            ]
+        },
+    )
+    responses.get(
+        f"{SERVICE_URL}Roots(2)/Mids",
+        json={
+            "value": [
+                {"Id": 20, "Leaves": [{"RecordLastModified": "2019-01-01T00:00:00Z"}]},
+                {"Id": 21, "Leaves": [{"RecordLastModified": "2020-07-01T00:00:00Z"}]},
+            ]
+        },
+    )
+    responder = _batch_responder(
+        [
+            (
+                "Roots(1)/Mids(10)/Leaves",
+                {"value": [{"Id": 1001, "RecordLastModified": "2020-06-01T00:00:00Z"}]},
+            ),
+            (
+                "Roots(2)/Mids(21)/Leaves",
+                {"value": [{"Id": 2101, "RecordLastModified": "2020-07-01T00:00:00Z"}]},
+            ),
+            ("Roots?$top=1", {"value": [{"Id": 1}]}),  # $batch preflight
+        ]
+    )
+    responses.add_callback(responses.POST, f"{SERVICE_URL}$batch", callback=responder)
+
+    c = _make()
+    _skip_probe_preflight(c)
+    recs, offset = c.read_table(
+        PROBE_TABLE,
+        {"cursor": since},
+        {
+            "cursor_field": "RecordLastModified",
+            "cursor_probe": "nested-expand",
+            "pagination": "nextlink",
+        },
+    )
+    rows = list(recs)
+    assert sorted((r["Roots_Id"], r["Mids_Id"], r["Id"]) for r in rows) == [
+        (1, 10, 1001),
+        (2, 21, 2101),
+    ]
+    assert offset["cursor"] == "2020-07-01T00:00:00Z"
+    # Probe ran (identify via nested-$expand) ...
+    assert any(
+        "$expand=Leaves" in unquote(call.request.url)
+        for call in responses.calls
+        if "/Mids?" in call.request.url
+    )
+    # ... and the dirty hydrate went through $batch — never a per-parent GET.
+    assert not any(
+        call.request.method == "GET" and "/Leaves" in call.request.url for call in responses.calls
+    )
+    assert any("Mids(10)/Leaves" in u for u in responder.seen)
+    assert any("Mids(21)/Leaves" in u for u in responder.seen)
+    # Clean leaf-parents are never hydrated.
+    assert not any("Mids(11)/Leaves" in u or "Mids(20)/Leaves" in u for u in responder.seen)
+    assert offset.get("cursor_probe_ok") is True
+    assert offset.get("batch_ok") is True
+
+
+@responses.activate
+def test_cursor_probe_nested_expand_falls_back_to_n1_when_batch_unsupported():
+    """When the ``$batch`` preflight fails (fail-closed), nested-expand still
+    prunes to the dirty parents but hydrates them via the plain N+1 walk —
+    one per-parent GET, clean parents untouched."""
+    _mock_probe_metadata()
+    since = "2020-01-01T00:00:00Z"
+    responses.get(f"{SERVICE_URL}Roots", json={"value": [{"Id": 1}]})
+    responses.get(
+        f"{SERVICE_URL}Roots(1)/Mids",
+        json={
+            "value": [
+                {"Id": 10, "Leaves": [{"RecordLastModified": "2020-06-01T00:00:00Z"}]},
+                {"Id": 11, "Leaves": [{"RecordLastModified": "2019-06-01T00:00:00Z"}]},
+            ]
+        },
+    )
+    responses.post(f"{SERVICE_URL}$batch", json={"detail": "Method Not Allowed"}, status=405)
+    responses.get(
+        f"{SERVICE_URL}Roots(1)/Mids(10)/Leaves",
+        json={"value": [{"Id": 1001, "RecordLastModified": "2020-06-01T00:00:00Z"}]},
+        match_querystring=False,
+    )
+
+    c = _make()
+    _skip_probe_preflight(c)
+    recs, offset = c.read_table(
+        PROBE_TABLE,
+        {"cursor": since},
+        {
+            "cursor_field": "RecordLastModified",
+            "cursor_probe": "nested-expand",
+            "pagination": "nextlink",
+        },
+    )
+    rows = list(recs)
+    assert [(r["Roots_Id"], r["Mids_Id"], r["Id"]) for r in rows] == [(1, 10, 1001)]
+    # Dirty parent hydrated via plain GET (N+1 fallback); clean parent untouched.
+    assert any(
+        call.request.method == "GET" and "Mids(10)/Leaves" in call.request.url
+        for call in responses.calls
+    )
+    assert not any("Mids(11)/Leaves" in call.request.url for call in responses.calls)
+    assert offset.get("batch_ok") is not True  # preflight failed → batch not used
+
+
+@responses.activate
+def test_cursor_probe_nested_expand_contained_fetch_single_forces_n1():
+    """An explicit ``contained_fetch=single`` overrides the probe's ``$batch``
+    hydrate: the probe still prunes to dirty parents, but they go down the plain
+    N+1 walk — no ``$batch`` POST at all (preflight skipped)."""
+    _mock_probe_metadata()
+    since = "2020-01-01T00:00:00Z"
+    responses.get(f"{SERVICE_URL}Roots", json={"value": [{"Id": 1}]})
+    responses.get(
+        f"{SERVICE_URL}Roots(1)/Mids",
+        json={
+            "value": [
+                {"Id": 10, "Leaves": [{"RecordLastModified": "2020-06-01T00:00:00Z"}]},
+                {"Id": 11, "Leaves": [{"RecordLastModified": "2019-06-01T00:00:00Z"}]},
+            ]
+        },
+    )
+    responses.get(
+        f"{SERVICE_URL}Roots(1)/Mids(10)/Leaves",
+        json={"value": [{"Id": 1001, "RecordLastModified": "2020-06-01T00:00:00Z"}]},
+        match_querystring=False,
+    )
+
+    c = _make()
+    _skip_probe_preflight(c)
+    recs, _ = c.read_table(
+        PROBE_TABLE,
+        {"cursor": since},
+        {
+            "cursor_field": "RecordLastModified",
+            "cursor_probe": "nested-expand",
+            "contained_fetch": "single",
+            "pagination": "nextlink",
+        },
+    )
+    rows = list(recs)
+    assert [(r["Roots_Id"], r["Mids_Id"], r["Id"]) for r in rows] == [(1, 10, 1001)]
+    # No $batch was even attempted (the explicit single skips the preflight).
+    assert not any(call.request.method == "POST" for call in responses.calls)
+    # Dirty parent hydrated via plain GET; clean parent untouched.
+    assert any(
+        call.request.method == "GET" and "Mids(10)/Leaves" in call.request.url
+        for call in responses.calls
+    )
+    assert not any("Mids(11)/Leaves" in call.request.url for call in responses.calls)
 
 
 # ---------------------------------------------------------------------------

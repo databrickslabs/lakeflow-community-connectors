@@ -104,6 +104,18 @@ class _BatchTooManyParts(RuntimeError):
     fall-back-to-plain-walk ``except`` clauses still catch it."""
 
 
+def _is_batch_too_large(body: str) -> bool:
+    """Whether a 4xx ``$batch`` error body indicates the request carried too many
+    sub-requests — the adaptive-shrink trigger. Matches both known phrasings:
+    "...contains too many parts" and "$batch exceeds the maximum of N operations".
+    Heuristic: a size/limit word together with a batch-unit word, so phrasing
+    variants across servers still trip the shrink rather than hard-failing."""
+    low = (body or "").lower()
+    size_words = ("too many", "maximum", "exceed", "limit")
+    unit_words = ("part", "operation")
+    return any(s in low for s in size_words) and any(u in low for u in unit_words)
+
+
 def rewrite_top_in_url(url: str, new_top: int) -> str:
     """Rewrite the ``$top=<N>`` (or url-encoded ``%24top=<N>``) parameter
     in a URL's query string. Returns the URL unchanged if no ``$top``
@@ -1569,7 +1581,7 @@ class ContainedNavMixin:
         resp = self._http_get(session, batch_url, method="POST", json=payload)
         if resp.status_code >= 400:
             body = resp.text or ""
-            if "too many parts" in body.lower():
+            if _is_batch_too_large(body):
                 raise _BatchTooManyParts(
                     f"OData $batch POST to {batch_url!r} rejected "
                     f"{len(urls)} parts: {resp.status_code} {body[:300]}"
@@ -1718,27 +1730,49 @@ class ContainedNavMixin:
         chunk size: how the **full** contained walks (the snapshot read and the
         framework batch-reader stream) hydrate each leaf-parent collection.
 
-        * ``batch`` (**default**) — pack the per-leaf-parent GETs into OData
+        * ``auto`` (**default**) — pack the per-leaf-parent GETs into OData
           ``$batch`` requests of up to :data:`_BATCH_MAX_OPS` (1000) ops each
           (server-driven paging, ``@odata.nextLink`` follow-up), collapsing M
           round-trips into ``ceil(M / 1000)`` (auto-reduced on a server "too
-          many parts" rejection).
+          many parts" rejection). A one-shot capability preflight gates it; on a
+          server without ``$batch`` it transparently **falls back** to ``single``.
+        * ``batch`` — same hydrate, but **strict**: a server that fails the
+          ``$batch`` capability preflight is an error (see
+          :meth:`_contained_fetch_batch_n`), not a silent fall-back.
+        * ``auto:<N>`` / ``batch:<N>`` — the ``auto`` / ``batch`` behaviour with
+          the chunk size set to a positive integer ``N`` ops per ``$batch``
+          request (``ceil(M / N)``), e.g. ``batch:200`` to start smaller.
         * ``single`` — the original behaviour: one GET per leaf-parent.
-        * a positive integer ``N`` — same as ``batch`` but with ``N`` ops per
-          ``$batch`` request: ``N == 1`` is equivalent to ``single``, ``N > 1``
-          packs ``N`` leaf-parent GETs per request (collapsing M round-trips
-          into ``ceil(M / N)``).
+        * a bare positive integer ``N`` — like ``batch:<N>`` (strict): ``N == 1``
+          is equivalent to ``single``, ``N > 1`` packs ``N`` GETs per request.
 
-        Returns the requested chunk size (``single`` → 1, ``batch`` → 100). A
-        one-shot capability preflight (in :meth:`_contained_fetch_batch_n`)
-        gates the actual batching; on a server without ``$batch`` it
-        transparently falls back to ``single``.
+        Returns the requested chunk size (``single`` → 1, ``auto``/``batch`` →
+        :data:`_BATCH_MAX_OPS`, the ``:<N>`` forms → ``N``). The strict-vs-fall-
+        back axis is :meth:`_contained_fetch_strict`.
 
         Unlike ``cursor_probe`` (which accelerates the *incremental* leaf-cursor
         read), this governs the un-cursored full walks; the two are
         independent."""
-        raw = ((table_options or {}).get("contained_fetch") or "batch").strip().lower()
-        if raw == "batch":
+        raw = ((table_options or {}).get("contained_fetch") or "auto").strip().lower()
+        base, sep, suffix = raw.partition(":")
+        if sep:
+            # Only ``auto`` / ``batch`` carry a ``:<N>`` chunk-size suffix.
+            if base not in ("auto", "batch"):
+                raise ValueError(
+                    f"Invalid contained_fetch={raw!r}. Only 'auto' and 'batch' accept a "
+                    "':<N>' size suffix (e.g. batch:200)."
+                )
+            try:
+                size = int(suffix)
+            except ValueError:
+                raise ValueError(
+                    f"Invalid contained_fetch={raw!r}. The size suffix must be a "
+                    "positive integer (e.g. batch:200)."
+                ) from None
+            if size < 1:
+                raise ValueError(f"Invalid contained_fetch={raw!r}. The size suffix must be >= 1.")
+            return size
+        if raw in ("auto", "batch"):
             return _BATCH_MAX_OPS
         if raw == "single":
             return 1
@@ -1746,27 +1780,67 @@ class ContainedNavMixin:
             size = int(raw)
         except ValueError:
             raise ValueError(
-                f"Invalid contained_fetch={raw!r}. "
-                "Expected 'batch', 'single', or a positive integer."
+                f"Invalid contained_fetch={raw!r}. Expected 'auto', 'batch', 'single', "
+                "'auto:<N>', 'batch:<N>', or a positive integer."
             ) from None
         if size < 1:
             raise ValueError(f"Invalid contained_fetch={raw!r}. Must be a positive integer (>= 1).")
         return size
+
+    def _contained_fetch_strict(self, table_options: dict[str, str] | None) -> bool:
+        """``True`` when ``contained_fetch`` demands ``$batch`` strictly — the
+        ``batch`` / ``batch:<N>`` forms or a bare integer ``N > 1``. In strict
+        mode a server that fails the ``$batch`` capability preflight raises
+        instead of falling back. ``auto`` / ``auto:<N>`` (default), ``single``,
+        ``1`` → ``False`` (the preflight failure falls back to the N+1 walk)."""
+        base = (
+            ((table_options or {}).get("contained_fetch") or "auto")
+            .strip()
+            .lower()
+            .partition(":")[0]
+        )
+        if base == "auto":
+            return False
+        if base == "batch":
+            return True
+        if base == "single":
+            return False
+        return self._contained_fetch_batch_size(table_options) > 1  # bare integer
 
     def _contained_fetch_batch_n(
         self, segments: list[str], table_options: dict[str, str] | None
     ) -> int:
         """Effective ``$batch`` chunk size for the full contained walk after the
         capability preflight: the requested :meth:`_contained_fetch_batch_size`
-        when it is ``> 1`` *and* the server passes the ``$batch`` preflight,
-        else ``1`` (plain one-GET-per-leaf-parent — ``contained_fetch=single``,
-        ``contained_fetch=1``, or an unsupported server)."""
+        when it is ``> 1`` *and* the server passes the ``$batch`` preflight, else
+        ``1`` (plain one-GET-per-leaf-parent). On a preflight failure the
+        behaviour splits on :meth:`_contained_fetch_strict`: ``auto`` (default) /
+        ``single`` fall back to ``1``; ``batch`` / ``N > 1`` **raise** — the user
+        asked for ``$batch`` and the server can't honour it."""
         size = self._contained_fetch_batch_size(table_options)
         if size <= 1:
             return 1
         if not self._verify_batch_support(segments, table_options):
+            if self._contained_fetch_strict(table_options):
+                raw = (table_options or {}).get("contained_fetch")
+                raise ValueError(
+                    f"contained_fetch={raw!r} requires OData $batch, but the server "
+                    "failed the $batch capability preflight. Use contained_fetch=auto "
+                    "to fall back to per-leaf-parent GETs, or contained_fetch=single."
+                )
             return 1
         return size
+
+    def _contained_fetch_forces_single(self, table_options: dict[str, str] | None) -> bool:
+        """``True`` when ``contained_fetch`` is **explicitly** set to ``single`` or
+        ``1`` — a user signal to avoid OData ``$batch`` for contained leaf
+        hydration. Used to let that signal also force the ``cursor_probe`` probe's
+        dirty-parent hydrate down the plain N+1 walk (the probe still prunes which
+        parents to read; only the ``$batch`` hydrate is suppressed). Unset, or any
+        value ``> 1`` (incl. the ``batch`` default), returns ``False``."""
+        if (table_options or {}).get("contained_fetch") is None:
+            return False
+        return self._contained_fetch_batch_size(table_options) <= 1
 
     def _iter_contained_leaf_rows(
         self,
@@ -3199,11 +3273,22 @@ class ContainedNavMixin:
                             cursor_field,
                             read_since,
                         )
-            # Cascade: ``auto`` (probe didn't apply / server mis-orders) and
-            # ``batch`` hydrate via $batch when the server supports it; otherwise
-            # both fall through to the plain N+1 walk. ``probe`` never reaches
-            # here without having engaged (it raised on an unsupported server).
-            if not used_probe and mode in ("auto", "batch"):
+            # Hydrate via $batch when the server supports it — for the probe's
+            # pruned dirty chains (``probe``/``auto`` with ``used_probe``) AND for
+            # the ``auto``/``batch`` cascade alike. The probe and $batch are
+            # complementary, not exclusive: the probe (nested-$expand) prunes
+            # WHICH leaf-parents to read, $batch batches the hydrate of whichever
+            # remain. ``_verify_batch_support`` is fail-closed, so an unsupported
+            # server leaves ``use_batch`` False and the SAME chains fall through to
+            # the plain N+1 walk. ``off`` (force plain walk) never batches.
+            #
+            # An explicit ``contained_fetch=single`` / ``1`` overrides the probe's
+            # $batch hydrate: the probe still prunes to dirty parents, but they are
+            # hydrated via the plain N+1 walk (the preflight is skipped entirely).
+            # Scoped to ``used_probe`` so it never countermands an explicit
+            # ``cursor_probe=batch`` or ``auto``'s no-probe $batch cascade.
+            forces_single = self._contained_fetch_forces_single(table_options)
+            if mode in ("probe", "auto", "batch") and not (used_probe and forces_single):
                 if self._verify_batch_support(segments, table_options, start_offset):
                     use_batch = True
                     persist_batch_ok = True
