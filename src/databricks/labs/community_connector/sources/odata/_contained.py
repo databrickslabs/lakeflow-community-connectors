@@ -80,10 +80,28 @@ _CURSOR_PROBE_PREFLIGHT_SCAN = 50
 
 # Max GET sub-requests packed into one OData ``$batch`` request by the
 # ``cursor_probe=batch`` / ``auto``-fallback hydrate. A hard cap — some Smart
-# API servers (Hexagon) reject batches above 100 operations — so the batched
-# walk chunks leaf-parent reads (and their @odata.nextLink continuations) into
-# groups of this size.
-_BATCH_MAX_OPS = 100
+# Default ``$batch`` chunk size: the batched walk packs leaf-parent reads (and
+# their @odata.nextLink continuations) into groups of this size. A server that
+# caps batch parts lower (e.g. "OData batch message contains too many parts")
+# triggers an adaptive shrink (see ``_post_batch_adaptive``), and the discovered
+# working size is recorded in the offset as ``batch_size_ok``.
+_BATCH_MAX_OPS = 1000
+# On a "too many parts" rejection, shrink the working chunk size by this factor
+# and retry, up to ``_BATCH_OVERFLOW_RETRIES`` times before falling back to a
+# plain per-leaf-parent GET. The budget is sized so the geometric shrink from
+# the 1000-op default converges to a small cap before giving up: 1000 × 0.75ⁿ
+# crosses 100 at n=8 (1000→750→562→421→315→236→177→132→99), so 10 retries leave
+# headroom for servers (e.g. Hexagon Smart API) that cap a batch around 100 parts.
+_BATCH_SHRINK_FACTOR = 0.75
+_BATCH_OVERFLOW_RETRIES = 10
+
+
+class _BatchTooManyParts(RuntimeError):
+    """Raised by :meth:`_post_batch` when the server rejects a ``$batch`` for
+    carrying too many sub-requests (e.g. Hexagon Smart API: "OData batch message
+    contains too many parts"). Signals the adaptive shrink path to reduce the
+    chunk size and retry; a plain ``RuntimeError`` subclass so existing
+    fall-back-to-plain-walk ``except`` clauses still catch it."""
 
 
 def rewrite_top_in_url(url: str, new_top: int) -> str:
@@ -644,8 +662,10 @@ class ContainedNavMixin:
 
     def _cursor_probe_batch_size(self, table_options: dict[str, str] | None) -> int:
         """Ops per ``$batch`` request for ``cursor_probe=batch``. Defaults to
-        :data:`_BATCH_MAX_OPS` (100); the ``batch:<N>`` form overrides it with a
-        positive integer ``N`` (``ceil(M / N)`` requests for M leaf-parents).
+        :data:`_BATCH_MAX_OPS` (1000); the ``batch:<N>`` form overrides it with a
+        positive integer ``N`` (``ceil(M / N)`` requests for M leaf-parents). The
+        effective size is further reduced at runtime if the server rejects a
+        batch for "too many parts" (see :meth:`_post_batch_adaptive`).
         Returns :data:`_BATCH_MAX_OPS` for every non-``batch:`` value."""
         raw = ((table_options or {}).get("cursor_probe") or "auto").strip().lower()
         base, sep, suffix = raw.partition(":")
@@ -1548,9 +1568,14 @@ class ContainedNavMixin:
         batch_url = join_url(self.service_url, "$batch")
         resp = self._http_get(session, batch_url, method="POST", json=payload)
         if resp.status_code >= 400:
+            body = resp.text or ""
+            if "too many parts" in body.lower():
+                raise _BatchTooManyParts(
+                    f"OData $batch POST to {batch_url!r} rejected "
+                    f"{len(urls)} parts: {resp.status_code} {body[:300]}"
+                )
             raise RuntimeError(
-                f"OData $batch POST to {batch_url!r} failed: "
-                f"{resp.status_code} {(resp.text or '')[:300]}"
+                f"OData $batch POST to {batch_url!r} failed: " f"{resp.status_code} {body[:300]}"
             )
         data = resp.json()
         by_id = {str(r.get("id")): r for r in data.get("responses", [])}
@@ -1562,6 +1587,86 @@ class ContainedNavMixin:
                     f"sub-response id {i!r}; got ids {sorted(by_id)}."
                 )
             out.append(by_id[str(i)])
+        return out
+
+    def _effective_batch_size(self, batch_size: int) -> int:
+        """The chunk size to slice the next ``$batch`` round at: the requested
+        ``batch_size`` clamped to the discovered working cap (``_batch_size_cap``,
+        set once a "too many parts" rejection forced a shrink and seeded from the
+        offset's ``batch_size_ok``). No cap discovered, or the give-up sentinel
+        ``cap == 1`` (``$batch`` abandoned for plain GETs, handled in
+        :meth:`_post_batch_adaptive`) → the requested size."""
+        cap = self.__dict__.get("_batch_size_cap")
+        return min(batch_size, cap) if cap and cap > 1 else batch_size
+
+    def _shrink_batch_cap(self, attempted: int) -> bool:
+        """Reduce the working ``$batch`` cap after a "too many parts" rejection of
+        ``attempted`` parts: ``_BATCH_SHRINK_FACTOR`` × the current cap (or the
+        attempted count if no cap yet), floored at 1. Returns ``False`` once the
+        per-instance shrink budget (:data:`_BATCH_OVERFLOW_RETRIES`) is spent — the
+        caller then falls back to a plain per-leaf-parent GET. Records the new cap
+        so it is persisted in the offset (``batch_size_ok``) and reused."""
+        shrinks = self.__dict__.get("_batch_shrinks", 0)
+        if shrinks >= _BATCH_OVERFLOW_RETRIES:
+            return False
+        cap = self.__dict__.get("_batch_size_cap") or attempted
+        new_cap = max(1, int(cap * _BATCH_SHRINK_FACTOR))
+        if new_cap >= cap:  # ensure forward progress when the factor rounds up
+            new_cap = max(1, cap - 1)
+        self.__dict__["_batch_size_cap"] = new_cap
+        self.__dict__["_batch_shrinks"] = shrinks + 1
+        _LOG.warning(
+            "OData $batch rejected %d parts (too many); reducing batch size to "
+            "%d and retrying (shrink %d/%d).",
+            attempted,
+            new_cap,
+            shrinks + 1,
+            _BATCH_OVERFLOW_RETRIES,
+        )
+        return True
+
+    def _get_as_batch_response(self, url: str) -> dict:
+        """Plain GET fall-back for one leaf-parent, shaped like a ``$batch``
+        sub-response (``{"status", "body": {"value": [...]}}``) so the drain loops
+        parse it identically. All pages are drained here (no ``@odata.nextLink``
+        returned), so the loop emits every row without re-batching."""
+        rows = list(self._fetch_pages(url))
+        return {"status": 200, "body": {"value": rows}}
+
+    def _post_batch_adaptive(self, urls: list[str]) -> list[dict]:
+        """:meth:`_post_batch` with adaptive sizing: post ``urls`` in chunks no
+        larger than the working cap, and on a "too many parts" rejection shrink
+        the cap by 25% and retry the offending chunk re-split at the new cap — up
+        to :data:`_BATCH_OVERFLOW_RETRIES` shrinks per instance. The discovered
+        cap is recorded (persisted as ``batch_size_ok``) so later rounds and
+        framework-recreated readers start there. Once a shrink would collapse the
+        cap to a single part or the retry budget is spent, ``$batch`` is
+        **given up** (cap pinned to the sentinel ``1``) and the remaining parts —
+        plus every later round — fall back to a plain per-leaf-parent GET.
+        Returns responses aligned with ``urls`` (``$batch`` sub-response shape)."""
+        if self.__dict__.get("_batch_size_cap") == 1:  # give-up sentinel → plain GET
+            return [self._get_as_batch_response(u) for u in urls]
+        out: list[dict] = []
+        pending = list(urls)
+        while pending:
+            cap = self.__dict__.get("_batch_size_cap")
+            if cap == 1:  # gave up mid-walk → plain GET the rest
+                out.extend(self._get_as_batch_response(u) for u in pending)
+                break
+            # Always slice the front at the CURRENT cap, so a shrink applies to
+            # every remaining chunk — no stale oversized chunk wastes a retry.
+            chunk = pending[:cap] if cap else pending
+            try:
+                out.extend(self._post_batch(chunk))
+                pending = pending[len(chunk) :]
+            except _BatchTooManyParts:
+                if not self._shrink_batch_cap(len(chunk)) or self.__dict__["_batch_size_cap"] <= 1:
+                    # Budget spent or batch collapsed to one part → give up on
+                    # $batch and plain-GET everything still pending.
+                    self.__dict__["_batch_size_cap"] = 1
+                    out.extend(self._get_as_batch_response(u) for u in pending)
+                    break
+                # cap shrank; retry the (now smaller) front of pending.
         return out
 
     def _verify_batch_support(
@@ -1614,9 +1719,10 @@ class ContainedNavMixin:
         framework batch-reader stream) hydrate each leaf-parent collection.
 
         * ``batch`` (**default**) — pack the per-leaf-parent GETs into OData
-          ``$batch`` requests of up to :data:`_BATCH_MAX_OPS` (100) ops each
+          ``$batch`` requests of up to :data:`_BATCH_MAX_OPS` (1000) ops each
           (server-driven paging, ``@odata.nextLink`` follow-up), collapsing M
-          round-trips into ``ceil(M / 100)``.
+          round-trips into ``ceil(M / 1000)`` (auto-reduced on a server "too
+          many parts" rejection).
         * ``single`` — the original behaviour: one GET per leaf-parent.
         * a positive integer ``N`` — same as ``batch`` but with ``N`` ops per
           ``$batch`` request: ``N == 1`` is equivalent to ``single``, ``N > 1``
@@ -1734,9 +1840,10 @@ class ContainedNavMixin:
             )
             meta_by_key[key] = meta
         while pending:
-            round_ = pending[:batch_size]
-            pending = pending[batch_size:]
-            responses = self._post_batch([u for _, u in round_])
+            eff = self._effective_batch_size(batch_size)
+            round_ = pending[:eff]
+            pending = pending[eff:]
+            responses = self._post_batch_adaptive([u for _, u in round_])
             for (key, req_url), resp in zip(round_, responses):
                 body = resp.get("body") if isinstance(resp, dict) else None
                 rows = body.get("value", []) if isinstance(body, dict) else []
@@ -2850,9 +2957,10 @@ class ContainedNavMixin:
                 )
                 chain_by_key[key] = chain
             while pending:
-                round_ = pending[:batch_size]
-                pending = pending[batch_size:]
-                responses = self._post_batch([u for _, u in round_])
+                eff = self._effective_batch_size(batch_size)
+                round_ = pending[:eff]
+                pending = pending[eff:]
+                responses = self._post_batch_adaptive([u for _, u in round_])
                 for (key, req_url), resp in zip(round_, responses):
                     body = resp.get("body") if isinstance(resp, dict) else None
                     rows = body.get("value", []) if isinstance(body, dict) else []
@@ -2945,7 +3053,7 @@ class ContainedNavMixin:
                 k: v
                 for k, v in (off or {}).items()
                 if not k.startswith("lb_")
-                and k not in ("cursor_probe_ok", "batch_ok", "or_filter_ok")
+                and k not in ("cursor_probe_ok", "batch_ok", "batch_size_ok", "or_filter_ok")
             }
 
         if _progress_view(start_offset) == _progress_view(end_offset):

@@ -803,7 +803,9 @@ class ODataLakeflowConnect(
         Mirrors ``cursor_probe_ok`` (which the leaf-cursor path threads itself),
         but for the **OR-across-columns** verdict (``or_filter_ok``) and the
         **$batch** verdict (``batch_ok``, shared with the leaf-cursor path and
-        the ``contained_fetch`` snapshot/stream walks). Both verdicts are
+        the ``contained_fetch`` snapshot/stream walks), and the discovered
+        **$batch chunk cap** (``batch_size_ok``, the working ops-per-request the
+        adaptive shrink settled on after a "too many parts" rejection). All are
         server-wide, so a single cached value serves every table this instance
         reads. Persisted back by :meth:`_merge_capability_caches`."""
         off = start_offset or {}
@@ -811,10 +813,13 @@ class ODataLakeflowConnect(
             self.__dict__["_or_filter_ok"] = bool(off["or_filter_ok"])
         if "batch_ok" in off:
             self.__dict__["_batch_supported"] = bool(off["batch_ok"])
+        if "batch_size_ok" in off:
+            self.__dict__["_batch_size_cap"] = int(off["batch_size_ok"])
 
     def _merge_capability_caches(self, offset: dict) -> dict:
-        """Thread the per-instance OR / $batch verdicts into the returned offset
-        so they survive the framework recreating the reader each microbatch.
+        """Thread the per-instance OR / $batch / batch-size verdicts into the
+        returned offset so they survive the framework recreating the reader each
+        microbatch.
         Only adds a flag once actually **determined** this instance (the probe
         ran), and never overwrites one a read path already wrote. Excluded from
         the no-progress comparison (see ``_finalize_cursor_read``), so baking in
@@ -826,6 +831,8 @@ class ODataLakeflowConnect(
             add["or_filter_ok"] = self.__dict__["_or_filter_ok"]
         if "_batch_supported" in self.__dict__ and "batch_ok" not in offset:
             add["batch_ok"] = self.__dict__["_batch_supported"]
+        if "_batch_size_cap" in self.__dict__ and "batch_size_ok" not in offset:
+            add["batch_size_ok"] = self.__dict__["_batch_size_cap"]
         return {**offset, **add} if add else offset
 
     def _with_capabilities(self, result: tuple) -> tuple:

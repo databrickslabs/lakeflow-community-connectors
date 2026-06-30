@@ -111,10 +111,10 @@ def _drop_lb(offset):
     """Strip non-logical bookkeeping from an offset for stable equality asserts:
     the ``auto`` cursor_lookback history (``lb_history``, non-deterministic
     wall-clock) and the persisted capability verdicts (``cursor_probe_ok`` /
-    ``batch_ok`` / ``or_filter_ok``, one-time-set markers threaded across
-    microbatches). Tests assert the cursor/resume state, not this bookkeeping —
-    mirrors the production no-progress comparison in ``_finalize_cursor_read``."""
-    _bookkeeping = {"lb_history", "cursor_probe_ok", "batch_ok", "or_filter_ok"}
+    ``batch_ok`` / ``batch_size_ok`` / ``or_filter_ok``, one-time-set markers
+    threaded across microbatches). Tests assert the cursor/resume state, not this
+    bookkeeping — mirrors the no-progress comparison in ``_finalize_cursor_read``."""
+    _bookkeeping = {"lb_history", "cursor_probe_ok", "batch_ok", "batch_size_ok", "or_filter_ok"}
     return {k: v for k, v in (offset or {}).items() if k not in _bookkeeping}
 
 
@@ -8454,6 +8454,41 @@ def _batch_responder(route_map):
     return _cb
 
 
+def _too_many_parts_responder(route_map, max_parts):
+    """``$batch`` callback that rejects any POST carrying more than ``max_parts``
+    sub-requests with a 400 "OData batch message contains too many parts" (the
+    adaptive-shrink trigger), and otherwise behaves like :func:`_batch_responder`.
+    Records the sub-request count of each *accepted* POST on ``.accepted`` and the
+    number of rejections on ``.rejections``."""
+    seen: list[str] = []
+    accepted: list[int] = []
+    rejections = [0]
+
+    def _cb(request):
+        reqs = json.loads(request.body)["requests"]
+        if len(reqs) > max_parts:
+            rejections[0] += 1
+            return (
+                400,
+                {"Content-Type": "application/json"},
+                json.dumps({"error": {"message": "OData batch message contains too many parts"}}),
+            )
+        accepted.append(len(reqs))
+        out = []
+        for r in reqs:
+            url = r["url"]
+            seen.append(url)
+            body = next((b for sub, b in route_map if sub in url), None)
+            status = 200 if body is not None else 404
+            out.append({"id": r["id"], "status": status, "body": body or {}})
+        return (200, {"Content-Type": "application/json"}, json.dumps({"responses": out}))
+
+    _cb.seen = seen
+    _cb.accepted = accepted
+    _cb.rejections = rejections
+    return _cb
+
+
 @responses.activate
 def test_cursor_probe_batch_hydrates_via_batch_endpoint():
     """``cursor_probe=batch`` skips the nested-$expand probe and hydrates the
@@ -8858,6 +8893,175 @@ def test_contained_fetch_invalid_value_raises():
     for bad in ("maybe", "0", "-1", "2.5"):
         with pytest.raises(ValueError, match="Invalid contained_fetch"):
             c.read_table("Parents__Children", {}, {"contained_fetch": bad})
+
+
+@responses.activate
+def test_batch_too_many_parts_shrinks_and_records_size():
+    """When the server rejects a ``$batch`` with "too many parts", the connector
+    shrinks the chunk size by 25% and retries until it fits, hydrates every
+    leaf-parent, and records the discovered size in the offset (``batch_size_ok``)."""
+    _mock_nested_metadata()
+    parents = [{"Id": i} for i in range(1, 6)]  # 5 leaf-parents
+    responses.get(f"{SERVICE_URL}Parents", json={"value": parents})
+    responder = _too_many_parts_responder(
+        [(f"Parents({i})/Children", {"value": [{"Id": i * 10 + 1}]}) for i in range(1, 6)]
+        + [("Parents?$top=1", {"value": [{"Id": 1}]})],  # 1-part preflight (accepted)
+        max_parts=2,
+    )
+    responses.add_callback(responses.POST, f"{SERVICE_URL}$batch", callback=responder)
+
+    c = _make()
+    recs, _ = c.read_table("Parents__Children", {}, {})  # default contained_fetch=batch (1000)
+    assert sorted(r["Id"] for r in recs) == [11, 21, 31, 41, 51]
+    # Server rejected the oversized batch at least once, then every accepted
+    # hydrate POST fit within the shrunk cap (<= 2 parts).
+    assert responder.rejections[0] >= 1
+    assert all(n <= 2 for n in responder.accepted)
+    # The working size was discovered and recorded on the instance for reuse.
+    # (The snapshot offset is built lazily before the generator runs, so the
+    # persisted ``batch_size_ok`` is exercised by the cursor path below.)
+    assert c.__dict__["_batch_size_cap"] == 2
+
+
+@responses.activate
+def test_batch_too_many_parts_falls_back_to_single_gets():
+    """A server that rejects *any* multi-part ``$batch`` drives the cap down to 1
+    and falls back to a plain per-leaf-parent GET — every row still arrives."""
+    _mock_nested_metadata()
+    responses.get(f"{SERVICE_URL}Parents", json={"value": [{"Id": 1}, {"Id": 2}]})
+    responder = _too_many_parts_responder([("Parents?$top=1", {"value": [{"Id": 1}]})], max_parts=1)
+    responses.add_callback(responses.POST, f"{SERVICE_URL}$batch", callback=responder)
+    # Plain-GET fall-back targets.
+    responses.get(
+        f"{SERVICE_URL}Parents(1)/Children",
+        json={"value": [{"Id": 11}]},
+        match_querystring=False,
+    )
+    responses.get(
+        f"{SERVICE_URL}Parents(2)/Children",
+        json={"value": [{"Id": 21}]},
+        match_querystring=False,
+    )
+
+    c = _make()
+    recs, _ = c.read_table("Parents__Children", {}, {})
+    assert sorted(r["Id"] for r in recs) == [11, 21]
+    # Fell back to per-parent GETs for the leaf collections.
+    assert any(
+        call.request.method == "GET" and "Parents(1)/Children" in call.request.url
+        for call in responses.calls
+    )
+    assert c.__dict__["_batch_size_cap"] == 1  # give-up sentinel
+
+
+@responses.activate
+def test_batch_size_ok_seeded_from_offset_avoids_oversized_batch():
+    """``batch_size_ok`` in the resume offset seeds the cap, so the connector
+    chunks at that size from the first round — no oversized batch is attempted."""
+    _mock_nested_metadata()
+    responses.get(f"{SERVICE_URL}Parents", json={"value": [{"Id": 1}, {"Id": 2}, {"Id": 3}]})
+    responder = _too_many_parts_responder(
+        [(f"Parents({i})/Children", {"value": [{"Id": i * 10 + 1}]}) for i in range(1, 4)]
+        + [("Parents?$top=1", {"value": [{"Id": 1}]})],
+        max_parts=2,
+    )
+    responses.add_callback(responses.POST, f"{SERVICE_URL}$batch", callback=responder)
+
+    c = _make()
+    # Snapshot read seeds capability caches from start_offset.
+    recs, _ = c.read_table("Parents__Children", {"batch_size_ok": 2}, {})
+    assert sorted(r["Id"] for r in recs) == [11, 21, 31]
+    # Never overflowed (chunked at the seeded cap from the start): no rejection.
+    assert responder.rejections[0] == 0
+    # Accepted POSTs: the 1-part capability preflight + two hydrate rounds (2 + 1).
+    assert sorted(responder.accepted) == [1, 1, 2]
+
+
+@responses.activate
+def test_batch_too_many_parts_persists_size_in_cursor_offset():
+    """The **eager** cursor-incremental ``$batch`` walk (``cursor_probe=batch``)
+    discovers the working size on a "too many parts" rejection and records it in
+    the resume offset (``batch_size_ok``) so the next microbatch reuses it."""
+    _mock_probe_metadata()
+    since = "2020-01-01T00:00:00Z"
+    responses.get(f"{SERVICE_URL}Roots", json={"value": [{"Id": 1}]})
+    responses.get(
+        f"{SERVICE_URL}Roots(1)/Mids",
+        json={"value": [{"Id": 10}, {"Id": 11}, {"Id": 12}]},
+    )
+    responder = _too_many_parts_responder(
+        [
+            (
+                "Mids(10)/Leaves",
+                {"value": [{"Id": 1001, "RecordLastModified": "2020-06-01T00:00:00Z"}]},
+            ),
+            (
+                "Mids(11)/Leaves",
+                {"value": [{"Id": 1101, "RecordLastModified": "2020-06-02T00:00:00Z"}]},
+            ),
+            (
+                "Mids(12)/Leaves",
+                {"value": [{"Id": 1201, "RecordLastModified": "2020-06-03T00:00:00Z"}]},
+            ),
+            ("Roots?$top=1", {"value": [{"Id": 1}]}),  # capability preflight
+        ],
+        max_parts=2,
+    )
+    responses.add_callback(responses.POST, f"{SERVICE_URL}$batch", callback=responder)
+
+    c = _make()
+    recs, offset = c.read_table(
+        PROBE_TABLE,
+        {"cursor": since},
+        {"cursor_field": "RecordLastModified", "cursor_probe": "batch", "pagination": "nextlink"},
+    )
+    assert sorted(r["Id"] for r in recs) == [1001, 1101, 1201]
+    assert responder.rejections[0] >= 1
+    assert all(n <= 2 for n in responder.accepted)
+    # Eager walk → cap discovered before the offset is finalized → persisted.
+    assert offset.get("batch_size_ok") == 2
+
+
+@responses.activate
+def test_batch_too_many_parts_converges_below_100_cap():
+    """The retry budget lets the 1000-op default shrink below a ~100-part server
+    cap and keep batching (rather than giving up): the recorded size settles
+    between 1 and 100, every accepted batch fits the cap, and all rows arrive."""
+    import re
+
+    _mock_nested_metadata()
+    n = 1000
+    responses.get(f"{SERVICE_URL}Parents", json={"value": [{"Id": i} for i in range(1, n + 1)]})
+
+    accepted: list[int] = []
+    rejections = [0]
+
+    def cb(request):
+        reqs = json.loads(request.body)["requests"]
+        if len(reqs) > 100:  # server caps a batch at 100 parts
+            rejections[0] += 1
+            return (
+                400,
+                {"Content-Type": "application/json"},
+                json.dumps({"error": {"message": "OData batch message contains too many parts"}}),
+            )
+        accepted.append(len(reqs))
+        out = []
+        for r in reqs:
+            m = re.search(r"Parents\((\d+)\)/Children", r["url"])
+            rows = [{"Id": int(m.group(1)) * 1000 + 1}] if m else []
+            out.append({"id": r["id"], "status": 200, "body": {"value": rows}})
+        return (200, {"Content-Type": "application/json"}, json.dumps({"responses": out}))
+
+    responses.add_callback(responses.POST, f"{SERVICE_URL}$batch", callback=cb)
+
+    c = _make()
+    recs, _ = c.read_table("Parents__Children", {}, {})  # default batch (1000)
+    assert sorted(r["Id"] for r in recs) == sorted(i * 1000 + 1 for i in range(1, n + 1))
+    assert rejections[0] >= 1
+    # Converged below the cap and kept batching — NOT the give-up sentinel (1).
+    assert 1 < c.__dict__["_batch_size_cap"] <= 100
+    assert all(s <= 100 for s in accepted)
 
 
 # ---------------------------------------------------------------------------
