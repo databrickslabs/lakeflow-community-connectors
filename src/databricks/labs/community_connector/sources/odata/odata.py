@@ -764,7 +764,7 @@ class ODataLakeflowConnect(
                 if opts.get("cursor_field"):
                     opts.setdefault("page_size", _DEFAULT_PAGE_SIZE)
                 return self._with_capabilities(
-                    self._read_contained_expand(table_name, start_offset, opts)
+                    self._read_contained_expand(table_name, start_offset, opts), opts
                 )
             if opts.get("cursor_field"):
                 # Cursor-based read: default page_size so a $top is sent.
@@ -773,9 +773,10 @@ class ODataLakeflowConnect(
                 return self._with_capabilities(
                     self._read_contained_incremental(
                         table_name, start_offset, opts, opts["cursor_field"]
-                    )
+                    ),
+                    opts,
                 )
-            return self._with_capabilities(self._read_contained_snapshot(table_name, opts))
+            return self._with_capabilities(self._read_contained_snapshot(table_name, opts), opts)
         # Offset-shape check ahead of the delta predicate so a resumed
         # delta stream (offset carries delta_link / next_link) takes the
         # delta path even if delta_tracking is no longer set in options.
@@ -792,7 +793,7 @@ class ODataLakeflowConnect(
             # Snapshot (the branch below) leaves it unset → no $top.
             opts.setdefault("page_size", _DEFAULT_PAGE_SIZE)
             return self._with_capabilities(
-                self._read_incremental(table_name, start_offset, opts, opts["cursor_field"])
+                self._read_incremental(table_name, start_offset, opts, opts["cursor_field"]), opts
             )
         return self._read_snapshot(table_name, opts)
 
@@ -835,11 +836,34 @@ class ODataLakeflowConnect(
             add["batch_size_ok"] = self.__dict__["_batch_size_cap"]
         return {**offset, **add} if add else offset
 
-    def _with_capabilities(self, result: tuple) -> tuple:
-        """Wrap a ``(records, offset)`` read result, threading capability
-        verdicts into the offset (see :meth:`_merge_capability_caches`)."""
+    def _scrub_nonauto_verdicts(self, offset: dict, table_options: dict | None) -> dict:
+        """Drop persisted preflight verdicts whose governing option is **not**
+        ``auto``, so re-selecting ``auto`` later re-runs the preflight instead of
+        reusing a stale verdict. Respective ownership: ``cursor_probe`` owns its
+        nested-``$expand`` probe verdict (``cursor_probe_ok``); ``contained_fetch``
+        owns the ``$batch`` capability + discovered size (``batch_ok`` /
+        ``batch_size_ok``). ``auto`` / ``auto:<N>`` and unset (the default) keep
+        their verdicts. (Trade-off: a pinned non-auto mode re-runs its preflight
+        each microbatch, since its verdict no longer rides the offset.)"""
+        if not isinstance(offset, dict):
+            return offset
+        drop: set[str] = set()
+        if self._cursor_probe_mode(table_options) != "auto":
+            drop.add("cursor_probe_ok")
+        if not self._contained_fetch_is_auto(table_options):
+            drop |= {"batch_ok", "batch_size_ok"}
+        if not drop:
+            return offset
+        return {k: v for k, v in offset.items() if k not in drop}
+
+    def _with_capabilities(self, result: tuple, table_options: dict | None = None) -> tuple:
+        """Wrap a ``(records, offset)`` read result, threading capability verdicts
+        into the offset (see :meth:`_merge_capability_caches`) and then scrubbing
+        any whose governing option is non-``auto`` (see
+        :meth:`_scrub_nonauto_verdicts`)."""
         records, offset = result
-        return records, self._merge_capability_caches(offset)
+        offset = self._merge_capability_caches(offset)
+        return records, self._scrub_nonauto_verdicts(offset, table_options)
 
     # ------------------------------------------------------------------
     # Snapshot + incremental read paths

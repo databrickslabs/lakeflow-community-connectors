@@ -1807,6 +1807,14 @@ class ContainedNavMixin:
             return False
         return self._contained_fetch_batch_size(table_options) > 1  # bare integer
 
+    def _contained_fetch_is_auto(self, table_options: dict[str, str] | None) -> bool:
+        """``True`` when ``contained_fetch`` is the ``auto`` family (``auto`` or
+        ``auto:<N>``), including the unset default. Used to decide whether the
+        persisted ``$batch`` verdicts should be cleared on a non-``auto`` run so
+        a later switch back to ``auto`` re-runs the preflight."""
+        raw = ((table_options or {}).get("contained_fetch") or "auto").strip().lower()
+        return raw.partition(":")[0] == "auto"
+
     def _contained_fetch_batch_n(
         self, segments: list[str], table_options: dict[str, str] | None
     ) -> int:

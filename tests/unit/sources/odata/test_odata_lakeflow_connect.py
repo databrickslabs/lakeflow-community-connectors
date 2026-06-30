@@ -8244,8 +8244,10 @@ def test_cursor_probe_read_table_raises_when_server_misorders_inner_expand():
 
 @responses.activate
 def test_cursor_probe_conclusive_pass_persists_ok_flag_in_offset():
-    """A conclusive preflight pass stamps ``cursor_probe_ok`` into the resume
-    offset, so a per-batch-recreated reader can trust it next batch."""
+    """Under ``cursor_probe=auto`` a conclusive preflight pass stamps
+    ``cursor_probe_ok`` into the resume offset, so a per-batch-recreated reader
+    can trust it next batch. (Non-``auto`` modes don't persist it — see
+    ``test_nonauto_clears_recorded_preflight_verdicts``.)"""
     _mock_probe_metadata()
     since = "2020-01-01T00:00:00Z"
     responses.get(f"{SERVICE_URL}Roots", json={"value": [{"Id": 1}]})
@@ -8271,7 +8273,7 @@ def test_cursor_probe_conclusive_pass_persists_ok_flag_in_offset():
         {"cursor": since},
         {
             "cursor_field": "RecordLastModified",
-            "cursor_probe": "nested-expand",
+            "cursor_probe": "auto",
             "pagination": "nextlink",
         },
     )
@@ -8309,7 +8311,7 @@ def test_cursor_probe_offset_flag_skips_preflight_requests():
         {"cursor": since, "cursor_probe_ok": True},
         {
             "cursor_field": "RecordLastModified",
-            "cursor_probe": "nested-expand",
+            "cursor_probe": "auto",
             "pagination": "nextlink",
         },
     )
@@ -9245,8 +9247,72 @@ def test_cursor_probe_nested_expand_hydrates_dirty_via_batch():
     assert any("Mids(21)/Leaves" in u for u in responder.seen)
     # Clean leaf-parents are never hydrated.
     assert not any("Mids(11)/Leaves" in u or "Mids(20)/Leaves" in u for u in responder.seen)
-    assert offset.get("cursor_probe_ok") is True
+    # cursor_probe=nested-expand is non-auto → its probe verdict is scrubbed from
+    # the offset (so a later switch to auto re-probes). batch_ok is owned by
+    # contained_fetch (default auto here) and persists.
+    assert "cursor_probe_ok" not in offset
     assert offset.get("batch_ok") is True
+
+
+@responses.activate
+def test_nonauto_clears_recorded_preflight_verdicts():
+    """A non-``auto`` option scrubs its recorded preflight verdict from the
+    outgoing offset, so re-selecting ``auto`` later re-runs the preflight:
+    ``cursor_probe`` non-auto drops ``cursor_probe_ok``; ``contained_fetch``
+    non-auto drops the ``$batch`` verdicts (``batch_ok`` / ``batch_size_ok``)."""
+    _mock_probe_metadata()
+    c = _make()
+
+    # contained_fetch=single (non-auto): a previously-recorded $batch verdict in
+    # the incoming offset is not carried forward.
+    responses.get(f"{SERVICE_URL}Roots", json={"value": [{"Id": 1}]})
+    responses.get(
+        f"{SERVICE_URL}Roots(1)/Mids",
+        json={"value": [{"Id": 10}]},
+    )
+    responses.get(
+        f"{SERVICE_URL}Roots(1)/Mids(10)/Leaves",
+        json={"value": [{"Id": 1001, "RecordLastModified": "2020-06-01T00:00:00Z"}]},
+        match_querystring=False,
+    )
+    _, offset = c.read_table(
+        PROBE_TABLE,
+        {"cursor": "2020-01-01T00:00:00Z", "batch_ok": True, "batch_size_ok": 200},
+        {
+            "cursor_field": "RecordLastModified",
+            "cursor_probe": "false",  # non-auto → drops cursor_probe_ok (absent here)
+            "contained_fetch": "single",  # non-auto → drops batch_ok / batch_size_ok
+            "pagination": "nextlink",
+        },
+    )
+    assert "batch_ok" not in offset
+    assert "batch_size_ok" not in offset
+
+
+@responses.activate
+def test_auto_retains_recorded_preflight_verdicts():
+    """``auto`` (default) keeps its recorded verdicts in the offset so a
+    recreated reader skips the preflight — the counterpart to the scrub."""
+    _mock_probe_metadata()
+    c = _make()
+    responses.get(f"{SERVICE_URL}Roots", json={"value": [{"Id": 1}]})
+    responses.get(
+        f"{SERVICE_URL}Roots(1)/Mids",
+        json={"value": [{"Id": 10}]},
+    )
+    responses.get(
+        f"{SERVICE_URL}Roots(1)/Mids(10)/Leaves",
+        json={"value": [{"Id": 1001, "RecordLastModified": "2020-06-01T00:00:00Z"}]},
+        match_querystring=False,
+    )
+    _, offset = c.read_table(
+        PROBE_TABLE,
+        {"cursor": "2020-01-01T00:00:00Z", "batch_ok": True, "batch_size_ok": 200},
+        {"cursor_field": "RecordLastModified", "cursor_probe": "auto", "pagination": "nextlink"},
+    )
+    # Both options default/auto → the seeded verdicts survive.
+    assert offset.get("batch_ok") is True
+    assert offset.get("batch_size_ok") == 200
 
 
 @responses.activate
