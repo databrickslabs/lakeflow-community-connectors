@@ -62,7 +62,7 @@ The port may differ from 9876 if that port is already in use.
 
 ## Important Notes
 
-- **OAuth connectors**: when `connector_spec.yaml` declares a `connection.oauth` block, the script runs the OAuth 2.0 authorization-code flow instead of a plain form — the user provides their `client_id` + `client_secret`, then logs in and authorizes in the browser, and the script obtains the token automatically. The OAuth app in the source must have the script's redirect URI registered. Otherwise the steps are identical.
+- **OAuth connectors**: when `connector_spec.yaml` declares a `connection.oauth` block with an interactive flow (`u2m` / `u2m_per_user`), the script runs the OAuth 2.0 authorization-code flow instead of a plain form — the user provides their `client_id` + `client_secret`, then logs in and authorizes in the browser, and the script obtains the token automatically. The OAuth app in the source must have the script's redirect URI registered. (The script does not run the `m2m` client-credentials grant; for an `m2m` connector the user just supplies `client_id` + `client_secret`.) Otherwise the steps are identical.
 - This skill is **interactive** — the script blocks until the user submits the browser form.
 - The caller must be able to run Bash in the background and communicate with the user (e.g., via `AskUserQuestion`) while the script is running.
 - The script automatically shuts down after the user submits the form.
