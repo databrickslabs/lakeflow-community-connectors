@@ -1,10 +1,19 @@
-import requests
 import json
-from pyspark.sql.types import *
-from datetime import datetime, timezone
 import time
-import random
-from typing import Dict, List, Tuple, Iterator, Any
+from datetime import datetime, timezone
+from typing import Dict, Iterator, List, Tuple
+
+import requests
+from pyspark.sql.types import (
+    ArrayType,
+    BooleanType,
+    DataType,
+    LongType,
+    StringType,
+    StructField,
+    StructType,
+)
+
 from databricks.labs.community_connector.interface import LakeflowConnect
 
 
@@ -181,8 +190,11 @@ class HubspotLakeflowConnect(LakeflowConnect):
         """
         supported_tables = self.list_tables()
         if table_name not in supported_tables:
-            raise ValueError(f"Unsupported table: {table_name}. Supported tables are: {supported_tables}")
-        
+            raise ValueError(
+                f"Unsupported table: {table_name}. "
+                f"Supported tables are: {supported_tables}"
+            )
+
         # Check cache first
         if table_name in self._schema_cache:
             return self._schema_cache[table_name]
@@ -230,8 +242,11 @@ class HubspotLakeflowConnect(LakeflowConnect):
         """
         supported_tables = self.list_tables()
         if table_name not in supported_tables:
-            raise ValueError(f"Unsupported table: {table_name}. Supported tables are: {supported_tables}")
-        
+            raise ValueError(
+                f"Unsupported table: {table_name}. "
+                f"Supported tables are: {supported_tables}"
+            )
+
         # Check cache first
         if table_name in self._metadata_cache:
             return self._metadata_cache[table_name]
@@ -337,11 +352,19 @@ class HubspotLakeflowConnect(LakeflowConnect):
         try:
             resp = requests.get(url, headers=self.auth_header, timeout=60)
             if resp.status_code != 200:
-                raise Exception("API error: {resp.status_code} {resp.text}")
+                raise RuntimeError(
+                    f"HubSpot Properties API error for {object_type}: "
+                    f"{resp.status_code} {resp.text}"
+                )
 
             return resp.json()
         except Exception as e:
-            return {"error": f"Failed to get object properties: {str(e)}"}
+            # Re-raise (don't return an error dict): callers iterate this as a
+            # list of property dicts, so a dict here turns a real API error into
+            # an unrelated TypeError far downstream.
+            raise RuntimeError(
+                f"Failed to get object properties for {object_type}: {e}"
+            ) from e
 
     def _map_hubspot_type_to_spark(self, hubspot_type: str) -> DataType:
         """
@@ -379,14 +402,22 @@ class HubspotLakeflowConnect(LakeflowConnect):
         """
         supported_tables = self.list_tables()
         if table_name not in supported_tables:
-            raise ValueError(f"Unsupported table: {table_name}. Supported tables are: {supported_tables}")
+            raise ValueError(
+                f"Unsupported table: {table_name}. "
+                f"Supported tables are: {supported_tables}"
+            )
 
         # Determine if this is an incremental read
         is_incremental = (
             start_offset is not None and start_offset.get("updatedAt") is not None
         )
 
-        return self._read_data(table_name, start_offset, incremental=is_incremental, table_options=table_options)
+        return self._read_data(
+            table_name,
+            start_offset,
+            incremental=is_incremental,
+            table_options=table_options,
+        )
 
     def read_table_deletes(
         self, table_name: str, start_offset: dict, table_options: Dict[str, str]
@@ -396,7 +427,7 @@ class HubspotLakeflowConnect(LakeflowConnect):
 
         HubSpot uses "archived" status to represent deleted records. This method
         fetches all archived records and filters them client-side for incremental reads.
-        
+
         Internally uses archivedAt for filtering, but copies it to updatedAt in the
         output records and offset for consistency with the normal read flow cursor.
 
@@ -411,7 +442,10 @@ class HubspotLakeflowConnect(LakeflowConnect):
         """
         supported_tables = self.list_tables()
         if table_name not in supported_tables:
-            raise ValueError(f"Unsupported table: {table_name}. Supported tables are: {supported_tables}")
+            raise ValueError(
+                f"Unsupported table: {table_name}. "
+                f"Supported tables are: {supported_tables}"
+            )
 
         # Short-circuit once the cursor has caught up to the init-time cap,
         # so Trigger.AvailableNow can terminate.
@@ -680,7 +714,7 @@ class HubspotLakeflowConnect(LakeflowConnect):
 
     def _sanitize_properties(self, properties: Dict) -> Dict:
         """Convert empty strings to None in properties dict.
-        
+
         HubSpot API returns empty strings "" instead of null for many fields,
         which causes issues when parsing to typed schemas (e.g., LongType).
         """
