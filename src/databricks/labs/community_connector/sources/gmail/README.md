@@ -13,16 +13,18 @@ This documentation describes how to configure and use the **Gmail** Lakeflow com
 
 ## Authentication model
 
-This connector is built for the Unity Catalog **COMMUNITY** connection type with one of the U2M OAuth flows:
+This connector authenticates with Google via OAuth 2.0 on a Unity Catalog **COMMUNITY** connection. You register a Google OAuth app and supply its `client_id` + `client_secret`; Databricks runs the sign-in and consent, then obtains and refreshes the token for you. You never paste a token into the connector.
 
-| Flow | When to pick it |
-|---|---|
-| `u2m` | One human authorizes once at connection creation; every pipeline using the connection sees that human's mail. Good for personal or team-shared mailboxes. |
-| `u2m_per_user` | Each end user who queries the connection authorizes separately. Databricks resolves the right token per query at runtime. Good for apps where each user sees their own mail. |
+You choose between two modes when creating the connection, depending on **whose mailbox** the connection reads:
 
-Databricks owns the OAuth dance — authorization-code + PKCE exchange, refresh, per-user token mapping. The connector receives only a runtime `access_token` and treats it as opaque. There is no longer a need to capture a refresh token via Postman or curl.
+| Mode | Whose mail it reads | Good for |
+|---|---|---|
+| Shared mailbox (default) | One person authorizes once; every pipeline on the connection reads that mailbox. | Personal or team-shared mailboxes. |
+| Per-user | Each Databricks user who queries authorizes their own Google account; each sees only their own mail. | Apps serving many users. |
 
-If a token expires or is revoked mid-query, Gmail returns 401; re-run the connection setup to re-consent.
+The default (shared mailbox) needs no extra flag. To use per-user, pass `--auth-type u2m_per_user` when creating the connection (see Step 4).
+
+If a token expires or is revoked mid-query, Gmail returns 401; re-run the connection setup to re-authorize.
 
 ## Setup
 
@@ -47,11 +49,17 @@ If a token expires or is revoked mid-query, Gmail returns 401; re-run the connec
 1. **APIs & Services → Credentials → Create Credentials → OAuth client ID**.
 2. **Application type**: **Web application**.
 3. Name it (e.g. `Gmail Lakeflow Web Client`).
-4. **Authorized redirect URIs**: add the loopback URI the Databricks community-connector CLI listens on:
-   ```
-   http://localhost
-   ```
-   The CLI picks a free port at run time and registers `http://127.0.0.1:<port>/callback`. Google requires the host to be listed; the port is not part of the matching rule.
+4. **Authorized redirect URIs**: add the redirect URI(s) for the way(s) you'll create the connection. Add both if you'll use both.
+   - **Databricks UI flow** (creating the connection from the **Add Data** page): add your workspace's redirect URL, substituting your own workspace host:
+     ```
+     https://<your-workspace-url>/login/oauth/http.html
+     ```
+     This must match exactly (scheme, host, path). If it's missing, the Google consent popup fails with `Error 400: redirect_uri_mismatch`.
+   - **`community-connector` CLI flow**: add the loopback host the CLI listens on:
+     ```
+     http://localhost
+     ```
+     The CLI picks a free port at run time and registers `http://127.0.0.1:<port>/callback`. Google requires the host to be listed; the port is not part of the matching rule, so no workspace URL is needed for the CLI.
 5. **Create**, then copy and save:
    - **Client ID** (e.g. `123456789-abc.apps.googleusercontent.com`)
    - **Client Secret** (e.g. `GOCSPX-xxxx...`)
@@ -63,13 +71,10 @@ If a token expires or is revoked mid-query, Gmail returns 401; re-run the connec
 ### Step 4 — Create the Unity Catalog COMMUNITY connection
 
 The connection can be created either through the Databricks UI or the
-`community-connector` CLI. Both run the same u2m authorization-code flow
-against Google — your browser opens, you sign in and grant consent, and
-Databricks stores the resulting grant. The connector spec ships with the
-OAuth flow definition baked in — `flow`, `scopes`, and Google's
-`authorization_url` / `token_url` (see the `connection.oauth` block in
-`connector_spec.yaml`) — so you only ever supply the OAuth app identity
-(`client_id` + `client_secret`).
+`community-connector` CLI. Either way your browser opens, you sign in to
+Google and grant consent, and Databricks stores the result. You only
+supply the OAuth app identity (`client_id` + `client_secret`) — the scope
+and Google's endpoints come from the connector spec.
 
 #### Option A — Databricks UI
 
@@ -79,48 +84,28 @@ A Unity Catalog connection for this connector can be created in two ways via the
 2. Select any existing Lakeflow Community Connector connection for this source or create a new one.
 3. Supply the OAuth app identity (`client_id` + `client_secret`) and complete the in-browser Google consent when prompted; the `gmail.readonly` scope and Google's authorization / token URLs come from the connector spec.
 
+> **Before using the UI flow**, make sure your OAuth client lists `https://<your-workspace-url>/login/oauth/http.html` under **Authorized redirect URIs** (Step 3). The UI flow redirects back to your workspace, not to a loopback, so without it Google rejects the consent popup with `redirect_uri_mismatch`.
+
 The connection can also be created using the standard Unity Catalog API.
 
 #### Option B — `community-connector` CLI
 
-Run the `community-connector` CLI. The `--auth-type u2m` flag triggers an in-process loopback authorization-code + PKCE flow against Google; your browser opens, you sign in and grant consent, and the CLI captures the authorization code and registers it with the Databricks connection. You only supply the OAuth app identity (`client_id` + `client_secret`):
+Run the `community-connector` CLI. Your browser opens, you sign in to Google and grant consent, and the CLI registers the result with the Databricks connection. You only supply the OAuth app identity (`client_id` + `client_secret`):
 
 ```bash
-community-connector create-connection \
-  --name gmail_connector \
-  --source-name gmail \
-  --auth-type u2m \
-  --options '{
-    "client_id": "<YOUR_CLIENT_ID>",
-    "client_secret": "<YOUR_CLIENT_SECRET>"
-  }'
+community-connector create_connection gmail gmail_connector \
+  -o '{"client_id": "<YOUR_CLIENT_ID>", "client_secret": "<YOUR_CLIENT_SECRET>"}'
 ```
 
-For per-user authorization (one Databricks connection serving many end users, each consenting independently):
+This creates a **shared-mailbox** connection (the default). For a **per-user** connection where each Databricks user reads their own mail, add `--auth-type u2m_per_user`:
 
 ```bash
-community-connector create-connection \
-  --name gmail_connector_per_user \
-  --source-name gmail \
+community-connector create_connection gmail gmail_connector_per_user \
   --auth-type u2m_per_user \
-  --options '{
-    "client_id": "<YOUR_CLIENT_ID>",
-    "client_secret": "<YOUR_CLIENT_SECRET>"
-  }'
+  -o '{"client_id": "<YOUR_CLIENT_ID>", "client_secret": "<YOUR_CLIENT_SECRET>"}'
 ```
 
-What ends up in the connection vs the connector:
-
-| Layer | Keys | Source |
-|---|---|---|
-| Connection (UC) | `client_id`, `client_secret` | you |
-| Connection (UC) | `flow`, `scopes`, `authorization_url`, `token_url` | spec `connection.oauth` block |
-| Connection (UC) | `community_oauth_flow` | derived from the spec's `oauth.flow` (`u2m` / `u2m_per_user`) |
-| Connection (UC) | `authorization_code`, `pkce_verifier`, `oauth_redirect_uri` | CLI's loopback flow |
-| Connector (runtime) | `access_token` | UC mints + refreshes from the stored grant |
-| Connector (runtime) | `user_id` (optional) | you, via pipeline spec; defaults to `me` |
-
-You never set `access_token` manually — UC handles it.
+You only ever provide `client_id` and `client_secret`. The scope and Google's endpoints come from the connector spec, and the access token that authenticates each API call is minted and refreshed by Databricks — you never set it manually. The only other value you may set is the optional `user_id` (via the pipeline spec; defaults to `me`).
 
 ## Supported Objects
 
@@ -472,8 +457,14 @@ Run the pipeline using your standard Lakeflow / Databricks orchestration:
 
 **API and Authentication Issues:**
 
+- **`Error 400: redirect_uri_mismatch` in the consent popup**:
+  - The redirect URI Databricks sent isn't registered on your OAuth client. For the UI flow, add `https://<your-workspace-url>/login/oauth/http.html` (your actual workspace host) under **Authorized redirect URIs** in Google Cloud Console (Step 3). For the CLI, register the `http://localhost` loopback host.
+
+- **`Error 401: invalid_client` ("The OAuth client was not found")**:
+  - The `client_id` sent to Google doesn't match an existing client. Re-check the `client_id` on the connection for typos/whitespace, confirm it's the **Web application** client (not a Desktop/CLI-only client), and that it lives in the same Google Cloud project where you configured the consent screen.
+
 - **Authentication failures (`401 Unauthorized`)**:
-  - The injected `access_token` has expired or been revoked — re-run the connection setup to re-consent through the u2m flow
+  - The injected `access_token` has expired or been revoked — re-run the connection setup to sign in and re-authorize
   - Verify the connection's `client_id` and `client_secret` match the OAuth client registered in Google Cloud Console
   - Check that the OAuth consent screen includes the `gmail.readonly` scope
 

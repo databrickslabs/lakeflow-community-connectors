@@ -122,7 +122,7 @@ community-connector show_pipeline my_github_pipeline
 
 ### `create_connection`
 
-Create a Unity Catalog connection for Lakeflow connectors.
+Create a Unity Catalog connection (type `COMMUNITY`) for Lakeflow connectors.
 
 The CLI validates connection options against the connector spec (`connector_spec.yaml`) and automatically configures the `externalOptionsAllowList` based on:
 1. Source-specific options from the connector spec
@@ -146,6 +146,8 @@ community-connector create_connection github my_github_conn \
 | Option | Short | Description |
 |--------|-------|-------------|
 | `--options` | `-o` | Connection options as JSON string (required) |
+| `--auth-type` | | Authentication mode: `static`, `m2m`, `u2m`, or `u2m_per_user`. Optional — when omitted it is taken from the connector spec's `oauth.flow` (or `static` if the spec has no `oauth` block). Pass it only to override the spec. |
+| `--redirect-port` | | Loopback port for the `u2m` OAuth redirect. Defaults to an OS-assigned free port. |
 | `--spec` | `-s` | Optional: local path to connector_spec.yaml, or a GitHub repo URL |
 
 **Validation:**
@@ -153,9 +155,34 @@ community-connector create_connection github my_github_conn \
 - Unknown parameters generate a warning
 - `externalOptionsAllowList` is automatically set if not provided
 
+#### Authentication modes
+
+The `COMMUNITY` connection supports static credentials plus three OAuth 2.0 modes. The mode is selected by `--auth-type`, or derived from the connector spec's `connection.oauth.flow` when `--auth-type` is omitted. OAuth modes set the connection's `community_oauth_flow` automatically.
+
+| Mode | What it is | Required options* |
+|------|------------|-------------------|
+| `static` | Arbitrary key/value credentials (token, API key, username/secret, …). No OAuth flow. | per connector spec |
+| `m2m` | Client-credentials OAuth (no human). | `client_id`, `client_secret`, `token_endpoint` |
+| `u2m` | One human authorizes once at connection creation. The CLI opens a browser, runs the authorization-code (+PKCE) flow against a `127.0.0.1` loopback redirect, and registers the captured grant. | `client_id`, `client_secret`, `authorization_endpoint`, `token_endpoint` |
+| `u2m_per_user` | Each end user authorizes separately; UC resolves the right token per query at runtime. The connection stores only app config. | `client_id`, `client_secret`, `authorization_endpoint`, `token_endpoint` |
+
+\* For OAuth modes the spec's `oauth` block supplies the endpoints and scope, so in practice the user passes only `client_id` + `client_secret`. The OAuth-issued token is injected into the connector at query time — it is never entered by hand. Spec keys `authorization_url` / `token_url` / `scopes` are accepted as aliases for the RFC 6749 names.
+
+```bash
+# OAuth connector whose spec declares oauth.flow — no --auth-type needed.
+# A u2m flow opens a browser for the user to sign in and grant consent.
+community-connector create_connection gmail my_gmail_conn \
+  -o '{"client_id":"<id>.apps.googleusercontent.com","client_secret":"<secret>"}'
+
+# Override the auth type explicitly (e.g. m2m), supplying the token endpoint:
+community-connector create_connection github my_github_conn \
+  --auth-type m2m \
+  -o '{"client_id":"...","client_secret":"...","token_endpoint":"https://idp/token"}'
+```
+
 ### `update_connection`
 
-Update an existing Unity Catalog connection.
+Update an existing Unity Catalog connection. The auth mode is fixed at creation time; for a `u2m` connection, re-running `update_connection` re-runs the browser authorization flow to refresh the OAuth grant.
 
 ```bash
 # Basic usage - same validation and auto-configuration as create
@@ -165,12 +192,18 @@ community-connector update_connection github my_github_conn \
 # With custom spec
 community-connector update_connection github my_github_conn \
   -o '{"token": "ghp_xxxx"}' --spec ./my_connector_spec.yaml
+
+# Refresh a u2m OAuth grant (re-opens the browser to re-consent)
+community-connector update_connection gmail my_gmail_conn \
+  -o '{"client_id":"...","client_secret":"..."}'
 ```
 
 **Options:**
 | Option | Short | Description |
 |--------|-------|-------------|
 | `--options` | `-o` | Connection options as JSON string (required) |
+| `--auth-type` | | Authentication mode. Optional — defaults to the spec's `oauth.flow` (or `static`). Must match the connection's existing mode. |
+| `--redirect-port` | | Loopback port for the `u2m` OAuth redirect. Defaults to an OS-assigned free port. |
 | `--spec` | `-s` | Optional: local path to connector_spec.yaml, or a GitHub repo URL |
 
 ### `upload`
