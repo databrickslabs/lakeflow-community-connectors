@@ -1,17 +1,12 @@
 # Gmail API Client Utilities
 # Handles HTTP requests, batch operations, and parallel fetching against the
-# Gmail API. The client supports two auth modes, selected by which
-# credentials the connection supplied:
+# Gmail API.
 #
-# 1. Pre-issued access token — the Unity Catalog COMMUNITY connection
-#    (u2m / u2m_per_user OAuth flow) owns the OAuth dance and injects a fresh
-#    bearer token at query time. Treated as opaque: no refresh, no token
-#    endpoint. A 401 means the token expired / was revoked and the user
-#    re-authorizes through the connection.
-# 2. In-code refresh — a connection created before the u2m migration stores
-#    client_id + client_secret + refresh_token; the client exchanges the
-#    refresh token for short-lived access tokens at Google's token endpoint
-#    and caches them. Keeps those older connections working.
+# Authentication is a pre-issued access token — the Unity Catalog COMMUNITY
+# connection (u2m / u2m_per_user OAuth flow) owns the OAuth dance and injects
+# a fresh bearer token at query time. Treated as opaque: no refresh, no token
+# endpoint. A 401 means the token expired / was revoked and the user
+# re-authorizes through the connection.
 
 import json
 import time
@@ -27,75 +22,29 @@ MAX_WORKERS = 3  # Concurrent workers for parallel fetching
 
 
 class GmailApiClient:
-    """Gmail HTTP client supporting two OAuth modes.
+    """Gmail HTTP client authenticated with a pre-issued access token.
 
-    Pass a pre-issued ``access_token`` (UC COMMUNITY u2m / u2m_per_user flow
-    injects it) for the opaque-token mode, or pass ``client_id`` +
-    ``client_secret`` + ``refresh_token`` for the in-code refresh mode used
-    by connections created before the u2m migration. The access-token mode
-    takes precedence when both are present.
+    The ``access_token`` is injected by the Unity Catalog COMMUNITY
+    connection's u2m / u2m_per_user OAuth flow and treated as opaque — the
+    client never refreshes it or contacts a token endpoint.
     """
 
     BASE_URL = "https://gmail.googleapis.com/gmail/v1"
     BATCH_URL = "https://gmail.googleapis.com/batch/gmail/v1"
-    TOKEN_URL = "https://oauth2.googleapis.com/token"
 
     def __init__(
         self,
-        access_token: Optional[str] = None,
+        access_token: str,
         user_id: str = "me",
-        *,
-        client_id: Optional[str] = None,
-        client_secret: Optional[str] = None,
-        refresh_token: Optional[str] = None,
     ) -> None:
         self.user_id = user_id
         self._session = requests.Session()
-
-        # Mode 1: opaque pre-issued bearer token (no refresh in code).
         self.access_token = access_token
-
-        # Mode 2: in-code refresh credentials + cached short-lived token.
-        self.client_id = client_id
-        self.client_secret = client_secret
-        self.refresh_token = refresh_token
-        self._refreshed_token: Optional[str] = None
-        self._token_expires_at = 0.0
-
-    def get_access_token(self) -> str:
-        """Return a valid bearer token for the active auth mode.
-
-        Opaque-token mode returns the injected token verbatim. Refresh mode
-        exchanges the refresh token at Google's token endpoint, caching the
-        result until ~60s before expiry.
-        """
-        if self.access_token:
-            return self.access_token
-
-        if self._refreshed_token and time.time() < self._token_expires_at - 60:
-            return self._refreshed_token
-
-        response = requests.post(
-            self.TOKEN_URL,
-            data={
-                "client_id": self.client_id,
-                "client_secret": self.client_secret,
-                "refresh_token": self.refresh_token,
-                "grant_type": "refresh_token",
-            },
-            timeout=30,
-        )
-        response.raise_for_status()
-        data = response.json()
-
-        self._refreshed_token = data["access_token"]
-        self._token_expires_at = time.time() + data.get("expires_in", 3600)
-        return self._refreshed_token
 
     def get_headers(self) -> Dict[str, str]:
         """Bearer-token headers for Gmail API calls."""
         return {
-            "Authorization": f"Bearer {self.get_access_token()}",
+            "Authorization": f"Bearer {self.access_token}",
             "Accept": "application/json",
         }
 
