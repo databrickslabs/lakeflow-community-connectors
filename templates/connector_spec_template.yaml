@@ -85,7 +85,7 @@ connection:
   # Add this block to make the connector use a Unity Catalog COMMUNITY
   # connection in one of the OAuth auth modes instead of static credentials.
   # The connection layer (UC, or the labs authenticate tool for local dev)
-  # runs the OAuth flow and injects a bearer token into the connector's
+  # runs the OAuth flow and injects an access token into the connector's
   # options at query time — the user only supplies their OAuth app's
   # `client_id` + `client_secret`, never a token.
   #

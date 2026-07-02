@@ -72,7 +72,7 @@ connection:
 
 ### OAuth 2.0 Connections (the `oauth` block)
 
-If the source authenticates via OAuth 2.0, add a `connection.oauth` block. This makes the connector use a Unity Catalog **COMMUNITY** connection in an OAuth auth mode instead of static credentials. The connection layer (UC, or the labs authenticate tool for local dev) runs the OAuth flow and **injects a bearer token into the connector's options at query time** — the user only supplies their OAuth app's `client_id` + `client_secret`, never a token.
+If the source authenticates via OAuth 2.0, add a `connection.oauth` block. This makes the connector use a Unity Catalog **COMMUNITY** connection in an OAuth auth mode instead of static credentials. The connection layer (UC, or the labs authenticate tool for local dev) runs the OAuth flow and **injects an access token into the connector's options at query time** — the user only supplies their OAuth app's `client_id` + `client_secret`, never a token.
 
 **This is where the OAuth flow is chosen.** Selecting the right auth mode (`m2m` vs `u2m` vs `u2m_per_user`) is a research/build-time decision you make here from the source's supported grant types and the connector's intended access pattern. Once it is recorded in `oauth.flow`, the rest of the lifecycle (connection creation, deployment, end-user docs) just follows the spec — no one re-picks the mode downstream.
 

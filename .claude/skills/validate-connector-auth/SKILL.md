@@ -148,6 +148,6 @@ Debug if authentication fails and report the issue clearly.
 
 ## Edge Cases
 
-- **OAuth 2.0**: When the spec declares a `connection.oauth` block, the auth test obtains a bearer token per the spec's `flow` and then calls the API with it. For `m2m` (client-credentials), POST `client_id` + `client_secret` (+ `scopes`) to `token_url` to get an access token — no user, no refresh token. For `u2m` / `u2m_per_user`, the collected credentials typically include `client_id`, `client_secret`, and a `refresh_token`; exchange the refresh token for an access token first.
+- **OAuth 2.0**: When the spec declares a `connection.oauth` block, the auth test obtains an access token per the spec's `flow` and calls the API with it as a Bearer credential (`Authorization: Bearer <access_token>`). For `m2m` (client-credentials), POST `client_id` + `client_secret` (+ `scopes`) to `token_url` to get the access token — no user, no refresh token. For `u2m` / `u2m_per_user`, the collected credentials typically include `client_id`, `client_secret`, and a `refresh_token`; exchange the refresh token for an access token first.
 - **Subdomain-based URLs**: Build the base URL from the `subdomain` field in config.
 - **Multiple auth methods**: Use whichever method's credentials are present in the supplied config.
