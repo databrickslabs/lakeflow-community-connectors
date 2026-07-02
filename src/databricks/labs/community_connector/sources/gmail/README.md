@@ -6,7 +6,7 @@ This documentation describes how to configure and use the **Gmail** Lakeflow com
 
 - **Google Account**: A Google account with Gmail access (personal Gmail or Google Workspace).
 - **Google Cloud Project**: A project in Google Cloud Console with the Gmail API enabled.
-- **Google OAuth client** (Web application): a `client_id` + `client_secret` pair you'll register with Databricks at connection-creation time. Databricks runs the user-facing OAuth flow against this client; you never paste a refresh token into the connector yourself.
+- **Google OAuth client** (Web application): a `client_id` + `client_secret` pair you'll register with Databricks at connection-creation time. Databricks runs the user-facing OAuth flow against this client; you never paste a token into the connector yourself.
 - **OAuth scope** (must be granted at consent time): `https://www.googleapis.com/auth/gmail.readonly`
 - **Network access**: The cluster must be able to reach `https://gmail.googleapis.com`.
 - **Lakeflow / Databricks environment**: A workspace where you can register a Lakeflow community connector and run ingestion pipelines.
