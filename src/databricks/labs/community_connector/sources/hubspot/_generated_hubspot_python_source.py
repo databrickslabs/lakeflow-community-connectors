@@ -28,9 +28,26 @@ from pyspark.sql.datasource import (
     SimpleDataSourceStreamReader,
 )
 from pyspark.sql.streaming.datasource import ReadAllAvailable, SupportsTriggerAvailableNow
-from pyspark.sql.types import *
+from pyspark.sql.types import (
+    ArrayType,
+    BinaryType,
+    BooleanType,
+    DataType,
+    DateType,
+    DecimalType,
+    DoubleType,
+    FloatType,
+    IntegerType,
+    LongType,
+    MapType,
+    StringType,
+    StructField,
+    StructType,
+    TimestampType,
+    VariantType,
+    VariantVal,
+)
 import base64
-import random
 import requests
 
 
@@ -756,7 +773,10 @@ def register_lakeflow_source(spark):
             """
             supported_tables = self.list_tables()
             if table_name not in supported_tables:
-                raise ValueError(f"Unsupported table: {table_name}. Supported tables are: {supported_tables}")
+                raise ValueError(
+                    f"Unsupported table: {table_name}. "
+                    f"Supported tables are: {supported_tables}"
+                )
 
             # Check cache first
             if table_name in self._schema_cache:
@@ -805,7 +825,10 @@ def register_lakeflow_source(spark):
             """
             supported_tables = self.list_tables()
             if table_name not in supported_tables:
-                raise ValueError(f"Unsupported table: {table_name}. Supported tables are: {supported_tables}")
+                raise ValueError(
+                    f"Unsupported table: {table_name}. "
+                    f"Supported tables are: {supported_tables}"
+                )
 
             # Check cache first
             if table_name in self._metadata_cache:
@@ -912,11 +935,19 @@ def register_lakeflow_source(spark):
             try:
                 resp = requests.get(url, headers=self.auth_header, timeout=60)
                 if resp.status_code != 200:
-                    raise Exception("API error: {resp.status_code} {resp.text}")
+                    raise RuntimeError(
+                        f"HubSpot Properties API error for {object_type}: "
+                        f"{resp.status_code} {resp.text}"
+                    )
 
                 return resp.json()
             except Exception as e:
-                return {"error": f"Failed to get object properties: {str(e)}"}
+                # Re-raise (don't return an error dict): callers iterate this as a
+                # list of property dicts, so a dict here turns a real API error into
+                # an unrelated TypeError far downstream.
+                raise RuntimeError(
+                    f"Failed to get object properties for {object_type}: {e}"
+                ) from e
 
         def _map_hubspot_type_to_spark(self, hubspot_type: str) -> DataType:
             """
@@ -954,14 +985,22 @@ def register_lakeflow_source(spark):
             """
             supported_tables = self.list_tables()
             if table_name not in supported_tables:
-                raise ValueError(f"Unsupported table: {table_name}. Supported tables are: {supported_tables}")
+                raise ValueError(
+                    f"Unsupported table: {table_name}. "
+                    f"Supported tables are: {supported_tables}"
+                )
 
             # Determine if this is an incremental read
             is_incremental = (
                 start_offset is not None and start_offset.get("updatedAt") is not None
             )
 
-            return self._read_data(table_name, start_offset, incremental=is_incremental, table_options=table_options)
+            return self._read_data(
+                table_name,
+                start_offset,
+                incremental=is_incremental,
+                table_options=table_options,
+            )
 
         def read_table_deletes(
             self, table_name: str, start_offset: dict, table_options: Dict[str, str]
@@ -986,7 +1025,10 @@ def register_lakeflow_source(spark):
             """
             supported_tables = self.list_tables()
             if table_name not in supported_tables:
-                raise ValueError(f"Unsupported table: {table_name}. Supported tables are: {supported_tables}")
+                raise ValueError(
+                    f"Unsupported table: {table_name}. "
+                    f"Supported tables are: {supported_tables}"
+                )
 
             # Short-circuit once the cursor has caught up to the init-time cap,
             # so Trigger.AvailableNow can terminate.
