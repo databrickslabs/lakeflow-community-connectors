@@ -1,0 +1,3265 @@
+"""OData v4 community connector for Lakeflow Connect.
+
+Implements the LakeflowConnect interface for any OData v4 service. The
+connector discovers tables and schemas from the service's ``$metadata``
+endpoint, supports four auth methods (bearer / basic / api_key /
+oauth2), and ingests each entity set either as a snapshot, an
+incremental CDC stream keyed off a user-supplied cursor field, or
+(when the service supports it) a server-driven delta query stream.
+
+Connection options (set on the UC connection):
+    service_url   required   OData service root, e.g.
+                             https://services.odata.org/V4/Northwind/Northwind.svc/
+    auth_type     optional   bearer | basic | api_key | oauth2
+    token, username, password, api_key, api_key_header,
+    oauth2_token_url, oauth2_client_id, oauth2_client_secret, oauth2_scope
+
+Per-table options (allowlisted via externalOptionsAllowList):
+    cursor_field          column to drive incremental reads; absent → snapshot
+    select                comma-separated $select projection
+    filter                additional $filter expression
+    page_size             $top per request; unset → no $top for snapshot
+                          ingest (server default), 1000 for cursor/delta ingest
+    max_records_per_batch cap rows returned per read_table call (default 10000)
+    delta_tracking        disabled (default) | auto | enabled. Opt-in.
+                          When the source honours ``Prefer: odata.track-changes``
+                          (MS Graph, Dataverse, SAP S/4HANA Cloud …), the
+                          connector reads via the OData delta link instead of
+                          cursor filtering, and emits removals as in-band
+                          ``_deleted=True`` rows. ``auto`` probes once per
+                          table and falls back to cursor/snapshot if the
+                          server doesn't acknowledge; ``enabled`` requires
+                          support and errors if the server doesn't acknowledge;
+                          ``disabled`` skips the probe entirely.
+"""
+
+# Primary connector module: the cohesive read / auth / pagination logic keeps it
+# over pylint's 1500-line advisory cap. Splitting it would scatter tightly
+# coupled helpers across files for no readability gain (the contained-nav and
+# partition logic already live in _contained.py / _partition.py).
+# pylint: disable=too-many-lines
+
+import base64
+import hashlib
+import itertools
+import json
+import logging
+import os
+import pickle
+import tempfile
+import time
+from dataclasses import dataclass, field
+from datetime import datetime, timedelta, timezone
+from email.utils import parsedate_to_datetime
+from typing import Any, Iterator
+from urllib.parse import urljoin, urlparse
+from xml.etree import ElementTree as ET
+
+import requests
+from requests.auth import HTTPBasicAuth
+from pyspark.sql.types import (
+    BinaryType,
+    BooleanType,
+    DateType,
+    DecimalType,
+    DoubleType,
+    FloatType,
+    IntegerType,
+    LongType,
+    StringType,
+    StructField,
+    StructType,
+    TimestampType,
+)
+
+from databricks.labs.community_connector.interface import LakeflowConnect
+from databricks.labs.community_connector.interface.supports_namespaces import (
+    SupportsNamespaces,
+)
+
+# Contained navigation-property support lives in ``_contained.py`` to keep
+# this module under its line-count budget. Re-exported under the original
+# private names so the rest of this file can keep using them as before.
+from databricks.labs.community_connector.sources.odata._helpers import (
+    trim_to_distinct_cursor_boundary as _trim_to_distinct_cursor_boundary,
+)
+
+# Note: the ``_pg_*`` client-side pagination URL helpers live in ``_contained``
+# (so the inner-``$expand`` continuation builder can share them without an
+# import cycle); they're re-exported here for ``_client_paginate_pages`` and
+# existing ``from ...odata.odata import _pg_*`` callers.
+from databricks.labs.community_connector.sources.odata._contained import (
+    CONTAINED_PATH_SEP as _CONTAINED_PATH_SEP,
+    DEFAULT_PAGE_SIZE as _DEFAULT_PAGE_SIZE,
+    MAX_CONTAINED_DEPTH as _MAX_CONTAINED_DEPTH,
+    ContainedNavMixin,
+    _pg_get_query,
+    _pg_base_filter,
+    _pg_keyset_filter,
+    _pg_keyset_seek_url,
+    _pg_orderby_keys,
+    _pg_page_fingerprint,
+    _pg_parse_top,
+    _pg_set_query,
+    _pg_strip_query,
+    _pg_with_extra_filter,
+    combine_filters as _combine_filters,
+    contained_nav_props as _contained_nav_props,
+    fk_column_name as _fk_column_name,
+    join_url as _join_url,
+    looks_like_iso8601 as _looks_like_iso8601,
+    odata_literal as _odata_literal,
+    parse_contained_path as _parse_contained_path,
+    resolve_segment_filters as _resolve_segment_filters,
+)
+from databricks.labs.community_connector.sources.odata._partition import (
+    PartitionMixin,
+)
+
+
+# ---------------------------------------------------------------------------
+# EDM (CSDL) → Spark type mapping
+# ---------------------------------------------------------------------------
+
+_EDM_TO_SPARK = {
+    "Edm.String": StringType(),
+    "Edm.Boolean": BooleanType(),
+    # Widen integers up to Int32 to IntegerType (the framework's
+    # parse_value doesn't support ShortType or ByteType, so the narrow
+    # EDM widths can't map to their natural Spark types). Int64 needs
+    # the full 64-bit range, so it stays as LongType.
+    "Edm.Byte": IntegerType(),
+    "Edm.SByte": IntegerType(),
+    "Edm.Int16": IntegerType(),
+    "Edm.Int32": IntegerType(),
+    "Edm.Int64": LongType(),
+    "Edm.Single": FloatType(),
+    "Edm.Double": DoubleType(),
+    "Edm.Decimal": DecimalType(38, 18),
+    "Edm.Date": DateType(),
+    "Edm.DateTime": TimestampType(),
+    "Edm.DateTimeOffset": TimestampType(),
+    "Edm.TimeOfDay": StringType(),
+    "Edm.Duration": StringType(),
+    "Edm.Guid": StringType(),
+    "Edm.Binary": BinaryType(),
+}
+
+_NS_EDMX = "{http://docs.oasis-open.org/odata/ns/edmx}"
+_NS_EDM = "{http://docs.oasis-open.org/odata/ns/edm}"
+
+# Delta tracking constants.
+#
+# Synthetic columns appended to the schema when delta is active so the
+# destination MERGE (apply_changes) has a sequence column and a tombstone
+# flag. Their names are namespaced so they can't collide with any real
+# OData property — OData property names start with a letter, never an
+# underscore.
+_DELTA_PREFER = "odata.track-changes"
+_DELETED_COL = "_deleted"
+_SEQUENCE_COL = "_lc_sequence"
+# Effectively-unlimited value for ``max_records_per_batch`` when the
+# framework's batch reader is detected (``start_offset is None``).
+# A bare ``sys.maxsize`` is unnecessary — the per-fetch cap arithmetic
+# only ever compares ``<= len(emitted)``; any value larger than what a
+# single ingestion could plausibly buffer works.
+_BATCH_UNCAPPED = 10**12
+
+# Pagination strategy for walking a collection's pages:
+#   * nextlink — follow the server's ``@odata.nextLink`` only; strictly
+#     spec-compliant, and the choice for a ``$top``-free snapshot scan.
+#   * keyset — ignore ``@odata.nextLink``; seek the next page via a
+#     ``(k gt last)`` predicate on the ``$orderby`` key set. For servers
+#     that page-limit a response but omit the continuation link.
+#   * skip — ignore ``@odata.nextLink``; page via ``$top`` + ``$skip``.
+#     The keyless fallback (entities with no unique sort key); O(n)
+#     offsets and fragile under concurrent writes.
+#   * auto (default) — follow ``@odata.nextLink`` while emitted; when the
+#     server stops linking, drain via a keyset (when the ``$orderby`` has
+#     keys) or skip seek until an *empty* page. This covers a server that
+#     page-limits below ``$top`` while omitting the link, and one that
+#     treats ``$top`` as a total-result limit and propagates the budget
+#     through its skiptoken links (the chain self-terminates at ``$top``;
+#     auto seeks past it when ``fetched >= top``).
+# keyset/skip/auto require a ``$top`` to size pages and detect
+# truncation, so they force a default ``page_size`` when none is set.
+_PAGINATION_MODES = frozenset({"nextlink", "keyset", "skip", "auto"})
+
+# ``cursor_lookback_seconds=auto`` self-sizes the overlap window from the
+# **max** measured walk duration over the last ``_LOOKBACK_AUTO_WINDOW``
+# completed walks (the worst recent walk is the robust ceiling on how long a
+# walk runs — far less hand-wavy than last-value × a big fudge factor, and
+# resistant to a single slow spike skewing the estimate). That max is then
+# multiplied by ``cursor_lookback_factor`` (small margin for a walk worse
+# than any seen recently) and clamped to ``cursor_lookback_max_seconds`` — a
+# runaway backstop. Both the factor and ceiling are per-table options; these
+# are their defaults.
+_LOOKBACK_AUTO_WINDOW = 5
+_LOOKBACK_AUTO_DEFAULT_FACTOR = 1.5
+_LOOKBACK_AUTO_DEFAULT_CEILING_SECONDS = 3600
+# Monotonic across the whole process — guarantees each emitted record
+# has a strictly increasing sequence value, so apply_changes can pick a
+# deterministic winner when the same primary key appears multiple times
+# in one batch (e.g. update then delete arriving back-to-back).
+_SEQUENCE_COUNTER = itertools.count()
+
+# Process-wide CSDL cache, keyed by service_url. SDP creates a fresh
+# ``LakeflowSource`` (and ``ODataLakeflowConnect``) for every
+# ``spark.readStream.format("lakeflow_connect").load()`` call; within
+# a single Python process this cache makes all instances share one
+# parse.
+_METADATA_CACHE: dict[str, tuple[str, ET.Element, "_CsdlIndex"]] = {}
+
+# On-disk CSDL cache. PySpark's Python Data Source forks a fresh
+# ``pyspark.daemon`` worker for schema inference on every ``.load()``
+# call, so the process-wide cache above doesn't survive — each fork
+# starts with an empty dict. On a pipeline with N tables that means
+# N HTTP fetches and N multi-MB XML parses during INITIALIZING. The
+# file cache lets each forked worker read a pickled parsed tree from
+# tempdir instead, saving the HTTP RT + parse on every fork after the
+# first. The TTL is short so subsequent pipeline triggers pick up
+# upstream schema changes; per-trigger we still pay one fresh fetch.
+_METADATA_FILE_CACHE_TTL_SECONDS = 60
+
+# Network-level exceptions treated as transient by ``_http_get``'s retry
+# loop. ``ConnectionError`` covers TCP resets, DNS failures, and remote
+# disconnects (e.g. the server killed the keep-alive connection mid-
+# request). ``Timeout`` covers both connect and read timeouts.
+# ``ChunkedEncodingError`` covers servers that close mid-body during a
+# chunked transfer (seen in practice with Hexagon SCApi under load).
+_TRANSIENT_NETWORK_ERRORS = (
+    requests.exceptions.ConnectionError,
+    requests.exceptions.Timeout,
+    requests.exceptions.ChunkedEncodingError,
+)
+
+# HTTP status codes treated as transient by ``_http_get``'s retry loop:
+# * 429 — Too Many Requests (throttling).
+# * 500 — Internal Server Error. Frequently transient (the "contact
+#   support" templated body that Hexagon SCApi returns under load is
+#   the prototype case); deterministic 500s eat the retry budget and
+#   surface the original body, same as deterministic 503s.
+# * 502 — Bad Gateway. Upstream proxy failure; virtually always
+#   transient.
+# * 503 — Service Unavailable. Server overload / restart.
+# * 504 — Gateway Timeout. Upstream took too long; same shape as 502.
+# 429 and 503 honour the server's ``Retry-After`` header when present;
+# 500/502/504 fall back to pure exponential backoff (Retry-After is
+# rarely emitted on those, and we shouldn't trust it if it is).
+_RETRYABLE_HTTP_STATUSES = frozenset({429, 500, 502, 503, 504})
+
+# Module logger. Always-on:
+#   * WARNING — every retry (network/429/503/JSON decode), so an
+#     operator inspecting pipeline logs sees how often the source
+#     flakes without enabling anything extra.
+#   * ERROR   — JSON decode failure (after retries exhausted) and
+#     other terminal problems re-raised as exceptions.
+# Opt-in via the ``verbose_http_logging`` connection option:
+#   * INFO    — one log line per request URL + response status / body
+#     snippet. Useful for triaging "why am I missing rows" but
+#     **emits source data into the log stream**, so it's off by
+#     default. Body snippet length is bounded by
+#     ``verbose_http_log_body_chars`` (default 500).
+_LOG = logging.getLogger(__name__)
+
+
+def _metadata_cache_path(service_url: str) -> str:
+    """Tempdir path for the pickled CSDL of ``service_url``."""
+    digest = hashlib.sha256(service_url.encode("utf-8")).hexdigest()[:16]
+    return os.path.join(tempfile.gettempdir(), f"odata_csdl_{digest}.pickle")
+
+
+def _clear_metadata_cache() -> None:
+    """Clear the in-process CSDL cache and remove any on-disk pickle
+    files. Tests use this between cases that reuse a ``service_url``
+    with different mocked ``$metadata`` bodies."""
+    _METADATA_CACHE.clear()
+    # Best-effort cleanup of all on-disk cache files. Tests don't know
+    # the service_url hash in advance, so wipe the whole pattern.
+    tmpdir = tempfile.gettempdir()
+    try:
+        for entry in os.listdir(tmpdir):
+            if entry.startswith("odata_csdl_") and entry.endswith(".pickle"):
+                try:
+                    os.remove(os.path.join(tmpdir, entry))
+                except OSError:
+                    pass
+    except OSError:
+        pass
+
+
+@dataclass
+class _CsdlIndex:
+    """One-time index of a parsed CSDL document.
+
+    Before this index existed every metadata lookup (resolve an entity
+    set to its type, follow a base-type chain, find an entity type by
+    qualified name) re-walked the whole ET tree. On a multi-MB CSDL
+    that's tens of milliseconds per call, and the connector makes
+    dozens of calls per table — measurable both during INITIALIZING
+    (table discovery, schema inference) and during steady-state
+    incremental reads (FK column resolution per batch).
+
+    The index is built once per parsed root and bundled with that root
+    in the in-memory cache; whenever the root is refreshed (file-cache
+    TTL expiry, in-process eviction) the index is rebuilt with it.
+    Per-instance memo dicts hang off ``ODataLakeflowConnect`` rather
+    than this dataclass — they're populated lazily by callers and
+    invalidated when the index they were built against is replaced.
+    """
+
+    # Every ``(schema_namespace, entity_set_name)`` pair declared in
+    # ``$metadata``. Order matches CSDL declaration order so error
+    # hints and listings stay deterministic.
+    entity_set_pairs: list[tuple[str, str]]
+    # ``(namespace, entity_set_name) → entity_type_ref_string`` — the
+    # raw ``EntityType=`` attribute the entity set points at.
+    entity_set_to_type_ref: dict[tuple[str, str], str]
+    # ``entity_set_name → list[(namespace, type_ref)]``. Multiple
+    # entries means the same name lives in two schemas; callers must
+    # disambiguate via the ``namespace`` table option.
+    entity_set_by_name: dict[str, list[tuple[str, str]]]
+    # ``namespace → list[entity_set_name]``. Used for error hints when
+    # a namespace was supplied but the set wasn't found.
+    entity_set_names_by_ns: dict[str, list[str]]
+    # ``namespace_or_alias → canonical_namespace``. CSDL ``Alias``
+    # attributes route through here so ``BaseType="graph.user"``
+    # resolves to the schema declaring ``Namespace="microsoft.graph"``.
+    alias_to_namespace: dict[str, str]
+    # Fully-qualified type name (using canonical namespace) →
+    # ``EntityType`` element. The qname uses the canonical namespace,
+    # not any alias; callers must alias-resolve first.
+    entity_type_by_qname: dict[str, ET.Element]
+    # All namespaces that declare at least one entity set. Used for
+    # error hints when the requested namespace declares only types.
+    namespaces_with_sets: list[str]
+
+
+def _build_csdl_index(root: ET.Element) -> _CsdlIndex:
+    """Single tree walk that populates every lookup in ``_CsdlIndex``.
+
+    The CSDL can declare multiple ``<Schema>`` blocks; each schema can
+    declare entity types and (optionally) an ``<EntityContainer>`` with
+    entity sets. The walk threads schemas → containers → entity sets in
+    one pass while also indexing every ``<EntityType>`` by qualified
+    name. Subsequent dict lookups replace what used to be O(N) tree
+    scans.
+    """
+    entity_set_pairs: list[tuple[str, str]] = []
+    entity_set_to_type_ref: dict[tuple[str, str], str] = {}
+    entity_set_by_name: dict[str, list[tuple[str, str]]] = {}
+    entity_set_names_by_ns: dict[str, list[str]] = {}
+    alias_to_namespace: dict[str, str] = {}
+    entity_type_by_qname: dict[str, ET.Element] = {}
+    namespaces_with_sets: list[str] = []
+
+    for schema in root.iter(f"{_NS_EDM}Schema"):
+        ns = schema.get("Namespace") or ""
+        if ns:
+            alias_to_namespace[ns] = ns
+        alias = schema.get("Alias")
+        if alias:
+            alias_to_namespace[alias] = ns
+
+        for entity_type in schema.findall(f"{_NS_EDM}EntityType"):
+            type_name = entity_type.get("Name")
+            if type_name:
+                entity_type_by_qname[f"{ns}.{type_name}"] = entity_type
+
+        had_set = False
+        for container in schema.iter(f"{_NS_EDM}EntityContainer"):
+            for es in container.iter(f"{_NS_EDM}EntitySet"):
+                set_name = es.get("Name")
+                type_ref = es.get("EntityType") or ""
+                entity_set_pairs.append((ns, set_name))
+                entity_set_to_type_ref[(ns, set_name)] = type_ref
+                entity_set_by_name.setdefault(set_name, []).append((ns, type_ref))
+                entity_set_names_by_ns.setdefault(ns, []).append(set_name)
+                had_set = True
+        if had_set and ns and ns not in namespaces_with_sets:
+            namespaces_with_sets.append(ns)
+
+    return _CsdlIndex(
+        entity_set_pairs=entity_set_pairs,
+        entity_set_to_type_ref=entity_set_to_type_ref,
+        entity_set_by_name=entity_set_by_name,
+        entity_set_names_by_ns=entity_set_names_by_ns,
+        alias_to_namespace=alias_to_namespace,
+        entity_type_by_qname=entity_type_by_qname,
+        namespaces_with_sets=namespaces_with_sets,
+    )
+
+
+@dataclass
+class _MetadataState:
+    """Per-instance bundle for parsed-CSDL state: the root, the index
+    built from it, and the memo dicts populated as callers walk it.
+
+    Bundling lets ``ODataLakeflowConnect`` stay within pylint's
+    instance-attribute budget (one attribute vs. seven) and ensures
+    the memos invalidate atomically when the root is refreshed —
+    callers reach for ``self._metadata`` and either get the full
+    bundle or rebuild it from scratch."""
+
+    root: ET.Element
+    index: _CsdlIndex
+    # All memos are keyed off either ``id(et)`` (for methods taking
+    # an ``ET.Element``) or ``(table_name, namespace)``. They're
+    # safe across the lifetime of ``root`` because element identity
+    # is stable within one parsed tree.
+    fields: dict = field(default_factory=dict)
+    primary_keys: dict = field(default_factory=dict)
+    base_chain: dict = field(default_factory=dict)
+    own_fields: dict = field(default_factory=dict)
+    own_pks: dict = field(default_factory=dict)
+    entity_type: dict = field(default_factory=dict)
+    fk_columns: dict = field(default_factory=dict)
+
+
+def _next_sequence() -> str:
+    """Strictly-increasing per-record sequence value for apply_changes.
+
+    Format: ``<ns_since_epoch:020d>_<counter:012d>``. Both parts
+    are zero-padded so the lexicographic string ordering used by
+    ``apply_changes`` matches the underlying numeric ordering. The
+    nanosecond timestamp tracks wall-clock so values stay ordered
+    across process restarts (latest data wins per key); the counter
+    breaks ties for records emitted in the same nanosecond.
+
+    ``time.time_ns()`` skips the ``datetime`` + ``strftime`` round-
+    trip the previous ISO-8601 format paid per row — meaningful for
+    delta-tracked tables that synthesise a sequence on every record.
+    """
+    return f"{time.time_ns():020d}_{next(_SEQUENCE_COUNTER):012d}"
+
+
+class ODataLakeflowConnect(
+    LakeflowConnect,
+    SupportsNamespaces,
+    PartitionMixin,
+    ContainedNavMixin,
+):
+    """LakeflowConnect implementation for OData v4 services.
+
+    OData ``$metadata`` documents can declare multiple ``<Schema>`` blocks,
+    each with its own namespace and its own entity sets. Two schemas in the
+    same service can re-use entity set names (e.g. ``Sales.Customers`` and
+    ``HR.Customers``), so this connector exposes the schema namespace as a
+    single-segment Lakeflow namespace path.
+
+    Pipelines disambiguate by passing ``namespace`` in *table_options*. When
+    only one schema declares a given table name, ``namespace`` may be omitted.
+    """
+
+    def __init__(self, options: dict[str, str]) -> None:
+        super().__init__(options)
+        self.service_url = _require(options, "service_url")
+        # Default 180s (3 min). Deep ``expand_contained=true`` chains
+        # (3+ segments) materialise a large cross-product server-side
+        # before responding; 60s isn't long enough for most real
+        # deployments and the previous default surfaced as
+        # ``ReadTimeout`` retried-to-exhaustion failures. Connection
+        # option ``timeout_seconds`` overrides per deployment.
+        self.timeout = int(options.get("timeout_seconds", "180"))
+        # On-disk pickle TTL. The default suits typical 1-minute SDP
+        # trigger intervals — each trigger spawns a fresh forked
+        # worker, the file cache survives, but stale state is bounded.
+        # Users with stable schemas can raise this to skip even the
+        # first-fork fetch within a longer window; users iterating on
+        # the source model can drop it to 0 to disable file caching.
+        self.metadata_cache_ttl_seconds = int(
+            options.get("metadata_cache_ttl_seconds", _METADATA_FILE_CACHE_TTL_SECONDS)
+        )
+        # Retry budget for transient server-side failures (HTTP 429 / 503).
+        # 5 attempts at exponential backoff (1, 2, 4, 8, 16 s) covers the
+        # vast majority of momentary throttling spikes from Graph /
+        # Dataverse / S/4HANA Cloud without keeping a Spark task pinned
+        # indefinitely. `retry_max_delay_seconds` caps any single sleep —
+        # honour the server's Retry-After header but never sleep longer
+        # than this (some misbehaving servers emit hour-long values).
+        self.max_retries = int(options.get("max_retries", "5"))
+        self.retry_max_delay_seconds = int(options.get("retry_max_delay_seconds", "60"))
+        # Per-request diagnostic logging. Off by default — when on,
+        # writes one INFO line per HTTP request (URL + status + body
+        # snippet) to the module logger. The body snippet is the
+        # source's response data, so enabling this emits source rows
+        # into pipeline logs; turn it on only for triage.
+        self.verbose_http_logging = (
+            options.get("verbose_http_logging") or "false"
+        ).strip().lower() == "true"
+        # How many chars of the response body to include in each INFO
+        # log line when ``verbose_http_logging`` is on. Default 500.
+        self.verbose_http_log_body_chars = int(options.get("verbose_http_log_body_chars", "500"))
+        self._session: requests.Session | None = None
+        # Parsed CSDL bundle: root + lookup index + per-instance memos.
+        # ``None`` until the first ``_metadata_root()`` call.
+        self._metadata: _MetadataState | None = None
+        # Monotonic deadline (seconds) for the current OAuth access token.
+        # Set when the token endpoint returns ``expires_in``; `None` means we
+        # don't know the expiry (user-supplied access token without metadata)
+        # so we fall through to the 401-retry path only.
+        self._access_token_expires_at: float | None = None
+        # Delta-tracking capability cache, keyed by (namespace_or_empty,
+        # table_name). Populated lazily by ``_probe_delta_support`` on the
+        # first metadata-resolution call for each table in ``auto`` mode.
+        # ``enabled`` mode trusts the user and skips the cache; ``disabled``
+        # mode never touches it.
+        self._delta_capable: dict[tuple[str, str], bool] = {}
+
+    # ------------------------------------------------------------------
+    # LakeflowConnect interface
+    # ------------------------------------------------------------------
+
+    def list_tables(self) -> list[str]:
+        """Flat fallback used by the framework when SupportsNamespaces is absent.
+
+        Includes both top-level entity sets and contained collections
+        reachable via ``ContainsTarget="true"`` navigation properties
+        (double-underscore-pathed, e.g. ``Instances__Assets__AssetDocuments``).
+        """
+        names: set[str] = set()
+        for ns, es_name in self._entity_set_index():
+            names.add(es_name)
+            names.update(self._enumerate_contained_paths(es_name, ns))
+        return sorted(names)
+
+    def list_namespaces(self, prefix: list[str] | None = None) -> list[list[str]]:
+        # OData has a single, flat level of schema namespaces. Anything
+        # below the root has no further children.
+        if prefix:
+            return []
+        index = self._entity_set_index()
+        seen = sorted({ns for ns, _ in index if ns})
+        return [[ns] for ns in seen]
+
+    def list_tables_in_namespace(self, namespace: list[str]) -> list[str]:
+        index = self._entity_set_index()
+        if not namespace:
+            # Entity sets always live inside a Schema with a Namespace
+            # attribute; root-level tables don't exist in OData v4.
+            return []
+        target = namespace[0]
+        flat = sorted({es for ns, es in index if ns == target})
+        contained: set[str] = set()
+        for es_name in flat:
+            contained.update(self._enumerate_contained_paths(es_name, target))
+        return flat + sorted(contained)
+
+    def get_table_schema(self, table_name: str, table_options: dict[str, str]) -> StructType:
+        namespace = (table_options or {}).get("namespace")
+        self._set_excluded_ancestor_columns(table_options)
+        excluded = self._excluded_ancestor_columns
+        fields = self._fields_for(table_name, namespace)
+        # ``exclude_ancestor_columns`` can ONLY drop synthetic ancestor-FK
+        # columns (the filter in ``_resolve_fk_columns`` iterates the FK
+        # mapping alone) — a leaf/own table column named here is left in
+        # place. Validate against the path's real FK columns, but only for
+        # contained paths: a flat table has none, so a connection-wide
+        # default applied to it is a silent no-op rather than warning noise.
+        if excluded and "*" not in excluded and _parse_contained_path(table_name) is not None:
+            segments = _parse_contained_path(table_name)
+            all_fk = self._all_fk_column_names(segments, namespace)
+            non_fk = excluded - all_fk
+            if non_fk:
+                # Split into "names a real table column (kept on purpose)"
+                # vs "matches nothing (likely a typo)" so the message is
+                # actionable either way.
+                own_cols = {f.name for f in fields} - all_fk
+                kept = sorted(non_fk & own_cols)
+                typos = sorted(non_fk - own_cols)
+                if kept:
+                    _LOG.warning(
+                        "exclude_ancestor_columns for %r names %s, which are "
+                        "table columns, not synthetic ancestor-FK columns; they "
+                        "are kept (only ancestor-FK columns can be excluded).",
+                        table_name,
+                        kept,
+                    )
+                if typos:
+                    _LOG.warning(
+                        "exclude_ancestor_columns for %r names %s, which match "
+                        "no column of this path (FK columns: %s); they have no "
+                        "effect. Check for typos.",
+                        table_name,
+                        typos,
+                        sorted(all_fk),
+                    )
+        select = (table_options or {}).get("select")
+        if select:
+            wanted = {c.strip() for c in select.split(",")}
+            # ``select`` filters leaf columns only; FK columns survive.
+            segments = _parse_contained_path(table_name) or [table_name]
+            fk_names = set(self._resolve_fk_columns(segments, namespace).values())
+            fields = [f for f in fields if f.name in fk_names or f.name in wanted]
+        # Contained path + cursor_field lives on an ancestor → propagate
+        # the ancestor's cursor column type onto the leaf schema. The
+        # incremental read path stamps the value onto each emitted row.
+        cursor_field = (table_options or {}).get("cursor_field")
+        if cursor_field:
+            ancestor_cursor = self._ancestor_cursor_field(table_name, namespace, cursor_field)
+            if ancestor_cursor is not None and ancestor_cursor.name not in {f.name for f in fields}:
+                fields = list(fields) + [ancestor_cursor]
+        if not fields:
+            raise ValueError(
+                f"Could not derive a non-empty schema for entity set {table_name!r}. "
+                f"Check the 'select' option."
+            )
+        # When delta tracking is active for this table the connector emits
+        # two synthetic columns alongside the entity's own properties:
+        # ``_deleted`` (in-band tombstone flag) and ``_lc_sequence`` (the
+        # cursor column apply_changes uses to order updates). Both must be
+        # in the declared schema so Spark accepts the records.
+        if self._delta_active_for(table_name, table_options):
+            fields = list(fields) + [
+                StructField(_DELETED_COL, BooleanType(), False),
+                StructField(_SEQUENCE_COL, StringType(), False),
+            ]
+        return StructType(fields)
+
+    def read_table_metadata(self, table_name: str, table_options: dict[str, str]) -> dict:
+        namespace = (table_options or {}).get("namespace")
+        self._set_excluded_ancestor_columns(table_options)
+        primary_keys = self._primary_keys_for(table_name, namespace)
+        user_cursor = (table_options or {}).get("cursor_field")
+        # Contained paths skip the delta probe (server delta is for
+        # top-level sets only; mutex enforced in dispatch below).
+        if _parse_contained_path(table_name) is None and self._delta_active_for(
+            table_name, table_options
+        ):
+            return {
+                "primary_keys": primary_keys,
+                "cursor_field": _SEQUENCE_COL,
+                "ingestion_type": "cdc",
+            }
+        return {
+            "primary_keys": primary_keys,
+            "cursor_field": user_cursor,
+            "ingestion_type": "cdc" if user_cursor else "snapshot",
+        }
+
+    def read_table(
+        self, table_name: str, start_offset: dict, table_options: dict[str, str]
+    ) -> tuple[Iterator[dict], dict]:
+        # The Spark Python Data Source batch reader
+        # (``LakeflowBatchReader``) passes ``start_offset=None`` and
+        # discards the returned end-offset — so any continuation state
+        # the connector would normally park in the offset (e.g.
+        # ``pending_fetches`` on the ``expand_contained=true`` path,
+        # ``chain_next_link`` on the leaf-cursor N+1 path) is dropped.
+        # Honouring ``max_records_per_batch`` here would therefore
+        # truncate the read at the cap and silently lose the remainder:
+        # a cap can only do something *correct* when the offset survives
+        # to resume from, which it never does under the batch reader.
+        # So treat ``start_offset is None`` as the batch-mode signal and
+        # force the cap effectively-infinite regardless of whether the
+        # user set one — warning when we override a user value so the
+        # ignored option isn't silent. Streaming readers always pass a
+        # dict (``{}`` or the parked offset) and keep their cap intact.
+        # The cursor read paths additionally stream lazily in this mode
+        # (see ``_read_incremental`` / ``_read_contained_incremental`` /
+        # ``_read_contained_expand``) so an uncapped batch doesn't
+        # materialise the whole result set in memory.
+        opts = dict(table_options or {})
+        # Pagination strategy for this read. keyset/skip/auto drive
+        # pagination client-side (for servers that omit @odata.nextLink)
+        # and need a $top to size pages, so force a default page_size when
+        # the user left it unset. Held on ``self`` for the duration of the
+        # read so the shared fetch primitives pick it up without threading
+        # it through every call site; defaults to nextlink (today's
+        # behaviour) for any path that doesn't set it.
+        self._pagination = self._parse_pagination(opts)
+        self._set_excluded_ancestor_columns(opts)
+        # Overlap re-read window for non-atomic walks. Held on ``self`` for
+        # the read's duration (like ``_pagination``); the floor is applied
+        # only to the read filter (``_apply_cursor_lookback``), never to the
+        # committed offset. Applies to every contained cursor-read path —
+        # ``expand_contained=true``, the N+1 leaf-cursor walk, and the
+        # ``cursor_probe`` hydrate — each of which self-sizes the ``auto``
+        # window from its measured walk duration. No-op for non-timestamp
+        # cursors.
+        self._cursor_lookback = self._parse_cursor_lookback(opts)
+        # ``auto`` tuning knobs (ignored for static/off modes).
+        self._cursor_lookback_factor = self._parse_cursor_lookback_factor(opts)
+        self._cursor_lookback_max_seconds = self._parse_cursor_lookback_ceiling(opts)
+        # Resolved per-read in the expand-cursor path (see
+        # ``_read_contained_expand``); stays 0 for every other read.
+        self._active_lookback_seconds = 0
+        # Only an EXPLICIT positive window is validated against the read
+        # config — the default ``auto`` is a no-op outside the expand-cursor
+        # path, so leaving it on for flat / N+1 / snapshot tables must not
+        # raise.
+        if (
+            isinstance(self._cursor_lookback, int)
+            and self._cursor_lookback > 0
+            and not (_parse_contained_path(table_name) is not None and opts.get("cursor_field"))
+        ):
+            raise ValueError(
+                "cursor_lookback_seconds (an explicit value) is supported "
+                "only with a cursor_field on a contained path — it floors the "
+                "read filter for the non-atomic expand_contained=true walk and "
+                "the leaf-cursor N+1 / cursor_probe walk. Use 'auto' (default) "
+                "or 'off' for other read configurations."
+            )
+        # ``auto`` (the default) is a best-effort hint that no-ops where it can't
+        # engage, so these conflict checks fire only on an EXPLICIT strategy
+        # opt-in (``cursor_probe=nested-expand`` or ``cursor_probe=batch``) — otherwise
+        # every flat / snapshot / expand_contained read would trip them.
+        cursor_probe_raw = (opts.get("cursor_probe") or "").strip().lower()
+        if "cursor_probe" in opts and self._cursor_probe_mode(opts) in ("probe", "batch"):
+            if _parse_contained_path(table_name) is None:
+                raise ValueError(
+                    f"cursor_probe={cursor_probe_raw} is supported only on "
+                    f"contained-collection paths; {table_name!r} is a flat entity "
+                    "set, which is already a single filtered request per batch."
+                )
+            if self._expand_contained_active(opts):
+                raise ValueError(
+                    f"cursor_probe={cursor_probe_raw} conflicts with "
+                    "expand_contained=true: both fetch only changed leaves, by "
+                    "different strategies. Pick one (expand_contained for shallow "
+                    "trees; cursor_probe=nested-expand/batch for deep trees with sparse "
+                    "changes)."
+                )
+            if not opts.get("cursor_field"):
+                raise ValueError(
+                    f"cursor_probe={cursor_probe_raw} requires a cursor_field (it "
+                    "only changes how a leaf-owned cursor read is executed). Set "
+                    "cursor_field or drop cursor_probe."
+                )
+        if self._pagination != "nextlink":
+            opts.setdefault("page_size", _DEFAULT_PAGE_SIZE)
+        if start_offset is None:
+            if "max_records_per_batch" in opts:
+                _LOG.warning(
+                    "max_records_per_batch=%s ignored for %r: the batch reader "
+                    "(LakeflowBatchReader) discards the returned offset, so a "
+                    "cap can only truncate the read and silently drop the "
+                    "remainder. Reading uncapped. Use a streaming table for a "
+                    "resumable per-batch cap.",
+                    opts["max_records_per_batch"],
+                    table_name,
+                )
+            opts["max_records_per_batch"] = str(_BATCH_UNCAPPED)
+        # ``offset`` is a local view used for shape checks below.
+        # The original ``start_offset`` (``None`` for batch reader,
+        # ``{}`` or populated dict for streaming) is passed through to
+        # the read methods so ``_finalize_cursor_read`` can distinguish
+        # batch from streaming and skip the no-progress raise when the
+        # framework will discard the returned offset anyway.
+        offset = start_offset or {}
+        # Seed per-instance capability verdicts from the resume offset so a
+        # reader the framework recreates each microbatch skips re-probing.
+        self._seed_capability_caches(start_offset)
+        if _parse_contained_path(table_name) is not None:
+            if self._delta_setting(opts) == "enabled":
+                raise ValueError(
+                    "delta_tracking=enabled is not supported on contained-"
+                    "collection paths (server change tracking only applies "
+                    "to top-level entity sets). Set delta_tracking=disabled "
+                    "or ingest the parent set directly."
+                )
+            if self._expand_contained_active(opts):
+                # Cursor-based expand keeps a default $top (page_size);
+                # snapshot expand omits $top when page_size is unset.
+                if opts.get("cursor_field"):
+                    opts.setdefault("page_size", _DEFAULT_PAGE_SIZE)
+                return self._with_capabilities(
+                    self._read_contained_expand(table_name, start_offset, opts), opts
+                )
+            if opts.get("cursor_field"):
+                # Cursor-based read: default page_size so a $top is sent.
+                # Snapshot (the branch below) leaves it unset → no $top.
+                opts.setdefault("page_size", _DEFAULT_PAGE_SIZE)
+                return self._with_capabilities(
+                    self._read_contained_incremental(
+                        table_name, start_offset, opts, opts["cursor_field"]
+                    ),
+                    opts,
+                )
+            return self._with_capabilities(self._read_contained_snapshot(table_name, opts), opts)
+        # Offset-shape check ahead of the delta predicate so a resumed
+        # delta stream (offset carries delta_link / next_link) takes the
+        # delta path even if delta_tracking is no longer set in options.
+        if (
+            "delta_link" in offset
+            or "next_link" in offset
+            or self._delta_active_for(table_name, opts)
+        ):
+            # Delta (CDC) is cursor-based — keep a default $top.
+            opts.setdefault("page_size", _DEFAULT_PAGE_SIZE)
+            return self._read_incremental_delta(table_name, offset, opts)
+        if opts.get("cursor_field"):
+            # Cursor-based read: default page_size so a $top is sent.
+            # Snapshot (the branch below) leaves it unset → no $top.
+            opts.setdefault("page_size", _DEFAULT_PAGE_SIZE)
+            return self._with_capabilities(
+                self._read_incremental(table_name, start_offset, opts, opts["cursor_field"]), opts
+            )
+        return self._read_snapshot(table_name, opts)
+
+    def _seed_capability_caches(self, start_offset: dict | None) -> None:
+        """Seed per-instance capability verdicts from the resume offset so a
+        reader the framework recreates each microbatch skips re-probing.
+
+        Mirrors ``cursor_probe_ok`` (which the leaf-cursor path threads itself),
+        but for the **OR-across-columns** verdict (``or_filter_ok``) and the
+        **$batch** verdict (``batch_ok``, shared with the leaf-cursor path and
+        the ``contained_fetch`` snapshot/stream walks), and the discovered
+        **$batch chunk cap** (``batch_size_ok``, the working ops-per-request the
+        adaptive shrink settled on after a "too many parts" rejection). All are
+        server-wide, so a single cached value serves every table this instance
+        reads. Persisted back by :meth:`_merge_capability_caches`."""
+        off = start_offset or {}
+        if "or_filter_ok" in off:
+            self.__dict__["_or_filter_ok"] = bool(off["or_filter_ok"])
+        if "batch_ok" in off:
+            self.__dict__["_batch_supported"] = bool(off["batch_ok"])
+        if "batch_size_ok" in off:
+            self.__dict__["_batch_size_cap"] = int(off["batch_size_ok"])
+
+    def _merge_capability_caches(self, offset: dict) -> dict:
+        """Thread the per-instance OR / $batch / batch-size verdicts into the
+        returned offset so they survive the framework recreating the reader each
+        microbatch.
+        Only adds a flag once actually **determined** this instance (the probe
+        ran), and never overwrites one a read path already wrote. Excluded from
+        the no-progress comparison (see ``_finalize_cursor_read``), so baking in
+        a verdict never reads as forward progress."""
+        if not isinstance(offset, dict):
+            return offset
+        add: dict = {}
+        if "_or_filter_ok" in self.__dict__ and "or_filter_ok" not in offset:
+            add["or_filter_ok"] = self.__dict__["_or_filter_ok"]
+        if "_batch_supported" in self.__dict__ and "batch_ok" not in offset:
+            add["batch_ok"] = self.__dict__["_batch_supported"]
+        if "_batch_size_cap" in self.__dict__ and "batch_size_ok" not in offset:
+            add["batch_size_ok"] = self.__dict__["_batch_size_cap"]
+        return {**offset, **add} if add else offset
+
+    def _scrub_nonauto_verdicts(self, offset: dict, table_options: dict | None) -> dict:
+        """Drop persisted preflight verdicts whose governing option is **not**
+        ``auto``, so re-selecting ``auto`` later re-runs the preflight instead of
+        reusing a stale verdict. Respective ownership: ``cursor_probe`` owns its
+        nested-``$expand`` probe verdict (``cursor_probe_ok``); ``contained_fetch``
+        owns the ``$batch`` capability + discovered size (``batch_ok`` /
+        ``batch_size_ok``). ``auto`` / ``auto:<N>`` and unset (the default) keep
+        their verdicts. (Trade-off: a pinned non-auto mode re-runs its preflight
+        each microbatch, since its verdict no longer rides the offset.)"""
+        if not isinstance(offset, dict):
+            return offset
+        drop: set[str] = set()
+        if self._cursor_probe_mode(table_options) != "auto":
+            drop.add("cursor_probe_ok")
+        if not self._contained_fetch_is_auto(table_options):
+            drop |= {"batch_ok", "batch_size_ok"}
+        if not drop:
+            return offset
+        return {k: v for k, v in offset.items() if k not in drop}
+
+    def _with_capabilities(self, result: tuple, table_options: dict | None = None) -> tuple:
+        """Wrap a ``(records, offset)`` read result, threading capability verdicts
+        into the offset (see :meth:`_merge_capability_caches`) and then scrubbing
+        any whose governing option is non-``auto`` (see
+        :meth:`_scrub_nonauto_verdicts`)."""
+        records, offset = result
+        offset = self._merge_capability_caches(offset)
+        return records, self._scrub_nonauto_verdicts(offset, table_options)
+
+    # ------------------------------------------------------------------
+    # Snapshot + incremental read paths
+    # ------------------------------------------------------------------
+
+    def _read_snapshot(
+        self, table_name: str, table_options: dict[str, str]
+    ) -> tuple[Iterator[dict], dict]:
+        # Return the page generator directly. Spark's
+        # LakeflowBatchReader.read consumes it lazily through a
+        # map(parse_value, ...), so each page is fetched, parsed, and
+        # streamed out before the next page is requested. Materialising
+        # the whole result into a list (the prior shape) pinned every
+        # row in memory at once on large tables.
+        segment_filters = _resolve_segment_filters(table_options, [table_name])
+        # PK-only ``$orderby`` so server skiptoken paging is stable across
+        # pages — OData v4 §11.2.5.7 doesn't promise a stable default
+        # order, and a value-based skiptoken over an unstable sort can
+        # drop or duplicate rows mid-scan. Empty (keyless entity) → no
+        # ``$orderby`` appended.
+        namespace = (table_options or {}).get("namespace")
+        pk_order = ",".join(f"{pk} asc" for pk in self._primary_keys_for(table_name, namespace))
+        url = self._build_url(
+            table_name,
+            table_options,
+            extra_filter=segment_filters.get(0),
+            order_by=pk_order or None,
+        )
+        return self._fetch_pages(url), {}
+
+    def _read_incremental(
+        self,
+        table_name: str,
+        start_offset: dict | None,
+        table_options: dict[str, str],
+        cursor_field: str,
+    ) -> tuple[Iterator[dict], dict]:
+        # No wall-clock upper bound on the cursor — `max_records_per_batch`
+        # is the only per-call cap. Each call fetches `cursor gt since`
+        # (no `le` clause), advances the offset, and Spark drives the
+        # call loop. Two consequences worth knowing:
+        #   * Continuous SDP pipelines pick up new rows as they arrive,
+        #     because we never freeze a "snapshot at startup" timestamp.
+        #     The connector instance can live for the whole stream and
+        #     each batch still sees fresh source state.
+        #   * Cursor type doesn't matter for the filter. Timestamps,
+        #     monotonic integer IDs, GUIDs — anything the server can
+        #     order in `$orderby` and compare in `$filter` works the
+        #     same way. There is no type mismatch between the cursor
+        #     literal and the server's column type because we don't
+        #     manufacture a timestamp ceiling out of wall-clock time.
+        if start_offset is None:
+            # Batch reader: offset discarded, ``since`` is None (no
+            # ``cursor gt`` filter), no cap and no no-progress guard — so
+            # the watermark, same-cursor trim and ``records`` buffer the
+            # streaming path builds all serve nothing. Stream pages
+            # straight through so peak memory is one page, not the whole
+            # table. See ``read_table`` for why the cap is force-disabled.
+            return self._stream_incremental_flat(table_name, table_options, cursor_field), {}
+        since = start_offset.get("cursor") if start_offset else None
+        segment_filters = _resolve_segment_filters(table_options, [table_name])
+        extra_filter = _combine_filters(
+            self._cursor_filter(cursor_field, since),
+            segment_filters.get(0),
+        )
+        # Append primary-key columns as $orderby tie-breakers. Without a
+        # fully unique sort, OData servers that paginate internally (via
+        # `@odata.nextLink` with a value-based skiptoken) can split a
+        # same-cursor cohort across pages: the skiptoken's strict-`>` on
+        # the cursor value drops the unread tail. A unique total ordering
+        # forces the skiptoken to use the key as well, so no rows are lost.
+        namespace = (table_options or {}).get("namespace")
+        order_terms = [f"{cursor_field} asc"]
+        for pk in self._primary_keys_for(table_name, namespace):
+            if pk != cursor_field:
+                order_terms.append(f"{pk} asc")
+        url = self._build_url(
+            table_name,
+            table_options,
+            extra_filter=extra_filter,
+            order_by=",".join(order_terms),
+        )
+        max_records = int(table_options.get("max_records_per_batch", "10000"))
+        # ``cursor_nulls`` policy: ``effective`` yields the value used for
+        # filtering/trim/watermark (a synthetic floor for nulls under
+        # ``coalesce``); ``skip_null`` drops null-cursor rows under
+        # ``ignore``. The emitted row is never mutated — its cursor column
+        # keeps the real null.
+        skip_null, effective = self._make_cursor_resolver(
+            table_name, namespace, cursor_field, table_options
+        )
+
+        records: list[dict] = []
+        truncated = False
+        for row in self._fetch_pages(url):
+            if skip_null and row.get(cursor_field) is None:
+                continue
+            rec_cursor = effective(row)
+            if since is not None and rec_cursor is not None and rec_cursor <= since:
+                continue
+            records.append(row)
+            if len(records) >= max_records:
+                truncated = True
+                break
+
+        if not records:
+            return iter([]), start_offset or {}
+
+        # Cursor boundary safety: the next call resumes with
+        # `cursor gt <last_cursor>`, so if the trailing records share that
+        # cursor with unseen records on the next page — OR with concurrently
+        # inserted siblings that arrive before the next call — the `gt`
+        # filter would silently drop them. Trim back to the last distinct
+        # cursor on every batch (not just truncated ones), so a stop/restart
+        # or natural completion can't lose same-cursor inserts at the boundary.
+        # Re-fetched rows on the next call are deduped at the destination
+        # via apply_changes' MERGE on the primary key.
+        trimmed = _trim_to_distinct_cursor_boundary(records, cursor_field)
+        if not trimmed:
+            # Every record in this batch shares one cursor value (including
+            # an all-null-cursor batch, which trims to empty here and is
+            # kept as-is; under cursor_nulls=coalesce the watermark still
+            # advances via the synthetic effective value below).
+            if truncated:
+                raise RuntimeError(
+                    f"max_records_per_batch ({max_records}) is too small for "
+                    f"{table_name!r}: every record in the batch shares cursor "
+                    f"value {records[-1].get(cursor_field)!r}. Increase "
+                    f"max_records_per_batch above the largest same-cursor "
+                    f"cohort, or choose a higher-cardinality cursor field."
+                )
+            # Natural exhaustion of a single-cursor cohort. Emit as-is —
+            # trimming would lose data with no way to re-fetch. There's a
+            # residual race for same-cursor rows added between now and any
+            # future call, which is unavoidable without finer cursor resolution.
+        else:
+            records = trimmed
+
+        # OData responses ordered by the cursor — the trailing distinct
+        # cursor carries the watermark in the common case. But a nullable
+        # cursor with server-dependent null-ordering can produce records
+        # with null cursor values, and the cohort fall-through above
+        # keeps records as-is when every value is null. Compute ``max``
+        # over the non-null cursors and fall back to ``since`` / ``{}``
+        # — mirrors ``_read_contained_incremental_leaf_cursor``'s
+        # normalization. The shared no-progress guard then fires on
+        # null-only batches (committing ``{"cursor": None}`` would loop
+        # because every subsequent trigger re-emits the same nulls).
+        cursors = [effective(r) for r in records if effective(r) is not None]
+        end_offset = self._cursor_max_end_offset(cursors, since)
+        return self._finalize_cursor_read(
+            start_offset, end_offset, records, table_name, cursor_field
+        )
+
+    def _stream_incremental_flat(
+        self, table_name: str, table_options: dict[str, str], cursor_field: str
+    ) -> Iterator[dict]:
+        """Lazy batch-mode flat cursor read.
+
+        Mirrors ``_read_incremental``'s per-row work minus everything the
+        batch reader makes moot: no ``cursor gt`` filter (``since`` is
+        None), no cap, no same-cursor trim, no watermark, no no-progress
+        guard. The only per-row behaviour kept is ``cursor_nulls=ignore``
+        null-skipping (``coalesce`` emits the real null as-is here, since
+        nothing consumes the synthetic ``effective`` value). Pages stream
+        through ``_fetch_pages`` so peak memory is one page."""
+        namespace = (table_options or {}).get("namespace")
+        segment_filters = _resolve_segment_filters(table_options, [table_name])
+        order_terms = [f"{cursor_field} asc"]
+        for pk in self._primary_keys_for(table_name, namespace):
+            if pk != cursor_field:
+                order_terms.append(f"{pk} asc")
+        url = self._build_url(
+            table_name,
+            table_options,
+            extra_filter=segment_filters.get(0),
+            order_by=",".join(order_terms),
+        )
+        skip_null, _effective = self._make_cursor_resolver(
+            table_name, namespace, cursor_field, table_options
+        )
+        for row in self._fetch_pages(url):
+            if skip_null and row.get(cursor_field) is None:
+                continue
+            yield row
+
+    def _read_incremental_delta(
+        self,
+        table_name: str,
+        start_offset: dict,
+        table_options: dict[str, str],
+    ) -> tuple[Iterator[dict], dict]:
+        """Delta-tracked read via OData ``Prefer: odata.track-changes``.
+
+        Three offset shapes, three entry behaviours:
+
+        * No ``delta_link`` and no ``next_link`` — bootstrap. Send the
+          initial entity-set GET with ``Prefer: odata.track-changes``,
+          verify the server acknowledges via ``Preference-Applied``, and
+          stream the full snapshot. The terminal page carries
+          ``@odata.deltaLink``.
+        * ``next_link`` set — we hit ``max_records_per_batch`` mid-
+          pagination on a previous call. Resume by walking from that
+          link.
+        * ``delta_link`` set — server's "changes since" cursor. Walk
+          ``@odata.nextLink`` chain (if any) until the terminal page
+          delivers a fresh ``@odata.deltaLink``.
+
+        Records emitted carry two synthetic columns: ``_deleted`` (bool,
+        in-band tombstone flag — set ``True`` for ``@removed`` entries)
+        and ``_lc_sequence`` (monotonic per-record string used as
+        apply_changes' sequence column). The microsoft_teams connector
+        established this convention in this repo; we follow it so the
+        framework's standard ``cdc`` path handles tombstones without
+        needing ``cdc_with_deletes`` + ``read_table_deletes`` split.
+        """
+        prev_delta_link = (start_offset or {}).get("delta_link")
+        prev_next_link = (start_offset or {}).get("next_link")
+        is_bootstrap = prev_delta_link is None and prev_next_link is None
+        url, initial_headers = self._delta_initial_request(
+            table_name, table_options, prev_delta_link, prev_next_link
+        )
+
+        namespace = (table_options or {}).get("namespace")
+        primary_keys = self._primary_keys_for(table_name, namespace)
+        max_records = int((table_options or {}).get("max_records_per_batch", "10000"))
+
+        records, new_delta_link, carry_next_link, rebootstrap = self._delta_walk_pages(
+            url=url,
+            initial_headers=initial_headers,
+            is_bootstrap=is_bootstrap,
+            prev_delta_link=prev_delta_link,
+            prev_next_link=prev_next_link,
+            table_name=table_name,
+            table_options=table_options,
+            primary_keys=primary_keys,
+            max_records=max_records,
+        )
+        if rebootstrap:
+            # 410 Gone surfaced during pagination → re-bootstrap from
+            # scratch. ``MERGE``-on-PK + ``_lc_sequence`` ordering
+            # reconciles re-fetched rows at the destination; no data
+            # loss, only HTTP cost.
+            return self._read_incremental_delta(table_name, {}, table_options)
+
+        # Graph-rotation guard. Some servers (notably Microsoft Graph)
+        # mint a fresh ``@odata.deltaLink`` on every response, even when
+        # the change set is empty. If we already had a delta link and
+        # produced no records this call, hand back the prior link so the
+        # framework sees ``end_offset == start_offset`` and a trigger
+        # like AvailableNow can terminate. Following microsoft_teams.py.
+        if prev_delta_link is not None and not records and not carry_next_link:
+            return iter([]), {"delta_link": prev_delta_link}
+
+        if carry_next_link:
+            offset: dict = {"next_link": carry_next_link}
+            # Preserve the prior delta_link as a fallback if the
+            # next_link expires before the cap-resume call lands.
+            if prev_delta_link is not None:
+                offset["delta_link"] = prev_delta_link
+            return iter(records), offset
+
+        if new_delta_link is None:
+            # Reached end of stream without a deltaLink. Server is
+            # misbehaving (spec requires the terminal page to carry one).
+            # Resume from the prior delta_link if we have one — better
+            # than losing the offset entirely.
+            if prev_delta_link is not None:
+                return iter(records), {"delta_link": prev_delta_link}
+            raise RuntimeError(
+                f"OData delta bootstrap for {table_name!r} ended without an "
+                f"@odata.deltaLink. The server may have aborted change "
+                f"tracking. Set delta_tracking=disabled to fall back to "
+                f"snapshot or cursor-based reads."
+            )
+
+        return iter(records), {"delta_link": new_delta_link}
+
+    def _build_delta_record(self, item: dict, primary_keys: list[str]) -> dict:
+        """Translate one delta payload entry into the emitted record shape.
+
+        - ``@removed`` entries become tombstones: a record carrying the
+          primary-key fields plus ``_deleted=True``.
+        - Regular adds/changes pass through with all ``@odata.*`` control
+          properties stripped and ``_deleted=False``.
+
+        Every emitted record gets ``_lc_sequence`` — a strictly monotonic
+        string — so apply_changes has a deterministic sequence_by column.
+        """
+        if "@removed" in item:
+            record: dict = {pk: item.get(pk) for pk in primary_keys}
+            record[_DELETED_COL] = True
+        else:
+            record = {k: v for k, v in item.items() if not k.startswith("@odata.")}
+            record[_DELETED_COL] = False
+        record[_SEQUENCE_COL] = _next_sequence()
+        return record
+
+    def _delta_initial_request(
+        self,
+        table_name: str,
+        table_options: dict[str, str] | None,
+        prev_delta_link: str | None,
+        prev_next_link: str | None,
+    ) -> tuple[str, dict[str, str] | None]:
+        """Pick the first URL + headers for a delta read.
+
+        ``next_link`` wins over ``delta_link`` when both are present —
+        we were mid-pagination on a cap hit, finish that before
+        consulting the prior change cursor.
+        """
+        if prev_next_link is not None:
+            return prev_next_link, None
+        if prev_delta_link is not None:
+            return prev_delta_link, None
+        segment_filters = _resolve_segment_filters(table_options, [table_name])
+        return (
+            self._build_url(table_name, table_options or {}, extra_filter=segment_filters.get(0)),
+            {"Prefer": _DELTA_PREFER},
+        )
+
+    def _delta_walk_pages(
+        self,
+        *,
+        url: str,
+        initial_headers: dict[str, str] | None,
+        is_bootstrap: bool,
+        prev_delta_link: str | None,
+        prev_next_link: str | None,
+        table_name: str,
+        table_options: dict[str, str] | None,
+        primary_keys: list[str],
+        max_records: int,
+    ) -> tuple[list[dict], str | None, str | None, bool]:
+        """Walk the ``@odata.nextLink`` chain until a deltaLink, cap, or 410.
+
+        Returns ``(records, new_delta_link, carry_next_link, rebootstrap)``:
+
+        * ``records`` — emitted records (already passed through
+          :py:meth:`_build_delta_record`).
+        * ``new_delta_link`` — the freshest ``@odata.deltaLink`` seen.
+        * ``carry_next_link`` — set when ``max_records`` capped the read
+          mid-pagination; the caller persists this in the offset.
+        * ``rebootstrap`` — True iff a 410 fired on a stored link; the
+          caller re-issues from a fresh empty offset.
+        """
+        session = self._get_session()
+        records: list[dict] = []
+        new_delta_link: str | None = None
+        carry_next_link: str | None = None
+        page_index = 0
+        bootstrap_verified = not is_bootstrap
+        sparse_checked = False
+        current_url: str | None = url
+
+        while current_url:
+            headers = initial_headers if (page_index == 0 and initial_headers) else None
+            kwargs: dict[str, Any] = {"headers": headers} if headers else {}
+            resp = self._http_get(session, current_url, **kwargs)
+            if resp.status_code == 410 and (prev_delta_link or prev_next_link):
+                return [], None, None, True
+            _raise_for_status_with_body(resp, current_url)
+
+            if not bootstrap_verified:
+                self._verify_delta_bootstrap(resp, table_name)
+                bootstrap_verified = True
+
+            payload = _decode_json_with_body(resp, current_url)
+            sparse_checked = self._delta_collect_page_records(
+                payload=payload,
+                records=records,
+                primary_keys=primary_keys,
+                table_name=table_name,
+                table_options=table_options,
+                sparse_checked=sparse_checked,
+                max_records=max_records,
+            )
+            fetched_url = resp.url
+            current_url, new_delta_link, carry_next_link = self._delta_advance_links(
+                payload=payload,
+                resp_url=resp.url,
+                records=records,
+                max_records=max_records,
+                new_delta_link=new_delta_link,
+                carry_next_link=carry_next_link,
+            )
+            if current_url is not None and current_url == fetched_url:
+                # Self-referential ``@odata.nextLink`` — the server handed back
+                # the URL we just fetched. Stop rather than loop forever; the
+                # caller persists ``new_delta_link`` (or falls back to the prior
+                # one) so the next run still resumes.
+                _LOG.warning(
+                    "delta walk: server returned a self-referential "
+                    "@odata.nextLink for %r; stopping to avoid an infinite loop.",
+                    fetched_url,
+                )
+                break
+            page_index += 1
+
+        return records, new_delta_link, carry_next_link, False
+
+    def _verify_delta_bootstrap(self, resp: requests.Response, table_name: str) -> None:
+        """Confirm the server actually honored ``Prefer: odata.track-changes``."""
+        applied = resp.headers.get("Preference-Applied", "")
+        if _DELTA_PREFER not in applied.lower():
+            raise RuntimeError(
+                f"OData server did not honor 'Prefer: odata.track-changes' "
+                f"for {table_name!r} (response missing 'Preference-Applied' "
+                f"header). The probe in delta_tracking=auto should have "
+                f"caught this — your service may have inconsistent support. "
+                f"Set delta_tracking=disabled and use cursor-based "
+                f"incremental instead."
+            )
+
+    def _delta_collect_page_records(
+        self,
+        *,
+        payload: dict,
+        records: list[dict],
+        primary_keys: list[str],
+        table_name: str,
+        table_options: dict[str, str] | None,
+        sparse_checked: bool,
+        max_records: int,
+    ) -> bool:
+        """Append delta records from ``payload`` until cap or page exhaustion.
+
+        Returns the updated ``sparse_checked`` flag so the caller can
+        continue to skip the check on later pages once it's already
+        passed for this call.
+        """
+        for item in payload.get("value", []):
+            if not sparse_checked and "@removed" not in item:
+                self._check_no_sparse_entity(item, table_name, table_options)
+                sparse_checked = True
+            records.append(self._build_delta_record(item, primary_keys))
+            if len(records) >= max_records:
+                break
+        return sparse_checked
+
+    def _delta_advance_links(
+        self,
+        *,
+        payload: dict,
+        resp_url: str,
+        records: list[dict],
+        max_records: int,
+        new_delta_link: str | None,
+        carry_next_link: str | None,
+    ) -> tuple[str | None, str | None, str | None]:
+        """Resolve the next URL + offset bookkeeping after one page.
+
+        Returns ``(next_url, new_delta_link, carry_next_link)``.
+        ``next_url`` is ``None`` when pagination should stop (either we
+        hit the cap, saw a terminal deltaLink, or the server omitted
+        both pagination links).
+        """
+        raw_delta = payload.get("@odata.deltaLink")
+        raw_next = payload.get("@odata.nextLink")
+        cap_hit = len(records) >= max_records
+
+        if cap_hit:
+            if raw_next:
+                carry_next_link = urljoin(resp_url, raw_next)
+            # Capture the deltaLink even on a cap-hit page — when the
+            # cap lines up exactly with the terminal page we still want
+            # the next-batch resume to follow ``delta_link`` rather
+            # than re-walk the whole bootstrap.
+            if raw_delta and new_delta_link is None:
+                new_delta_link = urljoin(resp_url, raw_delta)
+            return None, new_delta_link, carry_next_link
+
+        if raw_delta:
+            new_delta_link = urljoin(resp_url, raw_delta)
+            return None, new_delta_link, carry_next_link
+        if raw_next:
+            return urljoin(resp_url, raw_next), new_delta_link, carry_next_link
+        return None, new_delta_link, carry_next_link
+
+    def _check_no_sparse_entity(
+        self,
+        item: dict,
+        table_name: str,
+        table_options: dict[str, str] | None,
+    ) -> None:
+        """Refuse silently-corrupting sparse delta responses.
+
+        OData v4 §11.4 lets a delta payload return only the *changed*
+        properties on an updated entity. That sounds harmless until you
+        realize the connector emits the dict as-is to Spark, which
+        treats absent fields as NULL — overwriting good destination
+        values with nulls on every partial update. The damage is silent
+        and not recoverable from the destination table alone.
+
+        We can't safely apply partial updates in v1, so refuse them up
+        front with an actionable error. Run only on the first
+        non-tombstone entry per call.
+
+        The expected key set is the declared schema for the table, less
+        any selection imposed by ``$select`` and less the synthetic
+        ``_deleted`` / ``_lc_sequence`` columns we add ourselves.
+        """
+        select = (table_options or {}).get("select")
+        if select:
+            expected = {c.strip() for c in select.split(",") if c.strip()}
+        else:
+            namespace = (table_options or {}).get("namespace")
+            expected = {f.name for f in self._fields_for(table_name, namespace)}
+        expected -= {_DELETED_COL, _SEQUENCE_COL}
+        actual = {k for k in item.keys() if not k.startswith("@odata.")}
+        missing = expected - actual
+        if missing:
+            raise RuntimeError(
+                f"OData delta response for {table_name!r} returned a sparse "
+                f"entity: missing properties {sorted(missing)}. The connector "
+                f"cannot safely apply partial updates — every missing field "
+                f"would write NULL at the destination, silently corrupting "
+                f"data. Set delta_tracking=disabled to use cursor-based "
+                f"incremental, or restrict the schema with $select to only "
+                f"the fields the server always returns in delta payloads."
+            )
+
+    # ------------------------------------------------------------------
+    # Delta tracking capability
+    # ------------------------------------------------------------------
+
+    def _delta_setting(self, table_options: dict[str, str] | None) -> str:
+        """Resolve the delta_tracking option, normalised to lower case.
+
+        Defaults to ``disabled``. Delta tracking is opt-in because most
+        OData services don't honor ``Prefer: odata.track-changes``, and
+        a default-``auto`` would burn one wasted HTTP probe per table
+        per pipeline trigger on the common case where the user doesn't
+        want this feature anyway.
+        """
+        raw = ((table_options or {}).get("delta_tracking") or "disabled").strip().lower()
+        if raw not in {"auto", "enabled", "disabled"}:
+            raise ValueError(
+                f"Invalid delta_tracking={raw!r}. Expected one of: auto, enabled, disabled."
+            )
+        return raw
+
+    def _delta_cache_key(
+        self, table_name: str, table_options: dict[str, str] | None
+    ) -> tuple[str, str]:
+        """Cache key for :py:attr:`_delta_capable` keyed on (namespace, table).
+
+        Namespace defaults to the empty string when omitted so multi-schema
+        services with a single un-namespaced declaration also key cleanly.
+        """
+        namespace = (table_options or {}).get("namespace") or ""
+        return (namespace, table_name)
+
+    def _delta_active_for(self, table_name: str, table_options: dict[str, str] | None) -> bool:
+        """Whether delta tracking is the read mode for this table.
+
+        Resolution order:
+          1. ``delta_tracking=disabled`` → never.
+          2. ``cursor_field`` set + ``delta_tracking=enabled`` → ValueError
+             (the two are mutually exclusive — delta tracking provides
+             its own sequencing).
+          3. ``cursor_field`` set + ``delta_tracking=auto`` → cursor wins;
+             delta is left dormant, no probe.
+          4. ``delta_tracking=enabled`` → assume support; a probe failure
+             surfaces at read time rather than here.
+          5. ``delta_tracking=auto`` → probe once, cache, decide.
+        """
+        setting = self._delta_setting(table_options)
+        if setting == "disabled":
+            return False
+        if (table_options or {}).get("cursor_field"):
+            if setting == "enabled":
+                raise ValueError(
+                    "delta_tracking=enabled is mutually exclusive with "
+                    "cursor_field; the server-driven delta stream provides "
+                    "its own sequencing. Remove cursor_field, or switch to "
+                    "delta_tracking=disabled to use cursor-based incremental."
+                )
+            return False
+        if setting == "enabled":
+            return True
+        key = self._delta_cache_key(table_name, table_options)
+        if key not in self._delta_capable:
+            self._delta_capable[key] = self._probe_delta_support(table_name, table_options)
+        return self._delta_capable[key]
+
+    def _probe_delta_support(self, table_name: str, table_options: dict[str, str] | None) -> bool:
+        """Light-touch capability probe.
+
+        Sends a small GET against the entity set with the
+        ``Prefer: odata.track-changes`` header and inspects the response
+        headers for ``Preference-Applied: odata.track-changes``. That
+        header is the spec's positive acknowledgement that the server is
+        honoring change tracking on this request.
+
+        Returns ``False`` for every failure mode (non-200, missing
+        header, malformed body, network error). The cache is populated
+        with that ``False`` so we don't retry the probe per call — the
+        connector falls back to whatever cursor/snapshot path the
+        user's options imply.
+        """
+        # Force ``$top=1`` for the probe so the response stays small even
+        # against entity sets with millions of rows. We only care about
+        # headers.
+        probe_options = {**(table_options or {}), "page_size": "1"}
+        url = self._build_url(table_name, probe_options)
+        try:
+            session = self._get_session()
+            resp = self._http_get(
+                session,
+                url,
+                headers={"Prefer": _DELTA_PREFER},
+            )
+        except (requests.RequestException, ValueError, RuntimeError, PermissionError):
+            return False
+        if resp.status_code != 200:
+            return False
+        applied = resp.headers.get("Preference-Applied", "")
+        return _DELTA_PREFER in applied.lower()
+
+    # ------------------------------------------------------------------
+    # URL + HTTP plumbing
+    # ------------------------------------------------------------------
+
+    def _build_url(
+        self,
+        table_name: str,
+        table_options: dict[str, str],
+        extra_filter: str | None = None,
+        order_by: str | None = None,
+    ) -> str:
+        base = _join_url(self.service_url, table_name)
+        return f"{base}?{self._format_query_params(table_options, extra_filter, order_by)}"
+
+    def _format_query_params(
+        self,
+        table_options: dict[str, str],
+        extra_filter: str | None = None,
+        order_by: str | None = None,
+    ) -> str:
+        """Compose $top/$select/$filter/$orderby; shared across all URL builders.
+
+        ``$top`` is emitted only when ``page_size`` is set. With no
+        ``page_size`` the connector sends no ``$top`` at all and lets the
+        server pick its own page size — some services reject or mishandle
+        an explicit ``$top`` (e.g. a value above their per-page cap), and
+        omitting it is the safe default. Server-driven paging via
+        ``@odata.nextLink`` still walks the full collection either way.
+        """
+        opts = table_options or {}
+        params = []
+        if opts.get("page_size"):
+            params.append(f"$top={opts['page_size']}")
+        if opts.get("select"):
+            params.append(f"$select={opts['select']}")
+        filters = [f for f in (opts.get("filter"), extra_filter) if f]
+        if filters:
+            if len(filters) == 1:
+                # A single clause goes on the wire as-is. Wrapping it
+                # in parens would compound with any pre-wrapped clause
+                # passed via ``extra_filter`` (e.g. a multi-source
+                # ``combine_filters`` result), producing triple-paren
+                # ``$filter=((A) and (B))`` shapes that are harder to
+                # eyeball.
+                params.append(f"$filter={filters[0]}")
+            else:
+                params.append(f"$filter={' and '.join(f'({f})' for f in filters)}")
+        if order_by:
+            params.append(f"$orderby={order_by}")
+        return "&".join(params)
+
+    def _fetch_pages(self, url: str) -> Iterator[dict]:
+        """Walk a collection's pages, yielding raw JSON dicts (no coercion).
+
+        Thin row-flattening wrapper over :meth:`_fetch_pages_with_links`,
+        which handles the pagination strategy (nextlink / keyset / skip /
+        auto). The whole collection is drained within this call: under the
+        default ``auto`` a server that page-limits below ``$top`` without a
+        continuation link is still fully drained (keep seeking until empty).
+        """
+        for page_rows, _ in self._fetch_pages_with_links(url):
+            yield from page_rows
+
+    def _parse_pagination(self, table_options: dict[str, str] | None) -> str:
+        """Parse + validate the ``pagination`` table option.
+
+        Defaults to ``auto``: follow ``@odata.nextLink`` while the server
+        emits it (identical to ``nextlink`` for spec-compliant servers), but
+        fall back to a keyset/skip continuation on any link-less page and keep
+        seeking until empty — so a server that silently page-limits a response
+        below the requested ``$top`` *without* a continuation link doesn't drop
+        the remainder. ``auto`` forces a default ``page_size`` to size its
+        requests (including on snapshot scans); a spec-compliant server that
+        keeps emitting ``@odata.nextLink`` is followed directly with no extra
+        request, while a link-omitting server costs one trailing empty request
+        per collection.
+        """
+        raw = ((table_options or {}).get("pagination") or "auto").strip().lower()
+        if raw not in _PAGINATION_MODES:
+            raise ValueError(
+                f"Invalid pagination={raw!r}. Expected one of: " f"{sorted(_PAGINATION_MODES)}."
+            )
+        return raw
+
+    def _fetch_pages_with_links(self, url: str) -> Iterator[tuple[list[dict], str | None]]:
+        """Page-aware fetch: yields ``(page_rows, next_url)`` per response,
+        where ``next_url`` resumes the next page (``None`` at the end).
+
+        The yielded ``next_url`` is an opaque resume checkpoint — callers
+        park it to continue across batches without reconstructing query
+        state. What it *is* depends on ``pagination`` (``self._pagination``,
+        default ``nextlink``):
+
+        * ``nextlink`` — the server's resolved ``@odata.nextLink`` (its own
+          opaque skiptoken). Spec-compliant default.
+        * ``keyset`` / ``skip`` / ``auto`` — a connector-built URL (a
+          ``(k gt last)`` seek on the ``$orderby`` key set, or ``$top`` +
+          ``$skip``), for servers that page-limit a response but omit the
+          continuation link. See :meth:`_client_paginate_pages`.
+
+        Under ``auto``, when the server has emitted no ``@odata.nextLink`` the
+        walk keeps seeking past a short link-less page until empty, so a server
+        that page-limits below ``$top`` while suppressing the continuation link
+        is still fully drained.
+        """
+        mode = getattr(self, "_pagination", "nextlink")
+        if mode != "nextlink":
+            yield from self._client_paginate_pages(url, mode)
+            return
+        session = self._get_session()
+        next_url: str | None = url
+        # No-progress guard: a server that hands back a self-referential or
+        # cyclic ``@odata.nextLink`` would loop forever. Stop if the resolved
+        # link points back at the URL we just fetched, or if a non-empty page
+        # repeats the one before it.
+        prev_fp: int | None = None
+        while next_url:
+            resp, payload = self._fetch_page_payload(session, next_url)
+            page_rows = [
+                {k: v for k, v in item.items() if not k.startswith("@odata.")}
+                for item in payload.get("value", [])
+            ]
+            fp = _pg_page_fingerprint(page_rows)
+            if page_rows and prev_fp is not None and fp == prev_fp:
+                _LOG.warning(
+                    "pagination=nextlink made no progress on %r: the server "
+                    "returned an identical page (cyclic @odata.nextLink). "
+                    "Stopping to avoid an infinite loop; some rows may be "
+                    "unread.",
+                    next_url,
+                )
+                return
+            prev_fp = fp
+            raw_next = payload.get("@odata.nextLink")
+            new_next = self._resolve_next_link(resp.url, raw_next) if raw_next else None
+            if new_next is not None and new_next == next_url:
+                _LOG.warning(
+                    "pagination=nextlink: server returned a self-referential "
+                    "@odata.nextLink for %r; stopping to avoid an infinite loop.",
+                    next_url,
+                )
+                yield page_rows, None
+                return
+            yield page_rows, new_next
+            next_url = new_next
+
+    def _verify_or_filter_support(
+        self, base_url: str, order_keys: list[str], sample_row: dict
+    ) -> bool:
+        """One-shot, per-instance probe: does the server accept an
+        OR-across-**different-columns** ``$filter`` — the composite keyset-seek
+        shape ``(k1 eq v1 and k2 gt v2) or (k1 gt v1)``?
+
+        A single-key ``$orderby`` never builds an OR, so this short-circuits to
+        ``True`` for ``len(order_keys) < 2``. For a composite seek it issues ONE
+        ``$top=1`` probe carrying the OR filter, built from ``sample_row`` so the
+        literals are correctly typed. A definitive **4xx** ⇒ the server rejects
+        OR across columns (e.g. Hexagon Smart API: "on different columns, only
+        AND operators are supported") and the caller falls back to ``$skip``
+        (pagination mode B). A transport error or any non-4xx outcome is **not**
+        evidence of non-support, so it fails **open** (assume supported) — the
+        real seek then runs and surfaces any genuine error itself. The verdict
+        is cached per instance (the capability is server-wide)."""
+        if len(order_keys) < 2:
+            return True
+        cached = self.__dict__.get("_or_filter_ok")
+        if cached is not None:
+            return cached
+        ok = True
+        seek = _pg_keyset_filter(order_keys, sample_row)
+        if seek is not None and " or " in seek:
+            probe = _pg_strip_query(
+                _pg_set_query(
+                    _pg_keyset_seek_url(base_url, _pg_base_filter(base_url), seek),
+                    "$top",
+                    "1",
+                ),
+                "__pgbase",
+            )
+            try:
+                resp = self._get_session().get(probe, timeout=self.timeout)
+                if 400 <= resp.status_code < 500:
+                    ok = False  # server explicitly rejected the OR-across-columns filter
+            except Exception:  # transport error ≠ unsupported — defer to the real seek
+                ok = True
+        self.__dict__["_or_filter_ok"] = ok
+        return ok
+
+    def _client_paginate_pages(
+        self, url: str, mode: str
+    ) -> Iterator[tuple[list[dict], str | None]]:
+        """Client-driven pagination for servers that don't (always) emit
+        ``@odata.nextLink``. Yields ``(page_rows, next_url)`` like
+        :meth:`_fetch_pages_with_links`, where ``next_url`` is a
+        connector-built resume URL (``None`` at the end):
+
+        * ``keyset`` — seek the next page with a ``(k gt last)`` predicate
+          on the ``$orderby`` key set, rebuilt from the original URL each
+          page (so a same-collection walk never accumulates seeks). Commits
+          to ``$skip`` for the rest of the collection if a boundary value is
+          null (no comparable seek).
+        * ``skip`` — ``$top`` + ``$skip`` offset paging, continuing from any
+          ``$skip`` already on the URL (so a parked checkpoint resumes at
+          the right offset).
+        * ``auto`` — trust ``@odata.nextLink`` whenever the server emits it;
+          when a page arrives with no link, fall back to a keyset (when the
+          ``$orderby`` has keys) or skip continuation and keep seeking until an
+          empty page — so a server that page-limits below the requested
+          ``$top`` while omitting the link is still drained fully.
+
+        Termination (all client-driven modes, ``auto`` included): a continuation
+        that returns an **empty** page means done — NOT a short non-empty one.
+        A server may page-limit a response below the ``$top`` we request while
+        omitting ``@odata.nextLink`` (e.g. ``SUPPRESS_NEXTLINK_WITH_TOP``), so a
+        short page is not proof of exhaustion; the walk keeps seeking until
+        empty. Cost: one trailing empty request per collection that genuinely
+        ends on a short page. ``auto`` still short-circuits to the server's
+        ``@odata.nextLink`` whenever one is present, so a spec-compliant server
+        never incurs the extra request.
+
+        ``$top`` must be present (callers force a default ``page_size``). A
+        no-progress guard stops the walk if a continuation returns a page
+        identical to the one it continued from (server ignoring the
+        seek/``$skip``) or a self-referential ``@odata.nextLink`` — either
+        would otherwise loop forever.
+        """
+        session = self._get_session()
+        top = _pg_parse_top(url)
+        order_keys = _pg_orderby_keys(url)
+        can_keyset = mode in ("keyset", "auto") and bool(order_keys)
+        base_skip = int(_pg_get_query(url, "$skip") or _pg_get_query(url, "%24skip") or 0)
+        # Stable base $filter for keyset seeks — recovered from the private
+        # __pgbase marker on a resume URL, so each new seek REPLACES the prior
+        # one rather than AND-ing onto it across cap-resume batches (which
+        # would grow the URL unboundedly). See _pg_keyset_seek_url.
+        base_filter = _pg_base_filter(url)
+        fetched = 0
+        cur_url: str | None = url
+        # No-progress guard, shared across all client-driven steps: a server
+        # that ignores our seek/$skip (keyset/skip) or hands back a cyclic
+        # @odata.nextLink (auto) would loop forever. Stop when a non-empty page
+        # repeats the previous one — those rows were already emitted, so the
+        # duplicate is dropped rather than re-yielded.
+        prev_fp: int | None = None
+        # ``auto`` only: did the server emit an @odata.nextLink at any point in
+        # this walk? A server either drives pagination via the link or it
+        # doesn't — mixing isn't a real pattern. So once we've seen a link, a
+        # later page with no link means the collection genuinely ended (stop, no
+        # probe). If we've NEVER seen one, a link-less page is ambiguous (could
+        # be a server that page-limits below $top while suppressing the link),
+        # so auto falls back to the keyset/skip drain like the explicit modes.
+        # This keeps spec-compliant nextLink flows free of any extra trailing
+        # request while still draining link-omitting servers fully.
+        saw_next_link = False
+        while cur_url is not None:
+            resp, payload = self._fetch_page_payload(session, cur_url)
+            page_rows = [
+                {k: v for k, v in item.items() if not k.startswith("@odata.")}
+                for item in payload.get("value", [])
+            ]
+            fp = _pg_page_fingerprint(page_rows)
+            if page_rows and prev_fp is not None and fp == prev_fp:
+                _LOG.warning(
+                    "pagination=%s made no progress on %r: an identical page "
+                    "came back (server ignoring the seek/$skip, or a cyclic "
+                    "@odata.nextLink). Stopping this collection to avoid an "
+                    "infinite loop; some rows may be unread. Use "
+                    "pagination=nextlink if the server pages correctly.",
+                    mode,
+                    cur_url,
+                )
+                return
+            prev_fp = fp
+            fetched += len(page_rows)
+            raw_next = payload.get("@odata.nextLink")
+            if mode == "auto" and raw_next:
+                # Server is paginating — defer to its link for this step.
+                saw_next_link = True
+                nxt = self._resolve_next_link(resp.url, raw_next)
+                if nxt == cur_url:
+                    # Self-referential link (catches the empty-page case the
+                    # fingerprint guard skips). Emit this page, then stop.
+                    _LOG.warning(
+                        "pagination=auto: server returned a self-referential "
+                        "@odata.nextLink for %r; stopping to avoid an infinite "
+                        "loop.",
+                        cur_url,
+                    )
+                    yield page_rows, None
+                    return
+                yield page_rows, nxt
+                cur_url = nxt
+                continue
+            if not page_rows:
+                # Empty page ⇒ collection exhausted.
+                yield page_rows, None
+                return
+            if top is None:
+                # No $top to drive client paging, so take the one page. (This
+                # branch is only reachable for a caller that didn't size the
+                # request; the modes that need client paging force a $top.)
+                yield page_rows, None
+                return
+            if mode == "auto" and saw_next_link and len(page_rows) < top and fetched < top:
+                # The server drove this walk with @odata.nextLink and this SHORT
+                # page carried none, *before* our $top budget was reached — a
+                # spec-compliant pager signalling the genuine end of the
+                # collection. Don't probe further (no trailing request); trust
+                # the absent link.
+                #
+                # The ``fetched < top`` guard is essential: if the chain instead
+                # terminated at exactly the budget (``fetched >= top``), the
+                # absent link may signal $top exhaustion, NOT end-of-collection.
+                # OData ``$top`` is a TOTAL-result limit (§11.2.5.3), and a
+                # server may propagate the remaining budget through its skiptoken
+                # nextLinks — e.g. Northwind: ``$top=1000`` → page 1's link
+                # carries ``$top=500`` → after 1000 rows no further link, though
+                # the collection has more. Trusting the short final page there
+                # silently caps the table at ``$top`` rows. So we fall through to
+                # the keyset/$skip seek below, which resumes past the budget and
+                # drains the rest (each re-budgeted seek ends on a trailing empty
+                # page). A *full* no-link page after we've seen links is likewise
+                # ambiguous and falls through.
+                yield page_rows, None
+                return
+            # auto (never saw a link) / keyset / skip: do NOT stop on a short
+            # non-empty page — the server's page size may be below the $top we
+            # requested while it omits @odata.nextLink (SUPPRESS_NEXTLINK_WITH_TOP
+            # servers),
+            # so a short page is not proof of exhaustion. Keep seeking until an
+            # EMPTY page. ``auto`` already deferred to @odata.nextLink above
+            # whenever the server emitted one; reaching here means it didn't, so
+            # auto issues the same confirming seek/$skip as keyset/skip (one
+            # trailing empty request per genuinely-ended collection). The
+            # no-progress guard above bounds a server that ignores the
+            # seek/$skip — auto then stops with this page's rows, exactly as the
+            # old short-page default did, minus the dropped duplicate.
+            if can_keyset and not self._verify_or_filter_support(url, order_keys, page_rows[-1]):
+                # Composite keyset seek would build an OR-across-columns filter
+                # the server rejects (Hexagon Smart API). Drop to $skip (mode B)
+                # for the rest of this collection — and, via the cached verdict,
+                # every later walk this instance.
+                _LOG.warning(
+                    "pagination=%s: server rejected an OR-across-columns keyset "
+                    "seek (composite $orderby %s); using $skip for %r. Set "
+                    "pagination=skip to skip this probe.",
+                    mode,
+                    order_keys,
+                    cur_url,
+                )
+                can_keyset = False
+            if can_keyset:
+                seek = _pg_keyset_filter(order_keys, page_rows[-1])
+                if seek is not None:
+                    nxt = _pg_keyset_seek_url(url, base_filter, seek)
+                else:
+                    # Null boundary value — no comparable keyset seek;
+                    # commit to offset paging for the rest of this walk so
+                    # keyset and skip positions can't interleave.
+                    can_keyset = False
+                    nxt = _pg_set_query(url, "$skip", str(base_skip + fetched))
+            else:
+                nxt = _pg_set_query(url, "$skip", str(base_skip + fetched))
+            yield page_rows, nxt
+            cur_url = nxt
+
+    def _resolve_next_link(self, request_url: str, raw_next: str) -> str:
+        """Resolve an ``@odata.nextLink`` against the request URL.
+
+        Absolute links, root-absolute links (leading ``/``) and bare
+        query references (``?...``) all resolve correctly with a plain
+        ``urljoin`` against the request URL. The trap is a **relative
+        path** nextLink on a contained-collection request: some servers
+        (Hexagon SCApi, SAP Gateway, …) return it relative to the
+        **service root** — ``Top(key)/Child(key)/Leaf?$skiptoken=...`` —
+        rather than the current resource. Naively ``urljoin``-ing that
+        against the deep request URL **duplicates the ancestor path**
+        (``.../Leaf/Top(key)/Child(key)/Leaf?...``), so the next page
+        404s and the read silently stops after page one — only visible
+        on multi-page collections such as a full contained snapshot.
+
+        Detect that form — the relative link restates the entity set
+        that immediately follows the service root in the request URL —
+        and resolve it against the service root instead. Genuinely
+        resource-relative links (e.g. flat ``Customers?$skiptoken=...``
+        or leaf-only ``Leaf?$skiptoken=...``) fall through to the
+        standard request-URL resolution.
+        """
+        parsed = urlparse(raw_next)
+        if parsed.scheme or raw_next.startswith("/") or raw_next.startswith("?"):
+            return urljoin(request_url, raw_next)
+
+        def _first_seg(path: str) -> str:
+            seg = path.lstrip("/").split("/", 1)[0]
+            # Strip any key predicate and query so ``Top(key)?x`` → ``Top``.
+            return seg.split("(", 1)[0].split("?", 1)[0]
+
+        root = self.service_url if self.service_url.endswith("/") else self.service_url + "/"
+        root_path = urlparse(root).path
+        req_path = urlparse(request_url).path
+        after_root = req_path[len(root_path) :] if req_path.startswith(root_path) else req_path
+        if after_root and _first_seg(raw_next) == _first_seg(after_root):
+            # Service-root-relative: resolve against the root so the
+            # ancestor path isn't doubled.
+            return urljoin(root, raw_next)
+        return urljoin(request_url, raw_next)
+
+    def _fetch_page_payload(
+        self, session: requests.Session, url: str
+    ) -> tuple[requests.Response, dict]:
+        """GET one page + decode JSON, retrying on truncated/malformed
+        response bodies.
+
+        ``_http_get`` already retries on transport-layer transients
+        (TCP reset, timeout, 429/503). Some upstream sources additionally
+        emit **200 responses with corrupt JSON bodies** under load —
+        observed with Hexagon SCApi, which sometimes truncates response
+        bodies mid-serialization for large contained-collection
+        responses. Each outer attempt issues a fresh ``_http_get``, so
+        the retry composes cleanly with the transport-layer retries
+        already inside ``_http_get``. After ``max_retries`` exhausted
+        JSON decode attempts, raises the enriched JSONDecodeError with
+        the URL + truncated body in the message so the operator can
+        escalate to the upstream owner.
+        """
+        # Drop the connector-private keyset base marker before it can reach
+        # the server (it only exists to carry the stable base $filter across
+        # cap-resume batches; see _pg_keyset_seek_url).
+        url = _pg_strip_query(url, "__pgbase")
+        attempts = self.max_retries + 1
+        for attempt in range(attempts):
+            resp = self._http_get(session, url)
+            _raise_for_status_with_body(resp, url)
+            try:
+                return resp, _decode_json_with_body(resp, url)
+            except json.JSONDecodeError as exc:
+                if attempt >= self.max_retries:
+                    _LOG.error(
+                        "OData JSON decode failed after %d attempts on GET %s — %s",
+                        attempt + 1,
+                        url,
+                        exc.msg,
+                    )
+                    raise
+                _LOG.warning(
+                    "OData JSON decode failed on GET %s (%s) — retrying (%d/%d)",
+                    url,
+                    exc.msg,
+                    attempt + 1,
+                    self.max_retries,
+                )
+                time.sleep(self._backoff_delay(attempt))
+        # Defensive: the loop above always returns or raises.
+        raise RuntimeError(  # pragma: no cover
+            f"Exhausted retries decoding JSON for {url!r}."
+        )
+
+    def _http_get(
+        self, session: requests.Session, url: str, method: str = "GET", **kwargs: Any
+    ) -> requests.Response:
+        """GET (or other ``method``) with auth-aware 401/403 handling + transient-failure retry.
+
+        ``method`` defaults to ``GET``; a ``POST`` (with ``json=``) routes the
+        ``$batch`` endpoint through the same throttle/transient/token-refresh
+        retry path as every read.
+
+        Outer loop retries on two classes of transient failure, both
+        capped by ``retry_max_delay_seconds`` per attempt:
+
+        * **HTTP 429 / 503** — throttling or service unavailable.
+          Honours the ``Retry-After`` header when present (integer
+          seconds or HTTP-date), otherwise exponential backoff
+          (1, 2, 4, 8, 16 s …). After ``max_retries`` attempts, raises
+          :class:`RuntimeError` with the last response truncated into
+          the message.
+        * **Connection-level exceptions** —
+          :class:`requests.ConnectionError`,
+          :class:`requests.Timeout`,
+          :class:`requests.ChunkedEncodingError`. The server didn't
+          finish sending an HTTP response (TCP reset, remote disconnect,
+          read/connect timeout, half-closed mid-body), so there's no
+          ``Retry-After`` to honour — pure exponential backoff. After
+          ``max_retries`` attempts, re-raises the original exception
+          type with the attempt count appended; ``__cause__`` preserves
+          the original traceback for triage.
+
+        Inner per-attempt logic (see ``_http_get_once``):
+
+        1. **Pre-emptive token refresh** — when the OAuth ``expires_in``
+           clock is past the recorded deadline (60 s safety buffer),
+           swap the bearer header *before* sending. Avoids a wasted
+           round-trip on long paginated reads straddling an expiry
+           boundary.
+        2. **Reactive token refresh** — 401 from the source + OAuth
+           refresh path is available → mint a fresh token and retry
+           once. A second 401 means the access token reached the server
+           but the principal lacks access (raise
+           :class:`PermissionError` immediately, no further retry).
+        3. **Actionable no-refresh-path failure** — 401 or 403 with no
+           automatic refresh configured (bearer, basic, api_key, or
+           OAuth without a refresh-issuing token endpoint). Raise
+           :class:`PermissionError` whose message names the specific
+           connection options the operator should check.
+
+        Retries happen between attempts of the inner logic, so a token
+        refresh and a throttle backoff compose cleanly: refresh →
+        request → 429 → sleep → next attempt's pre-emptive refresh
+        check picks up where we left off.
+        """
+        attempts = self.max_retries + 1
+        for attempt in range(attempts):
+            try:
+                resp = self._http_get_once(session, url, method=method, **kwargs)
+            except _TRANSIENT_NETWORK_ERRORS as exc:
+                # Server closed the TCP connection / DNS failed / read
+                # timed out — no HTTP response, so no Retry-After to
+                # consult. Pure exponential backoff. Preserve the
+                # original exception type so callers that catch
+                # ConnectionError specifically still match.
+                if attempt >= self.max_retries:
+                    raise type(exc)(
+                        f"{exc} (after {attempt + 1} attempts on {url!r}; "
+                        f"raise 'max_retries' on the connection if the "
+                        f"source needs more retries)"
+                    ) from exc
+                _LOG.warning(
+                    "OData transient %s on %s %s — retrying (%d/%d)",
+                    type(exc).__name__,
+                    method,
+                    url,
+                    attempt + 1,
+                    self.max_retries,
+                )
+                time.sleep(self._backoff_delay(attempt))
+                continue
+            if resp.status_code in _RETRYABLE_HTTP_STATUSES:
+                if attempt >= self.max_retries:
+                    raise RuntimeError(
+                        self._transient_status_exhausted_error(resp, url, attempt + 1)
+                    )
+                _LOG.warning(
+                    "OData %d on %s %s — retrying (%d/%d)",
+                    resp.status_code,
+                    method,
+                    url,
+                    attempt + 1,
+                    self.max_retries,
+                )
+                time.sleep(self._retry_after_delay(resp, attempt))
+                continue
+            return resp
+        # Defensive: the loop always returns or raises before exiting.
+        raise RuntimeError(  # pragma: no cover
+            f"Exhausted retries for {url!r} without producing a response."
+        )
+
+    def _log_http_request(self, method: str, url: str) -> None:
+        """Emit a one-line INFO log for the outgoing request when
+        ``verbose_http_logging`` is enabled. No-op otherwise so the
+        hot path stays free of formatting work."""
+        if self.verbose_http_logging:
+            _LOG.info("OData %s %s", method, url)
+
+    def _log_http_response(self, method: str, url: str, resp: requests.Response) -> None:
+        """Emit a one-line INFO log for the response when
+        ``verbose_http_logging`` is enabled. Includes the status code,
+        ``Content-Length``, and the first ``verbose_http_log_body_chars``
+        chars of the body. **Source data ends up in the log stream**
+        when this is on — that's the point — so don't enable it for
+        steady-state pipelines."""
+        if not self.verbose_http_logging:
+            return
+        body_snippet = _truncate(resp.text or "", self.verbose_http_log_body_chars)
+        _LOG.info(
+            "OData %s %s → %d (%s bytes); body: %s",
+            method,
+            url,
+            resp.status_code,
+            resp.headers.get("Content-Length", "?"),
+            body_snippet or "(empty)",
+        )
+
+    def _backoff_delay(self, attempt: int) -> float:
+        """Exponential backoff capped at ``retry_max_delay_seconds``.
+
+        Used for transient network failures where the server never
+        sent a response, so there's no ``Retry-After`` to honour (the
+        429/503 path prefers the server hint via
+        ``_retry_after_delay``).
+        """
+        return min(float(2**attempt), float(self.retry_max_delay_seconds))
+
+    def _http_get_once(
+        self, session: requests.Session, url: str, method: str = "GET", **kwargs: Any
+    ) -> requests.Response:
+        """One auth-aware request attempt; throttle handling lives in `_http_get`."""
+        if self._should_preemptively_refresh():
+            session.headers["Authorization"] = f"Bearer {self._oauth2_token()}"
+        self._log_http_request(method, url)
+        resp = session.request(method, url, timeout=self.timeout, **kwargs)
+        self._log_http_response(method, url, resp)
+        if resp.status_code == 401 and self._has_oauth_refresh_path():
+            session.headers["Authorization"] = f"Bearer {self._oauth2_token()}"
+            self._log_http_request(method, url)
+            resp = session.request(method, url, timeout=self.timeout, **kwargs)
+            self._log_http_response(method, url, resp)
+            if resp.status_code == 401:
+                # We just minted a token straight from the OAuth provider
+                # and the source still rejected it — the access token isn't
+                # the problem. Most likely the principal lacks read access
+                # to this entity set, the scope is insufficient, or the
+                # tenant is mis-mapped. Surface that explicitly so the user
+                # doesn't chase a non-existent token issue.
+                raise PermissionError(
+                    f"OData service returned 401 for {url!r} even after "
+                    f"refreshing the OAuth2 access token. The new token "
+                    f"reached the server, so the access token itself is "
+                    f"not the problem. Check that the OAuth principal has "
+                    f"read access to this entity set, that 'oauth2_scope' "
+                    f"grants the right permissions, and that any "
+                    f"tenant/instance identifier in 'service_url' or "
+                    f"'extra_headers' matches the credentials. Server "
+                    f"response: {_truncate(resp.text, 300)}"
+                )
+            return resp
+        if resp.status_code in (401, 403):
+            raise PermissionError(self._no_refresh_auth_error(resp, url))
+        return resp
+
+    def _retry_after_delay(self, resp: requests.Response, attempt: int) -> float:
+        """Pick the sleep duration before the next retry.
+
+        Priority:
+          1. ``Retry-After`` header — integer seconds or HTTP-date.
+          2. Exponential backoff: ``2**attempt`` seconds (1, 2, 4, 8,
+             16 …).
+
+        Either way the value is capped at ``retry_max_delay_seconds``.
+        """
+        cap = float(self.retry_max_delay_seconds)
+        header = resp.headers.get("Retry-After")
+        if header is not None:
+            parsed = _parse_retry_after(header)
+            if parsed is not None:
+                return min(parsed, cap)
+        return min(float(2**attempt), cap)
+
+    def _transient_status_exhausted_error(
+        self, resp: requests.Response, url: str, attempts: int
+    ) -> str:
+        """Message for the post-retry-budget RuntimeError when the
+        server kept returning a retryable 4xx/5xx
+        (``_RETRYABLE_HTTP_STATUSES``)."""
+        status = resp.status_code
+        retry_after = resp.headers.get("Retry-After", "<none>")
+        if status in (429, 503):
+            symptom = "server is throttling or temporarily unavailable"
+        elif status == 500:
+            symptom = (
+                "server returned an internal error on every attempt — likely a "
+                "request shape the source can't handle (e.g. ``$top`` above its "
+                "per-page cap) or a deterministic upstream bug; check the "
+                "response body and lower ``page_size`` / narrow the request "
+                "before retrying"
+            )
+        else:  # 502, 504
+            symptom = "upstream gateway returned a transient error on every attempt"
+        return (
+            f"OData service returned {status} for {url!r} after "
+            f"{attempts} attempts ({symptom}). Last Retry-After header: "
+            f"{retry_after}. Raise 'max_retries' (current: {self.max_retries}) "
+            f"or 'retry_max_delay_seconds' (current: "
+            f"{self.retry_max_delay_seconds}) on the connection if the source "
+            f"needs longer cooldowns; reduce read concurrency via the "
+            f"per-table 'num_partitions' option if the failure is "
+            f"concurrency-driven. Server response: {_truncate(resp.text, 300)}"
+        )
+
+    def _no_refresh_auth_error(self, resp: requests.Response, url: str) -> str:
+        """Construct an actionable auth-failure message for the no-refresh path.
+
+        Different auth modes have very different failure modes — bearer
+        tokens expire, OAuth scopes can be too narrow, basic creds rot —
+        and bundling them all into one generic "401 Unauthorized" makes
+        triage from a pipeline log nearly impossible. This method picks
+        the relevant remediation hints based on which auth mode is
+        active on the connection.
+        """
+        status = resp.status_code
+        body = _truncate(resp.text, 300) or "(empty body)"
+        auth = (self.options.get("auth_type") or "").lower().strip()
+        if not auth and self.options.get("token"):
+            auth = "bearer"
+        prefix = (
+            f"OData service returned {status} for {url!r} and no "
+            f"automatic token-refresh path is configured. "
+        )
+        if auth == "bearer":
+            return (
+                f"{prefix}"
+                f"With auth_type=bearer the pre-acquired access token cannot "
+                f"be refreshed by the connector — either it has expired "
+                f"(typical lifetime ~1 h), or the principal that issued it "
+                f"lacks read access to this entity set. Fixes: replace "
+                f"'token' on the connection with a fresh one; or switch to "
+                f"auth_type=oauth2 with 'oauth2_client_id' + "
+                f"'oauth2_client_secret' so the connector mints and "
+                f"refreshes tokens automatically. For Microsoft Graph "
+                f"high-privilege endpoints (identityProviders, auditLogs, "
+                f"etc.), ensure the token carries the required scope and "
+                f"admin consent. Server response: {body}"
+            )
+        if auth == "basic":
+            return (
+                f"{prefix}"
+                f"With auth_type=basic the credentials are sent on every "
+                f"request unchanged. Check 'username' and 'password' on "
+                f"the connection — the password may have expired or been "
+                f"rotated — and confirm the user has read access to this "
+                f"entity set at the source. Server response: {body}"
+            )
+        if auth == "api_key":
+            return (
+                f"{prefix}"
+                f"With auth_type=api_key the key is sent on every request "
+                f"unchanged. Check 'api_key' (may have been rotated or "
+                f"revoked) and 'api_key_header' (some services expect a "
+                f"non-default header name). Confirm the key's scope "
+                f"includes this entity set. Server response: {body}"
+            )
+        if auth == "oauth2":
+            return (
+                f"{prefix}"
+                f"With auth_type=oauth2 but no refresh path available "
+                f"(missing 'oauth2_client_id' / 'oauth2_client_secret' "
+                f"for client-credentials, and no 'oauth2_refresh_token' "
+                f"for user-flow refresh), the connector can't mint a "
+                f"fresh access token. Provide one of those pairs, or "
+                f"replace 'oauth2_access_token' with a fresh value. "
+                f"Also confirm 'oauth2_scope' grants read on this entity "
+                f"set. Server response: {body}"
+            )
+        return (
+            f"{prefix}"
+            f"No authentication is configured on this connection but the "
+            f"OData service requires it. Set 'auth_type' to one of: "
+            f"bearer, basic, api_key, oauth2 (with the matching parameter "
+            f"set). Server response: {body}"
+        )
+
+    def _should_preemptively_refresh(self) -> bool:
+        """True iff a known-expiry token has hit its 60 s safety window."""
+        if self._access_token_expires_at is None:
+            return False
+        return time.monotonic() >= self._access_token_expires_at
+
+    def _has_oauth_refresh_path(self) -> bool:
+        """True iff `_oauth2_token()` can mint a fresh access token.
+
+        Either a refresh token is on hand (user flow) or
+        ``oauth2_client_id`` + ``oauth2_client_secret`` are present
+        for the client-credentials grant.
+        """
+        if self.options.get("oauth2_refresh_token"):
+            return True
+        return bool(
+            self.options.get("oauth2_client_id") and self.options.get("oauth2_client_secret")
+        )
+
+    # ------------------------------------------------------------------
+    # Auth session
+    # ------------------------------------------------------------------
+
+    def _get_session(self) -> requests.Session:
+        if self._session is not None:
+            return self._session
+
+        session = requests.Session()
+        session.headers.update(
+            {
+                "Accept": "application/json",
+                "OData-Version": "4.0",
+                "OData-MaxVersion": "4.0",
+            }
+        )
+        extra_headers = self.options.get("extra_headers")
+        if extra_headers:
+            for pair in extra_headers.split(","):
+                if ":" in pair:
+                    k, v = pair.split(":", 1)
+                    session.headers[k.strip()] = v.strip()
+
+        auth_type = (self.options.get("auth_type") or "").lower().strip()
+        if not auth_type and self.options.get("token"):
+            auth_type = "bearer"
+
+        if auth_type == "bearer":
+            session.headers["Authorization"] = f"Bearer {_require(self.options, 'token')}"
+        elif auth_type == "basic":
+            session.auth = HTTPBasicAuth(
+                _require(self.options, "username"),
+                _require(self.options, "password"),
+            )
+        elif auth_type == "api_key":
+            header = self.options.get("api_key_header", "x-api-key")
+            session.headers[header] = _require(self.options, "api_key")
+        elif auth_type == "oauth2":
+            # Two sub-modes share this branch:
+            #  * **User flow** — `oauth2_refresh_token` is set. A
+            #    pre-supplied `oauth2_access_token` is used as-is if
+            #    present (avoids an unnecessary round-trip); otherwise
+            #    `_oauth2_token()` runs the refresh-token grant to
+            #    mint one. Expired tokens mid-run are caught in
+            #    `_http_get` and refreshed once.
+            #  * **Client-credentials flow** — no refresh token; the
+            #    connector mints a fresh access token via
+            #    `client_credentials` at session start.
+            initial_token = self.options.get("oauth2_access_token") or self._oauth2_token()
+            session.headers["Authorization"] = f"Bearer {initial_token}"
+        elif auth_type:
+            raise ValueError(
+                f"Unknown auth_type {auth_type!r}. "
+                f"Expected one of: bearer, basic, api_key, oauth2."
+            )
+
+        self._session = session
+        return session
+
+    def _oauth2_token(self) -> str:
+        """Mint an OAuth2 access token.
+
+        Picks the grant type from what's available in `self.options`:
+          * `oauth2_refresh_token` present -> `refresh_token` grant
+            (user-flow refresh). Client id/secret are required so the
+            token endpoint can authenticate the client.
+          * Otherwise -> `client_credentials` grant (server-to-server).
+
+        Some providers issue a rotated refresh token in the response;
+        when that happens, the new value is written back into
+        `self.options` so the next refresh uses it.
+        """
+        refresh_token = self.options.get("oauth2_refresh_token")
+        if refresh_token:
+            data = {
+                "grant_type": "refresh_token",
+                "refresh_token": refresh_token,
+                "client_id": _require(self.options, "oauth2_client_id"),
+                "client_secret": _require(self.options, "oauth2_client_secret"),
+            }
+        else:
+            data = {
+                "grant_type": "client_credentials",
+                "client_id": _require(self.options, "oauth2_client_id"),
+                "client_secret": _require(self.options, "oauth2_client_secret"),
+            }
+        scope = self.options.get("oauth2_scope")
+        if scope:
+            data["scope"] = scope
+        token_url = _require(self.options, "oauth2_token_url")
+        resp = requests.post(
+            token_url,
+            data=data,
+            timeout=self.timeout,
+        )
+        # Surface a precise, actionable error when the token endpoint
+        # itself rejects the request. raise_for_status() would otherwise
+        # produce a terse "401 Client Error: Unauthorized for url ..."
+        # that doesn't tell the user *which* credential is the problem.
+        if resp.status_code in (400, 401):
+            grant = data["grant_type"]
+            hint = _extract_oauth_error_hint(resp)
+            if grant == "refresh_token":
+                raise ValueError(
+                    f"OAuth2 token endpoint returned {resp.status_code} when "
+                    f"refreshing the access token. The refresh token may be "
+                    f"expired, revoked, or paired with a different OAuth "
+                    f"client. Check that 'oauth2_refresh_token' was issued by "
+                    f"the same 'oauth2_client_id' configured on this "
+                    f"connection, and re-run the authorization-code flow if "
+                    f"needed. Server response: {hint}"
+                ) from None
+            raise ValueError(
+                f"OAuth2 token endpoint returned {resp.status_code} for the "
+                f"client_credentials grant. Check 'oauth2_client_id', "
+                f"'oauth2_client_secret', 'oauth2_token_url', and "
+                f"'oauth2_scope' on this connection. Server response: {hint}"
+            ) from None
+        resp.raise_for_status()
+        payload = _decode_json_with_body(resp, token_url)
+        token = payload.get("access_token")
+        if not token:
+            raise RuntimeError("OAuth2 token endpoint did not return access_token.")
+        rotated_refresh = payload.get("refresh_token")
+        if rotated_refresh:
+            self.options["oauth2_refresh_token"] = rotated_refresh
+        # Track wall-clock deadline so `_http_get` can refresh the token
+        # *before* the source returns 401. Subtract a 60 s safety margin
+        # to cover clock skew + in-flight request latency. Absent
+        # `expires_in` means the provider didn't tell us — fall back to
+        # the lazy 401-retry path.
+        expires_in = payload.get("expires_in")
+        if expires_in is not None:
+            try:
+                self._access_token_expires_at = time.monotonic() + int(expires_in) - 60
+            except (TypeError, ValueError):
+                self._access_token_expires_at = None
+        else:
+            self._access_token_expires_at = None
+        return token
+
+    # ------------------------------------------------------------------
+    # $metadata caching + parsing
+    # ------------------------------------------------------------------
+
+    def _metadata_root(self) -> ET.Element:
+        """Convenience accessor — returns the parsed root from the
+        cached bundle. Most callers want lookups against the index;
+        reach for ``self._metadata_state()`` directly when so."""
+        return self._metadata_state().root
+
+    def _metadata_state(self) -> _MetadataState:
+        """Return the bundled parsed-CSDL state for this instance,
+        fetching + parsing + indexing on first call only.
+
+        Four cache layers, checked in order:
+
+        1. Instance ``self._metadata`` — re-used across every downstream
+           lookup; the per-instance memos hang off this bundle so all
+           the lookup methods see the same cached root + index.
+        2. Module ``_METADATA_CACHE`` keyed by ``service_url`` — shared
+           across all connector instances in the same Python process.
+           Stores ``(xml_text, root, index)`` so the index isn't
+           rebuilt per instance either.
+        3. On-disk pickle at ``_metadata_cache_path(service_url)`` —
+           shared across forked ``pyspark.daemon`` workers (PySpark
+           forks one per ``.load()`` schema inference). The pickle
+           stores ``(xml_text, root)``; each fork rebuilds the index
+           from the unpickled root (one tree walk, ~50 ms).
+        4. Network — the actual ``GET $metadata``, taken only when no
+           cache has it.
+        """
+        if self._metadata is not None:
+            return self._metadata
+        cached = _METADATA_CACHE.get(self.service_url)
+        if cached is not None:
+            xml_text, root, index = cached
+            self._metadata = _MetadataState(root=root, index=index)
+            # ``xml_text`` is only needed for the write path; once
+            # cached, we don't carry it on the bundle.
+            del xml_text
+            return self._metadata
+        file_cached = self._read_metadata_file_cache()
+        if file_cached is not None:
+            xml_text, root = file_cached
+            index = _build_csdl_index(root)
+            self._metadata = _MetadataState(root=root, index=index)
+            _METADATA_CACHE[self.service_url] = (xml_text, root, index)
+            return self._metadata
+        session = self._get_session()
+        url = _join_url(self.service_url, "$metadata")
+        resp = self._http_get(session, url, headers={"Accept": "application/xml"})
+        _raise_for_status_with_body(resp, url)
+        xml_text = resp.text
+        root = ET.fromstring(xml_text)
+        index = _build_csdl_index(root)
+        self._metadata = _MetadataState(root=root, index=index)
+        _METADATA_CACHE[self.service_url] = (xml_text, root, index)
+        self._write_metadata_file_cache(xml_text, root)
+        return self._metadata
+
+    def _read_metadata_file_cache(self) -> tuple[str, ET.Element] | None:
+        """Return the cached ``(xml_text, parsed_root)`` from the
+        on-disk pickle if it exists and is within the TTL. Returns
+        ``None`` for any miss (missing, expired, unreadable,
+        unpicklable). All failures are silent — the caller falls
+        through to the network."""
+        if self.metadata_cache_ttl_seconds <= 0:
+            return None
+        path = _metadata_cache_path(self.service_url)
+        try:
+            mtime = os.path.getmtime(path)
+        except OSError:
+            return None
+        if time.time() - mtime > self.metadata_cache_ttl_seconds:
+            return None
+        try:
+            with open(path, "rb") as fh:
+                payload = pickle.load(fh)
+        except (OSError, pickle.UnpicklingError, EOFError, ValueError):
+            return None
+        # Defensive shape check — a corrupt or wrong-shape pickle
+        # shouldn't crash the connector.
+        if (
+            not isinstance(payload, tuple)
+            or len(payload) != 2
+            or not isinstance(payload[0], str)
+            or not isinstance(payload[1], ET.Element)
+        ):
+            return None
+        return payload
+
+    def _write_metadata_file_cache(self, xml_text: str, root: ET.Element) -> None:
+        """Best-effort write of ``(xml_text, parsed_root)`` to the
+        on-disk pickle. Uses atomic rename so a concurrent reader
+        either sees the old file or the fully-written new one, never
+        a torn write."""
+        if self.metadata_cache_ttl_seconds <= 0:
+            return
+        path = _metadata_cache_path(self.service_url)
+        tmp_path = f"{path}.{os.getpid()}.tmp"
+        try:
+            with open(tmp_path, "wb") as fh:
+                pickle.dump((xml_text, root), fh, protocol=pickle.HIGHEST_PROTOCOL)
+            os.replace(tmp_path, path)
+        except (OSError, pickle.PicklingError):
+            # File cache is purely an optimization. If anything goes
+            # wrong (read-only tempdir, disk full, pickling failure)
+            # the connector still works — just slower.
+            try:
+                os.remove(tmp_path)
+            except OSError:
+                pass
+
+    def _entity_set_index(self) -> list[tuple[str, str]]:
+        """All (schema_namespace, entity_set_name) pairs declared in $metadata."""
+        return self._metadata_state().index.entity_set_pairs
+
+    def _entity_type_for(self, table_name: str, namespace: str | None = None) -> ET.Element:
+        """Resolve flat names or contained paths (segment-by-segment via
+        contained nav props on the base-type chain)."""
+        state = self._metadata_state()
+        cache_key = (table_name, namespace)
+        cached = state.entity_type.get(cache_key)
+        if cached is not None:
+            return cached
+        segments = _parse_contained_path(table_name) or [table_name]
+        et = self._flat_entity_type_for(segments[0], namespace)
+        for idx, child_segment in enumerate(segments[1:], start=1):
+            nav_props = self._all_contained_nav_props(et)
+            target_ref = next((r for n, r in nav_props if n == child_segment), None)
+            if target_ref is None:
+                walked = _CONTAINED_PATH_SEP.join(segments[:idx])
+                raise ValueError(
+                    f"{child_segment!r} is not a contained-collection navigation "
+                    f"property on {walked!r}. Available contained collections: "
+                    f"{sorted(n for n, _ in nav_props)}"
+                )
+            target_et = self._resolve_type_ref(target_ref)
+            if target_et is None:
+                raise ValueError(
+                    f"Contained navigation target {target_ref!r} (referenced by "
+                    f"{child_segment!r} on {segments[idx - 1]!r}) not found in $metadata."
+                )
+            et = target_et
+        state.entity_type[cache_key] = et
+        return et
+
+    def _flat_entity_type_for(self, table_name: str, namespace: str | None = None) -> ET.Element:
+        """Resolve a top-level entity-set name to its EntityType element."""
+        index = self._metadata_state().index
+        candidates = index.entity_set_by_name.get(table_name) or []
+        if namespace is not None:
+            matches = [(ns, ref) for ns, ref in candidates if ns == namespace]
+        else:
+            matches = list(candidates)
+        if not matches:
+            if namespace is not None:
+                hint = sorted(index.entity_set_names_by_ns.get(namespace, []))
+                if not hint:
+                    # The requested namespace has zero entity sets — common
+                    # confusion when the user picks a type-only schema
+                    # (e.g. one declaring BaseType references) instead of
+                    # the schema whose <EntityContainer> declares the sets.
+                    raise ValueError(
+                        f"Entity set {table_name!r} not found in namespace "
+                        f"{namespace!r}. Namespace {namespace!r} declares "
+                        f"no entity sets (probably a type-only schema). "
+                        f"Namespaces with entity sets: {sorted(index.namespaces_with_sets)}."
+                    )
+                raise ValueError(
+                    f"Entity set {table_name!r} not found in namespace "
+                    f"{namespace!r}. Available in this namespace: {hint}"
+                )
+            raise ValueError(
+                f"Entity set {table_name!r} not found in $metadata. "
+                f"Available: {sorted({n for _, n in index.entity_set_pairs})}"
+            )
+        if len(matches) > 1:
+            namespaces = sorted({m[0] for m in matches})
+            raise ValueError(
+                f"Entity set {table_name!r} is declared in multiple namespaces: "
+                f"{namespaces}. Set 'namespace' in table_options to disambiguate."
+            )
+        schema_ns, type_ref = matches[0]
+        et = self._resolve_type_ref(type_ref)
+        if et is None:
+            raise ValueError(
+                f"EntityType {type_ref!r} (referenced by entity set "
+                f"{table_name!r} in schema {schema_ns!r}) not found in $metadata."
+            )
+        return et
+
+    def _schema_alias_map(self) -> dict[str, str]:
+        """``{namespace_or_alias → canonical_namespace}``.
+
+        Kept as a public-shape method so callers reading the source
+        for OData spec context still find it; internally it's a
+        direct index lookup. CSDL allows each ``<Schema>`` to declare
+        both a ``Namespace`` and a shorter ``Alias``; downstream
+        ``BaseType`` / ``EntityType`` references can use either.
+        Microsoft Graph for instance declares
+        ``Namespace="microsoft.graph" Alias="graph"`` and then writes
+        ``BaseType="graph.directoryObject"``.
+        """
+        return self._metadata_state().index.alias_to_namespace
+
+    def _resolve_type_ref(self, type_ref: str) -> ET.Element | None:
+        """Find the ``<EntityType>`` element for a qualified type reference.
+
+        Accepts both fully-qualified namespace references
+        (``microsoft.graph.user``) and alias-based references
+        (``graph.user``). Returns ``None`` if no matching declaration
+        exists — callers decide whether that's a hard error or worth
+        falling back to a shallower lookup.
+        """
+        if "." not in type_ref:
+            return None
+        prefix, type_name = type_ref.rsplit(".", 1)
+        index = self._metadata_state().index
+        target_ns = index.alias_to_namespace.get(prefix)
+        if target_ns is None:
+            return None
+        return index.entity_type_by_qname.get(f"{target_ns}.{type_name}")
+
+    def _resolve_base_chain(self, et: ET.Element) -> list[ET.Element]:
+        """Walk the ``BaseType`` chain starting at ``et``.
+
+        Returns ``[et, parent, grandparent, …]`` until ``BaseType`` is
+        absent or unresolvable. OData v4 §8.4: derived entity types
+        inherit Keys and Properties from their base. Real-world
+        services (Microsoft Graph, Microsoft Dataverse, most SAP
+        deployments) lean on this heavily — Graph's ``user`` extends
+        ``directoryObject`` extends ``entity``, and ``entity`` is the
+        type that actually declares ``<Key>id</Key>``.
+
+        Cycles are guarded against (cyclic CSDL is malformed but won't
+        crash the connector).
+        """
+        state = self._metadata_state()
+        cache_key = id(et)
+        cached = state.base_chain.get(cache_key)
+        if cached is not None:
+            return cached
+        chain = [et]
+        current = et
+        seen: set[str] = set()
+        while True:
+            base_ref = current.get("BaseType")
+            if not base_ref or base_ref in seen:
+                break
+            seen.add(base_ref)
+            parent = self._resolve_type_ref(base_ref)
+            if parent is None:
+                break
+            chain.append(parent)
+            current = parent
+        state.base_chain[cache_key] = chain
+        return chain
+
+    def _fields_for(self, table_name: str, namespace: str | None = None) -> list[StructField]:
+        state = self._metadata_state()
+        cache_key = (table_name, namespace)
+        cached = state.fields.get(cache_key)
+        if cached is not None:
+            return cached
+        segments = _parse_contained_path(table_name) or [table_name]
+        own_fields = self._own_fields_for_et(self._entity_type_for(table_name, namespace))
+        if len(segments) == 1:
+            state.fields[cache_key] = own_fields
+            return own_fields
+        # Every non-leaf ancestor contributes FK columns (OData v4
+        # §13.4.3 — contained-entity keys are unique within parent only).
+        fk_columns = self._resolve_fk_columns(segments, namespace)
+        fk_fields: list[StructField] = []
+        for idx in range(len(segments) - 1):
+            seg = segments[idx]
+            if not any(k[0] == seg for k in fk_columns):
+                continue
+            ancestor_et = self._entity_type_for(
+                _CONTAINED_PATH_SEP.join(segments[: idx + 1]), namespace
+            )
+            own = {f.name: f.dataType for f in self._own_fields_for_et(ancestor_et)}
+            for pk in self._own_primary_keys_for_et(ancestor_et):
+                fk_fields.append(
+                    StructField(
+                        fk_columns[(seg, pk)],
+                        own.get(pk, StringType()),
+                        False,
+                    )
+                )
+        result = fk_fields + own_fields
+        state.fields[cache_key] = result
+        return result
+
+    def _own_fields_for_et(self, et: ET.Element) -> list[StructField]:
+        """Property fields on ``et`` and its base chain. Walks root → leaf
+        so inherited fields appear before leaf's own additions; de-dupes
+        by name with closest-to-root winning (spec forbids redeclaration)."""
+        state = self._metadata_state()
+        cache_key = id(et)
+        cached = state.own_fields.get(cache_key)
+        if cached is not None:
+            return cached
+        fields: list[StructField] = []
+        seen: set[str] = set()
+        for type_el in reversed(self._resolve_base_chain(et)):
+            for prop in type_el.findall(f"{_NS_EDM}Property"):
+                name = prop.get("Name")
+                if name in seen:
+                    continue
+                seen.add(name)
+                fields.append(
+                    StructField(
+                        name,
+                        _EDM_TO_SPARK.get(prop.get("Type", "Edm.String"), StringType()),
+                        prop.get("Nullable", "true").lower() != "false",
+                    )
+                )
+        state.own_fields[cache_key] = fields
+        return fields
+
+    def _primary_keys_for(self, table_name: str, namespace: str | None = None) -> list[str]:
+        state = self._metadata_state()
+        cache_key = (table_name, namespace)
+        cached = state.primary_keys.get(cache_key)
+        if cached is not None:
+            return cached
+        segments = _parse_contained_path(table_name) or [table_name]
+        leaf_pks = self._own_primary_keys_for_et(self._entity_type_for(table_name, namespace))
+        if len(segments) == 1:
+            state.primary_keys[cache_key] = leaf_pks
+            return leaf_pks
+        # Composite: every ancestor's FK columns + leaf's own PKs.
+        fk_columns = self._resolve_fk_columns(segments, namespace)
+        composite: list[str] = []
+        for idx in range(len(segments) - 1):
+            seg = segments[idx]
+            if not any(k[0] == seg for k in fk_columns):
+                continue
+            ancestor_et = self._entity_type_for(
+                _CONTAINED_PATH_SEP.join(segments[: idx + 1]), namespace
+            )
+            for pk in self._own_primary_keys_for_et(ancestor_et):
+                composite.append(fk_columns[(seg, pk)])
+        composite.extend(leaf_pks)
+        state.primary_keys[cache_key] = composite
+        return composite
+
+    def _own_primary_keys_for_et(self, et: ET.Element) -> list[str]:
+        """Primary-key property names (OData v4 §8.4: derived types inherit
+        Keys; closest-to-leaf Key wins where multiple levels redeclare)."""
+        state = self._metadata_state()
+        cache_key = id(et)
+        cached = state.own_pks.get(cache_key)
+        if cached is not None:
+            return cached
+        result: list[str] = []
+        for type_el in self._resolve_base_chain(et):
+            key = type_el.find(f"{_NS_EDM}Key")
+            if key is not None:
+                result = [ref.get("Name") for ref in key.findall(f"{_NS_EDM}PropertyRef")]
+                break
+        state.own_pks[cache_key] = result
+        return result
+
+    # ------------------------------------------------------------------
+    # Cursor filter formatting
+    # ------------------------------------------------------------------
+
+    def _cursor_filter(self, cursor_field: str, since: Any) -> str | None:
+        """Build the `$filter` clause for an incremental fetch.
+
+        Strict `cursor gt since` once the offset has advanced; `None` on
+        the very first call so the server returns the natural start of
+        the table. `max_records_per_batch` is the per-call cap — there
+        is no wall-clock ceiling, which is what makes continuous polling
+        work and what keeps the connector type-agnostic over the cursor
+        column.
+        """
+        if since is None:
+            return None
+        return f"{cursor_field} gt {_odata_literal(since)}"
+
+    def _cursor_max_end_offset(self, cursors: list, since: Any) -> dict:
+        """End offset for a natural-completion cursor batch: ``{"cursor": max}``
+        over the batch's effective (non-null) cursor values, falling back to the
+        carried ``since`` and then ``{}``.
+
+        Shared by the flat (``_read_incremental``) and contained leaf-cursor
+        (``_read_contained_incremental_leaf_cursor``) reads. ``{"cursor": None}``
+        must never be committed — it would advance ``{}`` → ``{"cursor": None}``
+        on an all-null-cursor batch and then loop the no-progress guard — so a
+        null-only batch yields ``since`` (if carried) or ``{}``."""
+        if cursors:
+            return {"cursor": max(cursors)}
+        if since is not None:
+            return {"cursor": since}
+        return {}
+
+    def _parse_cursor_lookback(self, table_options: dict[str, str] | None):
+        """Parse the ``cursor_lookback_seconds`` table option.
+
+        Returns the mode: the string ``"auto"`` (default), or a non-negative
+        ``int`` of explicit seconds (``0`` disables the overlap).
+
+        The overlap re-reads a window behind the committed watermark on each
+        incremental ``expand_contained=true`` batch, so rows inserted *during*
+        a long (non-atomic) walk — which land with a cursor below the walk's
+        final max and would otherwise be skipped by ``cursor gt <max>`` — are
+        re-scanned and captured on the next progressing batch (deduped at the
+        destination by ``apply_changes`` MERGE).
+
+        * ``auto`` (default): size the window from the measured duration of
+          the previous completed walk (persisted in the offset), times a
+          safety factor, clamped to a ceiling. Self-tuning; no manual guess.
+          A no-op outside the expand-cursor path and for non-timestamp
+          cursors, so defaulting it on is safe.
+        * an explicit integer: a fixed window in cursor units (seconds for a
+          timestamp cursor). Set it at or above the worst-case walk duration.
+        * ``0`` / ``off``: disabled (exact prior behaviour).
+        """
+        raw = (table_options or {}).get("cursor_lookback_seconds")
+        if raw is None or str(raw).strip() == "":
+            return "auto"
+        norm = str(raw).strip().lower()
+        if norm == "auto":
+            return "auto"
+        if norm == "off":
+            return 0
+        try:
+            val = int(norm)
+        except ValueError as exc:
+            raise ValueError(
+                f"Invalid cursor_lookback_seconds={raw!r}; expected 'auto', "
+                f"'off', or a non-negative integer (seconds)."
+            ) from exc
+        if val < 0:
+            raise ValueError(f"cursor_lookback_seconds must be >= 0; got {val}.")
+        return val
+
+    def _parse_cursor_lookback_factor(self, table_options: dict[str, str] | None) -> float:
+        """Parse ``cursor_lookback_factor`` — the ``auto`` safety multiplier
+        applied to the max recent walk duration (default 1.5). Must be > 0;
+        values < 1 risk under-covering the overlap (dropped rows)."""
+        raw = (table_options or {}).get("cursor_lookback_factor")
+        if raw is None or str(raw).strip() == "":
+            return _LOOKBACK_AUTO_DEFAULT_FACTOR
+        try:
+            val = float(str(raw).strip())
+        except ValueError as exc:
+            raise ValueError(
+                f"Invalid cursor_lookback_factor={raw!r}; expected a positive number."
+            ) from exc
+        if val <= 0:
+            raise ValueError(f"cursor_lookback_factor must be > 0; got {val}.")
+        return val
+
+    def _parse_cursor_lookback_ceiling(self, table_options: dict[str, str] | None) -> int:
+        """Parse ``cursor_lookback_max_seconds`` — the ``auto`` ceiling clamp
+        (runaway backstop) on the overlap window (default 3600). Must be > 0."""
+        raw = (table_options or {}).get("cursor_lookback_max_seconds")
+        if raw is None or str(raw).strip() == "":
+            return _LOOKBACK_AUTO_DEFAULT_CEILING_SECONDS
+        try:
+            val = int(str(raw).strip())
+        except ValueError as exc:
+            raise ValueError(
+                f"Invalid cursor_lookback_max_seconds={raw!r}; expected a positive integer."
+            ) from exc
+        if val <= 0:
+            raise ValueError(f"cursor_lookback_max_seconds must be > 0; got {val}.")
+        return val
+
+    def _resolve_active_lookback(self, start_offset: dict | None) -> float:
+        """Seconds to subtract from the committed watermark for THIS read.
+
+        Static mode → the configured integer. ``auto`` → the **max** walk
+        duration over the last ``_LOOKBACK_AUTO_WINDOW`` completed walks
+        (``lb_history`` in the offset) × ``cursor_lookback_factor``, clamped
+        to ``cursor_lookback_max_seconds``; ``0`` until the first walk has
+        been measured. Held on ``self`` for the read so
+        ``_apply_cursor_lookback`` can read it without threading the offset
+        through ``_cursor_expand_clause``.
+
+        The ``auto`` value keeps **sub-second (down to nanosecond) precision**
+        — a fast walk only needs a fast overlap, and the mid-walk-arrival
+        window is itself sub-second on a small/fast source, so flooring to
+        whole seconds would collapse a 0.3s walk's window to a useless 0 and
+        strand rows that landed a few ms below the watermark. ``timedelta`` (in
+        ``_apply_cursor_lookback``) accepts the float directly."""
+        mode = getattr(self, "_cursor_lookback", "auto")
+        if mode != "auto":
+            return int(mode)
+        history = (start_offset or {}).get("lb_history") or []
+        if not history:
+            return 0
+        factor = getattr(self, "_cursor_lookback_factor", _LOOKBACK_AUTO_DEFAULT_FACTOR)
+        ceiling = getattr(
+            self, "_cursor_lookback_max_seconds", _LOOKBACK_AUTO_DEFAULT_CEILING_SECONDS
+        )
+        return min(round(max(history) * factor, 9), ceiling)
+
+    def _attach_lookback_state(
+        self, out_offset: dict, start_offset: dict | None, in_flight: bool, elapsed: float
+    ) -> dict:
+        """Maintain the ``auto`` walk-duration history on the returned offset.
+        No-op for static/off modes (nothing to measure).
+
+        ``lb_history`` is a rolling list of the last ``_LOOKBACK_AUTO_WINDOW``
+        completed-walk durations (seconds, down to nanosecond precision);
+        ``_resolve_active_lookback`` sizes the window from its max.
+
+        * In-flight (the walk spans more cap-resume batches): carry the prior
+          history unchanged so the read floor stays stable until completion.
+        * Idled (``out_offset is start_offset`` — quiescent overlap re-read):
+          keep the prior history; a quiescent walk only re-reads the small
+          overlap and would under-represent a real walk.
+        * Completed a progressing walk: append this batch's wall-clock
+          ``elapsed`` (rounded to nanoseconds, capped to the last N).
+          Sub-second walks ARE recorded — on a small/fast source the
+          mid-walk-arrival window is itself sub-second, so a sub-second
+          overlap is exactly what recovers rows that landed just below the
+          committed watermark; the old whole-second rounding floored those to
+          a zero window and stranded them. Idle/empty batches never reach
+          here (``out_offset is start_offset``), so only real walks are
+          captured — never a no-op zero.
+        """
+        if getattr(self, "_cursor_lookback", "auto") != "auto":
+            return out_offset
+        if out_offset is start_offset:
+            return out_offset
+        history = list((start_offset or {}).get("lb_history") or [])
+        if not in_flight:
+            measured = round(elapsed, 9)
+            if measured > 0:
+                history.append(measured)
+                history = history[-_LOOKBACK_AUTO_WINDOW:]
+        if not history:
+            return out_offset
+        return {**out_offset, "lb_history": history}
+
+    def _apply_cursor_lookback(self, since: Any) -> Any:
+        """Return the read floor: ``since`` minus the active lookback window.
+
+        Unchanged when the active window is 0 or ``since`` is ``None`` (the
+        first read stays unfiltered). For a positive window the cursor must be
+        a timestamp — ISO-8601 string or ``datetime``; the result is a
+        tz-aware ``datetime`` that ``_odata_literal`` renders to an OData
+        timestamp literal, so the server compares datetimes regardless of the
+        rendered format. The committed watermark is never floored — only the
+        read filter is — so the offset still advances to the true max seen.
+
+        A non-timestamp cursor under ``auto`` is a no-op (auto is the default
+        and must not break such tables); under an explicit window it raises."""
+        seconds = getattr(self, "_active_lookback_seconds", 0)
+        if not seconds or since is None:
+            return since
+        dt = since
+        if isinstance(since, str):
+            try:
+                dt = datetime.fromisoformat(since.replace("Z", "+00:00"))
+            except ValueError as exc:
+                if getattr(self, "_cursor_lookback", "auto") == "auto":
+                    return since
+                raise ValueError(
+                    f"cursor_lookback_seconds={seconds} requires a timestamp "
+                    f"cursor_field, but the cursor value {since!r} is not "
+                    f"ISO-8601. Unset cursor_lookback_seconds or pick a "
+                    f"timestamp cursor."
+                ) from exc
+        if not isinstance(dt, datetime):
+            if getattr(self, "_cursor_lookback", "auto") == "auto":
+                return since
+            raise ValueError(
+                f"cursor_lookback_seconds={seconds} requires a datetime/"
+                f"timestamp cursor; got {type(since).__name__} {since!r}."
+            )
+        # Return the OData timestamp LITERAL (``...Z``), not a datetime: the
+        # leaf-cursor walk compares it client-side against the rows' own
+        # cursor strings (``rec_cursor <= chain_since``), which would raise on
+        # a str-vs-datetime mix. The string renders bare in the URL exactly as
+        # the datetime did, so the expand path's wire filter is unchanged.
+        return _odata_literal(dt - timedelta(seconds=seconds))
+
+    # ------------------------------------------------------------------
+    # Null-cursor policy (``cursor_nulls``)
+    # ------------------------------------------------------------------
+
+    _DEFAULT_COALESCE_FLOOR_YEAR = 2000
+
+    def _parse_cursor_nulls(self, table_options: dict[str, str] | None) -> tuple[str, int]:
+        """Parse the ``cursor_nulls`` option into ``(mode, floor_year)``.
+
+        Forms: ``coalesce`` (default), ``error``, ``ignore``, and
+        ``coalesce:<YYYY>`` to override the temporal synthetic floor year
+        (default ``2000``). The year suffix is only valid with
+        ``coalesce``. Raises on an unrecognised mode or a malformed year.
+        """
+        raw = (table_options or {}).get("cursor_nulls", "coalesce").strip().lower()
+        mode, _, floor = raw.partition(":")
+        mode = mode.strip()
+        if mode not in ("coalesce", "error", "ignore"):
+            raise ValueError(
+                f"cursor_nulls mode must be one of 'coalesce', 'error', 'ignore'; got {mode!r}."
+            )
+        floor_year = self._DEFAULT_COALESCE_FLOOR_YEAR
+        if floor:
+            floor = floor.strip()
+            if mode != "coalesce":
+                raise ValueError(
+                    f"cursor_nulls floor year is only valid with 'coalesce'; got {raw!r}."
+                )
+            if not (floor.isdigit() and len(floor) == 4):
+                raise ValueError(
+                    f"cursor_nulls floor must be a 4-digit year (e.g. 'coalesce:1990'); "
+                    f"got {floor!r}."
+                )
+            floor_year = int(floor)
+        return mode, floor_year
+
+    def _cursor_floor(
+        self,
+        table_name: str,
+        namespace: str | None,
+        cursor_field: str,
+        floor_year: int = _DEFAULT_COALESCE_FLOOR_YEAR,
+    ) -> tuple[Any, str]:
+        """Deterministic floor used to substitute a null cursor under
+        ``cursor_nulls=coalesce``. Returns ``(floor, kind)`` where the
+        floor sorts below every real value of the cursor's type, so a
+        later ``cursor gt <floor>`` never skips a real row. ``kind`` is
+        ``datetime`` (sub-second room for a per-row PK offset), ``date``,
+        ``int``, ``num`` or ``str`` (constant floor — distinct synthetic
+        values aren't representable, so same-floor nulls fall back to the
+        complete-cohort handling).
+
+        Temporal floors use ``<floor_year>-01-01`` (default ``2000``,
+        configurable via ``cursor_nulls=coalesce:<YYYY>``) rather than the
+        EDM minimum: modification/created timestamps are comfortably after
+        it, every OData server parses it cleanly, and it keeps the
+        synthetic watermark readable. (A real cursor value *before* the
+        floor only matters if a synthetic floor is ever committed as the
+        watermark — i.e. a batch with no real-cursor rows — which doesn't
+        arise for the modification-timestamp cursors this targets; lower
+        the year if your data predates it.)
+
+        Raises ``ValueError`` for cursor types with no well-defined floor
+        (boolean/binary/etc.); pick ``cursor_nulls=ignore``/``error`` or a
+        different cursor for those.
+        """
+        et = self._entity_type_for(table_name, namespace)
+        dtype = next(
+            (f.dataType for f in self._own_fields_for_et(et) if f.name == cursor_field), None
+        )
+        if isinstance(dtype, TimestampType):
+            return f"{floor_year:04d}-01-01T00:00:00", "datetime"
+        if isinstance(dtype, DateType):
+            return f"{floor_year:04d}-01-01", "date"
+        if isinstance(dtype, (IntegerType, LongType)):
+            return -(2**63), "int"
+        if isinstance(dtype, (DecimalType, DoubleType, FloatType)):
+            return -1.0e308, "num"
+        if isinstance(dtype, StringType):
+            return "", "str"
+        raise ValueError(
+            f"cursor_nulls=coalesce cannot synthesise a floor for cursor_field "
+            f"{cursor_field!r} of type {type(dtype).__name__ if dtype else 'unknown'} "
+            f"on {table_name!r}. Use cursor_nulls=ignore (skip null-cursor rows), "
+            f"cursor_nulls=error, or pick a temporal/numeric/string cursor."
+        )
+
+    def _make_cursor_resolver(
+        self,
+        table_name: str,
+        namespace: str | None,
+        cursor_field: str,
+        table_options: dict[str, str] | None,
+    ):
+        """Return ``(skip_null, effective)`` for a cursor read.
+
+        ``effective(row)`` is the value used for filtering, the same-cursor
+        boundary trim and the watermark — **never** written back into the
+        row, so the emitted column keeps its real ``null``:
+
+        * ``coalesce`` (default) — a null cursor resolves to a synthetic
+          floor (``datetime`` floors carry a per-PK sub-second offset so
+          distinct nulls don't collapse into one cohort). The watermark
+          always advances, so null-cursor rows are ingested once on the
+          seed pass and the stream converges.
+        * ``error`` — ``effective`` is the raw value (``None`` for nulls);
+          a null-only batch can't advance the watermark and surfaces the
+          shared no-progress ``RuntimeError``.
+        * ``ignore`` — ``skip_null`` is True; null-cursor rows are dropped
+          (never emitted), so they don't block watermark progress.
+        """
+        mode, floor_year = self._parse_cursor_nulls(table_options)
+        if mode == "ignore":
+            return True, (lambda row: row.get(cursor_field))
+        if mode == "error":
+            return False, (lambda row: row.get(cursor_field))
+        try:
+            floor, kind = self._cursor_floor(table_name, namespace, cursor_field, floor_year)
+        except ValueError:
+            # No synthesisable floor for this cursor type. ``coalesce`` is
+            # the default, so silently fall back to ``error`` behaviour
+            # rather than break a previously-working pipeline — unless the
+            # user asked for ``coalesce`` explicitly, in which case the
+            # type error is theirs to see.
+            if "cursor_nulls" in (table_options or {}):
+                raise
+            return False, (lambda row: row.get(cursor_field))
+        pk_names = self._own_primary_keys_for_et(self._entity_type_for(table_name, namespace))
+
+        def effective(row: dict) -> Any:
+            value = row.get(cursor_field)
+            if value is not None:
+                return value
+            if kind == "datetime":
+                return f"{floor}.{_synthetic_pk_ordinal(row, pk_names):06d}Z"
+            return floor
+
+        return False, effective
+
+
+# ---------------------------------------------------------------------------
+# Helpers (module-level, no class state — easier to unit-test)
+# ---------------------------------------------------------------------------
+
+
+def _synthetic_pk_ordinal(row: dict, pk_names: list[str]) -> int:
+    """Deterministic 0..999999 ordinal from a row's primary key, used to
+    spread synthetic datetime floors for null cursors across the
+    sub-second range so they don't form one same-cursor cohort. Hash, so
+    it's stable across runs and works for any PK type; collisions only
+    cost cohort granularity, never correctness (the destination MERGE
+    keys on the real PK)."""
+    key = "\x1f".join(str(row.get(p)) for p in pk_names) if pk_names else repr(sorted(row.items()))
+    return int(hashlib.sha1(key.encode("utf-8")).hexdigest()[:8], 16) % 1_000_000
+
+
+def _extract_oauth_error_hint(resp: requests.Response) -> str:
+    """Pull the most informative error description out of an OAuth2 response.
+
+    Token endpoints conventionally return JSON with ``error`` (machine code,
+    e.g. ``invalid_grant``) and often ``error_description`` (human-readable).
+    Fall back to the raw body when the response isn't JSON, and truncate so
+    we never dump a 50 KB error page into a user-facing message.
+    """
+    try:
+        payload = resp.json()
+    except ValueError:
+        return _truncate(resp.text, 300) or "Unauthorized"
+    if isinstance(payload, dict):
+        description = payload.get("error_description")
+        code = payload.get("error")
+        if description and code:
+            return f"{code}: {description}"
+        if description:
+            return str(description)
+        if code:
+            return str(code)
+    return _truncate(resp.text, 300) or "Unauthorized"
+
+
+def _parse_retry_after(header: str) -> float | None:
+    """Parse an HTTP ``Retry-After`` header into seconds.
+
+    Accepts the two formats RFC 7231 §7.1.3 allows:
+
+      * Integer seconds (``"30"``) — most APIs (Microsoft Graph,
+        Dataverse, S/4HANA Cloud) emit this.
+      * HTTP-date (``"Wed, 21 Oct 2026 07:28:00 GMT"``) — older
+        spec-conformant servers.
+
+    Returns ``None`` for anything unparseable; the caller falls back
+    to exponential backoff. Past-dated HTTP-dates clamp to 0 (retry
+    immediately) rather than returning a negative sleep.
+    """
+    header = header.strip()
+    try:
+        seconds = float(header)
+    except (TypeError, ValueError):
+        seconds = None
+    if seconds is not None:
+        return max(0.0, seconds)
+    try:
+        dt = parsedate_to_datetime(header)
+    except (TypeError, ValueError):
+        return None
+    if dt is None:
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    delta = (dt - datetime.now(timezone.utc)).total_seconds()
+    return max(0.0, delta)
+
+
+def _decode_json_with_body(resp: requests.Response, url: str):
+    """Like ``resp.json()`` but enrich the error with URL + truncated
+    body when the decoder fails.
+
+    The bare ``requests.exceptions.JSONDecodeError`` exposes only the
+    Python parser's "Expecting … at line X column Y" message —
+    useless for diagnosing a source that returned a truncated or
+    non-JSON body (an HTML error page, a partial response under load,
+    an upstream proxy intercept, etc.). This wrapper catches the
+    decoder error and re-raises with the offending URL and the first
+    1000 chars of the body baked into the message, mirroring the
+    pattern ``_raise_for_status_with_body`` uses for 4xx/5xx
+    responses.
+
+    Preserves the original exception type so any callers catching
+    ``JSONDecodeError`` (or its ``requests`` subclass) specifically
+    still match.
+    """
+    try:
+        return resp.json()
+    except json.JSONDecodeError as exc:
+        body = _truncate((resp.text or "").strip(), 1000) or "(empty body)"
+        msg = f"{exc.msg} (parsing response for url: {url}). Server response body: {body}"
+        raise type(exc)(msg, exc.doc, exc.pos) from exc
+
+
+def _raise_for_status_with_body(resp: requests.Response, url: str) -> None:
+    """Like ``resp.raise_for_status()`` but include the response body
+    in the exception message.
+
+    The bare ``requests.HTTPError`` message is just "400 Client Error:
+    Bad Request for url ..." — useless for diagnosing OData services
+    that put the actual error reason in the response body (e.g.
+    ``{"error": {"message": "Page size 1000 exceeds maximum 500"}}``).
+    Without the body, every 4xx from the source is opaque.
+
+    Preserves the original :class:`requests.HTTPError` type so any
+    callers catching that class specifically still match. The
+    enriched message is what gets shown to operators in pipeline
+    logs.
+    """
+    if resp.status_code < 400:
+        return
+    # Mirror requests' own format for the leading line so log filters
+    # keyed off "<status> Client Error" / "Server Error" keep working.
+    reason = resp.reason or ""
+    family = "Client Error" if resp.status_code < 500 else "Server Error"
+    body = _truncate((resp.text or "").strip(), 1000) or "(empty body)"
+    msg = f"{resp.status_code} {family}: {reason} for url: {url}. " f"Server response body: {body}"
+    raise requests.HTTPError(msg, response=resp)
+
+
+def _truncate(text: str, limit: int) -> str:
+    """Cap a string at ``limit`` chars with a trailing ellipsis when clipped."""
+    if text is None:
+        return ""
+    if len(text) <= limit:
+        return text
+    return text[:limit] + "..."
+
+
+def _require(options: dict[str, str], key: str) -> str:
+    val = options.get(key)
+    if not val:
+        raise ValueError(f"Required option {key!r} is missing.")
+    return val
+
+
+# Re-export base64/binary helper for any downstream caller that wants
+# to materialize Edm.Binary fields into Python bytes prior to Spark.
+def _decode_binary(value: str) -> bytes:
+    return base64.b64decode(value)

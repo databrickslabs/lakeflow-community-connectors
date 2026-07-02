@@ -1,0 +1,474 @@
+{
+  "version": 1,
+  "generated_at": "2026-06-29T13:50:14.876885Z",
+  "endpoints": [
+    {
+      "method": "GET",
+      "spec_path": "/V4/Northwind/Northwind.svc/$metadata",
+      "sample_url": "https://services.odata.org/V4/Northwind/Northwind.svc/$metadata",
+      "status": "validated",
+      "calls": 1,
+      "matched": 1,
+      "mismatched": 0,
+      "no_spec": 0,
+      "issues": []
+    },
+    {
+      "method": "GET",
+      "spec_path": "/V4/Northwind/Northwind.svc/Customers",
+      "sample_url": "https://services.odata.org/V4/Northwind/Northwind.svc/Customers?$top=1000&$orderby=CustomerID%20asc",
+      "status": "validated",
+      "calls": 9,
+      "matched": 9,
+      "mismatched": 0,
+      "no_spec": 0,
+      "issues": []
+    },
+    {
+      "method": "GET",
+      "spec_path": "/V4/Northwind/Northwind.svc/Orders",
+      "sample_url": "https://services.odata.org/V4/Northwind/Northwind.svc/Orders?$top=1000&$orderby=OrderDate%20asc,OrderID%20asc",
+      "status": "validated",
+      "calls": 13,
+      "matched": 13,
+      "mismatched": 0,
+      "no_spec": 0,
+      "issues": []
+    },
+    {
+      "method": "GET",
+      "spec_path": null,
+      "sample_url": "https://services.odata.org/V4/Northwind/Northwind.svc/Alphabetical_list_of_products?$top=1000&$orderby=CategoryName%20asc,Discontinued%20asc,ProductID%20asc,ProductName%20asc",
+      "status": "no_spec",
+      "calls": 3,
+      "matched": 0,
+      "mismatched": 0,
+      "no_spec": 3,
+      "issues": [
+        "no matching endpoint spec"
+      ]
+    },
+    {
+      "method": "GET",
+      "spec_path": null,
+      "sample_url": "https://services.odata.org/V4/Northwind/Northwind.svc/Categories?$top=1000&$orderby=CategoryID%20asc",
+      "status": "no_spec",
+      "calls": 3,
+      "matched": 0,
+      "mismatched": 0,
+      "no_spec": 3,
+      "issues": [
+        "no matching endpoint spec"
+      ]
+    },
+    {
+      "method": "GET",
+      "spec_path": null,
+      "sample_url": "https://services.odata.org/V4/Northwind/Northwind.svc/Categories?$top=1000&$orderby=CategoryID%20asc&$filter=CategoryID%20gt%208",
+      "status": "no_spec",
+      "calls": 3,
+      "matched": 0,
+      "mismatched": 0,
+      "no_spec": 3,
+      "issues": [
+        "no matching endpoint spec"
+      ]
+    },
+    {
+      "method": "GET",
+      "spec_path": null,
+      "sample_url": "https://services.odata.org/V4/Northwind/Northwind.svc/Category_Sales_for_1997?$top=1000&$orderby=CategoryName%20asc",
+      "status": "no_spec",
+      "calls": 3,
+      "matched": 0,
+      "mismatched": 0,
+      "no_spec": 3,
+      "issues": [
+        "no matching endpoint spec"
+      ]
+    },
+    {
+      "method": "GET",
+      "spec_path": null,
+      "sample_url": "https://services.odata.org/V4/Northwind/Northwind.svc/Category_Sales_for_1997?$top=1000&$orderby=CategoryName%20asc&$filter=CategoryName%20gt%20'Seafood'",
+      "status": "no_spec",
+      "calls": 3,
+      "matched": 0,
+      "mismatched": 0,
+      "no_spec": 3,
+      "issues": [
+        "no matching endpoint spec"
+      ]
+    },
+    {
+      "method": "GET",
+      "spec_path": null,
+      "sample_url": "https://services.odata.org/V4/Northwind/Northwind.svc/Current_Product_Lists?$top=1000&$orderby=ProductID%20asc,ProductName%20asc",
+      "status": "no_spec",
+      "calls": 3,
+      "matched": 0,
+      "mismatched": 0,
+      "no_spec": 3,
+      "issues": [
+        "no matching endpoint spec"
+      ]
+    },
+    {
+      "method": "GET",
+      "spec_path": null,
+      "sample_url": "https://services.odata.org/V4/Northwind/Northwind.svc/CustomerDemographics?$top=1000&$orderby=CustomerTypeID%20asc",
+      "status": "no_spec",
+      "calls": 3,
+      "matched": 0,
+      "mismatched": 0,
+      "no_spec": 3,
+      "issues": [
+        "no matching endpoint spec"
+      ]
+    },
+    {
+      "method": "GET",
+      "spec_path": null,
+      "sample_url": "https://services.odata.org/V4/Northwind/Northwind.svc/Customer_and_Suppliers_by_Cities?$top=1000&$orderby=CompanyName%20asc,Relationship%20asc",
+      "status": "no_spec",
+      "calls": 3,
+      "matched": 0,
+      "mismatched": 0,
+      "no_spec": 3,
+      "issues": [
+        "no matching endpoint spec"
+      ]
+    },
+    {
+      "method": "GET",
+      "spec_path": null,
+      "sample_url": "https://services.odata.org/V4/Northwind/Northwind.svc/Employees?$top=1000&$orderby=EmployeeID%20asc",
+      "status": "no_spec",
+      "calls": 3,
+      "matched": 0,
+      "mismatched": 0,
+      "no_spec": 3,
+      "issues": [
+        "no matching endpoint spec"
+      ]
+    },
+    {
+      "method": "GET",
+      "spec_path": null,
+      "sample_url": "https://services.odata.org/V4/Northwind/Northwind.svc/Employees?$top=1000&$orderby=EmployeeID%20asc&$filter=EmployeeID%20gt%209",
+      "status": "no_spec",
+      "calls": 3,
+      "matched": 0,
+      "mismatched": 0,
+      "no_spec": 3,
+      "issues": [
+        "no matching endpoint spec"
+      ]
+    },
+    {
+      "method": "GET",
+      "spec_path": null,
+      "sample_url": "https://services.odata.org/V4/Northwind/Northwind.svc/Invoices?$top=1000&$orderby=CustomerName%20asc,Discount%20asc,OrderID%20asc,ProductID%20asc,ProductName%20asc,Quantity%20asc,Salesperson%20asc,ShipperName%20asc,UnitPrice%20asc",
+      "status": "no_spec",
+      "calls": 3,
+      "matched": 0,
+      "mismatched": 0,
+      "no_spec": 3,
+      "issues": [
+        "no matching endpoint spec"
+      ]
+    },
+    {
+      "method": "GET",
+      "spec_path": null,
+      "sample_url": "https://services.odata.org/V4/Northwind/Northwind.svc/Order_Details?$top=1000&$orderby=OrderID%20asc,ProductID%20asc",
+      "status": "no_spec",
+      "calls": 3,
+      "matched": 0,
+      "mismatched": 0,
+      "no_spec": 3,
+      "issues": [
+        "no matching endpoint spec"
+      ]
+    },
+    {
+      "method": "GET",
+      "spec_path": null,
+      "sample_url": "https://services.odata.org/V4/Northwind/Northwind.svc/Order_Details_Extendeds?$top=1000&$orderby=Discount%20asc,OrderID%20asc,ProductID%20asc,ProductName%20asc,Quantity%20asc,UnitPrice%20asc",
+      "status": "no_spec",
+      "calls": 3,
+      "matched": 0,
+      "mismatched": 0,
+      "no_spec": 3,
+      "issues": [
+        "no matching endpoint spec"
+      ]
+    },
+    {
+      "method": "GET",
+      "spec_path": null,
+      "sample_url": "https://services.odata.org/V4/Northwind/Northwind.svc/Order_Subtotals?$top=1000&$orderby=OrderID%20asc",
+      "status": "no_spec",
+      "calls": 3,
+      "matched": 0,
+      "mismatched": 0,
+      "no_spec": 3,
+      "issues": [
+        "no matching endpoint spec"
+      ]
+    },
+    {
+      "method": "GET",
+      "spec_path": null,
+      "sample_url": "https://services.odata.org/V4/Northwind/Northwind.svc/Orders_Qries?$top=1000&$orderby=CompanyName%20asc,OrderID%20asc",
+      "status": "no_spec",
+      "calls": 3,
+      "matched": 0,
+      "mismatched": 0,
+      "no_spec": 3,
+      "issues": [
+        "no matching endpoint spec"
+      ]
+    },
+    {
+      "method": "GET",
+      "spec_path": null,
+      "sample_url": "https://services.odata.org/V4/Northwind/Northwind.svc/Product_Sales_for_1997?$top=1000&$orderby=CategoryName%20asc,ProductName%20asc",
+      "status": "no_spec",
+      "calls": 3,
+      "matched": 0,
+      "mismatched": 0,
+      "no_spec": 3,
+      "issues": [
+        "no matching endpoint spec"
+      ]
+    },
+    {
+      "method": "GET",
+      "spec_path": null,
+      "sample_url": "https://services.odata.org/V4/Northwind/Northwind.svc/Products?$orderby=ProductID%20asc&$top=960&$skiptoken=40",
+      "status": "no_spec",
+      "calls": 3,
+      "matched": 0,
+      "mismatched": 0,
+      "no_spec": 3,
+      "issues": [
+        "no matching endpoint spec"
+      ]
+    },
+    {
+      "method": "GET",
+      "spec_path": null,
+      "sample_url": "https://services.odata.org/V4/Northwind/Northwind.svc/Products?$orderby=ProductID%20asc&$top=980&$skiptoken=20",
+      "status": "no_spec",
+      "calls": 3,
+      "matched": 0,
+      "mismatched": 0,
+      "no_spec": 3,
+      "issues": [
+        "no matching endpoint spec"
+      ]
+    },
+    {
+      "method": "GET",
+      "spec_path": null,
+      "sample_url": "https://services.odata.org/V4/Northwind/Northwind.svc/Products?$top=1000&$orderby=ProductID%20asc",
+      "status": "no_spec",
+      "calls": 3,
+      "matched": 0,
+      "mismatched": 0,
+      "no_spec": 3,
+      "issues": [
+        "no matching endpoint spec"
+      ]
+    },
+    {
+      "method": "GET",
+      "spec_path": null,
+      "sample_url": "https://services.odata.org/V4/Northwind/Northwind.svc/Products_Above_Average_Prices?$top=1000&$orderby=ProductName%20asc",
+      "status": "no_spec",
+      "calls": 3,
+      "matched": 0,
+      "mismatched": 0,
+      "no_spec": 3,
+      "issues": [
+        "no matching endpoint spec"
+      ]
+    },
+    {
+      "method": "GET",
+      "spec_path": null,
+      "sample_url": "https://services.odata.org/V4/Northwind/Northwind.svc/Products_Above_Average_Prices?$top=1000&$orderby=ProductName%20asc&$filter=ProductName%20gt%20'Wimmers%20gute%20Semmelkn%C3%B6del'",
+      "status": "no_spec",
+      "calls": 3,
+      "matched": 0,
+      "mismatched": 0,
+      "no_spec": 3,
+      "issues": [
+        "no matching endpoint spec"
+      ]
+    },
+    {
+      "method": "GET",
+      "spec_path": null,
+      "sample_url": "https://services.odata.org/V4/Northwind/Northwind.svc/Products_by_Categories?$top=1000&$orderby=CategoryName%20asc,Discontinued%20asc,ProductName%20asc",
+      "status": "no_spec",
+      "calls": 3,
+      "matched": 0,
+      "mismatched": 0,
+      "no_spec": 3,
+      "issues": [
+        "no matching endpoint spec"
+      ]
+    },
+    {
+      "method": "GET",
+      "spec_path": null,
+      "sample_url": "https://services.odata.org/V4/Northwind/Northwind.svc/Regions?$top=1000&$orderby=RegionID%20asc",
+      "status": "no_spec",
+      "calls": 3,
+      "matched": 0,
+      "mismatched": 0,
+      "no_spec": 3,
+      "issues": [
+        "no matching endpoint spec"
+      ]
+    },
+    {
+      "method": "GET",
+      "spec_path": null,
+      "sample_url": "https://services.odata.org/V4/Northwind/Northwind.svc/Regions?$top=1000&$orderby=RegionID%20asc&$filter=RegionID%20gt%204",
+      "status": "no_spec",
+      "calls": 3,
+      "matched": 0,
+      "mismatched": 0,
+      "no_spec": 3,
+      "issues": [
+        "no matching endpoint spec"
+      ]
+    },
+    {
+      "method": "GET",
+      "spec_path": null,
+      "sample_url": "https://services.odata.org/V4/Northwind/Northwind.svc/Sales_Totals_by_Amounts?$top=1000&$orderby=CompanyName%20asc,OrderID%20asc",
+      "status": "no_spec",
+      "calls": 3,
+      "matched": 0,
+      "mismatched": 0,
+      "no_spec": 3,
+      "issues": [
+        "no matching endpoint spec"
+      ]
+    },
+    {
+      "method": "GET",
+      "spec_path": null,
+      "sample_url": "https://services.odata.org/V4/Northwind/Northwind.svc/Sales_by_Categories?$top=1000&$orderby=CategoryID%20asc,CategoryName%20asc,ProductName%20asc",
+      "status": "no_spec",
+      "calls": 3,
+      "matched": 0,
+      "mismatched": 0,
+      "no_spec": 3,
+      "issues": [
+        "no matching endpoint spec"
+      ]
+    },
+    {
+      "method": "GET",
+      "spec_path": null,
+      "sample_url": "https://services.odata.org/V4/Northwind/Northwind.svc/Shippers?$top=1000&$orderby=ShipperID%20asc",
+      "status": "no_spec",
+      "calls": 3,
+      "matched": 0,
+      "mismatched": 0,
+      "no_spec": 3,
+      "issues": [
+        "no matching endpoint spec"
+      ]
+    },
+    {
+      "method": "GET",
+      "spec_path": null,
+      "sample_url": "https://services.odata.org/V4/Northwind/Northwind.svc/Shippers?$top=1000&$orderby=ShipperID%20asc&$filter=ShipperID%20gt%203",
+      "status": "no_spec",
+      "calls": 3,
+      "matched": 0,
+      "mismatched": 0,
+      "no_spec": 3,
+      "issues": [
+        "no matching endpoint spec"
+      ]
+    },
+    {
+      "method": "GET",
+      "spec_path": null,
+      "sample_url": "https://services.odata.org/V4/Northwind/Northwind.svc/Summary_of_Sales_by_Quarters?$top=1000&$orderby=OrderID%20asc",
+      "status": "no_spec",
+      "calls": 3,
+      "matched": 0,
+      "mismatched": 0,
+      "no_spec": 3,
+      "issues": [
+        "no matching endpoint spec"
+      ]
+    },
+    {
+      "method": "GET",
+      "spec_path": null,
+      "sample_url": "https://services.odata.org/V4/Northwind/Northwind.svc/Summary_of_Sales_by_Years?$top=1000&$orderby=OrderID%20asc",
+      "status": "no_spec",
+      "calls": 3,
+      "matched": 0,
+      "mismatched": 0,
+      "no_spec": 3,
+      "issues": [
+        "no matching endpoint spec"
+      ]
+    },
+    {
+      "method": "GET",
+      "spec_path": null,
+      "sample_url": "https://services.odata.org/V4/Northwind/Northwind.svc/Suppliers?$top=1000&$orderby=SupplierID%20asc",
+      "status": "no_spec",
+      "calls": 3,
+      "matched": 0,
+      "mismatched": 0,
+      "no_spec": 3,
+      "issues": [
+        "no matching endpoint spec"
+      ]
+    },
+    {
+      "method": "GET",
+      "spec_path": null,
+      "sample_url": "https://services.odata.org/V4/Northwind/Northwind.svc/Suppliers?$top=1000&$orderby=SupplierID%20asc&$filter=SupplierID%20gt%2029",
+      "status": "no_spec",
+      "calls": 3,
+      "matched": 0,
+      "mismatched": 0,
+      "no_spec": 3,
+      "issues": [
+        "no matching endpoint spec"
+      ]
+    },
+    {
+      "method": "GET",
+      "spec_path": null,
+      "sample_url": "https://services.odata.org/V4/Northwind/Northwind.svc/Territories?$top=1000&$orderby=TerritoryID%20asc",
+      "status": "no_spec",
+      "calls": 3,
+      "matched": 0,
+      "mismatched": 0,
+      "no_spec": 3,
+      "issues": [
+        "no matching endpoint spec"
+      ]
+    }
+  ],
+  "summary": {
+    "endpoints_total": 36,
+    "endpoints_validated": 3,
+    "endpoints_mismatched": 0,
+    "endpoints_missing_spec": 33
+  }
+}
