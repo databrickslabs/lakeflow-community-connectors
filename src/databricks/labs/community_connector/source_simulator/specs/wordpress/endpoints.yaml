@@ -1,0 +1,124 @@
+# WordPress REST API (wp/v2) endpoints exercised by the connector.
+#
+# Common patterns:
+#   * Pagination is page_number (?page=N&per_page=M, per_page capped at 100).
+#     The connector terminates on a short/empty page rather than on the
+#     X-WP-Total* headers, which the simulator does not emit.
+#   * Partitioned CDC/append tables (posts, pages, media, comments) filter on
+#     a UTC cursor with strict bounds:
+#       - lower bound `*_after`  -> op gt  (exclusive; prior cursor already read)
+#       - upper bound `*_before` -> op lt  (connector sends until+1s to make
+#         the window's upper edge inclusive at second precision)
+#   * `orderby` / `order` are accepted-but-ignored: read_partition drains the
+#     whole window across pages, so server sort order is immaterial.
+#   * synthesize_future_records seeds post-now() cursor values on the CDC/append
+#     corpora; the connector's init-time cap (`*_before = init_time + 1s`) must
+#     exclude them so the AvailableNow termination test converges.
+
+endpoints:
+  # ---- posts (cdc, cursor modified_gmt) ----
+  - path: "/wp-json/wp/v2/posts"
+    method: GET
+    corpus: posts
+    response:
+      pagination_style: page_number
+    params:
+      modified_after:  {role: filter, field: modified_gmt, op: gt}
+      modified_before: {role: filter, field: modified_gmt, op: lt}
+      orderby:  {role: ignore}
+      order:    {role: ignore}
+      page:     {role: page}
+      per_page: {role: per_page, default: 100, max: 100}
+    synthesize_future_records:
+      cursor_field: modified_gmt
+      count: 3
+
+  # ---- pages (cdc, cursor modified_gmt) ----
+  - path: "/wp-json/wp/v2/pages"
+    method: GET
+    corpus: pages
+    response:
+      pagination_style: page_number
+    params:
+      modified_after:  {role: filter, field: modified_gmt, op: gt}
+      modified_before: {role: filter, field: modified_gmt, op: lt}
+      orderby:  {role: ignore}
+      order:    {role: ignore}
+      page:     {role: page}
+      per_page: {role: per_page, default: 100, max: 100}
+    synthesize_future_records:
+      cursor_field: modified_gmt
+      count: 3
+
+  # ---- media (cdc, cursor modified_gmt) ----
+  - path: "/wp-json/wp/v2/media"
+    method: GET
+    corpus: media
+    response:
+      pagination_style: page_number
+    params:
+      modified_after:  {role: filter, field: modified_gmt, op: gt}
+      modified_before: {role: filter, field: modified_gmt, op: lt}
+      orderby:  {role: ignore}
+      order:    {role: ignore}
+      page:     {role: page}
+      per_page: {role: per_page, default: 100, max: 100}
+    synthesize_future_records:
+      cursor_field: modified_gmt
+      count: 3
+
+  # ---- comments (append, cursor date_gmt) ----
+  - path: "/wp-json/wp/v2/comments"
+    method: GET
+    corpus: comments
+    response:
+      pagination_style: page_number
+    params:
+      after:    {role: filter, field: date_gmt, op: gt}
+      before:   {role: filter, field: date_gmt, op: lt}
+      orderby:  {role: ignore}
+      order:    {role: ignore}
+      page:     {role: page}
+      per_page: {role: per_page, default: 100, max: 100}
+    synthesize_future_records:
+      cursor_field: date_gmt
+      count: 3
+
+  # ---- categories (snapshot) ----
+  - path: "/wp-json/wp/v2/categories"
+    method: GET
+    corpus: categories
+    response:
+      pagination_style: page_number
+    params:
+      page:     {role: page}
+      per_page: {role: per_page, default: 100, max: 100}
+
+  # ---- tags (snapshot) ----
+  - path: "/wp-json/wp/v2/tags"
+    method: GET
+    corpus: tags
+    response:
+      pagination_style: page_number
+    params:
+      page:     {role: page}
+      per_page: {role: per_page, default: 100, max: 100}
+
+  # ---- users (snapshot) ----
+  - path: "/wp-json/wp/v2/users"
+    method: GET
+    corpus: users
+    response:
+      pagination_style: page_number
+    params:
+      page:     {role: page}
+      per_page: {role: per_page, default: 100, max: 100}
+
+  # ---- taxonomies (snapshot, dict-keyed-by-slug on live; array in corpus) ----
+  # Single request, no pagination. The connector accepts either the live
+  # dict shape or the simulator's flat array.
+  - path: "/wp-json/wp/v2/taxonomies"
+    method: GET
+    corpus: taxonomies
+    response:
+      pagination_style: none
