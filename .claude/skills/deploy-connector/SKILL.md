@@ -79,6 +79,8 @@ If `{{connection_name}}` provided, use it. Otherwise ask if the user has one.
   ```
   List each required/optional **credential** parameter from the spec (e.g. `token`, `api_key`) with a short description. Do **not** ask for `externalOptionsAllowList` — the CLI reads the connector spec and adds it automatically. Ask the user to run the command and provide the connection name.
 
+  The command is the same whether the connector uses static credentials or OAuth — the CLI reads the auth mode and its required options from the spec's `connection.oauth` block, so you don't choose a mode here. The one runtime difference to flag for the user: an interactive flow (`u2m` / `u2m_per_user`) opens a browser at connection creation for them to log in and authorize (and the source's OAuth app must have the redirect URI registered), whereas `m2m` completes machine-to-machine with no browser.
+
 ### 2b. Default destination catalog and schema
 
 Ask for **catalog** (e.g. `main`) and **schema** (e.g. `raw_example`). Both optional — omitted values use pipeline defaults.
