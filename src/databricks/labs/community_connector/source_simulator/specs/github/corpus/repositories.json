@@ -201,7 +201,7 @@
     "has_pages": false,
     "has_discussions": false,
     "forks_count": 0,
-    "mirror_url": null,
+    "mirror_url": "https://mirror.example.com/yyoli-db/lakeflow-community-connectors.git",
     "archived": false,
     "disabled": false,
     "open_issues_count": 0,
@@ -229,6 +229,18 @@
       "push": true,
       "triage": true,
       "pull": true
-    }
+    },
+    "allow_rebase_merge": true,
+    "template_repository": {
+      "id": 999999,
+      "node_id": "R_kgDOTemplate",
+      "name": "template-repo",
+      "full_name": "yyoli-db/template-repo"
+    },
+    "temp_clone_token": "ghs_temptoken_redacted",
+    "allow_squash_merge": true,
+    "allow_merge_commit": true,
+    "subscribers_count": 1,
+    "network_count": 0
   }
 ]

@@ -1,0 +1,261 @@
+[
+  {
+    "id": "opendes:master-data--Wellbore:WB-PERMIAN-001:",
+    "kind": "osdu:wks:master-data--Wellbore:1.0.0",
+    "version": 1710504000000,
+    "acl": {
+      "viewers": ["data.default.viewers@opendes.contoso.com"],
+      "owners":  ["data.default.owners@opendes.contoso.com"]
+    },
+    "legal": {
+      "legaltags":                  ["opendes-public-usa-dataset-1"],
+      "otherRelevantDataCountries": ["US"],
+      "status":                     "compliant"
+    },
+    "tags": {},
+    "meta": [
+      {
+        "kind": "Unit",
+        "name": "m",
+        "persistableReference": "{\"abcd\":{\"a\":0.0,\"b\":1.0,\"c\":1.0,\"d\":0.0},\"symbol\":\"m\",\"baseMeasurement\":{\"ancestry\":\"Length\",\"type\":\"UM\"},\"type\":\"UAD\"}",
+        "propertyNames": ["TotalDepthMD", "TotalDepthTVD"],
+        "unitOfMeasureID": "opendes:reference-data--UnitOfMeasure:m:"
+      }
+    ],
+    "createTime": "2023-08-10T14:22:00.000Z",
+    "createUser": "ingestion-service@opendes.contoso.com",
+    "modifyTime": "2024-03-15T10:00:00.000Z",
+    "modifyUser": "data-steward@opendes.contoso.com",
+    "data": {
+      "FacilityID":               "opendes:master-data--Wellbore:WB-PERMIAN-001:",
+      "FacilityName":             "Permian Basin Explorer 1",
+      "FacilityTypeID":           "opendes:reference-data--FacilityType:Well:",
+      "WellID":                   "opendes:master-data--Well:WELL-PERMIAN-001:",
+      "KickOffWellboreID":        "opendes:master-data--Wellbore:WB-PERMIAN-PARENT:",
+      "StatusSummary":            "Producing — primary completion online since 2023-09-12",
+      "FacilityNameAliases": [
+        {
+          "AliasName":       "PBE-1",
+          "AliasNameTypeID": "opendes:reference-data--AliasNameType:RegulatoryName:"
+        }
+      ],
+      "FacilityOperators": [
+        {
+          "FacilityOperatorOrganisationID": "opendes:master-data--Organisation:HP-OPS:",
+          "EffectiveDateTime":              "2023-08-10T00:00:00.000Z"
+        }
+      ],
+      "SpatialLocation": {
+        "Wgs84Coordinates": {
+          "type":        "Point",
+          "coordinates": [-102.4523, 31.8764]
+        },
+        "AppliedOperations": ["conversion from WGS84 to projected"]
+      },
+      "GeoContexts": [
+        {
+          "GeoTypeID":           "opendes:reference-data--BasinType:Basin:",
+          "GeoPoliticalEntityID": "opendes:reference-data--GeoPoliticalEntity:US:"
+        }
+      ],
+      "DrillingReasons": [
+        {
+          "DrillingReasonTypeID": "opendes:reference-data--DrillingReasonType:Exploration:"
+        }
+      ],
+      "InitialCompletion": {
+        "CompletionDate": "2023-09-12",
+        "CompletionType": "opendes:reference-data--CompletionType:OpenHole:"
+      },
+      "ExtensionProperties": {
+        "InternalProjectCode": "PRX-2023-447"
+      },
+      "NameAliases": [
+        {
+          "AliasName":       "PBE-1",
+          "AliasNameTypeID": "opendes:reference-data--AliasNameType:RegulatoryName:"
+        }
+      ],
+      "CountryID":                "opendes:reference-data--GeoPoliticalEntity:US:",
+      "StateProvinceID":          "opendes:reference-data--GeoPoliticalEntity:TX:",
+      "WellboreBusinessIntentID": "opendes:reference-data--WellboreBusinessIntent:Exploration:",
+      "WellborePhaseID":          "opendes:reference-data--WellborePhase:TargetReached:",
+      "WellStatus":               "Active",
+      "SpudDate":                 "2023-08-01",
+      "PermitNumber":             "TX-2023-447821",
+      "TotalDepthMD":             4572.0,
+      "TotalDepthTVD":            4210.5,
+      "WaterDepth":               0.0,
+      "ElevationKB":              878.2,
+      "ElevationGL":              868.5,
+      "SurfaceLatitudeDeg":       31.8764,
+      "SurfaceLongitudeDeg":      -102.4523,
+      "TargetFormation":          "Wolfcamp A",
+      "BasinName":                "Permian Basin",
+      "FieldName":                "Midland Basin West",
+      "DrillingContractorName":   "Helmerich & Payne",
+      "RigName":                  "HP-204",
+      "VerticalMeasurements": [
+        {
+          "VerticalMeasurementID":     "TD",
+          "VerticalMeasurement":       4572.0,
+          "VerticalMeasurementTypeID": "opendes:reference-data--VerticalMeasurementType:TotalDepthMD:",
+          "VerticalMeasurementUOMID":  "opendes:reference-data--UnitOfMeasure:m:"
+        },
+        {
+          "VerticalMeasurementID":     "KB",
+          "VerticalMeasurement":       878.2,
+          "VerticalMeasurementTypeID": "opendes:reference-data--VerticalMeasurementType:KellyBushing:",
+          "VerticalMeasurementUOMID":  "opendes:reference-data--UnitOfMeasure:m:"
+        }
+      ],
+      "SpatialPoint": {
+        "type":                        "AnyCrsPoint",
+        "coordinates":                 [-102.4523, 31.8764],
+        "CoordinateReferenceSystemID": "opendes:reference-data--CoordinateReferenceSystem:WGS84:"
+      }
+    }
+  },
+  {
+    "id": "opendes:master-data--Wellbore:WB-NORTHSEA-002:",
+    "kind": "osdu:wks:master-data--Wellbore:1.0.0",
+    "version": 1710590400000,
+    "acl": {
+      "viewers": ["data.default.viewers@opendes.contoso.com"],
+      "owners":  ["data.default.owners@opendes.contoso.com"]
+    },
+    "legal": {
+      "legaltags":                  ["opendes-public-usa-dataset-1", "opendes-north-sea-dataset-1"],
+      "otherRelevantDataCountries": ["NO", "GB"],
+      "status":                     "compliant"
+    },
+    "tags": {},
+    "createTime": "2022-04-05T08:15:00.000Z",
+    "createUser": "ingestion-service@opendes.contoso.com",
+    "modifyTime": "2024-03-16T08:30:00.000Z",
+    "modifyUser": "data-steward@opendes.contoso.com",
+    "data": {
+      "FacilityName":             "Sleipner Alpha A-23",
+      "FacilityTypeID":           "opendes:reference-data--FacilityType:Well:",
+      "NameAliases": [
+        {
+          "AliasName":       "SLA-A23",
+          "AliasNameTypeID": "opendes:reference-data--AliasNameType:RegulatoryName:"
+        },
+        {
+          "AliasName":       "NPD-2022-00341",
+          "AliasNameTypeID": "opendes:reference-data--AliasNameType:GovernmentPermitNumber:"
+        }
+      ],
+      "CountryID":                "opendes:reference-data--GeoPoliticalEntity:NO:",
+      "StateProvinceID":          "opendes:reference-data--GeoPoliticalEntity:NorwegianNorthSea:",
+      "WellboreBusinessIntentID": "opendes:reference-data--WellboreBusinessIntent:Development:",
+      "WellborePhaseID":          "opendes:reference-data--WellborePhase:Producing:",
+      "WellStatus":               "Producing",
+      "SpudDate":                 "2022-03-14",
+      "PermitNumber":             "NPD-2022-00341",
+      "TotalDepthMD":             3820.0,
+      "TotalDepthTVD":            3650.0,
+      "WaterDepth":               82.5,
+      "ElevationKB":              33.5,
+      "ElevationGL":              -82.5,
+      "SurfaceLatitudeDeg":       58.3745,
+      "SurfaceLongitudeDeg":      1.9124,
+      "TargetFormation":          "Hugin Formation",
+      "BasinName":                "North Sea",
+      "FieldName":                "Sleipner East",
+      "DrillingContractorName":   "Odfjell Drilling",
+      "RigName":                  "Deepsea Aberdeen",
+      "VerticalMeasurements": [
+        {
+          "VerticalMeasurementID":     "TD",
+          "VerticalMeasurement":       3820.0,
+          "VerticalMeasurementTypeID": "opendes:reference-data--VerticalMeasurementType:TotalDepthMD:",
+          "VerticalMeasurementUOMID":  "opendes:reference-data--UnitOfMeasure:m:"
+        },
+        {
+          "VerticalMeasurementID":     "WD",
+          "VerticalMeasurement":       82.5,
+          "VerticalMeasurementTypeID": "opendes:reference-data--VerticalMeasurementType:WaterDepth:",
+          "VerticalMeasurementUOMID":  "opendes:reference-data--UnitOfMeasure:m:"
+        }
+      ],
+      "SpatialPoint": {
+        "type":                        "AnyCrsPoint",
+        "coordinates":                 [1.9124, 58.3745],
+        "CoordinateReferenceSystemID": "opendes:reference-data--CoordinateReferenceSystem:WGS84:"
+      }
+    }
+  },
+  {
+    "id": "opendes:master-data--Wellbore:WB-GOM-003:",
+    "kind": "osdu:wks:master-data--Wellbore:1.0.0",
+    "version": 1710676800000,
+    "acl": {
+      "viewers": ["data.default.viewers@opendes.contoso.com"],
+      "owners":  ["data.default.owners@opendes.contoso.com"]
+    },
+    "legal": {
+      "legaltags":                  ["opendes-public-usa-dataset-1", "opendes-boem-ocs-dataset-1"],
+      "otherRelevantDataCountries": ["US"],
+      "status":                     "compliant"
+    },
+    "tags": {},
+    "createTime": "2021-11-20T16:45:00.000Z",
+    "createUser": "ingestion-service@opendes.contoso.com",
+    "modifyTime": "2024-03-17T12:15:00.000Z",
+    "modifyUser": "data-steward@opendes.contoso.com",
+    "data": {
+      "FacilityName":             "Thunder Horse South ST1BP1",
+      "FacilityTypeID":           "opendes:reference-data--FacilityType:Well:",
+      "NameAliases": [
+        {
+          "AliasName":       "THS-ST1BP1",
+          "AliasNameTypeID": "opendes:reference-data--AliasNameType:RegulatoryName:"
+        },
+        {
+          "AliasName":       "BOEM-2021-G28278",
+          "AliasNameTypeID": "opendes:reference-data--AliasNameType:GovernmentPermitNumber:"
+        }
+      ],
+      "CountryID":                "opendes:reference-data--GeoPoliticalEntity:US:",
+      "StateProvinceID":          "opendes:reference-data--GeoPoliticalEntity:GulfOfMexicoOCS:",
+      "WellboreBusinessIntentID": "opendes:reference-data--WellboreBusinessIntent:Development:",
+      "WellborePhaseID":          "opendes:reference-data--WellborePhase:Producing:",
+      "WellStatus":               "Producing",
+      "SpudDate":                 "2021-10-01",
+      "PermitNumber":             "BOEM-2021-G28278",
+      "TotalDepthMD":             7823.5,
+      "TotalDepthTVD":            5610.2,
+      "WaterDepth":               1844.0,
+      "ElevationKB":              1870.4,
+      "ElevationGL":              -1844.0,
+      "SurfaceLatitudeDeg":       28.1836,
+      "SurfaceLongitudeDeg":      -88.4729,
+      "TargetFormation":          "Lower Miocene Wilcox",
+      "BasinName":                "Gulf of Mexico Deepwater",
+      "FieldName":                "Thunder Horse",
+      "DrillingContractorName":   "Transocean",
+      "RigName":                  "Transocean Deepwater Pontus",
+      "VerticalMeasurements": [
+        {
+          "VerticalMeasurementID":     "TD",
+          "VerticalMeasurement":       7823.5,
+          "VerticalMeasurementTypeID": "opendes:reference-data--VerticalMeasurementType:TotalDepthMD:",
+          "VerticalMeasurementUOMID":  "opendes:reference-data--UnitOfMeasure:m:"
+        },
+        {
+          "VerticalMeasurementID":     "WD",
+          "VerticalMeasurement":       1844.0,
+          "VerticalMeasurementTypeID": "opendes:reference-data--VerticalMeasurementType:WaterDepth:",
+          "VerticalMeasurementUOMID":  "opendes:reference-data--UnitOfMeasure:m:"
+        }
+      ],
+      "SpatialPoint": {
+        "type":                        "AnyCrsPoint",
+        "coordinates":                 [-88.4729, 28.1836],
+        "CoordinateReferenceSystemID": "opendes:reference-data--CoordinateReferenceSystem:WGS84:"
+      }
+    }
+  }
+]

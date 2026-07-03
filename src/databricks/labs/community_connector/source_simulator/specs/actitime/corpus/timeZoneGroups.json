@@ -1,0 +1,20 @@
+[
+  {
+    "id": -1,
+    "name": "New York",
+    "timeZoneId": "America/New_York",
+    "default": true
+  },
+  {
+    "id": 2,
+    "name": "London",
+    "timeZoneId": "Europe/London",
+    "default": false
+  },
+  {
+    "id": 3,
+    "name": "Sydney",
+    "timeZoneId": "Australia/Sydney",
+    "default": false
+  }
+]

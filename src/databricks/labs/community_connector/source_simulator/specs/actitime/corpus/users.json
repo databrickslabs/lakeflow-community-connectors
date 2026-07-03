@@ -1,0 +1,124 @@
+[
+  {
+    "id": 1,
+    "username": "redacted@example.com",
+    "active": true,
+    "firstName": "Fabrizio",
+    "middleName": "",
+    "lastName": "Napolitano",
+    "departmentId": 5,
+    "timeZoneGroupId": -1,
+    "hired": "2026-02-04",
+    "releaseDate": null,
+    "email": "redacted@example.com",
+    "requiresTimeTrackApproval": true,
+    "initialSchedule": null,
+    "allowedActions": {
+      "canSubmitTimetrack": true
+    },
+    "fullName": "Fabrizio Napolitano"
+  },
+  {
+    "id": 13,
+    "username": "hr",
+    "active": true,
+    "firstName": "Jane",
+    "middleName": "",
+    "lastName": "White",
+    "departmentId": 6,
+    "timeZoneGroupId": -1,
+    "hired": "2026-02-04",
+    "releaseDate": null,
+    "email": "redacted@example.com",
+    "requiresTimeTrackApproval": true,
+    "initialSchedule": [
+      0,
+      420,
+      420,
+      420,
+      420,
+      420,
+      0
+    ],
+    "allowedActions": {
+      "canSubmitTimetrack": true
+    },
+    "fullName": "Jane White"
+  },
+  {
+    "id": 14,
+    "username": "cto",
+    "active": true,
+    "firstName": "John",
+    "middleName": "",
+    "lastName": "Matthews",
+    "departmentId": 5,
+    "timeZoneGroupId": 2,
+    "hired": "2026-02-04",
+    "releaseDate": null,
+    "email": "redacted@example.com",
+    "requiresTimeTrackApproval": false,
+    "initialSchedule": null,
+    "allowedActions": {
+      "canSubmitTimetrack": true
+    },
+    "fullName": "John Matthews"
+  },
+  {
+    "id": 15,
+    "username": "finance",
+    "active": true,
+    "firstName": "Allison",
+    "middleName": "",
+    "lastName": "Meyers",
+    "departmentId": 6,
+    "timeZoneGroupId": 3,
+    "hired": "2026-02-04",
+    "releaseDate": null,
+    "email": "redacted@example.com",
+    "requiresTimeTrackApproval": true,
+    "initialSchedule": null,
+    "allowedActions": {
+      "canSubmitTimetrack": true
+    },
+    "fullName": "Allison Meyers"
+  },
+  {
+    "id": 16,
+    "username": "pm",
+    "active": true,
+    "firstName": "Daniel",
+    "middleName": "",
+    "lastName": "Alvarez",
+    "departmentId": 7,
+    "timeZoneGroupId": 3,
+    "hired": "2026-02-04",
+    "releaseDate": null,
+    "email": "redacted@example.com",
+    "requiresTimeTrackApproval": true,
+    "initialSchedule": null,
+    "allowedActions": {
+      "canSubmitTimetrack": true
+    },
+    "fullName": "Daniel Alvarez"
+  },
+  {
+    "id": 99001,
+    "username": "synthetic.augmentation",
+    "active": false,
+    "firstName": "Synthetic",
+    "middleName": "",
+    "lastName": "Augmentation",
+    "departmentId": -1,
+    "timeZoneGroupId": -1,
+    "hired": "2024-01-01",
+    "releaseDate": "2030-12-31",
+    "email": "synthetic@example.invalid",
+    "requiresTimeTrackApproval": false,
+    "initialSchedule": null,
+    "allowedActions": {
+      "canSubmitTimetrack": false
+    },
+    "fullName": "Synthetic Augmentation"
+  }
+]

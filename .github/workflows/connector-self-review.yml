@@ -30,8 +30,12 @@ on:
   pull_request:
     branches: [master]
     types: [opened, reopened, ready_for_review, synchronize, labeled]
-    paths:
-      - 'src/databricks/labs/community_connector/sources/**'
+    # No workflow-level `paths:` filter: branch protection requires
+    # `Connector Self-Review / check-self-review-label`, so the workflow
+    # must fire on every PR. `detect-significance` returns false for
+    # PRs that don't touch `sources/**` (no new connectors, ≤100 lines
+    # changed under sources), `check-self-review-label` then skips, and
+    # branch protection treats skipped as success.
 
 permissions:
   contents: read
@@ -54,7 +58,7 @@ jobs:
     outputs:
       significant: ${{ steps.check.outputs.significant }}
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
         with:
           fetch-depth: 0
       - name: Detect significant connector source changes

@@ -1,0 +1,35 @@
+[
+  {
+    "id": -1,
+    "name": "Users without department",
+    "default": true
+  },
+  {
+    "id": 6,
+    "name": "HR & Finance",
+    "default": false
+  },
+  {
+    "id": 7,
+    "name": "Production",
+    "default": false
+  },
+  {
+    "id": 8,
+    "name": "Quality Control",
+    "default": false
+  },
+  {
+    "id": 9,
+    "name": "Sales & Support",
+    "default": false
+  },
+  {
+    "id": 99001,
+    "name": "Synthetic — column coverage augmentation",
+    "default": false,
+    "description": "Synthetic department added to satisfy the simulator column-coverage invariant; not from any live tenant capture.",
+    "parentId": 9,
+    "managerId": 16
+  }
+]

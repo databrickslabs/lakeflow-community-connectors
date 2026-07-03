@@ -4,7 +4,7 @@
     "createdAt": "2024-01-01T00:00:00Z",
     "updatedAt": "2024-02-01T00:00:00Z",
     "archived": false,
-    "properties": null,
+    "properties": {"name": "Sample"},
     "contacts": [],
     "companies": [],
     "deals": [],

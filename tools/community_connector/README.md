@@ -20,6 +20,22 @@ It is recommended to use a configuration profile with the CLI tool, just as you 
 - [How to create configuration profile](https://docs.databricks.com/aws/en/dev-tools/auth/config-profiles)
 - [How to use configuration profile](https://docs.databricks.com/aws/en/dev-tools/cli/profiles)
 
+**Selecting a Profile**:
+When `~/.databrickscfg` contains multiple profiles — especially several pointing at the same workspace host — the Databricks SDK cannot auto-pick one. Use the `DATABRICKS_CONFIG_PROFILE` environment variable to choose:
+
+```bash
+export DATABRICKS_CONFIG_PROFILE=my-profile
+community-connector create_pipeline github my_pipeline -n my_conn
+```
+
+Or set it inline for a single command:
+
+```bash
+DATABRICKS_CONFIG_PROFILE=my-profile community-connector show_pipeline my_pipeline
+```
+
+When the variable is not set, the CLI falls back to the `[DEFAULT]` profile in `~/.databrickscfg`, so that case is unambiguous regardless of how many other profiles target the same host.
+
 
 ## Installation
 
@@ -106,7 +122,7 @@ community-connector show_pipeline my_github_pipeline
 
 ### `create_connection`
 
-Create a Unity Catalog connection for Lakeflow connectors.
+Create a Unity Catalog connection (type `COMMUNITY`) for Lakeflow connectors.
 
 The CLI validates connection options against the connector spec (`connector_spec.yaml`) and automatically configures the `externalOptionsAllowList` based on:
 1. Source-specific options from the connector spec
@@ -130,6 +146,8 @@ community-connector create_connection github my_github_conn \
 | Option | Short | Description |
 |--------|-------|-------------|
 | `--options` | `-o` | Connection options as JSON string (required) |
+| `--auth-type` | | Authentication mode: `static`, `m2m`, `u2m`, or `u2m_per_user`. Optional — when omitted it is taken from the connector spec's `oauth.flow` (or `static` if the spec has no `oauth` block). Pass it only to override the spec. |
+| `--redirect-port` | | Loopback port for the `u2m` OAuth redirect. Defaults to an OS-assigned free port. |
 | `--spec` | `-s` | Optional: local path to connector_spec.yaml, or a GitHub repo URL |
 
 **Validation:**
@@ -137,9 +155,34 @@ community-connector create_connection github my_github_conn \
 - Unknown parameters generate a warning
 - `externalOptionsAllowList` is automatically set if not provided
 
+#### Authentication modes
+
+The `COMMUNITY` connection supports static credentials plus three OAuth 2.0 modes. The mode is selected by `--auth-type`, or derived from the connector spec's `connection.oauth.flow` when `--auth-type` is omitted. OAuth modes set the connection's `community_oauth_flow` automatically.
+
+| Mode | What it is | Required options* |
+|------|------------|-------------------|
+| `static` | Arbitrary key/value credentials (token, API key, username/secret, …). No OAuth flow. | per connector spec |
+| `m2m` | Client-credentials OAuth (no human). | `client_id`, `client_secret`, `token_endpoint` |
+| `u2m` | One human authorizes once at connection creation. The CLI opens a browser, runs the authorization-code (+PKCE) flow against a `127.0.0.1` loopback redirect, and registers the captured grant. | `client_id`, `client_secret`, `authorization_endpoint`, `token_endpoint` |
+| `u2m_per_user` | Each end user authorizes separately; UC resolves the right token per query at runtime. The connection stores only app config. | `client_id`, `client_secret`, `authorization_endpoint`, `token_endpoint` |
+
+\* For OAuth modes the spec's `oauth` block supplies the endpoints and scope, so in practice the user passes only `client_id` + `client_secret`. The OAuth-issued token is injected into the connector at query time — it is never entered by hand. Spec keys `authorization_url` / `token_url` / `scopes` are accepted as aliases for the RFC 6749 names.
+
+```bash
+# OAuth connector whose spec declares oauth.flow — no --auth-type needed.
+# A u2m flow opens a browser for the user to sign in and grant consent.
+community-connector create_connection gmail my_gmail_conn \
+  -o '{"client_id":"<id>.apps.googleusercontent.com","client_secret":"<secret>"}'
+
+# Override the auth type explicitly (e.g. m2m), supplying the token endpoint:
+community-connector create_connection github my_github_conn \
+  --auth-type m2m \
+  -o '{"client_id":"...","client_secret":"...","token_endpoint":"https://idp/token"}'
+```
+
 ### `update_connection`
 
-Update an existing Unity Catalog connection.
+Update an existing Unity Catalog connection. The auth mode is fixed at creation time; for a `u2m` connection, re-running `update_connection` re-runs the browser authorization flow to refresh the OAuth grant.
 
 ```bash
 # Basic usage - same validation and auto-configuration as create
@@ -149,13 +192,75 @@ community-connector update_connection github my_github_conn \
 # With custom spec
 community-connector update_connection github my_github_conn \
   -o '{"token": "ghp_xxxx"}' --spec ./my_connector_spec.yaml
+
+# Refresh a u2m OAuth grant (re-opens the browser to re-consent)
+community-connector update_connection gmail my_gmail_conn \
+  -o '{"client_id":"...","client_secret":"..."}'
 ```
 
 **Options:**
 | Option | Short | Description |
 |--------|-------|-------------|
 | `--options` | `-o` | Connection options as JSON string (required) |
+| `--auth-type` | | Authentication mode. Optional — defaults to the spec's `oauth.flow` (or `static`). Must match the connection's existing mode. |
+| `--redirect-port` | | Loopback port for the `u2m` OAuth redirect. Defaults to an OS-assigned free port. |
 | `--spec` | `-s` | Optional: local path to connector_spec.yaml, or a GitHub repo URL |
+
+### `upload`
+
+Build and upload connector wheels to a UC Volume. By default `upload` ships
+**two** wheels per call: the root framework wheel
+(`lakeflow_community_connectors-*.whl`) and the connector wheel
+(`lakeflow_community_connectors_<source>-*.whl`). The connector declares the
+framework as a runtime dep, so shipping both keeps clusters from trying to
+fetch the framework from PyPI (where it is not published). The volume and any
+missing subdirectories are created automatically.
+
+```bash
+# Default: build + upload framework wheel and connector wheel
+community-connector upload example \
+  --volume-path /Volumes/main/default/community_connector/packages
+
+# Iterating on the connector: framework already on the volume, skip it
+community-connector upload example \
+  --volume-path /Volumes/main/default/community_connector/packages \
+  --skip-framework
+
+# Bring your own wheels
+community-connector upload example \
+  --volume-path /Volumes/main/default/community_connector/packages \
+  --wheel ./dist/lakeflow_community_connectors_example-0.1.0-py3-none-any.whl \
+  --framework-wheel ./dist/lakeflow_community_connectors-0.1.0-py3-none-any.whl
+
+# Non-conventional source layout + retain a local copy of what we built
+community-connector upload my_source \
+  --volume-path /Volumes/main/default/community_connector/packages \
+  --source-dir ./my_connector \
+  --keep-wheel ./dist
+```
+
+The build step shells out to `python -m build`, which runs setuptools inside a
+PEP 517 isolated environment — no per-connector venv setup needed. Install the
+`build` frontend once into the venv that owns the CLI:
+
+```bash
+pip install build
+```
+
+After upload, reference both wheel paths in your pipeline's
+`environment.dependencies` (e.g. via `community-connector create_pipeline
+--package <fw_path> --package <connector_path>`) so the cluster installs them
+in order.
+
+**Options:**
+| Option | Short | Description |
+|--------|-------|-------------|
+| `--volume-path` | `-v` | UC Volume directory to upload into (required). Auto-creates the volume and any subdirectories. |
+| `--wheel` | | Pre-built connector wheel; skip building it. |
+| `--framework-wheel` | | Pre-built framework (root) wheel; skip building it. |
+| `--skip-framework` | | Do not upload the framework wheel (use when it is already on the volume). |
+| `--source-dir` | | Override the connector source directory (default: locate `sources/<source_name>/`). |
+| `--keep-wheel` | | After upload, copy any wheels built in this run into this local directory. User-supplied wheels are not copied. |
 
 ## Pipeline Spec Format
 
@@ -194,6 +299,8 @@ objects:
 | `objects[].table.destination_table` | No | Target table name (defaults to source_table) |
 | `objects[].table.table_configuration.scd_type` | No | `SCD_TYPE_1`, `SCD_TYPE_2`, or `APPEND_ONLY` |
 | `objects[].table.table_configuration.primary_keys` | No | List of primary key columns |
+| `objects[].table.table_configuration.sequence_by` | No | Column used to order records for SCD Type 2 change tracking |
+| `objects[].table.table_configuration.cluster_by` | No | List of columns to cluster the destination Delta table by (Liquid Clustering) |
 
 ## Configuration
 

@@ -7,13 +7,13 @@ name: Verify Dependency Locks
 # Triggers: see pull_request_target rationale in .github/workflows/pylint.yml.
 on:
   pull_request_target:
-    paths:
-      - 'pyproject.toml'
-      - 'tools/community_connector/pyproject.toml'
-      - 'src/databricks/labs/community_connector/sources/**/pyproject.toml'
-      - 'requirements/**'
-      - 'tools/scripts/regenerate-locks.sh'
-      - '.github/workflows/verify-locks.yml'
+    # Default types (opened, synchronize, reopened) plus `labeled` so a
+    # maintainer's `safe-to-test` add fires CI on the exact labeled SHA.
+    types: [opened, synchronize, reopened, labeled]
+    # No workflow-level `paths:` filter on PR events: branch protection
+    # requires `Verify Dependency Locks / verify`, so the workflow must
+    # fire on every PR. PRs that don't touch lock-relevant files still
+    # regenerate the locks; the diff check is a no-op.
   push:
     branches: [master]
     paths:
@@ -33,12 +33,40 @@ jobs:
       group: databrickslabs-protected-runner-group
       labels: linux-ubuntu-latest
     steps:
+      # First step (runs before any fork-controlled code is on disk).
+      # Fork PRs only run CI when a maintainer adds the `safe-to-test`
+      # label, and only on the exact event (`action == 'labeled' &&
+      # label.name == 'safe-to-test'`). Explicit failure (rather than
+      # a job-level `if:` skip) ensures branch protection sees `failure`,
+      # not the ambiguous `skipped`. See CONTRIBUTING.md.
+      - name: Authorize
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
+          BASE_REPO: ${{ github.repository }}
+          ACTION: ${{ github.event.action }}
+          LABEL_NAME: ${{ github.event.label.name }}
+        run: |
+          if [ "$EVENT_NAME" = "push" ]; then
+            echo "OK: push to master."
+            exit 0
+          fi
+          if [ "$HEAD_REPO" = "$BASE_REPO" ]; then
+            echo "OK: same-repo PR ($HEAD_REPO)."
+            exit 0
+          fi
+          if [ "$ACTION" = "labeled" ] && [ "$LABEL_NAME" = "safe-to-test" ]; then
+            echo "OK: fork PR was just labeled 'safe-to-test'."
+            exit 0
+          fi
+          echo "::error title=Fork PR not authorized::Apply (or re-apply) the 'safe-to-test' label to authorize CI on this commit. See CONTRIBUTING.md."
+          exit 1
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
         with:
           ref: ${{ github.event.pull_request.head.sha }}
 
       - name: Setup uv
-        uses: astral-sh/setup-uv@e92bafb6253dcd438e0484186d7669ea7a8ca1cc  # v6.4.3
+        uses: astral-sh/setup-uv@fac544c07dec837d0ccb6301d7b5580bf5edae39  # v8.2.0
         with:
           version: "0.11.7"
           checksum: "6681d691eb7f9c00ac6a3af54252f7ab29ae72f0c8f95bdc7f9d1401c23ea868"
