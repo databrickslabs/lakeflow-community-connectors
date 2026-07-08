@@ -166,19 +166,42 @@ class _CallbackHandler(http.server.BaseHTTPRequestHandler):
         self.wfile.write(body.encode("utf-8"))
 
 
+def _merge_extra_auth_params(auth_params: dict, extra_auth_params: Optional[dict]) -> dict:
+    """Fold provider-specific extras into ``auth_params`` without letting them
+    clobber the flow-critical params already set (response_type, client_id,
+    redirect_uri, state, PKCE, scope). Returns ``auth_params`` for chaining."""
+    if extra_auth_params:
+        for key, value in extra_auth_params.items():
+            auth_params.setdefault(str(key), str(value))
+    return auth_params
+
+
 def run_u2m_authorization_code_flow(
     *,
     client_id: str,
     authorization_endpoint: str,
     scope: Optional[str],
     redirect_port: Optional[int] = None,
+    extra_auth_params: Optional[dict] = None,
+    use_pkce: bool = True,
     open_browser: bool = True,
     timeout_seconds: int = 300,
     echo=print,
 ) -> Tuple[str, str, str]:
-    """Drive the OAuth 2.0 authorization-code + PKCE flow against a loopback redirect.
+    """Drive the OAuth 2.0 authorization-code flow against a loopback redirect.
 
-    Returns ``(authorization_code, pkce_verifier, redirect_uri)``.
+    Returns ``(authorization_code, pkce_verifier, redirect_uri)``. When
+    ``use_pkce`` is False the flow omits the PKCE challenge and the returned
+    ``pkce_verifier`` is an empty string.
+
+    ``use_pkce`` defaults to True (PKCE is harmless for confidential clients
+    and required for public ones); pass False to honor a connector spec's
+    ``oauth.pkce: false``.
+
+    ``extra_auth_params`` are provider-specific knobs (e.g.
+    ``access_type=offline``, ``prompt=consent``) folded into the authorization
+    request. They never override the flow's own parameters (response_type,
+    client_id, redirect_uri, state, PKCE, scope).
 
     Raises ``RuntimeError`` if the user does not complete the flow within
     ``timeout_seconds`` or the IdP returns an error / mismatched state.
@@ -192,7 +215,7 @@ def run_u2m_authorization_code_flow(
     # server only listens on 127.0.0.1 → ERR_CONNECTION_REFUSED).
     redirect_uri = f"http://127.0.0.1:{redirect_port}/callback"
 
-    verifier, challenge = _generate_pkce()
+    verifier = ""
     state = secrets.token_urlsafe(24)
 
     auth_params = {
@@ -200,11 +223,15 @@ def run_u2m_authorization_code_flow(
         "client_id": client_id,
         "redirect_uri": redirect_uri,
         "state": state,
-        "code_challenge": challenge,
-        "code_challenge_method": "S256",
     }
+    if use_pkce:
+        verifier, challenge = _generate_pkce()
+        auth_params["code_challenge"] = challenge
+        auth_params["code_challenge_method"] = "S256"
     if scope:
         auth_params["scope"] = scope
+
+    _merge_extra_auth_params(auth_params, extra_auth_params)
 
     separator = "&" if "?" in authorization_endpoint else "?"
     auth_url = f"{authorization_endpoint}{separator}{urllib.parse.urlencode(auth_params)}"

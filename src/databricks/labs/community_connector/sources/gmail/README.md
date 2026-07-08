@@ -6,223 +6,106 @@ This documentation describes how to configure and use the **Gmail** Lakeflow com
 
 - **Google Account**: A Google account with Gmail access (personal Gmail or Google Workspace).
 - **Google Cloud Project**: A project in Google Cloud Console with the Gmail API enabled.
-- **OAuth 2.0 Credentials**:
-  - `client_id`: OAuth 2.0 client ID
-  - `client_secret`: OAuth 2.0 client secret
-  - `refresh_token`: Long-lived refresh token obtained via OAuth consent flow
-- **Required OAuth Scope**: `https://www.googleapis.com/auth/gmail.readonly`
-- **Network access**: The environment must be able to reach `https://gmail.googleapis.com`.
+- **Google OAuth client** (Web application): a `client_id` + `client_secret` pair you'll register with Databricks at connection-creation time. Databricks runs the user-facing OAuth flow against this client; you never paste a token into the connector yourself.
+- **OAuth scope** (must be granted at consent time): `https://www.googleapis.com/auth/gmail.readonly`
+- **Network access**: The cluster must be able to reach `https://gmail.googleapis.com`.
 - **Lakeflow / Databricks environment**: A workspace where you can register a Lakeflow community connector and run ingestion pipelines.
+
+## Authentication model
+
+This connector authenticates with Google via OAuth 2.0 on a Unity Catalog **COMMUNITY** connection. You register a Google OAuth app and supply its `client_id` + `client_secret`; Databricks runs the sign-in and consent, then obtains and refreshes the token for you. You never paste a token into the connector.
+
+You choose between two modes when creating the connection, depending on **whose mailbox** the connection reads:
+
+| Mode | Whose mail it reads | Good for |
+|---|---|---|
+| Shared mailbox (default) | One person authorizes once; every pipeline on the connection reads that mailbox. | Personal or team-shared mailboxes. |
+| Per-user | Each Databricks user who queries authorizes their own Google account; each sees only their own mail. | Apps serving many users. |
+
+The default (shared mailbox) needs no extra flag. To use per-user, pass `--auth-type u2m_per_user` when creating the connection (see Step 4).
+
+If a token expires or is revoked mid-query, Gmail returns 401; re-run the connection setup to re-authorize.
 
 ## Setup
 
-### Required Connection Parameters
+### Step 1 — Create a Google Cloud project + enable the Gmail API
 
-Provide the following **connection-level** options when configuring the connector:
-
-| Name | Type | Required | Description | Example |
-|------|------|----------|-------------|---------|
-| `client_id` | string | yes | OAuth 2.0 client ID from Google Cloud Console | `123456789-abc.apps.googleusercontent.com` |
-| `client_secret` | string | yes | OAuth 2.0 client secret | `GOCSPX-xxxx...` |
-| `refresh_token` | string | yes | Long-lived refresh token from OAuth flow | `1//0xxxx...` |
-| `user_id` | string | no | User email or `me` (default: `me`) | `user@gmail.com` |
-| `externalOptionsAllowList` | string | no | Comma-separated list of table-specific options (optional for this connector) | `tableName,tableNameList,tableConfigs,isDeleteFlow,q,labelIds,maxResults,includeSpamTrash,format` |
-
-The full list of supported table-specific options for `externalOptionsAllowList` is:
-`q,labelIds,maxResults,includeSpamTrash,format`
-
-> **Note**: Table-specific options are optional for Gmail. If you want to use query filters or customize message formats, include these option names in `externalOptionsAllowList`.
-
-### Obtaining OAuth Credentials
-
-Follow these steps to obtain the OAuth credentials required for the Gmail connector.
-
----
-
-#### Step 1: Create a Google Cloud Project and Enable Gmail API
-
-1. Go to [Google Cloud Console](https://console.cloud.google.com/)
-2. Click **Select a project** → **New Project**
-3. Enter a project name (e.g., "Gmail Lakeflow Connector") and click **Create**
-4. Once created, select your new project
-5. Navigate to **APIs & Services → Library**
-6. Search for "Gmail API" and click on it
-7. Click **Enable**
+1. Go to [Google Cloud Console](https://console.cloud.google.com/) → **Select a project** → **New Project** (e.g. `Gmail Lakeflow Connector`).
+2. **APIs & Services → Library**. Enable the **Gmail API**.
 
 ![Enable Gmail API](screenshots/gmail-api-enabled.png)
 
----
+### Step 2 — Configure the OAuth consent screen
 
-#### Step 2: Configure OAuth Consent Screen
+1. **APIs & Services → OAuth consent screen** → **Get started**.
+2. Fill in **App information** (app name, support email) and **Developer contact information**.
+3. Pick **External** (personal Gmail) or **Internal** (Workspace org).
+4. **Audience**: if External, add test users (your own Gmail address while the app is in test mode).
+5. **Data Access → Add or Remove Scopes**. Check `https://www.googleapis.com/auth/gmail.readonly`.
+6. Save and continue.
 
-Before creating credentials, you must configure the OAuth consent screen:
-1. Go to **APIs & Services → OAuth consent screen**
-2. Click **Get started** or **Create**
-3. Fill in the **App Information**:
-   - **App name**: `Gmail Lakeflow Connector` (or your preferred name)
-   - **User support email**: Your email address
-4. Fill in **Developer contact information**:
-   - **Email addresses**: Your email address
-5. Select **External** (for personal Gmail accounts) or **Internal** (for Google Workspace organizations)
-6. Click **Save and Continue**
-7. On the **Audience** page:
-   - If External, click **Add Users** under **Test users**
-   - Enter your Gmail address and click **Add**
-8. Click **Save and Continue**
-9. On the **Data Access** page, click **Add or Remove Scopes**
-10. Search for `gmail.readonly` and check the box for:
-   - `https://www.googleapis.com/auth/gmail.readonly`
-11. Click **Update** → **Save and Continue**
+### Step 3 — Create an OAuth 2.0 Web Application client
 
----
-
-#### Step 3: Create OAuth 2.0 Credentials
-
-1. Go to **APIs & Services → Credentials**
-2. Click **Create Credentials → OAuth client ID**
+1. **APIs & Services → Credentials → Create Credentials → OAuth client ID**.
+2. **Application type**: **Web application**.
+3. Name it (e.g. `Gmail Lakeflow Web Client`).
+4. **Authorized redirect URIs**: add the redirect URI(s) for the way(s) you'll create the connection. Add both if you'll use both.
+   - **Databricks UI flow** (creating the connection from the **Add Data** page): add your workspace's redirect URL, substituting your own workspace host:
+     ```
+     https://<your-workspace-url>/login/oauth/http.html
+     ```
+     This must match exactly (scheme, host, path). If it's missing, the Google consent popup fails with `Error 400: redirect_uri_mismatch`.
+   - **`community-connector` CLI flow**: add the loopback host the CLI listens on:
+     ```
+     http://localhost
+     ```
+     The CLI picks a free port at run time and registers `http://127.0.0.1:<port>/callback`. Google requires the host to be listed; the port is not part of the matching rule, so no workspace URL is needed for the CLI.
+5. **Create**, then copy and save:
+   - **Client ID** (e.g. `123456789-abc.apps.googleusercontent.com`)
+   - **Client Secret** (e.g. `GOCSPX-xxxx...`)
 
 ![Create Credentials](screenshots/create-credentials.png)
-
-3. Select **Web application** as the Application type
-4. Enter a name (e.g., "Gmail Lakeflow Web Client")
-5. Under **Authorized redirect URIs**, click **Add URI** and enter:
-   ```
-   https://oauth.pstmn.io/v1/callback
-   ```
-   > This redirect URI is used to capture the authorization code in the next step.
-
 ![OAuth Client Config](screenshots/oauth-client-config.png)
-
-6. Click **Create**
-7. A dialog will appear with your credentials. **Copy and save** both:
-   - **Client ID** (e.g., `123456789-abc.apps.googleusercontent.com`)
-   - **Client Secret** (e.g., `GOCSPX-xxxx...`)
-
 ![OAuth Credentials](screenshots/oauth-credentials-dialog.png)
 
----
+### Step 4 — Create the Unity Catalog COMMUNITY connection
 
-#### Step 4: Obtain a Refresh Token
+The connection can be created either through the Databricks UI or the
+`community-connector` CLI. Either way your browser opens, you sign in to
+Google and grant consent, and Databricks stores the result. You only
+supply the OAuth app identity (`client_id` + `client_secret`) — the scope
+and Google's endpoints come from the connector spec.
 
-Now you'll authorize the app and obtain a refresh token. This is a one-time process.
+#### Option A — Databricks UI
 
-**4.1. Build the Authorization URL**
+A Unity Catalog connection for this connector can be created in two ways via the UI:
 
-Replace `YOUR_CLIENT_ID` in the URL below with your actual Client ID:
+1. Follow the **Lakeflow Community Connector** UI flow from the **Add Data** page.
+2. Select any existing Lakeflow Community Connector connection for this source or create a new one.
+3. Supply the OAuth app identity (`client_id` + `client_secret`) and complete the in-browser Google consent when prompted; the `gmail.readonly` scope and Google's authorization / token URLs come from the connector spec.
 
-```
-https://accounts.google.com/o/oauth2/v2/auth?client_id=YOUR_CLIENT_ID&redirect_uri=https://oauth.pstmn.io/v1/callback&response_type=code&scope=https://www.googleapis.com/auth/gmail.readonly&access_type=offline&prompt=consent
-```
+> **Before using the UI flow**, make sure your OAuth client lists `https://<your-workspace-url>/login/oauth/http.html` under **Authorized redirect URIs** (Step 3). The UI flow redirects back to your workspace, not to a loopback, so without it Google rejects the consent popup with `redirect_uri_mismatch`.
 
+The connection can also be created using the standard Unity Catalog API.
 
+#### Option B — `community-connector` CLI
 
-**4.2. Authorize the Application**
-
-1. Open the URL in your web browser
-2. Sign in with the Google account you want to connect
-3. Click **Continue** on the "Google hasn't verified this app" warning (since this is your own app)
-4. Grant permission to view your email messages and settings
-5. You'll be redirected to a page showing a callback URL
-
-![Auth URL1](screenshots/auth_url1.png)
-![Auth URL2](screenshots/auth_url2.png)
-
-**4.3. Copy the Authorization Code**
-
-After authorization, you'll be redirected to a URL like:
-```
-https://oauth.pstmn.io/v1/callback?code=4/0AfJohXl...&scope=...
-```
-
-Copy the `code` parameter value (everything after `code=` and before `&scope`).
-
-![Authorization Code](screenshots/authorization-code.png)
-
-**4.4. Exchange the Code for a Refresh Token**
-
-Run this `curl` command in your terminal, replacing the placeholders:
+Run the `community-connector` CLI. Your browser opens, you sign in to Google and grant consent, and the CLI registers the result with the Databricks connection. You only supply the OAuth app identity (`client_id` + `client_secret`):
 
 ```bash
-curl -X POST https://oauth2.googleapis.com/token \
-  -d "code=YOUR_AUTHORIZATION_CODE" \
-  -d "client_id=YOUR_CLIENT_ID" \
-  -d "client_secret=YOUR_CLIENT_SECRET" \
-  -d "redirect_uri=https://oauth.pstmn.io/v1/callback" \
-  -d "grant_type=authorization_code"
+community-connector create_connection gmail gmail_connector \
+  -o '{"client_id": "<YOUR_CLIENT_ID>", "client_secret": "<YOUR_CLIENT_SECRET>"}'
 ```
 
-**4.5. Save the Refresh Token**
+This creates a **shared-mailbox** connection (the default). For a **per-user** connection where each Databricks user reads their own mail, add `--auth-type u2m_per_user`:
 
-The response will look like:
-```json
-{
-  "access_token": "ya29.a0AfH6SM...",
-  "expires_in": 3599,
-  "refresh_token": "1//0eXXXXXXXXXXX-XXXXXXXXXXXXXXXXX",
-  "scope": "https://www.googleapis.com/auth/gmail.readonly",
-  "token_type": "Bearer"
-}
+```bash
+community-connector create_connection gmail gmail_connector_per_user \
+  --auth-type u2m_per_user \
+  -o '{"client_id": "<YOUR_CLIENT_ID>", "client_secret": "<YOUR_CLIENT_SECRET>"}'
 ```
 
-**Copy the `refresh_token` value and save it securely.** This token does not expire and will be used by the connector to access Gmail.
-
-> ⚠️ **Important**: The refresh token is only returned on the first authorization. If you need a new one, you must revoke access at [Google Account Permissions](https://myaccount.google.com/permissions) and repeat this process.
-
----
-
-#### Summary: Your Three Credentials
-
-You now have the three values needed for the connector:
-
-| Credential | Example | Where to find it |
-|------------|---------|------------------|
-| `client_id` | `123456789-abc.apps.googleusercontent.com` | Step 3 - OAuth client creation |
-| `client_secret` | `GOCSPX-xxxx...` | Step 3 - OAuth client creation |
-| `refresh_token` | `1//0eXXXX...` | Step 4 - Token exchange response |
-
-### Create a Unity Catalog Connection
-
-You need to create a Unity Catalog connection to securely store your Gmail OAuth credentials. Choose one of the methods below.
-
----
-
-#### Option A: Using SQL Editor (Recommended)
-
-Run the following SQL command in Databricks SQL Editor or a notebook:
-
-```sql
-CREATE CONNECTION gmail_connector
-TYPE COMMUNITY
-OPTIONS (
-  sourceName = 'gmail',
-  client_id = '<YOUR_CLIENT_ID>',
-  client_secret = '<YOUR_CLIENT_SECRET>',
-  refresh_token = '<YOUR_REFRESH_TOKEN>',
-  externalOptionsAllowList = 'tableName,tableNameList,tableConfigs,isDeleteFlow,q,labelIds,maxResults,includeSpamTrash,format'
-);
-```
-
----
-
-#### Option B: Using Databricks UI
-
-1. In Databricks, go to **Catalog** in the left sidebar
-2. Click on the gear icon, then **Connections**
-3. Click **Create connection**
-4. Fill in the connection details:
-   - **Connection name**: `gmail_connector`
-   - **Connection type**: Select `Lakeflow community connector`
-5. In the **Connection options** section, add the following key-value pairs:
-
-| Key | Value |
-|-----|-------|
-| `sourceName` | `gmail` |
-| `client_id` | Your OAuth Client ID |
-| `client_secret` | Your OAuth Client Secret |
-| `refresh_token` | Your Refresh Token |
-| `externalOptionsAllowList` | `tableName,tableNameList,tableConfigs,isDeleteFlow,q,labelIds,maxResults,includeSpamTrash,format` |
-
-6. Click **Create**
+You only ever provide `client_id` and `client_secret`. The scope and Google's endpoints come from the connector spec, and the access token that authenticates each API call is minted and refreshed by Databricks — you never set it manually. The only other value you may set is the optional `user_id` (via the pipeline spec; defaults to `me`).
 
 ## Supported Objects
 
@@ -574,10 +457,15 @@ Run the pipeline using your standard Lakeflow / Databricks orchestration:
 
 **API and Authentication Issues:**
 
+- **`Error 400: redirect_uri_mismatch` in the consent popup**:
+  - The redirect URI Databricks sent isn't registered on your OAuth client. For the UI flow, add `https://<your-workspace-url>/login/oauth/http.html` (your actual workspace host) under **Authorized redirect URIs** in Google Cloud Console (Step 3). For the CLI, register the `http://localhost` loopback host.
+
+- **`Error 401: invalid_client` ("The OAuth client was not found")**:
+  - The `client_id` sent to Google doesn't match an existing client. Re-check the `client_id` on the connection for typos/whitespace, confirm it's the **Web application** client (not a Desktop/CLI-only client), and that it lives in the same Google Cloud project where you configured the consent screen.
+
 - **Authentication failures (`401 Unauthorized`)**:
-  - Verify `client_id`, `client_secret`, and `refresh_token` are correct
-  - Ensure the refresh token hasn't been revoked
-  - Refresh tokens expire if unused for 6 months - regenerate by repeating Step 4 of the OAuth setup
+  - The injected `access_token` has expired or been revoked — re-run the connection setup to sign in and re-authorize
+  - Verify the connection's `client_id` and `client_secret` match the OAuth client registered in Google Cloud Console
   - Check that the OAuth consent screen includes the `gmail.readonly` scope
 
 - **`403 Forbidden`**:

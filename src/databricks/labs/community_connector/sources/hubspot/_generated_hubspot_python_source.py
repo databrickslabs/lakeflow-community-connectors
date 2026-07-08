@@ -28,9 +28,26 @@ from pyspark.sql.datasource import (
     SimpleDataSourceStreamReader,
 )
 from pyspark.sql.streaming.datasource import ReadAllAvailable, SupportsTriggerAvailableNow
-from pyspark.sql.types import *
+from pyspark.sql.types import (
+    ArrayType,
+    BinaryType,
+    BooleanType,
+    DataType,
+    DateType,
+    DecimalType,
+    DoubleType,
+    FloatType,
+    IntegerType,
+    LongType,
+    MapType,
+    StringType,
+    StructField,
+    StructType,
+    TimestampType,
+    VariantType,
+    VariantVal,
+)
 import base64
-import random
 import requests
 
 
@@ -756,7 +773,10 @@ def register_lakeflow_source(spark):
             """
             supported_tables = self.list_tables()
             if table_name not in supported_tables:
-                raise ValueError(f"Unsupported table: {table_name}. Supported tables are: {supported_tables}")
+                raise ValueError(
+                    f"Unsupported table: {table_name}. "
+                    f"Supported tables are: {supported_tables}"
+                )
 
             # Check cache first
             if table_name in self._schema_cache:
@@ -805,7 +825,10 @@ def register_lakeflow_source(spark):
             """
             supported_tables = self.list_tables()
             if table_name not in supported_tables:
-                raise ValueError(f"Unsupported table: {table_name}. Supported tables are: {supported_tables}")
+                raise ValueError(
+                    f"Unsupported table: {table_name}. "
+                    f"Supported tables are: {supported_tables}"
+                )
 
             # Check cache first
             if table_name in self._metadata_cache:
@@ -912,11 +935,19 @@ def register_lakeflow_source(spark):
             try:
                 resp = requests.get(url, headers=self.auth_header, timeout=60)
                 if resp.status_code != 200:
-                    raise Exception("API error: {resp.status_code} {resp.text}")
+                    raise RuntimeError(
+                        f"HubSpot Properties API error for {object_type}: "
+                        f"{resp.status_code} {resp.text}"
+                    )
 
                 return resp.json()
             except Exception as e:
-                return {"error": f"Failed to get object properties: {str(e)}"}
+                # Re-raise (don't return an error dict): callers iterate this as a
+                # list of property dicts, so a dict here turns a real API error into
+                # an unrelated TypeError far downstream.
+                raise RuntimeError(
+                    f"Failed to get object properties for {object_type}: {e}"
+                ) from e
 
         def _map_hubspot_type_to_spark(self, hubspot_type: str) -> DataType:
             """
@@ -954,14 +985,22 @@ def register_lakeflow_source(spark):
             """
             supported_tables = self.list_tables()
             if table_name not in supported_tables:
-                raise ValueError(f"Unsupported table: {table_name}. Supported tables are: {supported_tables}")
+                raise ValueError(
+                    f"Unsupported table: {table_name}. "
+                    f"Supported tables are: {supported_tables}"
+                )
 
             # Determine if this is an incremental read
             is_incremental = (
                 start_offset is not None and start_offset.get("updatedAt") is not None
             )
 
-            return self._read_data(table_name, start_offset, incremental=is_incremental, table_options=table_options)
+            return self._read_data(
+                table_name,
+                start_offset,
+                incremental=is_incremental,
+                table_options=table_options,
+            )
 
         def read_table_deletes(
             self, table_name: str, start_offset: dict, table_options: Dict[str, str]
@@ -986,7 +1025,10 @@ def register_lakeflow_source(spark):
             """
             supported_tables = self.list_tables()
             if table_name not in supported_tables:
-                raise ValueError(f"Unsupported table: {table_name}. Supported tables are: {supported_tables}")
+                raise ValueError(
+                    f"Unsupported table: {table_name}. "
+                    f"Supported tables are: {supported_tables}"
+                )
 
             # Short-circuit once the cursor has caught up to the init-time cap,
             # so Trigger.AvailableNow can terminate.
@@ -1584,8 +1626,33 @@ def register_lakeflow_source(spark):
 
     class LakeflowSource(DataSource):
         """
-        PySpark DataSource implementation for Lakeflow Connect.
+        PySpark DataSource base for Lakeflow Connect.
+
+        Two ways the connector implementation is bound:
+
+        - Per-source subclass (wheel / multi-file deployment): subclass and set
+          ``_lakeflow_connect_cls``::
+
+              class GmailDataSource(LakeflowSource):
+                  _lakeflow_connect_cls = GmailLakeflowConnect
+
+              spark.dataSource.register(GmailDataSource)
+
+        - Merged single-file deployment (SDP): ``_lakeflow_connect_cls`` is left
+          ``None`` and the connector is taken from the module-level
+          ``LakeflowConnectImpl`` placeholder, which the merge script substitutes
+          with the actual implementation class.
         """
+
+        # Per-source subclasses set this. Left ``None`` on the base so the merged
+        # single-file path falls back to the ``LakeflowConnectImpl`` placeholder.
+        _lakeflow_connect_cls = None
+
+        # Spark format name. Defaults to "lakeflow_connect" because Unity Catalog
+        # connection-option injection looks for that exact string. A per-source
+        # subclass may override this with its source name once it no longer relies
+        # on UC injection (see the commented override in each source's __init__.py).
+        _format_name = "lakeflow_connect"
 
         def __init__(self, options):
             self.options = options
@@ -1600,13 +1667,15 @@ def register_lakeflow_source(spark):
                     f"For a regular source table, use a name that does not start "
                     f"with '_community_'."
                 )
-            # TEMPORARY: LakeflowConnectImpl is replaced with the actual implementation
-            # class during merge. See the placeholder comment at the top of this file.
-            self.lakeflow_connect = LakeflowConnectImpl(options)  # pylint: disable=abstract-class-instantiated
+            # Per-source subclasses bind the implementation via _lakeflow_connect_cls.
+            # The merged single-file path leaves it None and relies on the
+            # LakeflowConnectImpl placeholder (substituted by the merge script).
+            connect_cls = type(self)._lakeflow_connect_cls or LakeflowConnectImpl
+            self.lakeflow_connect = connect_cls(options)  # pylint: disable=abstract-class-instantiated
 
         @classmethod
         def name(cls):
-            return "lakeflow_connect"
+            return cls._format_name
 
         def schema(self):
             table = self.options[TABLE_NAME]

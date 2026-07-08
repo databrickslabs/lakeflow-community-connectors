@@ -1,15 +1,21 @@
 # Gmail Community Connector Spec
-# This file defines the specification for the connector including
-# connection parameters and allowlist options.
 #
-# This connector provides 100% Gmail API coverage with 10 tables:
+# Gmail authenticates via the OAuth 2.0 authorization-code flow. The
+# connection layer (Unity Catalog COMMUNITY connection, or the labs
+# authenticate tool for local dev) runs the browser-based flow, so the
+# user only supplies their OAuth app's client_id + client_secret; the
+# token is obtained from Google by the flow rather than entered by hand.
+#
+# Provides 100% Gmail API coverage with 10 tables:
 # - messages, threads, labels, drafts (core email data)
 # - profile (user info)
 # - settings, filters, forwarding_addresses, send_as, delegates (configuration)
 
 # ============================================================================
 # Connection Parameters
-# These are provided when creating the Unity Catalog connection.
+# These are the options the user supplies when creating the Unity Catalog
+# connection. The OAuth-issued token is NOT listed here — it is obtained by
+# the OAuth flow (and, for UC, refreshed server-side) rather than entered.
 # ============================================================================
 display_name: Gmail
 connection:
@@ -19,33 +25,40 @@ connection:
       required: true
       secret: true
       description: >
-        OAuth 2.0 client ID from Google Cloud Console.
-        Create this in APIs & Services → Credentials → OAuth 2.0 Client IDs.
+        OAuth 2.0 client ID from Google Cloud Console (APIs & Services →
+        Credentials → OAuth 2.0 Client IDs, Web application type).
 
     - name: client_secret
       type: string
       required: true
       secret: true
       description: >
-        OAuth 2.0 client secret from Google Cloud Console.
-        Obtained alongside the client_id when creating OAuth credentials.
-
-    - name: refresh_token
-      type: string
-      required: true
-      secret: true
-      description: >
-        Long-lived OAuth 2.0 refresh token obtained via the OAuth consent flow.
-        Use Google OAuth Playground or implement OAuth flow to obtain this token.
-        Required scope: https://www.googleapis.com/auth/gmail.readonly
+        OAuth 2.0 client secret issued alongside the client_id.
 
     - name: user_id
       type: string
       required: false
       description: >
-        The user's email address or 'me' for the authenticated user.
-        Defaults to 'me' if not specified. For service accounts with
-        domain-wide delegation, specify the user email to impersonate.
+        Gmail user identifier the connector reads against. Defaults to
+        'me' (the authorizing user). Service-account workflows with
+        domain-wide delegation can specify a target user email here.
+
+  # OAuth 2.0 authorization-code flow definition (see PR #218 for the shape).
+  #   flow   — u2m: a single human authorizes once at connection creation.
+  #            Maps to UC's community_oauth_flow.
+  #   pkce   — false: Google's Web-application client is a confidential
+  #            client (authenticates with client_secret) and does not
+  #            require PKCE. The labs authenticate CLI does not implement
+  #            PKCE yet, so this must stay false there.
+  oauth:
+    flow: u2m
+    pkce: false
+    scopes: https://www.googleapis.com/auth/gmail.readonly
+    authorization_url: https://accounts.google.com/o/oauth2/v2/auth
+    token_url: https://oauth2.googleapis.com/token
+    extra_auth_params:
+      access_type: offline
+      prompt: consent
 
 # ============================================================================
 # External Options Allowlist

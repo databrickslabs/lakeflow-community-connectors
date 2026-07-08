@@ -1,0 +1,126 @@
+# HL7 v2 Community Connector Spec
+# This file defines the specification for the connector including
+# connection parameters and allowlist options.
+#
+# This connector ingests HL7 v2 messages and parses each segment type into
+# its own Delta table, enabling structured analytics over clinical data.
+#
+# Supported source modes (selected via the auth_methods entry that matches
+# the connection's parameter set):
+#   gcp    - Google Cloud Healthcare API HL7v2 store
+#   volume - HL7 files on a Unity Catalog Volume (FUSE-mounted at runtime)
+#
+# Supported tables (segment types):
+#   msh  - Message Header              evn  - Event Type
+#   pid  - Patient Identification      pd1  - Patient Additional Demographic
+#   pv1  - Patient Visit               pv2  - Patient Visit Additional
+#   nk1  - Next of Kin / Associated    mrg  - Merge Patient Information
+#   al1  - Patient Allergy             iam  - Patient Adverse Reaction
+#   dg1  - Diagnosis                   pr1  - Procedures
+#   orc  - Common Order                obr  - Observation Request
+#   obx  - Observation Result          nte  - Notes and Comments
+#   spm  - Specimen                    in1  - Insurance
+#   gt1  - Guarantor                   ft1  - Financial Transaction
+#   rxa  - Pharmacy/Treatment Admin    sch  - Scheduling Activity
+#   txa  - Transcription Document
+#
+# Custom / Z-segments are supported via the segment_type table option.
+
+display_name: HL7 v2
+connection:
+  # ---------------------------------------------------------------------------
+  # Source modes
+  # The connector supports two mutually-exclusive source modes; the active one
+  # is detected from the parameter set supplied at connection time.
+  # ---------------------------------------------------------------------------
+  auth_methods:
+    - name: gcp
+      description: >
+        Fetches HL7 v2 messages from a Google Cloud Healthcare API HL7v2
+        store via REST. The service account must have
+        healthcare.hl7V2Messages.list and healthcare.hl7V2Messages.get
+        permissions.
+      parameters:
+        - name: project_id
+          type: string
+          required: true
+          description: >
+            GCP project ID containing the Healthcare dataset.
+
+        - name: location
+          type: string
+          required: true
+          description: >
+            GCP region where the Healthcare dataset resides (e.g. us-central1).
+
+        - name: dataset_id
+          type: string
+          required: true
+          description: >
+            Google Cloud Healthcare API dataset ID.
+
+        - name: hl7v2_store_id
+          type: string
+          required: true
+          description: >
+            HL7v2 store name within the Healthcare dataset.
+
+        - name: service_account_json
+          type: string
+          required: true
+          secret: true
+          description: >
+            Full JSON content of a GCP service account key file.
+
+    - name: volume
+      description: >
+        Reads HL7 v2 files directly from a Unity Catalog Volume path that
+        Spark executors have FUSE access to at runtime (e.g.
+        /Volumes/catalog/schema/hl7_inbound/). Files are read with plain
+        filesystem I/O (os.scandir + open) — no SDK, no HTTP, no credentials
+        beyond the pipeline's own identity. Each file's last-modified time
+        drives the incremental cursor. Permissions follow UC READ VOLUME
+        grants on the configured Volume. This is the read-side counterpart
+        of the dicomweb connector's WRITE FILES pattern; see the dicomweb
+        README for prior art.
+      parameters:
+        - name: volume_path
+          type: string
+          required: true
+          description: >
+            Absolute UC Volume path containing HL7 v2 files,
+            e.g. /Volumes/catalog/schema/hl7_inbound/. The Spark executor
+            identity must have READ VOLUME on this Volume.
+
+        - name: file_glob
+          type: string
+          required: false
+          description: >
+            Optional shell-style glob applied to file names within the
+            Volume (default "*"). Example: "*.hl7".
+
+        - name: recursive
+          type: string
+          required: false
+          description: >
+            Optional "true"/"false" flag controlling whether subdirectories
+            of volume_path are walked (default "false").
+
+  # ---------------------------------------------------------------------------
+  # Shared parameters (apply to both source modes)
+  # ---------------------------------------------------------------------------
+  parameters:
+    - name: source_type
+      type: string
+      required: false
+      description: >
+        Explicit source mode override: "gcp" or "volume". Optional —
+        the connector also infers the mode from which credentials are
+        supplied. Defaults to "gcp" when omitted.
+
+# ============================================================================
+# External Options Allowlist
+# These table-specific options can be passed per-table in the pipeline
+# configuration via externalOptionsAllowList on the UC connection.
+# ============================================================================
+external_options_allowlist: "segment_type,window_seconds,start_timestamp,max_records_per_batch"

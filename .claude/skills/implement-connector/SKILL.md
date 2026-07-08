@@ -114,5 +114,16 @@ or any of the built-in op classes (`ListObjectsOp`, `ReadTableOp`,
 customisation API is still being finalised. Just implement
 `LakeflowConnect` — the agent surface comes along for free.
 
+## Expose the DataSource class
+
+In the source package's `__init__.py`, expose a `<Source>DataSource`
+subclass of `LakeflowSource` that binds your connector via
+`_lakeflow_connect_cls` (name = connector class with `LakeflowConnect`
+replaced by `DataSource`, e.g. `GmailLakeflowConnect` → `GmailDataSource`).
+This is required — it's what lets the source register through
+`spark.dataSource.register(...)` / `find_data_source("{source_name}")`.
+Set only `_lakeflow_connect_cls`; leave `_format_name` at its default and
+add the class to `__all__`. Copy the shape from `sources/example/__init__.py`.
+
 ## Merge files
 After completion, run `python tools/scripts/merge_python_source.py {source_name}` to generate the merged connector file `_generated_{source_name}_python_source.py`. 

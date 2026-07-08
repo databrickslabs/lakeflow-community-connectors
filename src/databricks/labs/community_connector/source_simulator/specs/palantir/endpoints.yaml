@@ -1,0 +1,58 @@
+# Palantir Foundry Ontology v2 API endpoints.
+#
+# The connector uses three endpoint groups:
+# * **objectTypes** (GET): list and describe object types (tables).
+# * **loadObjects** (POST): paginated data fetch with snapshot consistency.
+# * **search** (POST): max-cursor lookup via orderBy desc + limit 1.
+#
+# The simulator serves single-page responses (nextPageToken: null) so
+# the connector's pagination loop terminates after one page per call.
+
+endpoints:
+  # ---- schema / metadata ----
+
+  - path: "/api/v2/ontologies/{ontology}/objectTypes"
+    method: GET
+    corpus: object_types_list
+    response:
+      pagination_style: none
+      wrapper:
+        records_key: data
+
+  # ---- data fetch ----
+
+  - path: "/api/v2/ontologies/{ontology}/objectSets/loadObjects"
+    method: POST
+    corpus: objects
+    response:
+      pagination_style: none
+      wrapper:
+        records_key: data
+        extras:
+          nextPageToken: null
+          totalCount: "4"
+          # Palantir always includes propertySecurities on
+          # loadObjects responses (per-property visibility metadata).
+          # Declaring it here keeps the live validator happy; the
+          # connector ignores it.
+          propertySecurities: []
+    # Cap-validation: clone records with arrivalTimestamp = ``now() + N
+    # hours`` so the corpus contains records past the connector's
+    # ``_init_time``. ``test_read_terminates`` then exercises the cap
+    # genuinely instead of relying on the corpus being finite.
+    synthesize_future_records:
+      cursor_field: arrivalTimestamp
+      count: 3
+
+  # ---- search (max cursor lookup) ----
+
+  - path: "/api/v2/ontologies/{ontology}/objects/{objectType}/search"
+    method: POST
+    corpus: objects
+    response:
+      pagination_style: none
+      wrapper:
+        records_key: data
+        extras:
+          nextPageToken: null
+          totalCount: "4"

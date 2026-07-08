@@ -78,7 +78,7 @@ report actionable.
 
 ---
 
-### Section A — Connector implementation (12 checks)
+### Section A — Connector implementation (13 checks)
 
 Source under audit:
 `src/databricks/labs/community_connector/sources/{{source_name}}/{{source_name}}.py`
@@ -97,6 +97,7 @@ Source under audit:
 | A10 | MAJOR | Imports clean — no imports outside `sources/{{source_name}}/`, `interface/`, `libs/`, `requests`, `pyspark`, std-lib | `grep -nE "^(from\\|import) " ...` |
 | A11 | MAJOR | Pylint clean on connector source — same gate as `.github/workflows/pylint.yml` and the `tools/scripts/precommit_pylint.sh` PreToolUse hook | see "Running pylint" below |
 | A12 | MAJOR | Connector does **not** implement the experimental ingestion-agent surface (still in design). | `grep -nE "SupportsIngestionAgent\|AgentOperation\|agent_operations\(\)" src/.../sources/{{source_name}}/` — must be empty |
+| A13 | BLOCKER | Source package exposes a `<Source>DataSource(LakeflowSource)` subclass binding the connector via `_lakeflow_connect_cls`, so it can register via `spark.dataSource.register` / `find_data_source`. Leaves `_format_name` at its default. | `grep -nE "class \\w+DataSource\\(LakeflowSource\\)" src/.../sources/{{source_name}}/__init__.py` and verify `_lakeflow_connect_cls\\s*=` is set |
 
 #### Running pylint (A11)
 
@@ -192,7 +193,7 @@ that weren't hit (`coverage.endpoints_in_spec − coverage.endpoints_hit`).
 |---|---|---|---|---|
 | C1 | BLOCKER | Implementation | `src/.../sources/{{source_name}}/{{source_name}}.py` | exists; `python -m py_compile` clean |
 | C2 | BLOCKER | API doc | `src/.../sources/{{source_name}}/{{source_name}}_api_doc.md` | exists; non-empty; mentions every table from `list_tables()` |
-| C3 | BLOCKER | Connector spec | `src/.../sources/{{source_name}}/connector_spec.yaml` | YAML parses; has `connection_parameters`; has `external_options_allowlist` if connector reads `table_options` keys |
+| C3 | BLOCKER | Connector spec | `src/.../sources/{{source_name}}/connector_spec.yaml` | YAML parses; has `connection_parameters`; has `external_options_allowlist` if connector reads `table_options` keys. If a `connection.oauth` block is present: `flow` is one of `m2m`/`u2m`/`u2m_per_user`, parameters list the user-supplied app identity (`client_id`/`client_secret`), and OAuth-issued tokens (`access_token`/`refresh_token`) are NOT listed as connection parameters (UC injects them at runtime) |
 | C4 | BLOCKER | Public README | `src/.../sources/{{source_name}}/README.md` | exists; non-empty; mentions every table and every connection parameter |
 | C5 | BLOCKER | Package metadata | `src/.../sources/{{source_name}}/pyproject.toml` | TOML parses; `dependencies` includes `requests` (and any other live deps the connector imports) |
 | C6 | MINOR | Generated merged source | `src/.../sources/{{source_name}}/_generated_{{source_name}}_python_source.py` | exists; mtime ≥ `{{source_name}}.py` mtime (re-run `python tools/scripts/merge_python_source.py {{source_name}}` if stale) |
@@ -235,7 +236,7 @@ Three artifacts describe the connector at different levels: the
 | # | Severity | What | How |
 |---|---|---|---|
 | E1 | MAJOR | `list_tables()` ≡ tables in API doc ≡ tables in README | parse all three; set diffs |
-| E2 | MAJOR | Connection-parameter keys: `__init__` `options.get("...")` ≡ `connector_spec.yaml` `connection_parameters` ≡ README mentions | parse all three; set diffs |
+| E2 | MAJOR | Connection-parameter keys: `__init__` `options.get("...")` ≡ `connector_spec.yaml` `connection_parameters` ≡ README mentions | parse all three; set diffs. **OAuth exemption:** for connectors with a `connection.oauth` block, the UC-injected runtime tokens (`access_token`, `refresh_token`) that `__init__` reads are expected to be absent from the spec parameters and README — do not flag them. The user-supplied params (`client_id`, `client_secret`, …) must still agree across all three. |
 | E3 | MINOR | Per-table schemas: column names from `connector.get_table_schema(t, {})` (run via simulator) are a subset of fields in API doc | run `get_table_schema` against simulator; compare |
 | E4 | MAJOR | Per-table primary keys: `read_table_metadata(t, {})['primary_keys']` matches API doc's natural identifier | parse both |
 | E5 | MAJOR | `external_options_allowlist` includes every `table_options.get("...")` key the connector reads | grep source vs YAML |
@@ -286,6 +287,7 @@ Run at: 2026-05-06T15:32:00Z
 - ❌ A11. Pylint: 1 finding — `source.py:142: R0912 too-many-branches
        (21/20)`. Same gate as CI; fix before merge.
 - ✅ A12. No ingestion-agent surface implemented (experimental)
+- ✅ A13. `GithubDataSource(LakeflowSource)` exposed — `__init__.py:5`
 
 ## B. Testing & simulator validation — 22 / 26
 - ✅ B1–B7
