@@ -32,19 +32,18 @@ class AzureDevopsLakeflowConnect(LakeflowConnect):
         Expected options:
             - organization: Azure DevOps organization name.
             - project: Project name or ID (optional).
-            - personal_access_token: PAT for authentication.
+            - personal_access_token: PAT (the ``pat`` auth method).
+            - access_token: OAuth bearer token (the ``service_principal``
+              auth method). For OAuth 2.0 m2m / client-credentials, this token
+              is minted and injected by the Unity Catalog COMMUNITY connection
+              at query time — the connector never runs the OAuth flow itself.
         """
         organization = options.get("organization")
         project = options.get("project")
-        personal_access_token = options.get("personal_access_token")
 
         if not organization:
             raise ValueError(
                 "Azure DevOps connector requires 'organization'"
-            )
-        if not personal_access_token:
-            raise ValueError(
-                "Azure DevOps connector requires 'personal_access_token'"
             )
 
         self.organization = organization
@@ -54,17 +53,40 @@ class AzureDevopsLakeflowConnect(LakeflowConnect):
             f"https://vssps.dev.azure.com/{organization}"
         )
 
-        auth_b64 = base64.b64encode(
-            f":{personal_access_token}".encode("ascii")
-        ).decode("ascii")
-
         self._session = requests.Session()
-        self._session.headers.update(
-            {
-                "Authorization": f"Basic {auth_b64}",
-                "Accept": "application/json",
-            }
-        )
+        self._session.headers.update({"Accept": "application/json"})
+        self._configure_auth(options)
+
+    def _configure_auth(self, options: dict[str, str]) -> None:
+        """Configure session authentication from the connection options.
+
+        Two auth methods are declared in ``connector_spec.yaml`` under
+        ``auth_methods``:
+
+        - ``service_principal`` — Microsoft Entra ID OAuth 2.0 client-
+          credentials (m2m). The UC COMMUNITY connection runs the flow and
+          injects a refreshed bearer token as ``access_token`` at query time,
+          so the connector simply sends ``Authorization: Bearer``. It never
+          holds the client secret or runs the token exchange itself.
+        - ``pat`` — HTTP Basic auth with a Personal Access Token.
+
+        ``access_token`` (OAuth) takes precedence when both are present.
+        """
+        access_token = options.get("access_token")
+        personal_access_token = options.get("personal_access_token")
+
+        if access_token:
+            self._session.headers["Authorization"] = f"Bearer {access_token}"
+        elif personal_access_token:
+            auth_b64 = base64.b64encode(
+                f":{personal_access_token}".encode("ascii")
+            ).decode("ascii")
+            self._session.headers["Authorization"] = f"Basic {auth_b64}"
+        else:
+            raise ValueError(
+                "Azure DevOps connector requires either 'access_token' "
+                "(service_principal / OAuth) or 'personal_access_token' (pat)"
+            )
 
     # ------------------------------------------------------------------ #
     # Interface methods

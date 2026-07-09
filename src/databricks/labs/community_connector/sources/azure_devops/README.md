@@ -22,12 +22,22 @@ This documentation describes how to configure and use the **Azure DevOps** Lakef
 
 Provide the following **connection-level** options when configuring the connector. These correspond to the connection options exposed by the connector.
 
-| Name                     | Type   | Required | Description                                                                                 | Example                            |
-|--------------------------|--------|----------|---------------------------------------------------------------------------------------------|------------------------------------|
-| `organization`           | string | yes      | Azure DevOps organization name. This is the organization segment in the Azure DevOps URL.  | `my-organization`                  |
-| `project`                | string | no       | Project name or ID. If provided, scopes Git and Work Item operations to this project. If omitted, tables can fetch from all projects. | `my-project`                       |
-| `personal_access_token`  | string | yes      | Personal Access Token (PAT) used for authentication with Azure DevOps Services REST API.   | `7tq...qDnpdg1Nitj8JQQJ99BLAC...` |
-| `externalOptionsAllowList` | string | yes    | Comma-separated list of allowed table-specific options. Must be set to: `project,repository_id,pullrequest_id,status_filter,filter,ids` | `project,repository_id,pullrequest_id,status_filter,filter,ids` |
+| Name | Type | Required | Description | Example |
+|------|------|----------|-------------|---------|
+| `organization` | string | yes (shared) | Azure DevOps organization name — the org segment of the Azure DevOps URL. | `my-organization` |
+| `project` | string | no (shared) | Project name or ID. Scopes Git and Work Item operations to this project; if omitted, tables fetch from all projects. | `my-project` |
+| `externalOptionsAllowList` | string | yes | Comma-separated allowed table-specific options: `project,repository_id,pullrequest_id,status_filter,filter,ids` | `project,repository_id,…` |
+
+**Authentication:** the connector declares two `auth_methods` in its spec — pick **one** when creating the connection:
+
+| Method | Parameters | How it works |
+|--------|-----------|--------------|
+| `pat` | `personal_access_token` (secret) | HTTP Basic auth with a Personal Access Token. Simplest for a single user. |
+| `service_principal` | `tenant_id`, `client_id`, `client_secret` (secret) | Microsoft Entra ID **OAuth 2.0 client-credentials (m2m)** — no interactive user. The Unity Catalog COMMUNITY connection runs the token exchange and refresh **server-side** and injects the bearer token into the connector at query time; the connector never holds the client secret or runs the flow itself. Fits enterprise identity governance and avoids per-user PATs. |
+
+The `service_principal` method uses the spec's `oauth: flow: m2m` block: the token endpoint is `https://login.microsoftonline.com/{tenant_id}/oauth2/v2.0/token` (the `{tenant_id}` is filled from your `tenant_id` option) and the scope is the Azure DevOps resource `499b84ac-1321-427f-aa17-267ca6975798/.default`.
+
+> **Note:** the `service_principal` (m2m) method is **not yet supported through the community-connector UI** ("Add data" flow). Create the connection with the `community-connector` CLI tool for now (`community-connector create_connection azure_devops <name> -o '{"organization":"…","tenant_id":"…","client_id":"…","client_secret":"…"}'`). The `pat` method works in both the UI and the CLI.
 
 **Important**: The `externalOptionsAllowList` parameter is **required** because tables support table-specific configuration options (`project`, `repository_id`, `pullrequest_id`, `status_filter`, `filter`, `ids`).
 
@@ -53,6 +63,12 @@ Provide the following **connection-level** options when configuring the connecto
        - **Work Items (read)** under the Work Items section - Required if you plan to ingest work item tables
   5. Click **Create** and copy the generated token immediately. Store it securely as you won't be able to see it again.
   6. Use this token as the `personal_access_token` connection option.
+
+- **Entra ID Service Principal (the `service_principal` auth method)**:
+  1. In the Azure portal, register an application (Entra ID → App registrations) — note its **Application (client) ID** and **Directory (tenant) ID**.
+  2. Under **Certificates & secrets**, create a **client secret** and copy its value immediately.
+  3. Add the service principal to your Azure DevOps organization (Organization settings → Users) and grant it the same read access the PAT scopes describe (Code, Graph, Project and Team, Work Items).
+  4. Create the connection with the `service_principal` auth method and supply `tenant_id`, `client_id`, `client_secret` (plus the shared `organization`). Unity Catalog runs the OAuth 2.0 client-credentials exchange and refresh server-side and injects the bearer token at query time — the connector never sees the secret or runs the flow. No PAT required.
 
 ### Create a Unity Catalog Connection
 

@@ -40,6 +40,7 @@ from databricks.labs.community_connector_cli.cli import (
     _validate_wheel_layout,
     _validate_framework_wheel,
     _find_repo_root,
+    _interpolate_oauth_placeholders,
 )
 from databricks.labs.community_connector_cli.connector_spec import (
     ParsedConnectorSpec,
@@ -3046,3 +3047,37 @@ class TestUploadCommand:
             # not the user-supplied framework wheel.
             assert len(kept_files) == 1
             assert "example" in kept_files[0].name
+
+
+class TestInterpolateOauthPlaceholders:
+    """`{param}` interpolation in resolved OAuth connection options
+    (parameter-in-a-parameter, e.g. a per-tenant token endpoint)."""
+
+    def test_interpolates_tenant_id_into_token_endpoint(self):
+        conn = {
+            "token_endpoint": (
+                "https://login.microsoftonline.com/{tenant_id}/oauth2/v2.0/token"
+            ),
+            "oauth_scope": "499b84ac/.default",
+        }
+        out = _interpolate_oauth_placeholders(conn, {"tenant_id": "T-123"})
+        assert out["token_endpoint"] == (
+            "https://login.microsoftonline.com/T-123/oauth2/v2.0/token"
+        )
+        # values without placeholders are untouched
+        assert out["oauth_scope"] == "499b84ac/.default"
+
+    def test_missing_referenced_param_raises(self):
+        import click
+
+        conn = {
+            "token_endpoint": (
+                "https://login.microsoftonline.com/{tenant_id}/oauth2/v2.0/token"
+            )
+        }
+        with pytest.raises(click.ClickException, match="tenant_id"):
+            _interpolate_oauth_placeholders(conn, {})
+
+    def test_no_placeholders_is_noop(self):
+        conn = {"token_endpoint": "https://example.com/token"}
+        assert _interpolate_oauth_placeholders(conn, {}) == conn
