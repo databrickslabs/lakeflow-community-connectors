@@ -12,7 +12,7 @@ What gets seeded
 
 Usage
 -----
-  python3 scripts/seed_amplitude.py --api-key KEY [--days N]
+  python3 tools/scripts/seed_amplitude.py --api-key KEY [--days N]
 
   The API key must be supplied via --api-key or the AMPLITUDE_API_KEY env var.
 """
