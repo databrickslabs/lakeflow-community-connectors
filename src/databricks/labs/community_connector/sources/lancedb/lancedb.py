@@ -25,8 +25,11 @@ plain JSON so the connector is exercisable against the in-process source
 simulator.
 
 Ingestion type is always ``snapshot`` with no primary keys and no cursor:
-LanceDB's REST API exposes no primary keys, no cursor/watermark, and no
-change/delete feed, so incremental (cdc) reads are not supported.
+LanceDB's REST API exposes no primary keys and no row-level change tracking
+(no ``updated_at``/cursor column, no change/delete feed).  It does provide a
+monotonic table-level ``version`` (time-travel via the query ``version``
+parameter), but that yields full snapshots, not row-level deltas, so
+incremental (cdc) reads are not supported.
 
 A note on partitioning: LanceDB offers only offset-based pagination (no
 ``since``/``until`` range query and no row-count endpoint to pre-split an
@@ -224,9 +227,11 @@ class LancedbLakeflowConnect(LakeflowConnect):
         """Report snapshot ingestion metadata.
 
         Reads are snapshot-only: ``ingestion_type`` is always ``snapshot`` and
-        there is no cursor.  LanceDB's REST API exposes no primary keys, no
-        cursor/watermark, and no change/delete feed, so incremental (cdc) reads
-        are not supported.
+        there is no cursor.  LanceDB's REST API exposes no primary keys and no
+        row-level change tracking (no ``updated_at``/cursor column, no
+        change/delete feed).  Its monotonic table-level ``version`` supports
+        only full-snapshot time-travel, not row-level deltas, so incremental
+        (cdc) reads are not supported.
 
         A single primary-key column is derived from the table's own schema
         (preferring an ``id`` column, else the first field) purely to key the

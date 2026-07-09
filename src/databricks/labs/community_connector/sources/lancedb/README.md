@@ -72,7 +72,7 @@ The pipeline configuration (stored in `ingest.py` in your workspace) looks like 
 Run the pipeline from the Databricks UI or schedule it as a recurring job.
 
 - **First run**: each configured table is read in full (a snapshot / full-table scan).
-- **Subsequent runs**: every table is re-read in full. This connector is **snapshot-only** — it does not track incremental changes, because LanceDB's REST API exposes no cursor/watermark or change feed.
+- **Subsequent runs**: every table is re-read in full. This connector is **snapshot-only** — it does not track incremental changes. LanceDB's REST API has no primary keys and no row-level change tracking (no cursor column, no change/delete feed); its table-level version only supports full-snapshot time-travel, not row-level deltas.
 
 ---
 
@@ -93,7 +93,7 @@ Each real table's schema is read from `POST /v1/table/{name}/describe/`, so your
 
 Every table is read as a full-table **snapshot** and re-read in full on each run. Internally this is a "full-table scan": because LanceDB's query API is vector-first and top-K, the connector issues a scan using an all-zero dummy vector (sized to the table's embedding dimension, auto-detected from the schema) with `bypass_vector_index` set, and paginates by offset until all rows are returned. This is **not** a similarity search — every row comes back.
 
-This connector is snapshot-only. LanceDB's REST API exposes no primary keys, no cursor/watermark, and no change/delete feed, so incremental (CDC) reads are not supported.
+This connector is snapshot-only. LanceDB's REST API exposes no primary keys and no row-level change tracking (no cursor column, no change/delete feed). It does expose a monotonic table-level `version` (time-travel), but that returns full snapshots rather than row-level deltas, so incremental (CDC) reads are not supported.
 
 > **No delete capture:** deleted rows in a table simply stop appearing on the next full read.
 

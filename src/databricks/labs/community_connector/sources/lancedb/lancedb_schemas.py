@@ -14,9 +14,11 @@ The ``TABLES`` / ``TABLE_SCHEMAS`` maps below therefore describe a small set of
 * the seed the simulator's ``corpus_from_schema`` tool uses to synthesize a
   record corpus for those tables.
 
-Reads are snapshot-only: LanceDB's REST API exposes no primary keys, no
-cursor/watermark, and no change/delete feed, so every table is read as a full
-snapshot and incremental (cdc) reads are not supported.
+Reads are snapshot-only: LanceDB's REST API exposes no primary keys and no
+row-level change tracking (no cursor column, no change/delete feed).  Its
+table-level ``version`` supports only full-snapshot time-travel, not row-level
+deltas, so every table is read as a full snapshot and incremental (cdc) reads
+are not supported.
 """
 
 from pyspark.sql.types import (
