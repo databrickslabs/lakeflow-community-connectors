@@ -833,6 +833,7 @@ class AzureDevopsLakeflowConnect(LakeflowConnect):
         start_offset = start_offset or {}
         watermarks: dict[str, str] = dict(start_offset.get("watermarks", {}))
         all_records: list[dict[str, Any]] = []
+        watermarks_advanced = False
 
         for project in projects:
             if explicit_ids:
@@ -860,10 +861,16 @@ class AzureDevopsLakeflowConnect(LakeflowConnect):
                 or max_changed > watermarks[project]
             ):
                 watermarks[project] = max_changed
+                watermarks_advanced = True
 
         if explicit_ids:
             # Explicit-IDs path is snapshot-like — stable offset terminates
             return iter(all_records), start_offset
+        # If no watermarks advanced, no new changes — return empty to satisfy
+        # Spark's SimpleDataSourceStreamReader contract: a non-empty batch
+        # must always be paired with a strictly advancing end offset.
+        if not watermarks_advanced:
+            return iter([]), start_offset
         return iter(all_records), {"watermarks": watermarks}
 
     def _discover_workitem_ids(self, project: str) -> list[str]:
