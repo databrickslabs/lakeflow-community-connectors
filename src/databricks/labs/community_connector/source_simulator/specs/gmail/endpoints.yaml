@@ -1,21 +1,11 @@
 # Gmail API v1 (uses ``requests`` directly, not the Google SDK).
 #
-# Two auth modes are exercised:
-# * Pre-issued access_token (UC COMMUNITY u2m flow) — the connector never
-#   hits Google's /token endpoint.
-# * In-code refresh (older connections) — the connector posts to the
-#   /token endpoint below to exchange a refresh_token for an access_token.
-# Hosts:
-# * https://oauth2.googleapis.com/token — OAuth refresh (refresh mode only)
+# Auth: the connector receives a pre-issued access_token (injected by the UC
+# COMMUNITY u2m / u2m_per_user flow) and never hits Google's /token endpoint.
+# Host:
 # * https://gmail.googleapis.com/gmail/v1/...
 
 endpoints:
-  # ---- OAuth refresh (refresh mode only; lazy on first API call) ----
-  - path: /token
-    method: POST
-    corpus: oauth_token
-    response: {single_entity: true, pagination_style: none}
-
   # ---- Batch endpoint — force fallback to sequential ----
   - path: /batch/gmail/v1
     method: POST

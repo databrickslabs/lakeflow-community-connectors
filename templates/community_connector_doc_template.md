@@ -13,12 +13,14 @@ This documentation provides setup instructions and reference information for the
 
 To configure the connector, provide the following parameters in your connector options:
 <List the parameters with name, type, whether required, description, and example in a table>
+<If the connector uses OAuth (the connector_spec.yaml declares a `connection.oauth` block), the parameters are the OAuth app identity — typically `client_id` and `client_secret` — NOT a token. State that the connection obtains the access token automatically; the user never pastes a token. Describe the user experience in plain terms (e.g. "creating the connection opens a browser to sign in and authorize") — do NOT name the internal flow (`u2m` / `m2m` / `u2m_per_user`); users don't configure it. Only present a flow choice if the connector supports more than one and the user must pick.>
 <If this connector supports any extra table-specific options (such as options that must be set per table when reading data), list every allowed option name here as a comma-separated string. 
 Document these in the `externalOptionsAllowList` connection option. 
 If there are such table-specific options, clearly state that `externalOptionsAllowList` is a required connection option, and provide the full, definitive list of all supported options — do not mark this option as optional or provide a sample value.
 If no extra table-specific options are supported, make it clear that `externalOptionsAllowList` does not need to be included as a connection parameter.>
 
 ### <Add a section describing how to obtain the required parameters>
+<For OAuth connectors, describe how to register an OAuth app in the source system: where to create it, which redirect URI to register (the connection flow uses a localhost loopback redirect), the scopes to grant, and where to copy the client_id / client_secret.>
 
 ### Create a Unity Catalog Connection 
 A Unity Catalog connection for this connector can be created in two ways via the UI:
@@ -27,6 +29,8 @@ A Unity Catalog connection for this connector can be created in two ways via the
 3. <Identify any extra table-specific options that can be configured (especially any that are required). List these option names as a comma-separated string in the `externalOptionsAllowList`. Do this for the specific source.>
 
 The connection can also be created using the standard Unity Catalog API.
+
+<For OAuth connectors with an interactive login, note that creating the connection opens a browser for the user to sign in and authorize; the user supplies only client_id / client_secret.>
 
 
 ## Supported Objects

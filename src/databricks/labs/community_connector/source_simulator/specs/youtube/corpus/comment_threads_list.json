@@ -1,0 +1,27 @@
+{
+  "kind": "youtube#commentThreadListResponse",
+  "etag": "sim-comment-threads-etag",
+  "items": [
+    {
+      "kind": "youtube#commentThread",
+      "etag": "sim-comment-thread-etag",
+      "id": "ct_test_001",
+      "snippet": {
+        "videoId": "vid_test_001",
+        "topLevelComment": {
+          "id": "comment_test_001",
+          "snippet": {
+            "textDisplay": "Simulator comment",
+            "authorDisplayName": "Test User",
+            "publishedAt": "2020-07-01T00:00:00Z",
+            "likeCount": 1
+          }
+        },
+        "canReply": true,
+        "totalReplyCount": 0
+      }
+    }
+  ],
+  "nextPageToken": null,
+  "pageInfo": {"totalResults": 1, "resultsPerPage": 50}
+}
