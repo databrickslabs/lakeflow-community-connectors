@@ -12,23 +12,18 @@ What gets seeded
 
 Usage
 -----
-  python3 scripts/seed_amplitude.py [--api-key KEY] [--days N]
+  python3 scripts/seed_amplitude.py --api-key KEY [--days N]
 
-  Credentials fall back to the env var AMPLITUDE_API_KEY, then the hard-coded
-  trial key below.
+  The API key must be supplied via --api-key or the AMPLITUDE_API_KEY env var.
 """
 import argparse
-import json
+import os
 import random
-import sys
-import time
 import uuid
 from datetime import datetime, timedelta, timezone
 
 import requests
 
-# ── trial account credentials ─────────────────────────────────────────────────
-DEFAULT_API_KEY = "f8ee8a3ee18bca43bccb7afa5135247d"
 INGEST_URL = "https://api2.amplitude.com/2/httpapi"
 BATCH_SIZE = 100          # Amplitude max per request
 
@@ -145,12 +140,16 @@ def send_batch(api_key: str, events: list, dry_run: bool = False) -> dict:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Seed Amplitude trial account")
-    parser.add_argument("--api-key", default=DEFAULT_API_KEY)
+    parser.add_argument("--api-key", default=os.environ.get("AMPLITUDE_API_KEY"),
+                        help="Amplitude project API key (or set AMPLITUDE_API_KEY)")
     parser.add_argument("--days", type=int, default=8,
                         help="Number of past days to generate data for (default: 8)")
     parser.add_argument("--dry-run", action="store_true",
                         help="Print stats without sending to Amplitude")
     args = parser.parse_args()
+
+    if not args.api_key and not args.dry_run:
+        parser.error("no API key: pass --api-key or set AMPLITUDE_API_KEY")
 
     today = datetime.now(tz=timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
 

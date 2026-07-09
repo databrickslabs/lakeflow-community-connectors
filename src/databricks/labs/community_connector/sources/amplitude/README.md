@@ -44,10 +44,10 @@ This connector pulls from Amplitude's Export API, Dashboard REST API, Behavioral
 | **Secret Key** | Yes | Your Amplitude project Secret Key |
 | **Data Region** | No | `standard` (default) or `eu` |
 | **Start Date** | No | ISO-8601 date for the earliest events to backfill, e.g. `2024-01-01`. Only affects the `events` table and other incremental tables on the first run. Leave blank to sync only the most recent data. |
-| **External Options Allow List** | Yes | Copy and paste this value exactly: `window_hours,window_days,m,i,g` |
+| **External Options Allow List** | Yes | Copy and paste this value exactly: `window_hours,window_days,lookback_hours,m,i,g` |
 
 > **Why do I need External Options Allow List?**
-> This connector supports optional per-table settings (such as date window widths and grouping). The `externalOptionsAllowList` field tells Databricks which option names are allowed to pass through from your pipeline to the connector. Simply paste `window_hours,window_days,m,i,g` into the field — you don't need to understand each option unless you want to customize behavior later.
+> This connector supports optional per-table settings (such as date window widths and grouping). The `externalOptionsAllowList` field tells Databricks which option names are allowed to pass through from your pipeline to the connector. Simply paste `window_hours,window_days,lookback_hours,m,i,g` into the field — you don't need to understand each option unless you want to customize behavior later.
 
 4. Click **Test connection** to verify, then **Save**.
 
