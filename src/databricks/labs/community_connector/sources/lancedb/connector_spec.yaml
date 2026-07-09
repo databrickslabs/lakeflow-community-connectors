@@ -44,4 +44,4 @@ connection:
 # parameter of the UC connection to allow them to be passed through.
 # Use a comma-separated string of option names.
 # ============================================================================
-external_options_allowlist: "columns,batch_size,filter_expression"
+external_options_allowlist: "columns,batch_size,filter_expression,ingestion_type,cursor_field,primary_keys,max_records_per_batch"

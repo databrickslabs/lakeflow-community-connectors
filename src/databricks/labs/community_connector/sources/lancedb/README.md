@@ -2,7 +2,19 @@
 
 Ingest tables from **LanceDB Cloud** — including their vector/embedding columns — into Databricks Delta tables via Lakeflow Connect. No coding required.
 
-LanceDB is a vector database. Its tables are user-defined and fully dynamic, so this connector **discovers your tables automatically** at runtime and reads each one as a full-table snapshot (re-read in full on every run). Vector/embedding columns come through as numeric arrays alongside your regular columns.
+LanceDB is a vector database. Its tables are user-defined and fully dynamic, so this connector **discovers your tables automatically** at runtime. By default each table is read as a full-table snapshot (re-read in full on every run), and you can opt into incremental (`cdc`) or `append` ingestion per table. Vector/embedding columns come through as numeric arrays alongside your regular columns.
+
+## Ingestion modes at a glance
+
+Set the `ingestion_type` per-table option to choose how a table syncs (default `snapshot`):
+
+| Mode | When to use | Requires | Behavior |
+|------|-------------|----------|----------|
+| `snapshot` *(default)* | Small/medium tables; you want a mirror of the current table each run | — | Full-table scan every run; rows upserted on the guaranteed-unique `_rowid` (or your `primary_keys`). |
+| `cdc` | Tables with an orderable "last updated" column and you want to sync only new/changed rows | a `cursor_field` column that exists in the table | Each run reads only rows where `cursor_field > last-synced-value`; upserted on the primary key. |
+| `append` | Immutable / log tables where rows are only ever inserted | — | Full-table scan every run, appended (no primary key, no cursor). **Re-running duplicates rows** — see the caveat below. |
+
+> **`cdc_with_deletes` is not supported.** LanceDB's REST API exposes no delete or change feed, so deletes cannot be captured incrementally. In `cdc` mode a row deleted in LanceDB simply stops receiving updates; it is not removed downstream. If you need deletes reflected, use `snapshot` mode (a deleted row stops appearing on the next full read).
 
 ---
 
@@ -36,10 +48,10 @@ LanceDB is a vector database. Its tables are user-defined and fully dynamic, so 
 | **API Key** | Yes | Your LanceDB Cloud API key (`api_key`). Stored as a secret. |
 | **Project Name** | Yes | Your LanceDB project/database identifier (`project_name`), e.g. `my-lancedb-project` |
 | **Region** | Yes | The cloud region hosting the project (`region`), e.g. `us-east-1` |
-| **External Options Allow List** | Yes | Copy and paste this value exactly: `columns,batch_size,filter_expression` |
+| **External Options Allow List** | Yes | Copy and paste this value exactly: `columns,batch_size,filter_expression,ingestion_type,cursor_field,primary_keys,max_records_per_batch` |
 
 > **Why do I need External Options Allow List?**
-> This connector supports optional per-table settings (such as which columns to read, batch size, and a filter). The `externalOptionsAllowList` field tells Databricks which option names are allowed to pass through from your pipeline to the connector. Simply paste `columns,batch_size,filter_expression` into the field — you don't need to understand each option unless you want to customize behavior later (see [Optional Per-Table Settings](#optional-per-table-settings)).
+> This connector supports optional per-table settings (such as which columns to read, batch size, a filter, and the ingestion mode). The `externalOptionsAllowList` field tells Databricks which option names are allowed to pass through from your pipeline to the connector. Simply paste `columns,batch_size,filter_expression,ingestion_type,cursor_field,primary_keys,max_records_per_batch` into the field — you don't need to understand each option unless you want to customize behavior later (see [Optional Per-Table Settings](#optional-per-table-settings)).
 
 4. Click **Test connection** to verify, then **Save**.
 
@@ -71,8 +83,11 @@ The pipeline configuration (stored in `ingest.py` in your workspace) looks like 
 
 Run the pipeline from the Databricks UI or schedule it as a recurring job.
 
-- **First run**: each configured table is read in full (a snapshot / full-table scan).
-- **Subsequent runs**: every table is re-read in full. This connector is **snapshot-only** — it does not track incremental changes. LanceDB's REST API has no primary keys and no row-level change tracking (no cursor column, no change/delete feed); its table-level version only supports full-snapshot time-travel, not row-level deltas.
+- **First run**: each configured table is read in full (a full-table scan). For `cdc` tables this establishes the starting cursor.
+- **Subsequent runs**:
+  - `snapshot` (default) — the table is re-read in full and upserted.
+  - `cdc` — only rows newer than the last-synced cursor value are read and upserted (no full re-scan).
+  - `append` — the table is re-read in full and appended (see the append caveat under [Ingestion modes](#ingestion-modes-at-a-glance)).
 
 ---
 
@@ -91,11 +106,15 @@ Each real table's schema is read from `POST /v1/table/{name}/describe/`, so your
 
 ### How reads work
 
-Every table is read as a full-table **snapshot** and re-read in full on each run. Internally this is a "full-table scan": because LanceDB's query API is vector-first and top-K, the connector issues a scan using an all-zero dummy vector (sized to the table's embedding dimension, auto-detected from the schema) with `bypass_vector_index` set, and paginates by offset until all rows are returned. This is **not** a similarity search — every row comes back.
+Under the hood every mode uses the same "full-table scan": because LanceDB's query API is vector-first and top-K, the connector issues a scan using an all-zero dummy vector (sized to the table's embedding dimension, auto-detected from the schema) with `bypass_vector_index` set, and paginates by offset until all rows are returned. This is **not** a similarity search — every matching row comes back.
 
-This connector is snapshot-only. LanceDB's REST API exposes no primary keys and no row-level change tracking (no cursor column, no change/delete feed). It does expose a monotonic table-level `version` (time-travel), but that returns full snapshots rather than row-level deltas, so incremental (CDC) reads are not supported.
+- **`snapshot` (default):** the scan returns the whole table each run; rows are upserted on `_rowid` (or your `primary_keys`).
+- **`cdc`:** the scan is filtered server-side with `{cursor_field} > {last-synced-value}` (AND-combined with any `filter_expression`), so only new/changed rows are fetched. The connector tracks the max cursor value seen and checkpoints it; when a run finds nothing newer, it stops. `cdc` requires a `cursor_field` — an **orderable column that exists in your table** (e.g. a timestamp such as `updated_at`, or a monotonically increasing id). Rows are upserted on the primary key, so re-fetching a small overlap is de-duplicated safely.
+- **`append`:** the scan returns the whole table each run and every row is inserted (no primary key). See the caveat below.
 
-> **No delete capture:** deleted rows in a table simply stop appearing on the next full read.
+> **`cdc` does not capture deletes.** LanceDB has no delete/change feed, so `cdc_with_deletes` is not supported. A row deleted in LanceDB stops receiving `cdc` updates but is not removed downstream. Use `snapshot` mode if you need deletes reflected (a deleted row stops appearing on the next full read).
+
+> **`append` re-reads the whole table every run.** `append` mode does no cursor tracking — it scans the entire table and appends all rows on every run, so **re-running a pipeline duplicates rows**. Use it only for immutable / log tables where you either run once or accept duplicates (and de-duplicate downstream).
 
 ---
 
@@ -113,9 +132,13 @@ These settings are **optional** — all tables work without them. To use them, a
 
 | Option | Default | Description |
 |--------|---------|-------------|
-| `columns` | *(all columns)* | JSON array of column names to read, e.g. `["id", "file_name"]`. Prunes the columns fetched — useful to exclude large vector or binary columns. Applied both in the request and re-checked client-side. |
+| `ingestion_type` | `snapshot` | Ingestion mode: `snapshot`, `cdc`, or `append` (see [Ingestion modes](#ingestion-modes-at-a-glance)). |
+| `cursor_field` | *(none)* | **Required when `ingestion_type=cdc`.** Name of an orderable column that exists in the table (e.g. `updated_at` or a monotonic id) used to fetch only new/changed rows. |
+| `primary_keys` | `["_rowid"]` | JSON array of column names used as the merge/upsert key for `snapshot` and `cdc`, e.g. `["id"]`. Defaults to LanceDB's guaranteed-unique `_rowid`. Ignored for `append`. |
+| `max_records_per_batch` | `1000` | (cdc only) Caps how many rows one microbatch returns to Spark. Safe to truncate because rows carry the primary key and are upserted. |
+| `columns` | *(all columns)* | JSON array of column names to read, e.g. `["id", "file_name"]`. Prunes the columns fetched — useful to exclude large vector or binary columns. Applied both in the request and re-checked client-side. (`_rowid` is always kept.) For `cdc`, keep the `cursor_field` in this list. |
 | `batch_size` | `1000` | Number of rows fetched per request (the query API's top-`k`), also the pagination page size. Clamped to the range `1`–`10000`. |
-| `filter_expression` | *(none)* | A Lance SQL filter applied server-side, e.g. `category = 'news'`. |
+| `filter_expression` | *(none)* | A Lance SQL filter applied server-side, e.g. `category = 'news'`. For `cdc` it is AND-combined with the cursor filter. |
 
 **Full example with options:**
 
@@ -137,6 +160,22 @@ These settings are **optional** — all tables work without them. To use them, a
       "table": {
         "source_table": "embeddings",
         "table_configuration": { "batch_size": "5000" }
+      }
+    },
+    {
+      "table": {
+        "source_table": "changes",
+        "table_configuration": {
+          "ingestion_type": "cdc",
+          "cursor_field": "updated_at",
+          "max_records_per_batch": "1000"
+        }
+      }
+    },
+    {
+      "table": {
+        "source_table": "event_log",
+        "table_configuration": { "ingestion_type": "append" }
       }
     }
   ]

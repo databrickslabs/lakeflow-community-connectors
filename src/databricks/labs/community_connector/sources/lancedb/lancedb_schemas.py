@@ -14,16 +14,21 @@ The ``TABLES`` / ``TABLE_SCHEMAS`` maps below therefore describe a small set of
 * the seed the simulator's ``corpus_from_schema`` tool uses to synthesize a
   record corpus for those tables.
 
-Reads are snapshot-only: LanceDB's REST API exposes no primary keys and no
-row-level change tracking (no cursor column, no change/delete feed).  Its
-table-level ``version`` supports only full-snapshot time-travel, not row-level
-deltas, so every table is read as a full snapshot and incremental (cdc) reads
-are not supported.
+Ingestion mode is selected per table via an ``ingestion_type`` table option
+(``snapshot`` — the default, ``cdc``, or ``append``):
+
+* ``snapshot`` — full-table scan on every run (no cursor).
+* ``cdc`` — one incremental microbatch per call, filtered by a user-supplied
+  ``cursor_field`` column (``{cursor_field} > {since}``).  ``cdc_with_deletes``
+  is **not** supported: LanceDB exposes no delete/change feed.
+* ``append`` — full-table scan appended on every run (no primary key, no
+  cursor); re-running duplicates rows.
 
 Because LanceDB declares no natural unique key, the connector always requests
 LanceDB's guaranteed-unique ``_rowid`` system column (via ``with_row_id``) and
-uses it as the snapshot merge (primary) key.  ``_rowid`` (``LongType``) is
-therefore included in every built-in schema below.
+uses it as the default merge (primary) key for ``snapshot`` / ``cdc``.  A user
+may override this with a ``primary_keys`` table option.  ``_rowid``
+(``LongType``) is therefore included in every built-in schema below.
 """
 
 from pyspark.sql.types import (
@@ -55,6 +60,15 @@ DEFAULT_TIMEOUT = 60  # seconds; every request sets an explicit timeout
 # Production usage caps a single request near ~10k rows.
 DEFAULT_BATCH_SIZE = 1000
 MAX_BATCH_SIZE = 10000
+
+# Caps how many records a single ``cdc`` ``read_table`` call returns to the
+# framework (client-side truncation).  Safe for cdc because rows carry the
+# ``_rowid`` primary key, so a re-fetched overlap is de-duplicated by the
+# framework's merge/upsert.
+DEFAULT_MAX_RECORDS = 1000
+
+# Ingestion modes selectable via the ``ingestion_type`` table option.
+VALID_INGESTION_TYPES = ("snapshot", "cdc", "append")
 
 # LanceDB's guaranteed-unique row identifier, returned when a query sets
 # ``with_row_id: true``.  LanceDB exposes no natural unique key, so the
