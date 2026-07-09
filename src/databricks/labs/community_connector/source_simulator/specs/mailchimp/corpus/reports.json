@@ -1,0 +1,297 @@
+[
+  {
+    "id": "oscar-58-pk0",
+    "campaign_title": "charlie-116",
+    "type": "tango-856",
+    "list_id": "alpha-832",
+    "list_is_active": true,
+    "list_name": "oscar-454",
+    "subject_line": "alpha-208",
+    "preview_text": "lima-421",
+    "emails_sent": 38340,
+    "abuse_reports": 40179,
+    "unsubscribed": 53096,
+    "send_time": "2024-01-01T00:00:00Z",
+    "bounces": {
+      "hard_bounces": 58164,
+      "soft_bounces": 14142,
+      "syntax_errors": 89309
+    },
+    "forwards": {
+      "forwards_count": 16231,
+      "forwards_opens": 14094
+    },
+    "opens": {
+      "opens_total": 86983,
+      "unique_opens": 44076,
+      "open_rate": 176.68,
+      "last_open": "delta-909"
+    },
+    "clicks": {
+      "clicks_total": 88960,
+      "unique_clicks": 55639,
+      "unique_subscriber_clicks": 64718,
+      "click_rate": 279.66,
+      "last_click": "victor-415"
+    },
+    "facebook_likes": {
+      "recipient_likes": 6023,
+      "unique_likes": 94015,
+      "facebook_likes": 7728
+    },
+    "list_stats": {
+      "sub_rate": 6.48,
+      "unsub_rate": 344.69,
+      "open_rate": 319.75,
+      "click_rate": 472.04
+    },
+    "ecommerce": {
+      "total_orders": 93199,
+      "total_spent": 393.78,
+      "total_revenue": 852.39
+    },
+    "delivery_status": {
+      "enabled": false,
+      "can_cancel": true,
+      "status": "november-417",
+      "emails_sent": 16167,
+      "emails_canceled": 18138
+    }
+  },
+  {
+    "id": "echo-921-pk1",
+    "campaign_title": "hotel-629",
+    "type": "bravo-482",
+    "list_id": "echo-381",
+    "list_is_active": false,
+    "list_name": "november-693",
+    "subject_line": "bravo-542",
+    "preview_text": "yankee-157",
+    "emails_sent": 44794,
+    "abuse_reports": 76210,
+    "unsubscribed": 88481,
+    "send_time": "2024-01-01T01:00:00Z",
+    "bounces": {
+      "hard_bounces": 92191,
+      "soft_bounces": 3932,
+      "syntax_errors": 44998
+    },
+    "forwards": {
+      "forwards_count": 22592,
+      "forwards_opens": 51655
+    },
+    "opens": {
+      "opens_total": 2763,
+      "unique_opens": 99900,
+      "open_rate": 475.77,
+      "last_open": "oscar-275"
+    },
+    "clicks": {
+      "clicks_total": 41060,
+      "unique_clicks": 80597,
+      "unique_subscriber_clicks": 28406,
+      "click_rate": 366.0,
+      "last_click": "whiskey-879"
+    },
+    "facebook_likes": {
+      "recipient_likes": 68219,
+      "unique_likes": 29002,
+      "facebook_likes": 45589
+    },
+    "list_stats": {
+      "sub_rate": 791.17,
+      "unsub_rate": 818.48,
+      "open_rate": 986.16,
+      "click_rate": 889.14
+    },
+    "ecommerce": {
+      "total_orders": 72678,
+      "total_spent": 992.91,
+      "total_revenue": 851.52
+    },
+    "delivery_status": {
+      "enabled": true,
+      "can_cancel": false,
+      "status": "romeo-436",
+      "emails_sent": 73536,
+      "emails_canceled": 67105
+    }
+  },
+  {
+    "id": "sierra-9-pk2",
+    "campaign_title": "romeo-911",
+    "type": "charlie-234",
+    "list_id": "mike-578",
+    "list_is_active": false,
+    "list_name": "delta-339",
+    "subject_line": "charlie-165",
+    "preview_text": "november-481",
+    "emails_sent": 36247,
+    "abuse_reports": 94516,
+    "unsubscribed": 2119,
+    "send_time": "2024-01-01T02:00:00Z",
+    "bounces": {
+      "hard_bounces": 64663,
+      "soft_bounces": 40816,
+      "syntax_errors": 13927
+    },
+    "forwards": {
+      "forwards_count": 46082,
+      "forwards_opens": 3803
+    },
+    "opens": {
+      "opens_total": 9448,
+      "unique_opens": 29342,
+      "open_rate": 112.03,
+      "last_open": "november-130"
+    },
+    "clicks": {
+      "clicks_total": 57297,
+      "unique_clicks": 94685,
+      "unique_subscriber_clicks": 96991,
+      "click_rate": 784.06,
+      "last_click": "november-624"
+    },
+    "facebook_likes": {
+      "recipient_likes": 31782,
+      "unique_likes": 50026,
+      "facebook_likes": 54958
+    },
+    "list_stats": {
+      "sub_rate": 438.74,
+      "unsub_rate": 546.12,
+      "open_rate": 99.59,
+      "click_rate": 157.92
+    },
+    "ecommerce": {
+      "total_orders": 41642,
+      "total_spent": 146.5,
+      "total_revenue": 160.97
+    },
+    "delivery_status": {
+      "enabled": true,
+      "can_cancel": false,
+      "status": "delta-709",
+      "emails_sent": 63808,
+      "emails_canceled": 9455
+    }
+  },
+  {
+    "id": "oscar-88-pk3",
+    "campaign_title": "echo-165",
+    "type": "india-296",
+    "list_id": "xray-750",
+    "list_is_active": true,
+    "list_name": "delta-326",
+    "subject_line": "zulu-239",
+    "preview_text": "hotel-743",
+    "emails_sent": 1111,
+    "abuse_reports": 96151,
+    "unsubscribed": 36731,
+    "send_time": "2024-01-01T03:00:00Z",
+    "bounces": {
+      "hard_bounces": 79624,
+      "soft_bounces": 21252,
+      "syntax_errors": 21840
+    },
+    "forwards": {
+      "forwards_count": 77987,
+      "forwards_opens": 60795
+    },
+    "opens": {
+      "opens_total": 45289,
+      "unique_opens": 32315,
+      "open_rate": 42.78,
+      "last_open": "delta-300"
+    },
+    "clicks": {
+      "clicks_total": 58514,
+      "unique_clicks": 58668,
+      "unique_subscriber_clicks": 56653,
+      "click_rate": 463.79,
+      "last_click": "charlie-309"
+    },
+    "facebook_likes": {
+      "recipient_likes": 67797,
+      "unique_likes": 50129,
+      "facebook_likes": 7878
+    },
+    "list_stats": {
+      "sub_rate": 229.9,
+      "unsub_rate": 752.72,
+      "open_rate": 715.3,
+      "click_rate": 610.98
+    },
+    "ecommerce": {
+      "total_orders": 34908,
+      "total_spent": 236.43,
+      "total_revenue": 125.41
+    },
+    "delivery_status": {
+      "enabled": true,
+      "can_cancel": false,
+      "status": "juliet-542",
+      "emails_sent": 85509,
+      "emails_canceled": 67130
+    }
+  },
+  {
+    "id": "kilo-830-pk4",
+    "campaign_title": "xray-268",
+    "type": "lima-309",
+    "list_id": "tango-850",
+    "list_is_active": false,
+    "list_name": "papa-898",
+    "subject_line": "zulu-588",
+    "preview_text": "alpha-732",
+    "emails_sent": 56452,
+    "abuse_reports": 40668,
+    "unsubscribed": 74065,
+    "send_time": "2024-01-01T04:00:00Z",
+    "bounces": {
+      "hard_bounces": 67737,
+      "soft_bounces": 64919,
+      "syntax_errors": 41690
+    },
+    "forwards": {
+      "forwards_count": 58445,
+      "forwards_opens": 96782
+    },
+    "opens": {
+      "opens_total": 17954,
+      "unique_opens": 34457,
+      "open_rate": 156.01,
+      "last_open": "lima-532"
+    },
+    "clicks": {
+      "clicks_total": 8605,
+      "unique_clicks": 71416,
+      "unique_subscriber_clicks": 93243,
+      "click_rate": 282.47,
+      "last_click": "kilo-178"
+    },
+    "facebook_likes": {
+      "recipient_likes": 7809,
+      "unique_likes": 62796,
+      "facebook_likes": 46012
+    },
+    "list_stats": {
+      "sub_rate": 178.89,
+      "unsub_rate": 765.81,
+      "open_rate": 918.09,
+      "click_rate": 448.6
+    },
+    "ecommerce": {
+      "total_orders": 33881,
+      "total_spent": 346.15,
+      "total_revenue": 37.8
+    },
+    "delivery_status": {
+      "enabled": true,
+      "can_cancel": false,
+      "status": "lima-683",
+      "emails_sent": 51538,
+      "emails_canceled": 61411
+    }
+  }
+]

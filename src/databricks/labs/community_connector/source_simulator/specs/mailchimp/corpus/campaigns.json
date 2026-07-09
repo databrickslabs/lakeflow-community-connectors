@@ -1,0 +1,322 @@
+[
+  {
+    "id": "alpha-12-pk0",
+    "web_id": 44877,
+    "type": "uniform-694",
+    "create_time": "2024-01-01T00:00:00Z",
+    "send_time": "november-517",
+    "status": "papa-566",
+    "emails_sent": 66464,
+    "archive_url": "november-414",
+    "content_type": "uniform-967",
+    "recipients": {
+      "list_id": "quebec-335",
+      "list_is_active": false,
+      "list_name": "charlie-852",
+      "segment_text": "lima-268",
+      "recipient_count": 92936
+    },
+    "settings": {
+      "subject_line": "sierra-849",
+      "preview_text": "whiskey-227",
+      "title": "echo-969",
+      "from_name": "foxtrot-894",
+      "reply_to": "alpha-394",
+      "use_conversation": false,
+      "to_name": "golf-967",
+      "folder_id": "uniform-319",
+      "authenticate": true,
+      "auto_footer": true,
+      "inline_css": false,
+      "auto_tweet": true,
+      "fb_comments": true,
+      "template_id": 43917,
+      "drag_and_drop": true
+    },
+    "tracking": {
+      "opens": false,
+      "html_clicks": true,
+      "text_clicks": true,
+      "goal_tracking": true,
+      "ecomm360": true,
+      "google_analytics": "sierra-164",
+      "clicktale": "delta-202"
+    },
+    "report_summary": {
+      "opens": 85200,
+      "unique_opens": 92567,
+      "open_rate": 755.28,
+      "clicks": 34916,
+      "subscriber_clicks": 55106,
+      "click_rate": 637.66,
+      "ecommerce": {
+        "total_orders": 4513,
+        "total_spent": 387.73,
+        "total_revenue": 954.29
+      }
+    },
+    "delivery_status": {
+      "enabled": false,
+      "can_cancel": true,
+      "status": "quebec-103",
+      "emails_sent": 38732,
+      "emails_canceled": 63734
+    }
+  },
+  {
+    "id": "kilo-669-pk1",
+    "web_id": 20267,
+    "type": "lima-851",
+    "create_time": "2024-01-01T01:00:00Z",
+    "send_time": "delta-766",
+    "status": "bravo-948",
+    "emails_sent": 94625,
+    "archive_url": "juliet-997",
+    "content_type": "papa-422",
+    "recipients": {
+      "list_id": "romeo-216",
+      "list_is_active": true,
+      "list_name": "quebec-807",
+      "segment_text": "hotel-602",
+      "recipient_count": 83774
+    },
+    "settings": {
+      "subject_line": "mike-660",
+      "preview_text": "romeo-230",
+      "title": "oscar-117",
+      "from_name": "lima-187",
+      "reply_to": "papa-176",
+      "use_conversation": false,
+      "to_name": "bravo-241",
+      "folder_id": "whiskey-374",
+      "authenticate": false,
+      "auto_footer": true,
+      "inline_css": false,
+      "auto_tweet": true,
+      "fb_comments": true,
+      "template_id": 57033,
+      "drag_and_drop": true
+    },
+    "tracking": {
+      "opens": true,
+      "html_clicks": false,
+      "text_clicks": false,
+      "goal_tracking": true,
+      "ecomm360": true,
+      "google_analytics": "romeo-494",
+      "clicktale": "tango-612"
+    },
+    "report_summary": {
+      "opens": 11805,
+      "unique_opens": 7162,
+      "open_rate": 679.94,
+      "clicks": 37278,
+      "subscriber_clicks": 45293,
+      "click_rate": 878.61,
+      "ecommerce": {
+        "total_orders": 71431,
+        "total_spent": 195.81,
+        "total_revenue": 155.52
+      }
+    },
+    "delivery_status": {
+      "enabled": false,
+      "can_cancel": true,
+      "status": "romeo-992",
+      "emails_sent": 21590,
+      "emails_canceled": 59691
+    }
+  },
+  {
+    "id": "oscar-47-pk2",
+    "web_id": 53294,
+    "type": "uniform-839",
+    "create_time": "2024-01-01T02:00:00Z",
+    "send_time": "xray-982",
+    "status": "delta-129",
+    "emails_sent": 81994,
+    "archive_url": "juliet-670",
+    "content_type": "alpha-531",
+    "recipients": {
+      "list_id": "sierra-275",
+      "list_is_active": true,
+      "list_name": "romeo-213",
+      "segment_text": "echo-210",
+      "recipient_count": 63943
+    },
+    "settings": {
+      "subject_line": "zulu-277",
+      "preview_text": "delta-585",
+      "title": "quebec-649",
+      "from_name": "xray-429",
+      "reply_to": "papa-644",
+      "use_conversation": false,
+      "to_name": "delta-354",
+      "folder_id": "papa-144",
+      "authenticate": false,
+      "auto_footer": false,
+      "inline_css": false,
+      "auto_tweet": false,
+      "fb_comments": true,
+      "template_id": 7192,
+      "drag_and_drop": false
+    },
+    "tracking": {
+      "opens": true,
+      "html_clicks": true,
+      "text_clicks": false,
+      "goal_tracking": false,
+      "ecomm360": true,
+      "google_analytics": "mike-351",
+      "clicktale": "victor-504"
+    },
+    "report_summary": {
+      "opens": 53263,
+      "unique_opens": 51242,
+      "open_rate": 774.6,
+      "clicks": 5861,
+      "subscriber_clicks": 13226,
+      "click_rate": 813.39,
+      "ecommerce": {
+        "total_orders": 82300,
+        "total_spent": 227.08,
+        "total_revenue": 149.26
+      }
+    },
+    "delivery_status": {
+      "enabled": true,
+      "can_cancel": false,
+      "status": "lima-721",
+      "emails_sent": 20513,
+      "emails_canceled": 50522
+    }
+  },
+  {
+    "id": "echo-768-pk3",
+    "web_id": 76919,
+    "type": "mike-752",
+    "create_time": "2024-01-01T03:00:00Z",
+    "send_time": "golf-315",
+    "status": "bravo-715",
+    "emails_sent": 39124,
+    "archive_url": "quebec-378",
+    "content_type": "bravo-952",
+    "recipients": {
+      "list_id": "bravo-809",
+      "list_is_active": false,
+      "list_name": "uniform-270",
+      "segment_text": "tango-873",
+      "recipient_count": 87752
+    },
+    "settings": {
+      "subject_line": "mike-259",
+      "preview_text": "golf-517",
+      "title": "lima-143",
+      "from_name": "victor-981",
+      "reply_to": "papa-473",
+      "use_conversation": false,
+      "to_name": "papa-957",
+      "folder_id": "papa-939",
+      "authenticate": false,
+      "auto_footer": true,
+      "inline_css": false,
+      "auto_tweet": false,
+      "fb_comments": true,
+      "template_id": 44507,
+      "drag_and_drop": true
+    },
+    "tracking": {
+      "opens": true,
+      "html_clicks": true,
+      "text_clicks": true,
+      "goal_tracking": true,
+      "ecomm360": false,
+      "google_analytics": "romeo-852",
+      "clicktale": "whiskey-255"
+    },
+    "report_summary": {
+      "opens": 44796,
+      "unique_opens": 37296,
+      "open_rate": 248.53,
+      "clicks": 73617,
+      "subscriber_clicks": 25044,
+      "click_rate": 522.63,
+      "ecommerce": {
+        "total_orders": 1381,
+        "total_spent": 656.86,
+        "total_revenue": 196.12
+      }
+    },
+    "delivery_status": {
+      "enabled": false,
+      "can_cancel": false,
+      "status": "lima-443",
+      "emails_sent": 88267,
+      "emails_canceled": 22216
+    }
+  },
+  {
+    "id": "foxtrot--pk4",
+    "web_id": 89293,
+    "type": "mike-918",
+    "create_time": "2024-01-01T04:00:00Z",
+    "send_time": "mike-134",
+    "status": "alpha-703",
+    "emails_sent": 20647,
+    "archive_url": "echo-799",
+    "content_type": "kilo-315",
+    "recipients": {
+      "list_id": "golf-764",
+      "list_is_active": true,
+      "list_name": "alpha-438",
+      "segment_text": "november-706",
+      "recipient_count": 48862
+    },
+    "settings": {
+      "subject_line": "delta-421",
+      "preview_text": "foxtrot-855",
+      "title": "whiskey-238",
+      "from_name": "uniform-649",
+      "reply_to": "foxtrot-302",
+      "use_conversation": true,
+      "to_name": "lima-501",
+      "folder_id": "kilo-823",
+      "authenticate": true,
+      "auto_footer": false,
+      "inline_css": true,
+      "auto_tweet": true,
+      "fb_comments": true,
+      "template_id": 22795,
+      "drag_and_drop": false
+    },
+    "tracking": {
+      "opens": false,
+      "html_clicks": false,
+      "text_clicks": false,
+      "goal_tracking": true,
+      "ecomm360": true,
+      "google_analytics": "foxtrot-931",
+      "clicktale": "oscar-213"
+    },
+    "report_summary": {
+      "opens": 79864,
+      "unique_opens": 27374,
+      "open_rate": 330.89,
+      "clicks": 48405,
+      "subscriber_clicks": 72065,
+      "click_rate": 930.47,
+      "ecommerce": {
+        "total_orders": 10893,
+        "total_spent": 570.69,
+        "total_revenue": 100.93
+      }
+    },
+    "delivery_status": {
+      "enabled": true,
+      "can_cancel": false,
+      "status": "alpha-346",
+      "emails_sent": 75996,
+      "emails_canceled": 73741
+    }
+  }
+]
