@@ -50,18 +50,30 @@ USERS = [
 
 # ── event property templates ──────────────────────────────────────────────────
 EVENT_PROPS = {
-    "page_view":         lambda: {"page": random.choice(["/home", "/products", "/cart", "/checkout"])},
-    "button_click":      lambda: {"button": random.choice(["buy_now", "add_to_cart", "learn_more", "sign_up"])},
-    "purchase":          lambda: {"amount": round(random.uniform(9.99, 499.99), 2),
-                                   "currency": "USD",
-                                   "items": random.randint(1, 5)},
-    "sign_up":           lambda: {"method": random.choice(["email", "google", "apple"])},
-    "login":             lambda: {"method": random.choice(["email", "sso", "magic_link"])},
-    "search":            lambda: {"query": random.choice(["shoes", "laptop", "headphones", "book", "coffee"])},
-    "add_to_cart":       lambda: {"product_id": f"prod_{random.randint(1000,9999)}",
-                                   "price": round(random.uniform(4.99, 199.99), 2)},
-    "checkout_complete": lambda: {"order_id": f"order_{random.randint(10000,99999)}",
-                                   "total": round(random.uniform(19.99, 999.99), 2)},
+    "page_view": lambda: {
+        "page": random.choice(["/home", "/products", "/cart", "/checkout"])
+    },
+    "button_click": lambda: {
+        "button": random.choice(["buy_now", "add_to_cart", "learn_more", "sign_up"])
+    },
+    "purchase": lambda: {
+        "amount": round(random.uniform(9.99, 499.99), 2),
+        "currency": "USD",
+        "items": random.randint(1, 5),
+    },
+    "sign_up": lambda: {"method": random.choice(["email", "google", "apple"])},
+    "login": lambda: {"method": random.choice(["email", "sso", "magic_link"])},
+    "search": lambda: {
+        "query": random.choice(["shoes", "laptop", "headphones", "book", "coffee"])
+    },
+    "add_to_cart": lambda: {
+        "product_id": f"prod_{random.randint(1000,9999)}",
+        "price": round(random.uniform(4.99, 199.99), 2),
+    },
+    "checkout_complete": lambda: {
+        "order_id": f"order_{random.randint(10000,99999)}",
+        "total": round(random.uniform(19.99, 999.99), 2),
+    },
 }
 
 OS_MAP = {"web": ("Chrome", "130.0"), "ios": ("iOS", "17.2"), "android": ("Android", "14.0")}
