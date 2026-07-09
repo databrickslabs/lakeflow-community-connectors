@@ -19,6 +19,11 @@ row-level change tracking (no cursor column, no change/delete feed).  Its
 table-level ``version`` supports only full-snapshot time-travel, not row-level
 deltas, so every table is read as a full snapshot and incremental (cdc) reads
 are not supported.
+
+Because LanceDB declares no natural unique key, the connector always requests
+LanceDB's guaranteed-unique ``_rowid`` system column (via ``with_row_id``) and
+uses it as the snapshot merge (primary) key.  ``_rowid`` (``LongType``) is
+therefore included in every built-in schema below.
 """
 
 from pyspark.sql.types import (
@@ -50,6 +55,12 @@ DEFAULT_TIMEOUT = 60  # seconds; every request sets an explicit timeout
 # Production usage caps a single request near ~10k rows.
 DEFAULT_BATCH_SIZE = 1000
 MAX_BATCH_SIZE = 10000
+
+# LanceDB's guaranteed-unique row identifier, returned when a query sets
+# ``with_row_id: true``.  LanceDB exposes no natural unique key, so the
+# connector always requests this column and uses it as the sole snapshot merge
+# (primary) key.  It is an int64 → Spark ``LongType``.
+ROW_ID_COLUMN = "_rowid"
 # Page size for the List Tables endpoint (no documented default/max; 100 is a
 # previously-validated value carried over from the reference implementation).
 LIST_TABLES_LIMIT = 100
@@ -66,6 +77,7 @@ def _documents_schema() -> StructType:
     """A text-plus-embedding table — the canonical LanceDB RAG shape."""
     return StructType(
         [
+            StructField(ROW_ID_COLUMN, LongType(), nullable=False),
             StructField("id", LongType(), nullable=False),
             StructField("text", StringType(), nullable=True),
             StructField("category", StringType(), nullable=True),
@@ -79,6 +91,7 @@ def _embeddings_schema() -> StructType:
     """A bare vector table keyed by an integer id."""
     return StructType(
         [
+            StructField(ROW_ID_COLUMN, LongType(), nullable=False),
             StructField("id", LongType(), nullable=False),
             StructField("source", StringType(), nullable=True),
             StructField("vector", ArrayType(FloatType()), nullable=True),

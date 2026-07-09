@@ -16,12 +16,17 @@
 #   example schema in TABLE_SCHEMAS and uses a length-1 dummy scan vector.
 #
 # The query endpoint is vector-first in production and returns Apache Arrow
-# IPC.  Reads are snapshot-only.  Pagination (offset/k) is sent in the JSON
-# *body*, which the simulator does not interpret — it returns the whole corpus
-# for the table.  The connector's parser accepts the simulator's plain-JSON
-# array (its Arrow path is only taken against the live API), and termination is
-# driven by the connector: a snapshot read returns all rows in one batch with
-# an empty offset, so the stream stops after one batch.
+# IPC.  Reads are snapshot-only.  Pagination (offset/k) and ``with_row_id`` are
+# sent in the JSON *body*, which the simulator does not interpret — it returns
+# the whole corpus for the table.  Because the simulator ignores the body, it
+# does not synthesize the ``_rowid`` system column that ``with_row_id: true``
+# would add against the live API, so the corpus rows carry an explicit
+# ``_rowid`` (Long) value.  ``_rowid`` is LanceDB's guaranteed-unique row id and
+# is used as the snapshot merge (primary) key.  The connector's parser accepts
+# the simulator's plain-JSON array (its Arrow path is only taken against the
+# live API), and termination is driven by the connector: a snapshot read returns
+# all rows in one batch with an empty offset, so the stream stops after one
+# batch.
 
 endpoints:
   # ---- list_tables (discovery; empty → connector fallback) ----

@@ -606,6 +606,12 @@ def register_lakeflow_source(spark):
     # Production usage caps a single request near ~10k rows.
     DEFAULT_BATCH_SIZE = 1000
     MAX_BATCH_SIZE = 10000
+
+    # LanceDB's guaranteed-unique row identifier, returned when a query sets
+    # ``with_row_id: true``.  LanceDB exposes no natural unique key, so the
+    # connector always requests this column and uses it as the sole snapshot merge
+    # (primary) key.  It is an int64 → Spark ``LongType``.
+    ROW_ID_COLUMN = "_rowid"
     # Page size for the List Tables endpoint (no documented default/max; 100 is a
     # previously-validated value carried over from the reference implementation).
     LIST_TABLES_LIMIT = 100
@@ -622,6 +628,7 @@ def register_lakeflow_source(spark):
         """A text-plus-embedding table — the canonical LanceDB RAG shape."""
         return StructType(
             [
+                StructField(ROW_ID_COLUMN, LongType(), nullable=False),
                 StructField("id", LongType(), nullable=False),
                 StructField("text", StringType(), nullable=True),
                 StructField("category", StringType(), nullable=True),
@@ -635,6 +642,7 @@ def register_lakeflow_source(spark):
         """A bare vector table keyed by an integer id."""
         return StructType(
             [
+                StructField(ROW_ID_COLUMN, LongType(), nullable=False),
                 StructField("id", LongType(), nullable=False),
                 StructField("source", StringType(), nullable=True),
                 StructField("vector", ArrayType(FloatType()), nullable=True),
@@ -884,6 +892,11 @@ def register_lakeflow_source(spark):
             Falls back to the built-in example schema when describe returns no
             fields.  When a ``columns`` table option is set, the schema is projected
             to those columns so it matches the records ``read_table`` returns.
+
+            ``_rowid`` (``LongType``) — LanceDB's guaranteed-unique row id, used as
+            the snapshot merge key — is always included: it is appended when absent
+            and is retained *in addition to* the projected columns when a ``columns``
+            projection filters the schema, so the merge key is never dropped.
             """
             safe = self._sanitize_identifier(table_name)
             resp = self._request_with_retry(
@@ -903,7 +916,21 @@ def register_lakeflow_source(spark):
             if columns:
                 wanted = set(columns)
                 schema = StructType([f for f in schema.fields if f.name in wanted])
-            return schema
+            return self._with_row_id_field(schema)
+
+        @staticmethod
+        def _with_row_id_field(schema: StructType) -> StructType:
+            """Return ``schema`` guaranteed to include the ``_rowid`` merge key.
+
+            Appends a ``LongType`` ``_rowid`` field when absent (e.g. after a
+            ``columns`` projection, or when ``describe`` did not report it).
+            """
+            if any(field.name == ROW_ID_COLUMN for field in schema.fields):
+                return schema
+            return StructType(
+                list(schema.fields)
+                + [StructField(ROW_ID_COLUMN, LongType(), nullable=False)]
+            )
 
         @staticmethod
         def _schema_from_describe(body) -> StructType | None:
@@ -936,47 +963,28 @@ def register_lakeflow_source(spark):
             """Report snapshot ingestion metadata.
 
             Reads are snapshot-only: ``ingestion_type`` is always ``snapshot`` and
-            there is no cursor.  LanceDB's REST API exposes no primary keys and no
-            row-level change tracking (no ``updated_at``/cursor column, no
-            change/delete feed).  Its monotonic table-level ``version`` supports
-            only full-snapshot time-travel, not row-level deltas, so incremental
-            (cdc) reads are not supported.
+            there is no cursor.  LanceDB's REST API exposes no row-level change
+            tracking (no ``updated_at``/cursor column, no change/delete feed).  Its
+            monotonic table-level ``version`` supports only full-snapshot
+            time-travel, not row-level deltas, so incremental (cdc) reads are not
+            supported.
 
-            A single primary-key column is derived from the table's own schema
-            (preferring an ``id`` column, else the first field) purely to key the
-            Delta merge on the destination — LanceDB itself declares none.
+            The framework maps ``snapshot`` ingestion to APPLY CHANGES FROM
+            SNAPSHOT, which needs a unique key per row.  LanceDB declares no natural
+            unique key, so the primary key is always LanceDB's guaranteed-unique
+            ``_rowid`` system column (requested via ``with_row_id`` on every query
+            and always present in the schema).
 
             Rejects malformed table names up front (the same identifier check the
             schema / query paths apply) so an unknown / injection-shaped name raises
             rather than silently returning metadata.
             """
             self._sanitize_identifier(table_name)
-            schema = self.get_table_schema(table_name, table_options)
             return {
-                "primary_keys": self._infer_primary_keys(schema),
+                "primary_keys": [ROW_ID_COLUMN],
                 "cursor_field": None,
                 "ingestion_type": "snapshot",
             }
-
-        @staticmethod
-        def _infer_primary_keys(schema: StructType) -> list[str]:
-            """Pick a single scalar key column, preferring ``id``.
-
-            Never returns a vector/array, binary, or nested (struct/map) column —
-            those make no sense as a Delta merge key.  Falls back to the first
-            field only when the table has no scalar column at all.
-            """
-            fields = schema.fields
-            if not fields:
-                return []
-            non_key_types = ("array", "binary", "struct", "map")
-            scalar = [f.name for f in fields if f.dataType.typeName() not in non_key_types]
-            for name in scalar:
-                if name.lower() == "id":
-                    return [name]
-            if scalar:
-                return [scalar[0]]
-            return [fields[0].name]
 
         def read_table(
             self, table_name: str, start_offset: dict, table_options: dict[str, str]
@@ -998,8 +1006,10 @@ def register_lakeflow_source(spark):
 
             Uses an all-zero dummy vector (sized to the embedding dimension) with
             ``bypass_vector_index`` so the query behaves as a plain scan rather than
-            a similarity search.  An optional user ``filter_expression`` is applied
-            server-side.  Stops when a short page is returned.
+            a similarity search.  Always sets ``with_row_id`` so LanceDB returns the
+            guaranteed-unique ``_rowid`` column used as the snapshot merge key.  An
+            optional user ``filter_expression`` is applied server-side.  Stops when
+            a short page is returned.
             """
             safe = self._sanitize_identifier(table_name)
             endpoint = f"/v1/table/{quote(safe)}/query/"
@@ -1015,6 +1025,7 @@ def register_lakeflow_source(spark):
                     "vector": {"single_vector": dummy_vector},
                     "k": batch_size,
                     "bypass_vector_index": True,
+                    "with_row_id": True,
                     "offset": offset,
                 }
                 if filter_expr:
@@ -1101,15 +1112,17 @@ def register_lakeflow_source(spark):
 
         @staticmethod
         def _project_columns(rows: list[dict], columns: list[str] | None) -> list[dict]:
-            """Re-filter rows to the requested columns.
+            """Re-filter rows to the requested columns, always keeping ``_rowid``.
 
             Some LanceDB API versions ignore server-side ``columns`` projection and
             return all columns; this makes the client honour the request regardless
-            (a no-op when the server already projected).
+            (a no-op when the server already projected).  ``_rowid`` (the snapshot
+            merge key, requested via ``with_row_id``) is retained in addition to the
+            projected columns so projection never drops it.
             """
             if not columns:
                 return rows
-            wanted = set(columns)
+            wanted = set(columns) | {ROW_ID_COLUMN}
             if rows and all(key in wanted for key in rows[0].keys()):
                 return rows
             return [{k: v for k, v in row.items() if k in wanted} for row in rows]
