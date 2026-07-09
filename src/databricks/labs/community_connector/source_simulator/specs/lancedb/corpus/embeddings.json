@@ -1,0 +1,39 @@
+[
+  {
+    "id": 1000,
+    "source": "quebec-491",
+    "vector": [
+      23.74,
+      399.11
+    ],
+    "created_at": "2024-01-20T08:00:14Z"
+  },
+  {
+    "id": 1001,
+    "source": "papa-244",
+    "vector": [],
+    "created_at": "2024-01-28T05:05:12Z"
+  },
+  {
+    "id": 1002,
+    "source": "echo-327",
+    "vector": [
+      361.54
+    ],
+    "created_at": "2024-01-18T02:28:27Z"
+  },
+  {
+    "id": 1003,
+    "source": "oscar-595",
+    "vector": [
+      830.81
+    ],
+    "created_at": "2024-01-07T19:38:07Z"
+  },
+  {
+    "id": 1004,
+    "source": "kilo-927",
+    "vector": [],
+    "created_at": "2024-01-30T09:26:13Z"
+  }
+]

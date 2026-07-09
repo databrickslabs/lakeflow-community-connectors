@@ -1,0 +1,56 @@
+# LanceDB Cloud REST API endpoints exercised by the connector.
+#
+# Auth is an ``x-api-key`` header and is ignored by the simulator.
+#
+# Connector flow:
+# * ``list_tables``      → GET  /v1/table/                       (page_token paginated)
+# * ``get_table_schema`` → POST /v1/table/{table_name}/describe/ (Arrow-derived schema)
+# * ``read_table``       → POST /v1/table/{table_name}/query/    (Apache Arrow IPC)
+#
+# Discovery endpoints return empty/minimal responses so the connector falls
+# back to its built-in example schemas — the same minimal-fallback pattern
+# HubSpot uses:
+# * GET /v1/table/  → {"tables": [], "page_token": null}; the connector then
+#   falls back to its example table list (documents, embeddings).
+# * POST .../describe/ → {} (no fields); the connector falls back to the
+#   example schema in TABLE_SCHEMAS and uses a length-1 dummy scan vector.
+#
+# The query endpoint is vector-first in production and returns Apache Arrow
+# IPC.  Reads are snapshot-only.  Pagination (offset/k) is sent in the JSON
+# *body*, which the simulator does not interpret — it returns the whole corpus
+# for the table.  The connector's parser accepts the simulator's plain-JSON
+# array (its Arrow path is only taken against the live API), and termination is
+# driven by the connector: a snapshot read returns all rows in one batch with
+# an empty offset, so the stream stops after one batch.
+
+endpoints:
+  # ---- list_tables (discovery; empty → connector fallback) ----
+  - path: /v1/table/
+    method: GET
+    corpus: tables
+    response:
+      single_entity: true
+      pagination_style: none
+    params:
+      limit: {role: ignore}
+      page_token: {role: ignore}
+
+  # ---- get_table_schema + vector-dimension probe (empty → fallback) ----
+  - path: /v1/table/{table_name}/describe/
+    method: POST
+    corpus: describe
+    response:
+      single_entity: true
+      pagination_style: none
+
+  # ---- read_table (query; one endpoint per example table) ----
+  - path: /v1/table/documents/query/
+    method: POST
+    corpus: documents
+    response:
+      pagination_style: none
+  - path: /v1/table/embeddings/query/
+    method: POST
+    corpus: embeddings
+    response:
+      pagination_style: none

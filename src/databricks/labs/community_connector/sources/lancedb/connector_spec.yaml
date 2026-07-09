@@ -1,0 +1,47 @@
+# LanceDB Community Connector Spec
+# This file defines the specification for the connector including
+# connection parameters and allowlist options.
+
+display_name: LanceDB
+
+# ============================================================================
+# Connection Parameters
+# These are provided when creating the Unity Catalog connection.
+#
+# The LanceDB connector uses API key authentication via the x-api-key header.
+# It also requires project/database name and region, which are encoded into
+# the base URL as https://{project}.{region}.api.lancedb.com/v1
+# ============================================================================
+connection:
+  parameters:
+    - name: api_key
+      type: string
+      required: true
+      secret: true
+      description: >
+        LanceDB Cloud API key generated in the Cloud console under
+        Settings → API Keys. Used for x-api-key header authentication.
+
+    - name: project_name
+      type: string
+      required: true
+      description: >
+        LanceDB Cloud project identifier (also called "database name") shown
+        in the Cloud dashboard. Used as the first subdomain label in the
+        API host. Example: my-lancedb-project
+
+    - name: region
+      type: string
+      required: true
+      description: >
+        Cloud region where the project is hosted, shown next to the project
+        name in the dashboard. Used as the second subdomain label in the API
+        host. Example: us-east-1
+
+# ============================================================================
+# External Options Allowlist
+# These table-specific options must be included in the externalOptionsAllowList
+# parameter of the UC connection to allow them to be passed through.
+# Use a comma-separated string of option names.
+# ============================================================================
+external_options_allowlist: "columns,batch_size,filter_expression"
