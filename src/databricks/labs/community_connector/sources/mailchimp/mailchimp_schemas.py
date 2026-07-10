@@ -387,7 +387,8 @@ TABLE_SCHEMAS = {
 # path         : list endpoint path (relative to base_url). ``members`` is
 #                nested and templated per list_id at read time.
 # cursor_field : incremental cursor column.
-# since_param  : query param for the window lower bound (>=).
+# since_param  : query param for the window lower bound (exclusive / >; the
+#                connector applies a small lookback so the boundary row is kept).
 # before_param : query param for the window upper bound (<).
 # primary_keys : effective PK for the unioned output table.
 # supports_sort: whether the list endpoint honours sort_field/sort_dir. Only

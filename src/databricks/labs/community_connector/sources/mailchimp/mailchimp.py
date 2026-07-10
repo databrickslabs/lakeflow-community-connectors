@@ -29,6 +29,7 @@ Design notes
 """
 
 import json
+import re
 import time
 from datetime import datetime, timedelta, timezone
 from typing import Dict, Iterator, List, Optional, Tuple
@@ -51,6 +52,12 @@ from databricks.labs.community_connector.sources.mailchimp.mailchimp_schemas imp
 
 _USERNAME = "anystring"  # Mailchimp ignores the Basic-auth username.
 
+# Mailchimp's ``since_*`` filters are EXCLUSIVE (strictly greater than), so a
+# query seeded with the oldest cursor drops that boundary row. Subtract a small
+# lookback from the queried ``since`` so the boundary is included; CDC upsert
+# dedupes any re-fetched overlap. Overridable per table via ``lookback_seconds``.
+DEFAULT_LOOKBACK_SECONDS = 1
+
 
 class MailchimpLakeflowConnect(LakeflowConnect):
     """LakeflowConnect implementation for the Mailchimp Marketing API."""
@@ -63,17 +70,24 @@ class MailchimpLakeflowConnect(LakeflowConnect):
         self._api_key = api_key
 
         # Derive the data center from the key suffix (e.g. "...-us21" -> "us21").
-        # Fall back to an explicit option for legacy keys with no suffix.
+        # Fall back to the documented 'server_prefix' option for legacy keys
+        # with no suffix.
         dc: Optional[str] = None
         if "-" in api_key:
             dc = api_key.rsplit("-", 1)[1] or None
         if not dc:
-            dc = options.get("server_prefix") or options.get("dc")
+            dc = options.get("server_prefix")
         if not dc:
             raise ValueError(
                 "Could not determine the Mailchimp data center. The API key has "
-                "no '-<dc>' suffix; supply a 'server_prefix' (or 'dc') option, "
-                "e.g. 'us21'."
+                "no '-<dc>' suffix; supply a 'server_prefix' option, e.g. 'us21'."
+            )
+        # Validate the data center so it cannot inject a different host/path
+        # into the base URL (it is only ever a short region code like 'us21').
+        if not re.fullmatch(r"[a-z]{2}\d+", dc):
+            raise ValueError(
+                f"Invalid Mailchimp data center '{dc}'; expected a region code "
+                "like 'us21'."
             )
         self._base_url = f"https://{dc}.api.mailchimp.com/3.0"
 
@@ -158,8 +172,12 @@ class MailchimpLakeflowConnect(LakeflowConnect):
         """One list GET. Returns (records, total_items)."""
         resp = self._request_with_retry(path, params)
         if resp.status_code != 200:
+            # Truncate the body so a verbose error can't dump large/sensitive
+            # payloads into pipeline logs. Mailchimp errors are short RFC 7807
+            # problem-details, so the head is enough to diagnose.
+            detail = (resp.text or "")[:500]
             raise RuntimeError(
-                f"Mailchimp API error for {path}: {resp.status_code} {resp.text}"
+                f"Mailchimp API error for {path}: {resp.status_code} {detail}"
             )
         body = resp.json()
         records = body.get(resource_key) or []
@@ -271,6 +289,22 @@ class MailchimpLakeflowConnect(LakeflowConnect):
         end = (datetime.fromisoformat(normalized) + timedelta(seconds=window_seconds)).isoformat()
         return min(end, self._init_ts)
 
+    @staticmethod
+    def _apply_lookback(since: str, lookback_seconds: int) -> str:
+        """Subtract a lookback from an ISO cursor for the (exclusive) API filter.
+
+        Mailchimp's ``since_*`` filter is strictly greater-than, so querying at
+        exactly the boundary cursor drops that row. Shifting ``since`` back by a
+        few seconds includes it; CDC upsert dedupes the re-fetched overlap. The
+        stored offset keeps the raw cursor — only the queried value is shifted.
+        """
+        if lookback_seconds <= 0:
+            return since
+        normalized = since.replace("Z", "+00:00") if since.endswith("Z") else since
+        return (
+            datetime.fromisoformat(normalized) - timedelta(seconds=lookback_seconds)
+        ).isoformat()
+
     def _read_window(
         self, table_name: str, start_offset: dict, table_options: dict
     ) -> Tuple[Iterator[dict], dict]:
@@ -294,11 +328,15 @@ class MailchimpLakeflowConnect(LakeflowConnect):
         max_records = int(
             table_options.get("max_records_per_batch", DEFAULT_MAX_RECORDS_PER_BATCH)
         )
+        lookback_seconds = int(
+            table_options.get("lookback_seconds", DEFAULT_LOOKBACK_SECONDS)
+        )
         window_end = self._window_end(since, window_seconds)
 
         base_params = {
             "count": DEFAULT_PAGE_COUNT,
-            cfg["since_param"]: since,
+            # since_* is exclusive: shift back so the boundary row is included.
+            cfg["since_param"]: self._apply_lookback(since, lookback_seconds),
             cfg["before_param"]: window_end,
         }
         if cfg["supports_sort"]:
@@ -330,11 +368,13 @@ class MailchimpLakeflowConnect(LakeflowConnect):
 
         The whole members population is treated under one cursor window. We
         enumerate every audience, apply the ``since``/``before`` window per
-        list, union the members, and advance the cursor to the window end.
-        The window is drained completely (no client-side truncation) so no
-        record with a cursor below ``window_end`` is skipped on the next call;
-        ``max_records_per_batch`` is therefore best-effort here (windows are
-        the sizing knob). Keep ``window_seconds`` small on large accounts.
+        list, and yield the members **lazily, one audience at a time**, then
+        advance the cursor to the window end. Yielding lazily bounds peak
+        memory to a single audience's members instead of the union of every
+        audience. The window is drained completely (no client-side truncation)
+        so no record with a cursor below ``window_end`` is skipped on the next
+        call; ``max_records_per_batch`` is therefore best-effort here (windows
+        are the sizing knob). Keep ``window_seconds`` small on large accounts.
         """
         cfg = TABLE_CONFIG["members"]
         cursor_field = cfg["cursor_field"]
@@ -351,38 +391,45 @@ class MailchimpLakeflowConnect(LakeflowConnect):
         window_seconds = int(
             table_options.get("window_seconds", DEFAULT_WINDOW_SECONDS)
         )
+        lookback_seconds = int(
+            table_options.get("lookback_seconds", DEFAULT_LOOKBACK_SECONDS)
+        )
         window_end = self._window_end(since, window_seconds)
+        api_since = self._apply_lookback(since, lookback_seconds)
 
         # Enumerate every audience, then fan out members per list within the
         # same window.
         lists = self._paginate("/lists", "lists", {"count": DEFAULT_PAGE_COUNT})
-
-        records: List[dict] = []
-        for lst in lists:
-            list_id = lst.get("id")
-            if not list_id:
-                continue
-            base_params = {
-                "count": DEFAULT_PAGE_COUNT,
-                cfg["since_param"]: since,
-                cfg["before_param"]: window_end,
-                "sort_field": cursor_field,
-                "sort_dir": "ASC",
-            }
-            path = cfg["path"].format(list_id=list_id)
-            members = self._paginate(path, cfg["resource_key"], base_params)
-            for m in members:
-                # Preserve provenance even if the payload omits list_id.
-                if not m.get("list_id"):
-                    m["list_id"] = list_id
-            records.extend(members)
 
         # Window is drained by construction — advance the cursor to its end.
         end_offset = {"cursor": window_end}
         if start_offset and start_offset == end_offset:
             return iter([]), start_offset
 
-        return iter(self._project(records, "members")), end_offset
+        def _iter_members() -> Iterator[dict]:
+            """Fan out per audience, yielding lazily to bound peak memory."""
+            for lst in lists:
+                list_id = lst.get("id")
+                if not list_id:
+                    continue
+                base_params = {
+                    "count": DEFAULT_PAGE_COUNT,
+                    # since_* is exclusive: shift back to include the boundary.
+                    cfg["since_param"]: api_since,
+                    cfg["before_param"]: window_end,
+                    "sort_field": cursor_field,
+                    "sort_dir": "ASC",
+                }
+                path = cfg["path"].format(list_id=list_id)
+                members = self._paginate(path, cfg["resource_key"], base_params)
+                for m in members:
+                    # Preserve provenance even if the payload omits list_id.
+                    if not m.get("list_id"):
+                        m["list_id"] = list_id
+                for m in self._project(members, "members"):
+                    yield m
+
+        return _iter_members(), end_offset
 
     # ---- record shaping --------------------------------------------------
 

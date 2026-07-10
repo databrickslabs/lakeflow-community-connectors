@@ -12,8 +12,10 @@
 #   * List responses are wrapped: ``{"<resource>": [...], "total_items": N}``.
 #     The wrapper's ``total_items`` extra is a fixed placeholder; the connector
 #     terminates on a short page, so the exact value is not load-bearing.
-#   * Incremental filters use ISO-8601 timestamps: ``since_*`` (gte) and
-#     ``before_*`` (lt) on the table's cursor field.
+#   * Incremental filters use ISO-8601 timestamps: ``since_*`` (gt, EXCLUSIVE —
+#     matches the real Mailchimp API) and ``before_*`` (lt) on the cursor field.
+#     The connector applies a small lookback to ``since`` so the exclusive
+#     boundary row is not dropped.
 #   * The connector caps its window upper bound at an init-time snapshot, so
 #     each endpoint declares ``synthesize_future_records`` on its cursor field
 #     to inject a few post-now records that a correctly-capped connector must
@@ -32,13 +34,17 @@ endpoints:
     response:
       pagination_style: offset_limit
       default_sort: "create_time asc"
-      wrapper: {records_key: campaigns, extras: {total_items: 0}}
+      # Mailchimp wraps every list response with a HATEOAS ``_links`` array
+      # (and ``constraints`` on /lists, ``list_id`` on /members) that the
+      # connector never reads. ignore_extra_keys suppresses the live-validator
+      # "top-level keys missing from spec" noise for these envelope-only keys.
+      wrapper: {records_key: campaigns, extras: {total_items: 0}, ignore_extra_keys: true}
     params:
       count:               {role: limit, default: 10, max: 1000}
       offset:              {role: offset}
-      since_create_time:   {role: filter, field: create_time, op: gte}
+      since_create_time:   {role: filter, field: create_time, op: gt}
       before_create_time:  {role: filter, field: create_time, op: lt}
-      since_send_time:     {role: filter, field: send_time, op: gte}
+      since_send_time:     {role: filter, field: send_time, op: gt}
       before_send_time:    {role: filter, field: send_time, op: lt}
       sort_field:          {role: ignore}
       sort_dir:            {role: ignore}
@@ -55,11 +61,11 @@ endpoints:
     response:
       pagination_style: offset_limit
       default_sort: "send_time asc"
-      wrapper: {records_key: reports, extras: {total_items: 0}}
+      wrapper: {records_key: reports, extras: {total_items: 0}, ignore_extra_keys: true}
     params:
       count:             {role: limit, default: 10, max: 1000}
       offset:            {role: offset}
-      since_send_time:   {role: filter, field: send_time, op: gte}
+      since_send_time:   {role: filter, field: send_time, op: gt}
       before_send_time:  {role: filter, field: send_time, op: lt}
       sort_field:        {role: ignore}
       sort_dir:          {role: ignore}
@@ -76,11 +82,11 @@ endpoints:
     response:
       pagination_style: offset_limit
       default_sort: "date_created asc"
-      wrapper: {records_key: lists, extras: {total_items: 0}}
+      wrapper: {records_key: lists, extras: {total_items: 0}, ignore_extra_keys: true}
     params:
       count:                {role: limit, default: 10, max: 1000}
       offset:               {role: offset}
-      since_date_created:   {role: filter, field: date_created, op: gte}
+      since_date_created:   {role: filter, field: date_created, op: gt}
       before_date_created:  {role: filter, field: date_created, op: lt}
       sort_field:           {role: ignore}
       sort_dir:             {role: ignore}
@@ -97,13 +103,13 @@ endpoints:
     response:
       pagination_style: offset_limit
       default_sort: "last_changed asc"
-      wrapper: {records_key: members, extras: {total_items: 0}}
+      wrapper: {records_key: members, extras: {total_items: 0}, ignore_extra_keys: true}
     params:
       count:                 {role: limit, default: 10, max: 1000}
       offset:                {role: offset}
-      since_last_changed:    {role: filter, field: last_changed, op: gte}
+      since_last_changed:    {role: filter, field: last_changed, op: gt}
       before_last_changed:   {role: filter, field: last_changed, op: lt}
-      since_timestamp_opt:   {role: filter, field: timestamp_opt, op: gte}
+      since_timestamp_opt:   {role: filter, field: timestamp_opt, op: gt}
       before_timestamp_opt:  {role: filter, field: timestamp_opt, op: lt}
       sort_field:            {role: ignore}
       sort_dir:              {role: ignore}
