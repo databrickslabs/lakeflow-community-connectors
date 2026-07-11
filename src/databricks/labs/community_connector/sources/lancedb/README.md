@@ -12,7 +12,7 @@ Set the `ingestion_type` per-table option to choose how a table syncs (default `
 |------|-------------|----------|----------|
 | `snapshot` *(default)* | Small/medium tables; you want a mirror of the current table each run | — | Full-table scan every run; rows upserted on the guaranteed-unique `_rowid` (or your `primary_keys`). |
 | `cdc` | Tables with an orderable "last updated" column and you want to sync only new/changed rows | a `cursor_field` column that exists in the table | Each run reads only rows where `cursor_field > last-synced-value`; upserted on the primary key. |
-| `append` | Immutable / log tables where rows are only ever inserted | — | Full-table scan every run, appended (no primary key, no cursor). **Re-running duplicates rows** — see the caveat below. |
+| `append` | Immutable / log tables where rows are only ever inserted | — | Insert-only: each run appends only rows with a higher `_rowid` than the previous run (no upsert key). Re-running does **not** duplicate rows; updates to existing rows are not captured — see the note below. |
 
 > **`cdc_with_deletes` is not supported.** LanceDB's REST API exposes no delete or change feed, so deletes cannot be captured incrementally. In `cdc` mode a row deleted in LanceDB simply stops receiving updates; it is not removed downstream. If you need deletes reflected, use `snapshot` mode (a deleted row stops appearing on the next full read).
 
@@ -87,7 +87,7 @@ Run the pipeline from the Databricks UI or schedule it as a recurring job.
 - **Subsequent runs**:
   - `snapshot` (default) — the table is re-read in full and upserted.
   - `cdc` — only rows newer than the last-synced cursor value are read and upserted (no full re-scan).
-  - `append` — the table is re-read in full and appended (see the append caveat under [Ingestion modes](#ingestion-modes-at-a-glance)).
+  - `append` — only rows newer than the last run (higher `_rowid`) are appended; existing rows are not re-appended (see the append note under [Ingestion modes](#ingestion-modes-at-a-glance)).
 
 ---
 
@@ -110,11 +110,11 @@ Under the hood every mode uses the same "full-table scan": because LanceDB's que
 
 - **`snapshot` (default):** the scan returns the whole table each run; rows are upserted on `_rowid` (or your `primary_keys`).
 - **`cdc`:** the scan is filtered server-side with `{cursor_field} > {last-synced-value}` (AND-combined with any `filter_expression`), so only new/changed rows are fetched. The connector tracks the max cursor value seen and checkpoints it; when a run finds nothing newer, it stops. `cdc` requires a `cursor_field` — an **orderable column that exists in your table** (e.g. a timestamp such as `updated_at`, or a monotonically increasing id). Rows are upserted on the primary key, so re-fetching a small overlap is de-duplicated safely.
-- **`append`:** the scan returns the whole table each run and every row is inserted (no primary key). See the caveat below.
+- **`append`:** insert-only. LanceDB's `_rowid` increases for newly-inserted rows, so the connector checkpoints the highest `_rowid` seen and, on each run, appends only rows above that watermark (no primary key / no upsert). See the note below.
 
 > **`cdc` does not capture deletes.** LanceDB has no delete/change feed, so `cdc_with_deletes` is not supported. A row deleted in LanceDB stops receiving `cdc` updates but is not removed downstream. Use `snapshot` mode if you need deletes reflected (a deleted row stops appearing on the next full read).
 
-> **`append` re-reads the whole table every run.** `append` mode does no cursor tracking — it scans the entire table and appends all rows on every run, so **re-running a pipeline duplicates rows**. Use it only for immutable / log tables where you either run once or accept duplicates (and de-duplicate downstream).
+> **`append` captures inserts only.** `append` mode tracks LanceDB's `_rowid` as its watermark and appends only newly-inserted rows on each run — so re-running does **not** duplicate existing rows. It does **not** capture *updates* to existing rows (their `_rowid` is unchanged) or deletes. Use it for immutable / append-only tables; use `snapshot` or `cdc` if existing rows change. (`append` scans the table and filters by `_rowid` client-side, so it still reads the table each run even though only new rows are emitted.)
 
 ---
 

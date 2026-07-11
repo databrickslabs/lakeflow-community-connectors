@@ -158,7 +158,7 @@ LanceDB does support an **unenforced, single-column primary key** concept (used 
 - It is a write-path/SDK concept (`set_unenforced_primary_key()` in the Python/JS SDKs), and
 - The REST `describe` endpoint response **does not surface** which column (if any) was designated as the primary key — no `primary_key`/`pk` field was found in the schema or table-description response in current docs or in the production reference implementation.
 
-**Conclusion**: the connector **cannot discover primary keys via the API**. Primary keys must be supplied by the user as table-specific configuration (the reference implementation exposes a `primary_keys` table option, validated as a list of column names) rather than auto-detected. Document this clearly to end users — for CDC/SCD ingestion modes, they must explicitly set `primary_keys` per table.
+**Conclusion**: the connector **cannot discover primary keys via the API**, so it uses LanceDB's guaranteed-unique **`_rowid`** system column (requested via `with_row_id: true` on every query) as the default merge/upsert key for `snapshot` and `cdc`. Users may override this with a `primary_keys` table option (validated as a list of column names) when their table has a natural key; it is not auto-detected.
 
 `TBD: if LanceDB Cloud later exposes the unenforced primary key in the describe/table-details response, prefer that over user-supplied config.`
 
@@ -173,12 +173,16 @@ LanceDB Cloud tables are, from the API's perspective, **snapshot** sources by de
 - Therefore:
   - **Default ingestion type: `snapshot`** — full-table read each run, unless the user configures a `cursor_field`.
   - **If the user supplies a `cursor_field`** (any column with mono­tonically increasing values, e.g. an `updated_at` timestamp or a version/sequence integer that the *application* writing to LanceDB maintains): the connector can approximate `cdc`-like incremental reads by appending a `filter` predicate `"{cursor_field} > '{last_cursor_value}'"` to the query request. This is an **append/upsert-only approximation** — it will pick up new rows and rows whose `cursor_field` was bumped on update, but it cannot detect deletes (no `cdc_with_deletes` support) and only works if the user's own write path reliably bumps that column.
-  - **No delete detection is possible** via this API — there is no tombstone/deleted-records endpoint exposed over REST. Ingestion type should never be reported as `cdc_with_deletes` for this source.
+  - **`append`** is a connector-level insert-only mode: it watermarks LanceDB's monotonic `_rowid` (`with_row_id`) and, each run, emits only rows whose `_rowid` exceeds the last checkpoint (no upsert key; inserts only, not updates/deletes). Suitable for immutable/append-only tables.
+  - **No delete detection is possible** via this API — there is no tombstone/deleted-records endpoint exposed over REST. Ingestion type is never `cdc_with_deletes` for this source.
 
-| Condition | Ingestion Type |
+The connector selects the mode via an `ingestion_type` table option (default `snapshot`):
+
+| `ingestion_type` | Behavior |
 |-----------|---------------|
-| No `cursor_field` configured for the table | `snapshot` |
-| `cursor_field` configured (user-supplied, since not discoverable via API) | `cdc` (upserts only; no delete feed) |
+| `snapshot` (default) | Full-table read each run; upsert on `_rowid` (or user `primary_keys`) |
+| `cdc` (requires `cursor_field`) | Incremental read where `cursor_field > last-synced`; upsert; no delete feed |
+| `append` | Insert-only; watermarked on `_rowid`; captures inserts only |
 
 ---
 
