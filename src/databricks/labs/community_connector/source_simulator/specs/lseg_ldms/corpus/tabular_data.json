@@ -1,0 +1,47 @@
+[
+  {
+    "data_type": "quebec-4-pk0",
+    "country": "hotel-26-pk0",
+    "product": "bravo-37-pk0",
+    "flow": "xray-426-pk0",
+    "period": "yankee-1-pk0",
+    "value": 151.74,
+    "unit": "hotel-165"
+  },
+  {
+    "data_type": "uniform--pk1",
+    "country": "xray-345-pk1",
+    "product": "hotel-82-pk1",
+    "flow": "victor-2-pk1",
+    "period": "juliet-1-pk1",
+    "value": 134.05,
+    "unit": "zulu-630"
+  },
+  {
+    "data_type": "lima-550-pk2",
+    "country": "xray-333-pk2",
+    "product": "hotel-30-pk2",
+    "flow": "xray-636-pk2",
+    "period": "echo-715-pk2",
+    "value": 586.25,
+    "unit": "romeo-567"
+  },
+  {
+    "data_type": "delta-34-pk3",
+    "country": "zulu-470-pk3",
+    "product": "quebec-2-pk3",
+    "flow": "golf-714-pk3",
+    "period": "juliet-2-pk3",
+    "value": 839.81,
+    "unit": "zulu-590"
+  },
+  {
+    "data_type": "foxtrot--pk4",
+    "country": "lima-171-pk4",
+    "product": "alpha-62-pk4",
+    "flow": "oscar-71-pk4",
+    "period": "hotel-51-pk4",
+    "value": 677.7,
+    "unit": "zulu-592"
+  }
+]

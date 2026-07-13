@@ -1,0 +1,42 @@
+[
+  {
+    "curve_id": "hotel-22-pk0",
+    "scenario_id": 1000,
+    "forecast_date": "2024-01-09T00:01:44Z",
+    "value_date": "2024-01-01T00:00:00Z",
+    "value": 170.04,
+    "last_update_time": "2024-01-18T14:38:07Z"
+  },
+  {
+    "curve_id": "india-57-pk1",
+    "scenario_id": 1001,
+    "forecast_date": "2024-01-17T04:43:59Z",
+    "value_date": "2024-01-01T01:00:00Z",
+    "value": 770.64,
+    "last_update_time": "2024-01-27T09:52:45Z"
+  },
+  {
+    "curve_id": "quebec-1-pk2",
+    "scenario_id": 1002,
+    "forecast_date": "2024-01-12T06:25:22Z",
+    "value_date": "2024-01-01T02:00:00Z",
+    "value": 521.07,
+    "last_update_time": "2024-01-29T21:04:02Z"
+  },
+  {
+    "curve_id": "india-84-pk3",
+    "scenario_id": 1003,
+    "forecast_date": "2024-01-16T02:57:19Z",
+    "value_date": "2024-01-01T03:00:00Z",
+    "value": 306.95,
+    "last_update_time": "2024-01-23T02:34:38Z"
+  },
+  {
+    "curve_id": "romeo-18-pk4",
+    "scenario_id": 1004,
+    "forecast_date": "2024-01-10T03:52:35Z",
+    "value_date": "2024-01-01T04:00:00Z",
+    "value": 465.52,
+    "last_update_time": "2024-01-22T16:35:01Z"
+  }
+]

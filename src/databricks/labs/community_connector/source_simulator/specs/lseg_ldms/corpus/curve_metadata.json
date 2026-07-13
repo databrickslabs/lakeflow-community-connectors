@@ -1,0 +1,32 @@
+[
+  {
+    "curve_id": "quebec-6-pk0",
+    "alias": "juliet-421",
+    "name": "charlie-544",
+    "metadata_json": "alpha-266"
+  },
+  {
+    "curve_id": "kilo-612-pk1",
+    "alias": "whiskey-341",
+    "name": "november-431",
+    "metadata_json": "echo-231"
+  },
+  {
+    "curve_id": "oscar-64-pk2",
+    "alias": "uniform-418",
+    "name": "lima-109",
+    "metadata_json": "kilo-581"
+  },
+  {
+    "curve_id": "golf-991-pk3",
+    "alias": "delta-521",
+    "name": "uniform-274",
+    "metadata_json": "papa-420"
+  },
+  {
+    "curve_id": "papa-672-pk4",
+    "alias": "charlie-595",
+    "name": "hotel-889",
+    "metadata_json": "november-920"
+  }
+]

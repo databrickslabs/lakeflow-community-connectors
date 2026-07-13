@@ -1,0 +1,46 @@
+# LSEG LDMS (RDMS) REST API endpoints exercised by the connector.
+#
+# Auth is a static API key in the Authorization header (no token exchange),
+# so there is no auth endpoint to stub.
+#
+# Two endpoints need custom handlers because their shapes don't fit the
+# declarative param-role pipeline:
+#
+#   * POST /api/v1/CurveValuesBatch — request params live in the JSON body
+#     (scenarioID / minValueDate / maxValueDate / curveRequests) and the
+#     response nests observations under results[].values[]. The handler also
+#     synthesises a few future-dated observations so the connector's
+#     init-time value_date cap is exercised (the equivalent of the declarative
+#     synthesize_future_records: directive, which can't reach into a nested
+#     body-driven response).
+#   * GET /api/v1/Metadata/Search — MaxResults / SkipRows paging with the
+#     curve id echoed as the real API's curveID field. Used by curve_metadata
+#     and by curve_values curve resolution.
+#
+# TabularData/Data is a plain offset-paged array and uses the declarative
+# offset_limit style.
+
+endpoints:
+  # ---- curve_values: batch value retrieval (nested body + response) ----
+  - path: /api/v1/CurveValuesBatch
+    method: POST
+    handler: databricks.labs.community_connector.source_simulator.specs.lseg_ldms.handlers.ldms:curve_values_batch
+
+  # ---- curve catalog / curve resolution ----
+  - path: /api/v1/Metadata/Search
+    method: GET
+    handler: databricks.labs.community_connector.source_simulator.specs.lseg_ldms.handlers.ldms:metadata_search
+
+  # ---- tabular_data: provider datasets (offset paging) ----
+  - path: /api/v1/TabularData/Data/{data_type}
+    method: GET
+    corpus: tabular_data
+    response:
+      pagination_style: offset_limit
+    params:
+      Fields:   {role: ignore}
+      Filter:   {role: ignore}
+      OrderBy:  {role: ignore}
+      MaxRows:  {role: ignore}
+      SkipSize: {role: offset}
+      PageSize: {role: limit, default: 1000, max: 1000}

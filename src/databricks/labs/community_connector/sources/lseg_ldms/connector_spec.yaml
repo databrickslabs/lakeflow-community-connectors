@@ -1,0 +1,42 @@
+# LSEG LDMS (RDMS) Community Connector Spec
+# This file defines the specification for the connector including
+# connection parameters and allowlist options.
+
+# ============================================================================
+# Connection Parameters
+# These are provided when creating the Unity Catalog connection.
+#
+# LSEG Data Management System (LDMS), branded RDMS, exposes the same REST API
+# on different hosts (oil, freight) with different permissioning. One
+# connector implementation serves both; it is deployed as separate Unity
+# Catalog connections (one per host), each with its own api_key.
+# ============================================================================
+display_name: LSEG LDMS (RDMS)
+connection:
+  parameters:
+    - name: base_url
+      type: string
+      required: true
+      description: >
+        Host-specific base URL for the LDMS REST API endpoint.
+        Examples:
+          - https://oilprod1.rdms.refinitiv.com (Oil deployment)
+          - https://freightprod1.rdms.refinitiv.com (Freight deployment)
+        This is the root URL without any path suffix.
+
+    - name: api_key
+      type: string
+      required: true
+      secret: true
+      description: >
+        Static API key for LDMS authentication, including the "apikey-v1 "
+        prefix. The full value is sent verbatim in the Authorization header,
+        e.g. "apikey-v1 66kCwNWtbJvdBbcSJvjTzVm4wiKELIiyx58axrC6M71".
+        Obtain from your LSEG data administrator.
+
+# ============================================================================
+# External Options Allowlist
+# These table-specific options must be included in the externalOptionsAllowList
+# parameter of the UC connection to allow them to be passed through.
+# ============================================================================
+external_options_allowlist: "curve_ids,metadata_query,scenario_id,start_date,result_timezone,ingestion_mode,window_days,max_partitions,max_results,data_type,fields,filter,order_by,page_size"
