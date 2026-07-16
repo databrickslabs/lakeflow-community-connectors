@@ -1,0 +1,62 @@
+[
+  {
+    "id": "lima-572-pk0",
+    "partNumber": "zulu-366",
+    "externalReference": "echo-133",
+    "name": "charlie-576",
+    "description": "november-579",
+    "createdAt": "2024-01-14T20:08:13Z",
+    "updatedAt": "2024-01-01T00:00:00Z",
+    "price": 847.52,
+    "minimumStock": 413.7,
+    "availableStock": 311.82
+  },
+  {
+    "id": "india-79-pk1",
+    "partNumber": "india-645",
+    "externalReference": "romeo-595",
+    "name": "charlie-847",
+    "description": "kilo-658",
+    "createdAt": "2024-01-13T18:23:52Z",
+    "updatedAt": "2024-01-01T01:00:00Z",
+    "price": 206.77,
+    "minimumStock": 560.7,
+    "availableStock": 112.75
+  },
+  {
+    "id": "juliet-3-pk2",
+    "partNumber": "juliet-479",
+    "externalReference": "foxtrot-954",
+    "name": "tango-710",
+    "description": "xray-111",
+    "createdAt": "2024-01-18T21:14:19Z",
+    "updatedAt": "2024-01-01T02:00:00Z",
+    "price": 53.98,
+    "minimumStock": 690.66,
+    "availableStock": 141.87
+  },
+  {
+    "id": "victor-4-pk3",
+    "partNumber": "mike-267",
+    "externalReference": "charlie-828",
+    "name": "juliet-357",
+    "description": "juliet-900",
+    "createdAt": "2024-01-26T14:18:38Z",
+    "updatedAt": "2024-01-01T03:00:00Z",
+    "price": 324.42,
+    "minimumStock": 463.51,
+    "availableStock": 266.69
+  },
+  {
+    "id": "delta-67-pk4",
+    "partNumber": "foxtrot-769",
+    "externalReference": "delta-272",
+    "name": "november-857",
+    "description": "romeo-559",
+    "createdAt": "2024-01-17T09:26:29Z",
+    "updatedAt": "2024-01-01T04:00:00Z",
+    "price": 4.17,
+    "minimumStock": 596.51,
+    "availableStock": 607.95
+  }
+]
