@@ -25,21 +25,29 @@
 
 endpoints:
   # ---- Search API (incremental, cdc) — custom handler ----
+  # ``corpus:`` is declared alongside ``handler:`` purely so
+  # ``tools.cassette_to_corpus`` can route recorded records to the right
+  # table file when re-seeding; the custom handler ignores it and reads the
+  # corpus by name via its own path->corpus route table.
   - path: /conversations/search
     method: POST
+    corpus: conversations
     handler: databricks.labs.community_connector.source_simulator.specs.fin_ai.handlers.search:search
 
   - path: /contacts/search
     method: POST
+    corpus: contacts
     handler: databricks.labs.community_connector.source_simulator.specs.fin_ai.handlers.search:search
 
   - path: /tickets/search
     method: POST
+    corpus: tickets
     handler: databricks.labs.community_connector.source_simulator.specs.fin_ai.handlers.search:search
 
   # ---- Companies (snapshot via Scroll API) — custom handler ----
   - path: /companies/scroll
     method: GET
+    corpus: companies
     handler: databricks.labs.community_connector.source_simulator.specs.fin_ai.handlers.search:companies_scroll
 
   # ---- Simple GET snapshots (single wrapped page, no pagination) ----

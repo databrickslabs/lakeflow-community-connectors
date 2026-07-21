@@ -1104,7 +1104,19 @@ def register_lakeflow_source(spark):
             StructField("away_status_reason_id", LongType(), True),
             StructField("has_inbox_seat", BooleanType(), True),
             StructField("team_ids", ArrayType(LongType()), True),
-            StructField("avatar", StringType(), True),
+            # Intercom returns ``avatar`` as an object ``{type, image_url}`` (verified
+            # live against GET /admins), not a bare URL string — model it as a struct
+            # so the image URL is preserved rather than stringified.
+            StructField(
+                "avatar",
+                StructType(
+                    [
+                        StructField("type", StringType(), True),
+                        StructField("image_url", StringType(), True),
+                    ]
+                ),
+                True,
+            ),
             StructField("team_priority_level", MapType(StringType(), StringType()), True),
         ]
     )
@@ -1408,7 +1420,16 @@ def register_lakeflow_source(spark):
 
             starting_after: str | None = None
             while True:
-                filters = [{"field": "updated_at", "operator": "<=", "value": until}]
+                # Intercom's Search API date predicates support only the strict
+                # ``<`` / ``>`` operators — ``<=`` / ``>=`` are rejected with a 422
+                # ``data_invalid`` ("Date predicate doesn't support comparison type
+                # :lte"), as observed live on ``/contacts/search``. ``updated_at`` is
+                # an integer number of epoch seconds, so the inclusive upper bound
+                # ``updated_at <= until`` is expressed exactly as ``< until + 1``.
+                # This keeps back-to-back windows disjoint: window ``(since, until]``
+                # then ``(until, next]`` never double-counts or drops the boundary
+                # second.
+                filters = [{"field": "updated_at", "operator": "<", "value": until + 1}]
                 if since > 0:
                     filters.append(
                         {"field": "updated_at", "operator": ">", "value": since}
@@ -1636,7 +1657,19 @@ def register_lakeflow_source(spark):
             Intercom's list/search envelopes vary by resource (``conversations`` /
             ``tickets`` / ``data`` / ``segments`` / ...), so try the expected key
             first, then the common fallbacks, then any top-level list value.
+
+            Each record is normalised so that empty JSON objects (``{}``) become
+            ``None`` — Intercom returns ``{}`` for absent nested objects (e.g. a
+            company with no ``plan``), which Spark's StructType parser rejects
+            ("field in StructType cannot be an empty dict"). Nulling them keeps the
+            yielded records compatible with the declared struct schemas while
+            leaving MapType columns (which accept empty maps) unaffected.
             """
+            raw = FinAiLakeflowConnect._records_list(body, records_key)
+            return [FinAiLakeflowConnect._null_empty_dicts(r) for r in raw]
+
+        @staticmethod
+        def _records_list(body, records_key: str) -> list[dict]:
             if isinstance(body, list):
                 return body
             if not isinstance(body, dict):
@@ -1649,6 +1682,25 @@ def register_lakeflow_source(spark):
                 if isinstance(value, list):
                     return value
             return []
+
+        @staticmethod
+        def _null_empty_dicts(value):
+            """Recursively replace empty dicts (``{}``) with ``None``.
+
+            Intercom emits ``{}`` for absent nested objects; a StructType column
+            cannot ingest an empty dict, so it must be nulled. Non-empty dicts and
+            lists are walked so nested absent objects are handled too.
+            """
+            if isinstance(value, dict):
+                if not value:
+                    return None
+                return {
+                    k: FinAiLakeflowConnect._null_empty_dicts(v)
+                    for k, v in value.items()
+                }
+            if isinstance(value, list):
+                return [FinAiLakeflowConnect._null_empty_dicts(v) for v in value]
+            return value
 
         @staticmethod
         def _next_starting_after(body) -> str | None:

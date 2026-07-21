@@ -543,7 +543,19 @@ ADMINS_SCHEMA = StructType(
         StructField("away_status_reason_id", LongType(), True),
         StructField("has_inbox_seat", BooleanType(), True),
         StructField("team_ids", ArrayType(LongType()), True),
-        StructField("avatar", StringType(), True),
+        # Intercom returns ``avatar`` as an object ``{type, image_url}`` (verified
+        # live against GET /admins), not a bare URL string — model it as a struct
+        # so the image URL is preserved rather than stringified.
+        StructField(
+            "avatar",
+            StructType(
+                [
+                    StructField("type", StringType(), True),
+                    StructField("image_url", StringType(), True),
+                ]
+            ),
+            True,
+        ),
         StructField("team_priority_level", MapType(StringType(), StringType()), True),
     ]
 )
