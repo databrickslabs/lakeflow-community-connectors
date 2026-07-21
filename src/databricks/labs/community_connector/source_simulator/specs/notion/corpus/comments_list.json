@@ -1,0 +1,48 @@
+[
+  {
+    "object": "comment",
+    "id": "comment-001-uuid",
+    "parent": {
+      "type": "page_id",
+      "page_id": "page-001-uuid-example"
+    },
+    "discussion_id": "discussion-001-uuid",
+    "created_by": {
+      "object": "user",
+      "id": "user-001-uuid"
+    },
+    "created_time": "2024-01-20T15:00:00.000Z",
+    "last_edited_time": "2024-01-20T15:00:00.000Z",
+    "rich_text": [
+      {
+        "type": "text",
+        "text": {
+          "content": "This is a sample comment on the page."
+        }
+      }
+    ]
+  },
+  {
+    "object": "comment",
+    "id": "comment-002-uuid",
+    "parent": {
+      "type": "block_id",
+      "block_id": "block-001-uuid"
+    },
+    "discussion_id": "discussion-002-uuid",
+    "created_by": {
+      "object": "user",
+      "id": "user-002-uuid"
+    },
+    "created_time": "2024-01-20T15:05:00.000Z",
+    "last_edited_time": "2024-01-20T15:05:00.000Z",
+    "rich_text": [
+      {
+        "type": "text",
+        "text": {
+          "content": "Another comment on a specific block."
+        }
+      }
+    ]
+  }
+]

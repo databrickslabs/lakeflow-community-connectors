@@ -1,0 +1,49 @@
+[
+  {
+    "object": "user",
+    "id": "user-001",
+    "name": "John Doe",
+    "avatar_url": "https://lh3.googleusercontent.com/a-/avatar1",
+    "type": "person",
+    "person": {
+      "email": "john.doe@example.com"
+    }
+  },
+  {
+    "object": "user",
+    "id": "user-002",
+    "name": "Jane Smith",
+    "avatar_url": "https://lh3.googleusercontent.com/a-/avatar2",
+    "type": "person",
+    "person": {
+      "email": "jane.smith@example.com"
+    }
+  },
+  {
+    "object": "user",
+    "id": "user-003",
+    "name": "Bob Wilson",
+    "avatar_url": null,
+    "type": "person",
+    "person": {
+      "email": "bob.wilson@example.com"
+    }
+  },
+  {
+    "object": "user",
+    "id": "bot-001",
+    "name": "Notion Bot",
+    "avatar_url": null,
+    "type": "bot",
+    "bot": {
+      "owner": {
+        "type": "user",
+        "user": {
+          "object": "user",
+          "id": "user-001"
+        }
+      },
+      "workspace_name": "Example Workspace"
+    }
+  }
+]
