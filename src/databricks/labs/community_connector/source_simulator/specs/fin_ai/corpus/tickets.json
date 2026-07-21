@@ -1,0 +1,319 @@
+[
+  {
+    "id": "golf-693-pk0",
+    "type": "kilo-983",
+    "ticket_id": "november-745",
+    "category": "papa-686",
+    "ticket_attributes": {},
+    "ticket_state": {
+      "id": "oscar-134",
+      "category": "charlie-244",
+      "internal_label": "november-310",
+      "external_label": "juliet-846"
+    },
+    "ticket_type": {
+      "id": "foxtrot-654",
+      "name": "delta-209",
+      "description": "alpha-105",
+      "icon": "delta-132",
+      "category": "quebec-632",
+      "archived": false,
+      "created_at": 89638,
+      "updated_at": 66624,
+      "ticket_type_attributes": {}
+    },
+    "contacts": {
+      "type": "tango-210",
+      "contacts": []
+    },
+    "admin_assignee_id": "quebec-356",
+    "team_assignee_id": "victor-767",
+    "created_at": 53204,
+    "updated_at": 1704067200,
+    "open": false,
+    "snoozed_until": 37108,
+    "linked_objects": {
+      "type": "mike-933",
+      "data": [
+        {},
+        {
+          "key_0": "charlie-191",
+          "key_1": "tango-936"
+        }
+      ],
+      "total_count": 94166,
+      "has_more": true
+    },
+    "ticket_parts": {
+      "type": "uniform-986",
+      "ticket_parts": [
+        {}
+      ],
+      "total_count": 47915
+    },
+    "is_shared": true
+  },
+  {
+    "id": "tango-42-pk1",
+    "type": "golf-966",
+    "ticket_id": "golf-646",
+    "category": "alpha-368",
+    "ticket_attributes": {
+      "key_0": "victor-592",
+      "key_1": "mike-204"
+    },
+    "ticket_state": {
+      "id": "xray-720",
+      "category": "charlie-951",
+      "internal_label": "hotel-701",
+      "external_label": "xray-877"
+    },
+    "ticket_type": {
+      "id": "zulu-905",
+      "name": "golf-403",
+      "description": "uniform-174",
+      "icon": "whiskey-958",
+      "category": "sierra-123",
+      "archived": true,
+      "created_at": 65068,
+      "updated_at": 95902,
+      "ticket_type_attributes": {
+        "key_0": "bravo-436",
+        "key_1": "juliet-172"
+      }
+    },
+    "contacts": {
+      "type": "uniform-898",
+      "contacts": [
+        {
+          "type": "echo-752",
+          "id": "tango-599",
+          "external_id": "hotel-687"
+        },
+        {
+          "type": "uniform-192",
+          "id": "tango-121",
+          "external_id": "uniform-599"
+        }
+      ]
+    },
+    "admin_assignee_id": "xray-969",
+    "team_assignee_id": "victor-787",
+    "created_at": 3719,
+    "updated_at": 1704070800,
+    "open": false,
+    "snoozed_until": 71334,
+    "linked_objects": {
+      "type": "juliet-714",
+      "data": [
+        {
+          "key_0": "papa-343",
+          "key_1": "yankee-769"
+        }
+      ],
+      "total_count": 53985,
+      "has_more": false
+    },
+    "ticket_parts": {
+      "type": "xray-663",
+      "ticket_parts": [
+        {
+          "key_0": "juliet-338"
+        }
+      ],
+      "total_count": 88315
+    },
+    "is_shared": true
+  },
+  {
+    "id": "echo-239-pk2",
+    "type": "tango-175",
+    "ticket_id": "alpha-908",
+    "category": "charlie-695",
+    "ticket_attributes": {
+      "key_0": "quebec-827",
+      "key_1": "kilo-202"
+    },
+    "ticket_state": {
+      "id": "kilo-819",
+      "category": "sierra-268",
+      "internal_label": "juliet-566",
+      "external_label": "golf-496"
+    },
+    "ticket_type": {
+      "id": "whiskey-424",
+      "name": "quebec-259",
+      "description": "whiskey-650",
+      "icon": "papa-323",
+      "category": "foxtrot-852",
+      "archived": true,
+      "created_at": 35004,
+      "updated_at": 2976,
+      "ticket_type_attributes": {
+        "key_0": "foxtrot-322"
+      }
+    },
+    "contacts": {
+      "type": "juliet-997",
+      "contacts": [
+        {
+          "type": "uniform-496",
+          "id": "charlie-594",
+          "external_id": "delta-575"
+        },
+        {
+          "type": "echo-965",
+          "id": "uniform-444",
+          "external_id": "zulu-986"
+        }
+      ]
+    },
+    "admin_assignee_id": "echo-280",
+    "team_assignee_id": "tango-767",
+    "created_at": 23461,
+    "updated_at": 1704074400,
+    "open": true,
+    "snoozed_until": 35981,
+    "linked_objects": {
+      "type": "golf-465",
+      "data": [],
+      "total_count": 95168,
+      "has_more": false
+    },
+    "ticket_parts": {
+      "type": "november-798",
+      "ticket_parts": [],
+      "total_count": 90496
+    },
+    "is_shared": true
+  },
+  {
+    "id": "xray-884-pk3",
+    "type": "juliet-334",
+    "ticket_id": "india-326",
+    "category": "india-339",
+    "ticket_attributes": {},
+    "ticket_state": {
+      "id": "hotel-548",
+      "category": "tango-538",
+      "internal_label": "echo-118",
+      "external_label": "foxtrot-282"
+    },
+    "ticket_type": {
+      "id": "yankee-896",
+      "name": "yankee-724",
+      "description": "yankee-305",
+      "icon": "kilo-212",
+      "category": "delta-974",
+      "archived": false,
+      "created_at": 81297,
+      "updated_at": 79889,
+      "ticket_type_attributes": {
+        "key_0": "golf-855",
+        "key_1": "yankee-771"
+      }
+    },
+    "contacts": {
+      "type": "juliet-966",
+      "contacts": [
+        {
+          "type": "november-445",
+          "id": "foxtrot-855",
+          "external_id": "golf-330"
+        },
+        {
+          "type": "alpha-211",
+          "id": "victor-155",
+          "external_id": "sierra-343"
+        }
+      ]
+    },
+    "admin_assignee_id": "hotel-855",
+    "team_assignee_id": "zulu-288",
+    "created_at": 46318,
+    "updated_at": 1704078000,
+    "open": false,
+    "snoozed_until": 60216,
+    "linked_objects": {
+      "type": "juliet-861",
+      "data": [],
+      "total_count": 16108,
+      "has_more": false
+    },
+    "ticket_parts": {
+      "type": "bravo-670",
+      "ticket_parts": [],
+      "total_count": 50661
+    },
+    "is_shared": false
+  },
+  {
+    "id": "quebec-6-pk4",
+    "type": "sierra-846",
+    "ticket_id": "lima-731",
+    "category": "sierra-856",
+    "ticket_attributes": {},
+    "ticket_state": {
+      "id": "kilo-434",
+      "category": "zulu-795",
+      "internal_label": "november-552",
+      "external_label": "lima-750"
+    },
+    "ticket_type": {
+      "id": "golf-551",
+      "name": "india-654",
+      "description": "juliet-452",
+      "icon": "foxtrot-519",
+      "category": "bravo-546",
+      "archived": false,
+      "created_at": 6082,
+      "updated_at": 81908,
+      "ticket_type_attributes": {
+        "key_0": "zulu-141",
+        "key_1": "charlie-122"
+      }
+    },
+    "contacts": {
+      "type": "november-599",
+      "contacts": [
+        {
+          "type": "foxtrot-909",
+          "id": "mike-712",
+          "external_id": "romeo-686"
+        },
+        {
+          "type": "yankee-998",
+          "id": "xray-383",
+          "external_id": "hotel-637"
+        }
+      ]
+    },
+    "admin_assignee_id": "alpha-995",
+    "team_assignee_id": "alpha-751",
+    "created_at": 87308,
+    "updated_at": 1704081600,
+    "open": false,
+    "snoozed_until": 24786,
+    "linked_objects": {
+      "type": "sierra-257",
+      "data": [
+        {
+          "key_0": "romeo-925",
+          "key_1": "zulu-427"
+        }
+      ],
+      "total_count": 38703,
+      "has_more": false
+    },
+    "ticket_parts": {
+      "type": "lima-864",
+      "ticket_parts": [
+        {
+          "key_0": "uniform-864"
+        }
+      ],
+      "total_count": 82141
+    },
+    "is_shared": true
+  }
+]

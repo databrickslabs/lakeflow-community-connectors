@@ -1,0 +1,94 @@
+# Fin.ai (Intercom) REST API — endpoints exercised by the connector.
+#
+# Two shapes need custom handlers because the simulator's declarative
+# param-role pipeline only reads URL query params:
+#
+# * Search API (conversations / contacts / tickets) — the filter, sort and
+#   pagination live in a JSON POST *body*. The ``search`` handler parses the
+#   body, filters by the ``updated_at`` range, paginates via an opaque
+#   ``starting_after`` cursor, and appends a few future-dated clones so the
+#   connector's init-time cap (``updated_at <= until``) is exercised (the
+#   handler-side equivalent of the declarative ``synthesize_future_records``
+#   directive, which can't be used here because the corpus cursor field is a
+#   numeric epoch and the request shape isn't a query param).
+#
+# * Companies Scroll API — paginates with an opaque ``scroll_param`` query
+#   param and ends by returning an empty ``data`` array. The
+#   ``companies_scroll`` handler models that so the connector's drain loop
+#   terminates.
+#
+# The remaining GET snapshot endpoints (admins / tags / segments /
+# data_attributes / teams) return a single wrapped page and are declarative.
+# Auth headers (Bearer token, Intercom-Version) are ignored by the simulator.
+# Each ``corpus`` name matches a table so connector-tester can bootstrap the
+# corpus from that table's schema.
+
+endpoints:
+  # ---- Search API (incremental, cdc) — custom handler ----
+  - path: /conversations/search
+    method: POST
+    handler: databricks.labs.community_connector.source_simulator.specs.fin_ai.handlers.search:search
+
+  - path: /contacts/search
+    method: POST
+    handler: databricks.labs.community_connector.source_simulator.specs.fin_ai.handlers.search:search
+
+  - path: /tickets/search
+    method: POST
+    handler: databricks.labs.community_connector.source_simulator.specs.fin_ai.handlers.search:search
+
+  # ---- Companies (snapshot via Scroll API) — custom handler ----
+  - path: /companies/scroll
+    method: GET
+    handler: databricks.labs.community_connector.source_simulator.specs.fin_ai.handlers.search:companies_scroll
+
+  # ---- Simple GET snapshots (single wrapped page, no pagination) ----
+  - path: /admins
+    method: GET
+    corpus: admins
+    response:
+      pagination_style: none
+      wrapper:
+        records_key: admins
+        extras:
+          type: admin.list
+
+  - path: /tags
+    method: GET
+    corpus: tags
+    response:
+      pagination_style: none
+      wrapper:
+        records_key: data
+        extras:
+          type: list
+
+  - path: /segments
+    method: GET
+    corpus: segments
+    response:
+      pagination_style: none
+      wrapper:
+        records_key: segments
+        extras:
+          type: segment.list
+
+  - path: /data_attributes
+    method: GET
+    corpus: data_attributes
+    response:
+      pagination_style: none
+      wrapper:
+        records_key: data
+        extras:
+          type: list
+
+  - path: /teams
+    method: GET
+    corpus: teams
+    response:
+      pagination_style: none
+      wrapper:
+        records_key: teams
+        extras:
+          type: team.list

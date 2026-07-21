@@ -1,0 +1,278 @@
+[
+  {
+    "id": "alpha-83-pk0",
+    "type": "lima-501",
+    "company_id": "oscar-376",
+    "app_id": "charlie-527",
+    "name": "echo-425",
+    "plan": {
+      "type": "zulu-666",
+      "id": "tango-405",
+      "name": "xray-814"
+    },
+    "remote_created_at": 71415,
+    "created_at": 22338,
+    "updated_at": 55980,
+    "last_request_at": 75751,
+    "size": 42459,
+    "website": "oscar-308",
+    "industry": "papa-513",
+    "monthly_spend": 82806,
+    "session_count": 68900,
+    "user_count": 56442,
+    "custom_attributes": {
+      "key_0": "november-192",
+      "key_1": "quebec-417"
+    },
+    "tags": {
+      "type": "zulu-550",
+      "tags": [
+        {
+          "type": "foxtrot-429",
+          "id": "echo-493",
+          "name": "oscar-543",
+          "applied_at": 1210,
+          "applied_by": {
+            "key_0": "lima-129"
+          }
+        }
+      ]
+    },
+    "segments": {
+      "type": "uniform-750",
+      "segments": [
+        {
+          "type": "uniform-475",
+          "id": "romeo-458",
+          "name": "echo-413"
+        },
+        {
+          "type": "golf-469",
+          "id": "oscar-529",
+          "name": "tango-705"
+        }
+      ]
+    }
+  },
+  {
+    "id": "whiskey--pk1",
+    "type": "romeo-771",
+    "company_id": "delta-808",
+    "app_id": "mike-165",
+    "name": "xray-240",
+    "plan": {
+      "type": "echo-598",
+      "id": "juliet-438",
+      "name": "zulu-878"
+    },
+    "remote_created_at": 84988,
+    "created_at": 53593,
+    "updated_at": 40618,
+    "last_request_at": 23035,
+    "size": 2986,
+    "website": "romeo-614",
+    "industry": "foxtrot-734",
+    "monthly_spend": 28959,
+    "session_count": 95924,
+    "user_count": 79950,
+    "custom_attributes": {},
+    "tags": {
+      "type": "india-273",
+      "tags": [
+        {
+          "type": "bravo-867",
+          "id": "tango-880",
+          "name": "november-692",
+          "applied_at": 15736,
+          "applied_by": {
+            "key_0": "victor-853"
+          }
+        },
+        {
+          "type": "victor-321",
+          "id": "papa-668",
+          "name": "foxtrot-924",
+          "applied_at": 12920,
+          "applied_by": {}
+        }
+      ]
+    },
+    "segments": {
+      "type": "yankee-860",
+      "segments": [
+        {
+          "type": "november-429",
+          "id": "november-211",
+          "name": "kilo-638"
+        }
+      ]
+    }
+  },
+  {
+    "id": "mike-952-pk2",
+    "type": "foxtrot-540",
+    "company_id": "alpha-702",
+    "app_id": "november-534",
+    "name": "bravo-380",
+    "plan": {
+      "type": "golf-524",
+      "id": "quebec-518",
+      "name": "kilo-415"
+    },
+    "remote_created_at": 49998,
+    "created_at": 14098,
+    "updated_at": 72229,
+    "last_request_at": 75951,
+    "size": 57085,
+    "website": "lima-547",
+    "industry": "papa-628",
+    "monthly_spend": 36053,
+    "session_count": 94266,
+    "user_count": 22587,
+    "custom_attributes": {
+      "key_0": "delta-899",
+      "key_1": "charlie-410"
+    },
+    "tags": {
+      "type": "zulu-304",
+      "tags": [
+        {
+          "type": "uniform-626",
+          "id": "zulu-576",
+          "name": "papa-485",
+          "applied_at": 71825,
+          "applied_by": {
+            "key_0": "charlie-465",
+            "key_1": "bravo-421"
+          }
+        }
+      ]
+    },
+    "segments": {
+      "type": "hotel-836",
+      "segments": [
+        {
+          "type": "whiskey-843",
+          "id": "xray-943",
+          "name": "quebec-201"
+        },
+        {
+          "type": "quebec-684",
+          "id": "oscar-914",
+          "name": "sierra-212"
+        }
+      ]
+    }
+  },
+  {
+    "id": "romeo-43-pk3",
+    "type": "tango-402",
+    "company_id": "echo-480",
+    "app_id": "charlie-943",
+    "name": "xray-586",
+    "plan": {
+      "type": "kilo-465",
+      "id": "india-786",
+      "name": "delta-329"
+    },
+    "remote_created_at": 78983,
+    "created_at": 40597,
+    "updated_at": 91721,
+    "last_request_at": 88218,
+    "size": 56433,
+    "website": "victor-695",
+    "industry": "hotel-682",
+    "monthly_spend": 96407,
+    "session_count": 17879,
+    "user_count": 19452,
+    "custom_attributes": {
+      "key_0": "papa-436",
+      "key_1": "charlie-370"
+    },
+    "tags": {
+      "type": "sierra-180",
+      "tags": []
+    },
+    "segments": {
+      "type": "foxtrot-373",
+      "segments": [
+        {
+          "type": "echo-780",
+          "id": "xray-838",
+          "name": "echo-194"
+        },
+        {
+          "type": "juliet-112",
+          "id": "kilo-746",
+          "name": "zulu-194"
+        }
+      ]
+    }
+  },
+  {
+    "id": "bravo-82-pk4",
+    "type": "charlie-678",
+    "company_id": "mike-312",
+    "app_id": "tango-326",
+    "name": "juliet-780",
+    "plan": {
+      "type": "tango-208",
+      "id": "papa-131",
+      "name": "delta-946"
+    },
+    "remote_created_at": 49258,
+    "created_at": 46336,
+    "updated_at": 87222,
+    "last_request_at": 1867,
+    "size": 3052,
+    "website": "alpha-606",
+    "industry": "zulu-905",
+    "monthly_spend": 75587,
+    "session_count": 13906,
+    "user_count": 53323,
+    "custom_attributes": {
+      "key_0": "sierra-304",
+      "key_1": "foxtrot-620"
+    },
+    "tags": {
+      "type": "sierra-713",
+      "tags": [
+        {
+          "type": "foxtrot-198",
+          "id": "victor-697",
+          "name": "charlie-436",
+          "applied_at": 60305,
+          "applied_by": {
+            "key_0": "sierra-768",
+            "key_1": "hotel-261"
+          }
+        },
+        {
+          "type": "victor-687",
+          "id": "uniform-838",
+          "name": "yankee-316",
+          "applied_at": 5650,
+          "applied_by": {
+            "key_0": "charlie-774",
+            "key_1": "sierra-311"
+          }
+        }
+      ]
+    },
+    "segments": {
+      "type": "foxtrot-300",
+      "segments": [
+        {
+          "type": "echo-944",
+          "id": "november-252",
+          "name": "november-436"
+        },
+        {
+          "type": "romeo-858",
+          "id": "bravo-433",
+          "name": "bravo-761"
+        }
+      ]
+    }
+  }
+]
