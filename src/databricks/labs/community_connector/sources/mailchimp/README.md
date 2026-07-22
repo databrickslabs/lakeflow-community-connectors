@@ -23,10 +23,10 @@ Provide the following **connection-level** options when configuring the connecto
 |-------------|--------|----------|------------------------------------------------------------------------------------------------------------------------------------|------------------------------------------|
 | `api_key`   | string | yes      | Mailchimp Marketing API key used for HTTP Basic authentication. The account data center is derived from the key's `-<dc>` suffix.  | `0123456789abcdef0123456789abcde-us21`   |
 | `server_prefix` | string | no   | Data center / server prefix (e.g. `us21`). Only needed for **legacy** keys that have no `-<dc>` suffix; otherwise it is derived automatically from `api_key`. | `us21`                                   |
-| `externalOptionsAllowList` | string | yes | Comma-separated list of table-specific option names that are allowed to be passed through to the connector. This connector supports table-specific options, so this parameter must be set. | `max_records_per_batch,window_seconds,start_timestamp` |
+| `externalOptionsAllowList` | string | yes | Comma-separated list of table-specific option names that are allowed to be passed through to the connector. This connector supports table-specific options, so this parameter must be set. | `max_records_per_batch,window_seconds,start_timestamp,lookback_seconds` |
 
 The full list of supported table-specific options for `externalOptionsAllowList` is:
-`max_records_per_batch,window_seconds,start_timestamp`
+`max_records_per_batch,window_seconds,start_timestamp,lookback_seconds`
 
 > **Note**: Table-specific options such as `window_seconds` and `start_timestamp` are **not** connection parameters. They are provided per-table via table options in the pipeline specification. These option names must be included in `externalOptionsAllowList` for the connection to allow them.
 
@@ -55,7 +55,7 @@ A Unity Catalog connection for this connector can be created in two ways via the
 
 1. Follow the **Lakeflow Community Connector** UI flow from the **Add Data** page.
 2. Select any existing Lakeflow Community Connector connection for this source or create a new one.
-3. Set `externalOptionsAllowList` to `max_records_per_batch,window_seconds,start_timestamp` (required for this connector to pass table-specific options).
+3. Set `externalOptionsAllowList` to `max_records_per_batch,window_seconds,start_timestamp,lookback_seconds` (required for this connector to pass table-specific options).
 
 The connection can also be created using the standard Unity Catalog API.
 
@@ -133,7 +133,8 @@ These table-specific options apply to all four tables. They must be listed in th
 |---|---|---|---|---|
 | `start_timestamp` | ISO 8601 string | No | Auto-discovered | Initial cursor lower bound used when there is no stored offset yet (first run). If omitted, the connector probes the source for the oldest cursor value and starts there — which backfills all history and can be heavy. Set this to a recent cutoff (e.g. `2026-01-01T00:00:00Z`) to limit initial backfill. |
 | `window_seconds` | integer | No | `86400` (1 day) | Size of the incremental sliding time-window in seconds. Each `read_table` call advances the cursor by at most this much. **On large accounts, start with a small value** to keep per-batch volume bounded — this is the primary sizing knob for `members`. |
-| `max_records_per_batch` | integer | No | `200` | Caps the number of records returned per `read_table` call. For `campaigns` / `reports` / `lists` the batch is truncated at this cap and the cursor resumes mid-window. For `members`, windows are drained completely, so this value is best-effort — use `window_seconds` to size `members` batches. |
+| `max_records_per_batch` | integer | No | `200` | Caps the number of records returned per `read_table` call. Applies only to **sorted** endpoints (`campaigns`, `members` list-fan-out), where the batch is truncated at this cap and the cursor resumes mid-window in ascending cursor order. For the **unsorted** endpoints (`reports`, `lists`) and the `members` window as a whole, each window is drained completely so no row is skipped, making this value best-effort there — use `window_seconds` to bound volume. |
+| `lookback_seconds` | integer | No | `1` | Seconds subtracted from the queried `since_*` lower bound. Mailchimp's `since_*` filters are **exclusive** (strictly greater-than), so a window seeded at exactly the boundary cursor would drop that row; the lookback shifts the query back so the boundary is included (CDC upsert dedupes the small re-fetched overlap). The stored cursor keeps the raw value — only the query is shifted. Set to `0` to disable. |
 
 > **Tip**: `members` is the highest-volume table. Because its window is always drained fully (never truncated client-side), control its batch size with a small `window_seconds` rather than `max_records_per_batch`.
 

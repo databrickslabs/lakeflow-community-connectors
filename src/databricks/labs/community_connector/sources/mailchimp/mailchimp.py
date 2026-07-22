@@ -106,15 +106,25 @@ class MailchimpLakeflowConnect(LakeflowConnect):
         """GET ``path`` with exponential backoff on 429/500/503.
 
         429 is Mailchimp's rate-limit signal (max 10 concurrent connections
-        per key); 500/503 are transient server errors.
+        per key); 500/503 are transient server errors. Transient transport
+        errors (``ConnectionError``/``Timeout``) are retried on the same
+        backoff so an executor-side read survives a blip; the last exception
+        is re-raised if every attempt fails.
         """
         url = f"{self._base_url}{path}"
         backoff = INITIAL_BACKOFF
         resp = None
         for attempt in range(MAX_RETRIES):
-            resp = requests.get(
-                url, params=params or {}, auth=self._auth(), timeout=60
-            )
+            try:
+                resp = requests.get(
+                    url, params=params or {}, auth=self._auth(), timeout=60
+                )
+            except (requests.ConnectionError, requests.Timeout):
+                if attempt < MAX_RETRIES - 1:
+                    time.sleep(backoff)
+                    backoff *= 2
+                    continue
+                raise
             if resp.status_code not in RETRIABLE_STATUS_CODES:
                 return resp
             if attempt < MAX_RETRIES - 1:
@@ -190,17 +200,24 @@ class MailchimpLakeflowConnect(LakeflowConnect):
         resource_key: str,
         base_params: dict,
         max_records: Optional[int] = None,
-    ) -> List[dict]:
+    ) -> Tuple[List[dict], bool]:
         """Page through a list endpoint with offset/count.
 
         Stops on a short page (fewer than ``count`` rows), when
         ``offset >= total_items``, or when ``max_records`` is reached.
         Short-page detection is the primary terminator so the loop ends even
         when the source does not populate ``total_items``.
+
+        Returns ``(records, exhausted)`` where ``exhausted`` is True when the
+        endpoint was drained for the current window (short page / total
+        reached) and False when the loop bailed on the ``max_records`` cap.
+        The caller uses that flag to decide whether it is safe to advance the
+        cursor to ``window_end`` (drained) or must resume mid-window.
         """
         count = int(base_params.get("count", DEFAULT_PAGE_COUNT))
         records: List[dict] = []
         offset = 0
+        exhausted = True
         while True:
             params = dict(base_params)
             params["count"] = count
@@ -214,8 +231,11 @@ class MailchimpLakeflowConnect(LakeflowConnect):
             if total > 0 and offset >= total:
                 break
             if max_records is not None and len(records) >= max_records:
+                # Bailed on the cap with a full last page: more rows may remain
+                # in this window.
+                exhausted = False
                 break
-        return records
+        return records, exhausted
 
     # ---- incremental window reads ---------------------------------------
 
@@ -243,8 +263,13 @@ class MailchimpLakeflowConnect(LakeflowConnect):
         """
         cursor_field = cfg["cursor_field"]
         if cfg["nested"]:
-            # members: probe the first audience's oldest member.
-            lists = self._paginate("/lists", "lists", {"count": DEFAULT_PAGE_COUNT})
+            # members: probe EVERY audience and take the global minimum cursor.
+            # All members share one cursor window, so seeding ``since`` from the
+            # first audience's oldest member would permanently skip any member
+            # in another audience with an older ``last_changed`` (the exclusive
+            # ``since_*`` filter excludes it on every subsequent window).
+            lists, _ = self._paginate("/lists", "lists", {"count": DEFAULT_PAGE_COUNT})
+            oldest: Optional[str] = None
             for lst in lists:
                 list_id = lst.get("id")
                 if not list_id:
@@ -255,9 +280,9 @@ class MailchimpLakeflowConnect(LakeflowConnect):
                     cursor_field,
                     supports_sort=cfg["supports_sort"],
                 )
-                if cursor:
-                    return cursor
-            return None
+                if cursor and (oldest is None or self._to_dt(cursor) < self._to_dt(oldest)):
+                    oldest = cursor
+            return oldest
         return self._peek_from_path(
             cfg["path"], cfg["resource_key"], cursor_field, cfg["supports_sort"]
         )
@@ -283,14 +308,28 @@ class MailchimpLakeflowConnect(LakeflowConnect):
         cursors = [r.get(cursor_field) for r in batch if r.get(cursor_field)]
         return min(cursors) if cursors else None
 
+    @staticmethod
+    def _to_dt(ts: str) -> datetime:
+        """Parse an ISO 8601 cursor to an aware UTC datetime.
+
+        Mailchimp emits ``+00:00`` offsets, but a user-supplied
+        ``start_timestamp`` (or a re-fetched cursor) may use a ``Z`` suffix.
+        Comparing those as raw strings is wrong (``'...Z'`` sorts after
+        ``'...+00:00'`` lexically even for the same instant), so every cursor
+        comparison and arithmetic goes through this parser instead.
+        """
+        normalized = ts.replace("Z", "+00:00") if ts.endswith("Z") else ts
+        dt = datetime.fromisoformat(normalized)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt
+
     def _window_end(self, since: str, window_seconds: int) -> str:
         """Compute the window upper bound, capped at ``_init_ts``."""
-        normalized = since.replace("Z", "+00:00") if since.endswith("Z") else since
-        end = (datetime.fromisoformat(normalized) + timedelta(seconds=window_seconds)).isoformat()
-        return min(end, self._init_ts)
+        end_dt = self._to_dt(since) + timedelta(seconds=window_seconds)
+        return min(end_dt, self._to_dt(self._init_ts)).isoformat()
 
-    @staticmethod
-    def _apply_lookback(since: str, lookback_seconds: int) -> str:
+    def _apply_lookback(self, since: str, lookback_seconds: int) -> str:
         """Subtract a lookback from an ISO cursor for the (exclusive) API filter.
 
         Mailchimp's ``since_*`` filter is strictly greater-than, so querying at
@@ -300,10 +339,7 @@ class MailchimpLakeflowConnect(LakeflowConnect):
         """
         if lookback_seconds <= 0:
             return since
-        normalized = since.replace("Z", "+00:00") if since.endswith("Z") else since
-        return (
-            datetime.fromisoformat(normalized) - timedelta(seconds=lookback_seconds)
-        ).isoformat()
+        return (self._to_dt(since) - timedelta(seconds=lookback_seconds)).isoformat()
 
     def _read_window(
         self, table_name: str, start_offset: dict, table_options: dict
@@ -319,7 +355,7 @@ class MailchimpLakeflowConnect(LakeflowConnect):
                 f"Provide 'start_timestamp' in table_options."
             )
         # Already caught up to init time — nothing new this run.
-        if since >= self._init_ts:
+        if self._to_dt(since) >= self._to_dt(self._init_ts):
             return iter([]), start_offset if start_offset else {}
 
         window_seconds = int(
@@ -339,21 +375,30 @@ class MailchimpLakeflowConnect(LakeflowConnect):
             cfg["since_param"]: self._apply_lookback(since, lookback_seconds),
             cfg["before_param"]: window_end,
         }
+        # The ``max_records`` mid-window cap is only safe on SORTED endpoints,
+        # where rows arrive in ascending cursor order and the max cursor seen is
+        # a valid resume point. UNSORTED endpoints (reports, lists) return the
+        # window in server-default order, so a partial fetch cannot resume
+        # without risking dropped rows; drain the whole window instead (these
+        # tables are low-cardinality and the window bounds the volume).
         if cfg["supports_sort"]:
             base_params["sort_field"] = cursor_field
             base_params["sort_dir"] = "ASC"
+            page_cap: Optional[int] = max_records
+        else:
+            page_cap = None
 
-        records = self._paginate(
-            cfg["path"], cfg["resource_key"], base_params, max_records
+        records, window_drained = self._paginate(
+            cfg["path"], cfg["resource_key"], base_params, page_cap
         )
 
-        # Drained the whole window (drained fully unless we bailed on the cap).
-        window_drained = len(records) < max_records
         if window_drained:
+            # Endpoint fully drained for this window: advance cleanly to the end.
             end_offset = {"cursor": window_end}
         else:
-            # Cap hit mid-window: resume from the max cursor seen. CDC upsert
-            # tolerates the re-fetch of the window head on the next call.
+            # Cap hit mid-window on a sorted endpoint: resume from the max cursor
+            # seen (everything below it is already fetched). CDC upsert tolerates
+            # the re-fetch of the window head on the next call.
             end_offset = {"cursor": self._max_cursor(records, cursor_field, window_end)}
 
         if start_offset and start_offset == end_offset:
@@ -385,7 +430,7 @@ class MailchimpLakeflowConnect(LakeflowConnect):
                 "Cannot determine a starting cursor for 'members'. "
                 "Provide 'start_timestamp' in table_options."
             )
-        if since >= self._init_ts:
+        if self._to_dt(since) >= self._to_dt(self._init_ts):
             return iter([]), start_offset if start_offset else {}
 
         window_seconds = int(
@@ -399,7 +444,7 @@ class MailchimpLakeflowConnect(LakeflowConnect):
 
         # Enumerate every audience, then fan out members per list within the
         # same window.
-        lists = self._paginate("/lists", "lists", {"count": DEFAULT_PAGE_COUNT})
+        lists, _ = self._paginate("/lists", "lists", {"count": DEFAULT_PAGE_COUNT})
 
         # Window is drained by construction — advance the cursor to its end.
         end_offset = {"cursor": window_end}
@@ -421,7 +466,7 @@ class MailchimpLakeflowConnect(LakeflowConnect):
                     "sort_dir": "ASC",
                 }
                 path = cfg["path"].format(list_id=list_id)
-                members = self._paginate(path, cfg["resource_key"], base_params)
+                members, _ = self._paginate(path, cfg["resource_key"], base_params)
                 for m in members:
                     # Preserve provenance even if the payload omits list_id.
                     if not m.get("list_id"):
