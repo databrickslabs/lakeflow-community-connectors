@@ -955,8 +955,12 @@ def register_lakeflow_source(spark):
             }
 
             # Cap cursors at init time so Trigger.AvailableNow always terminates.
-            self._init_dt = datetime.now(timezone.utc)
-            self._init_ts_iso = _format_ts(self._init_dt)
+            # Parse the formatted string back so ``_init_dt`` carries the same
+            # millisecond precision as stored cursors (which come from
+            # ``_format_ts``); otherwise the sub-ms microseconds would make the
+            # caught-up fast-path in ``_read_incremental`` never compare equal.
+            self._init_ts_iso = _format_ts(datetime.now(timezone.utc))
+            self._init_dt = _parse_ts(self._init_ts_iso)
 
             # Client-side throttle state: monotonic timestamp of the last
             # request per endpoint path (remberg limits are per endpoint).
@@ -1165,6 +1169,31 @@ def register_lakeflow_source(spark):
             if since:
                 params["updatedAtFrom"] = since
 
+            if max_records >= sys.maxsize:
+                # Unbounded (the default): stream pages lazily so driver memory
+                # tracks a single page, not the whole range. A short page drains
+                # the range; the cursor then advances to its upper bound. Because
+                # the range always fully drains here, the end offset is known up
+                # front (like the snapshot path), so no accumulation is needed.
+                def generate() -> Iterator[dict]:
+                    p = page
+                    while True:
+                        page_records = self._unwrap_records(
+                            self._get_json(path, params={**params, "page": str(p)}),
+                            records_key,
+                        )
+                        yield from (
+                            self._map_record(table_name, raw) for raw in page_records
+                        )
+                        if len(page_records) < limit:
+                            return
+                        p += 1
+
+                return generate(), {"cursor": until}
+
+            # Bounded by ``max_records_per_batch``: accumulate up to the cap
+            # (memory stays bounded by the cap) so the split offset can be
+            # computed before the tuple is returned.
             records: list[dict] = []
             while True:
                 params["page"] = str(page)
