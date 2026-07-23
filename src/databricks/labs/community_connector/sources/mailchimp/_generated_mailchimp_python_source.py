@@ -1195,7 +1195,7 @@ def register_lakeflow_source(spark):
                 if len(batch) < count:
                     break
                 offset += count
-                if total > 0 and offset >= total:
+                if 0 < total <= offset:
                     break
                 if max_records is not None and len(records) >= max_records:
                     # Bailed on the cap with a full last page: more rows may remain
@@ -1438,8 +1438,7 @@ def register_lakeflow_source(spark):
                         # Preserve provenance even if the payload omits list_id.
                         if not m.get("list_id"):
                             m["list_id"] = list_id
-                    for m in self._project(members, "members"):
-                        yield m
+                    yield from self._project(members, "members")
 
             return _iter_members(), end_offset
 
