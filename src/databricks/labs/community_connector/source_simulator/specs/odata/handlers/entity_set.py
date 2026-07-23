@@ -42,13 +42,14 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import parse_qs, urlsplit
 
+from requests.models import PreparedRequest, Response
+
 from databricks.labs.community_connector.source_simulator.cassette import (
     ResponseRecord,
 )
 from databricks.labs.community_connector.source_simulator.interceptor import (
     response_from_record,
 )
-from requests.models import PreparedRequest, Response
 
 # Mirror Northwind's server-side response cap. Real OData servers (per
 # the v4 spec) are free to ignore the client's ``$top`` and impose
