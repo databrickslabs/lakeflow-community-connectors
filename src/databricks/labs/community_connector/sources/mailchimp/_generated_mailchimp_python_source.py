@@ -1268,10 +1268,11 @@ def register_lakeflow_source(spark):
                 if batch:
                     return batch[0].get(cursor_field)
                 return None
-            # No sort support: take the min cursor across the first full page.
-            batch, _ = self._fetch_page(
-                path, resource_key, {"count": DEFAULT_PAGE_COUNT, "offset": 0}
-            )
+            # No sort support: drain all pages and take the global min cursor.
+            # ``_paginate`` enumerates every page when ``max_records`` is None, so a
+            # global-oldest row on a later page is not missed. This probe runs only
+            # on first-run discovery, so the full enumeration is a one-time cost.
+            batch, _ = self._paginate(path, resource_key, {"count": DEFAULT_PAGE_COUNT})
             cursors = [r.get(cursor_field) for r in batch if r.get(cursor_field)]
             return min(cursors) if cursors else None
 
@@ -1358,6 +1359,20 @@ def register_lakeflow_source(spark):
             records, window_drained = self._paginate(
                 cfg["path"], cfg["resource_key"], base_params, page_cap
             )
+
+            # Same-second cursor cluster larger than the cap: every capped row shares
+            # one cursor value, so the resume point (`_max_cursor`) would equal
+            # `since` and the next call re-fetches the same first page forever —
+            # dropping everything past it. When the cap trips but the resume cursor
+            # can't advance past the window start, re-drain the whole window uncapped;
+            # ``window_seconds`` bounds the volume so peak memory stays bounded.
+            # (Only reachable on sorted endpoints; the unsorted path never sets a cap.)
+            if not window_drained and page_cap is not None:
+                resume = self._max_cursor(records, cursor_field, window_end)
+                if self._to_dt(resume) <= self._to_dt(since):
+                    records, window_drained = self._paginate(
+                        cfg["path"], cfg["resource_key"], base_params, None
+                    )
 
             if window_drained:
                 # Endpoint fully drained for this window: advance cleanly to the end.

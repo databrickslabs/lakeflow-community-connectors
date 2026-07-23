@@ -13,6 +13,11 @@ layer, so no network or simulator corpus is involved.
   actually exhausted), not off the ``max_records`` cap.
 - Finding 4: cursor comparisons/arithmetic must be timestamp-aware
   (``Z`` vs ``+00:00``), not raw string compares.
+- Finding 5: a same-second cursor cluster larger than one page must not
+  stall — when the cap trips and the resume cursor can't advance past
+  ``since``, the window is re-drained uncapped so no row is lost.
+- Finding 6: the oldest-cursor probe on unsorted endpoints must paginate
+  fully, so a global-oldest row on a later page seeds ``since`` correctly.
 """
 
 from unittest.mock import Mock, patch
@@ -204,3 +209,72 @@ def test_window_end_normalizes_mixed_offsets():
     assert conn._window_end("2026-01-01T00:00:00Z", 86400) == "2026-01-02T00:00:00+00:00"
     # A window that would exceed _init_ts is capped at it.
     assert conn._window_end("2026-01-09T12:00:00Z", 86400) == "2026-01-10T00:00:00+00:00"
+
+
+# ---------------------------------------------------------------------------
+# Finding 5 — same-second cursor cluster larger than a page re-drains uncapped
+# ---------------------------------------------------------------------------
+
+
+def test_same_second_cluster_larger_than_cap_drains_all_rows():
+    """1500 sorted rows sharing one cursor-second, cap=1000 -> all 1500 ingest.
+
+    The capped page would resume from ``_max_cursor`` == ``since`` (every row
+    shares the same ``create_time``), so an offset/time-cursor resume can't
+    advance: the next call re-fetches the same first page and the 500 rows past
+    it are lost forever. The drain-on-stall fix re-drains the window uncapped so
+    all 1500 come through in one read and the cursor advances to window_end.
+    """
+    conn = _connector()
+    conn._init_ts = "2030-01-01T00:00:00+00:00"
+    rows = [
+        {"id": f"c{i}", "create_time": "2026-03-01T00:00:00+00:00"} for i in range(1500)
+    ]
+    with patch.object(
+        conn,
+        "_request_with_retry",
+        side_effect=_paged_request({"/campaigns": ("campaigns", rows)}),
+    ):
+        it, end_offset = conn._read_window(
+            "campaigns",
+            {"cursor": "2026-03-01T00:00:00+00:00"},
+            {
+                "max_records_per_batch": "1000",
+                "window_seconds": "864000",
+                "lookback_seconds": "0",
+            },
+        )
+        out = list(it)
+
+    assert len(out) == 1500  # nothing dropped despite the cap
+    expected_end = conn._window_end("2026-03-01T00:00:00+00:00", 864000)
+    assert end_offset == {"cursor": expected_end}  # advanced cleanly, no stall
+
+
+# ---------------------------------------------------------------------------
+# Finding 6 — oldest-cursor probe on unsorted endpoints paginates fully
+# ---------------------------------------------------------------------------
+
+
+def test_unsorted_probe_paginates_to_global_oldest():
+    """1200 reports, global-oldest at index 1100 -> probe must find it.
+
+    Unsorted endpoints have no ascending sort, so the probe fetches in
+    server-default order. A single-page probe (count=1000) would only see the
+    first page and miss the oldest row on page 2; draining all pages returns the
+    true global minimum.
+    """
+    conn = _connector()
+    rows = [
+        {"id": f"r{i}", "send_time": f"2026-06-{(i % 27) + 1:02d}T00:00:00+00:00"}
+        for i in range(1200)
+    ]
+    rows[1100]["send_time"] = "2020-01-01T00:00:00+00:00"  # global oldest, page 2
+    with patch.object(
+        conn,
+        "_request_with_retry",
+        side_effect=_paged_request({"/reports": ("reports", rows)}),
+    ):
+        oldest = conn._peek_oldest_cursor("reports", TABLE_CONFIG["reports"])
+
+    assert oldest == "2020-01-01T00:00:00+00:00"
