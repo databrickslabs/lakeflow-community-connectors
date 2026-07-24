@@ -203,7 +203,7 @@ class TestCreatePipelineCommand:
         with patch("databricks.labs.community_connector_cli.cli.WorkspaceClient"):
             result = runner.invoke(
                 main,
-                ['create_pipeline', 'github', 'my_pipeline'],
+                ['create_pipeline', 'github', 'my_pipeline', '--use-workspace-pipeline'],
             )
 
         assert result.exit_code != 0
@@ -241,7 +241,8 @@ class TestCreatePipelineCommand:
 
         result = runner.invoke(
             main,
-            ['create_pipeline', 'github', 'my_pipeline', '-n', 'my_conn'],
+            ['create_pipeline', 'github', 'my_pipeline', '-n', 'my_conn',
+             '--use-workspace-pipeline'],
         )
 
         # Should succeed (or at least pass the validation)
@@ -283,6 +284,7 @@ class TestCreatePipelineCommand:
                 [
                     'create_pipeline', 'github', 'my_pipeline',
                     '-n', 'my_conn', '--package', temp_pkg.name,
+                    '--use-workspace-pipeline',
                 ],
             )
 
@@ -338,7 +340,7 @@ class TestCreatePipelineCommand:
                 main,
                 [
                     'create_pipeline', 'github', 'my_pipeline', '-n', 'my_conn',
-                    '-p', pkg1.name, '-p', pkg2.name,
+                    '-p', pkg1.name, '-p', pkg2.name, '--use-workspace-pipeline',
                 ],
             )
 
@@ -380,7 +382,8 @@ class TestCreatePipelineCommand:
 
             result = runner.invoke(
                 main,
-                ['create_pipeline', 'github', 'my_pipeline', '-n', 'my_conn', '-p', temp_pkg.name],
+                ['create_pipeline', 'github', 'my_pipeline', '-n', 'my_conn', '-p', temp_pkg.name,
+                 '--use-workspace-pipeline'],
             )
 
             assert result.exit_code == 0, f"Exit code: {result.exit_code}\nOutput: {result.output}"
@@ -509,7 +512,8 @@ class TestCreatePipelineUseLocalSource:
 
         result = runner.invoke(
             main,
-            ['create_pipeline', 'github', 'my_pipeline', '-n', 'my_conn', '--use-local-source'],
+            ['create_pipeline', 'github', 'my_pipeline', '-n', 'my_conn', '--use-local-source',
+             '--use-workspace-pipeline'],
         )
 
         assert result.exit_code == 0, f"Exit code: {result.exit_code}\nOutput: {result.output}"
@@ -549,7 +553,8 @@ class TestCreatePipelineUseLocalSource:
 
         result = runner.invoke(
             main,
-            ['create_pipeline', 'github', 'my_pipeline', '-n', 'my_conn'],
+            ['create_pipeline', 'github', 'my_pipeline', '-n', 'my_conn',
+             '--use-workspace-pipeline'],
         )
 
         assert result.exit_code == 0, f"Exit code: {result.exit_code}\nOutput: {result.output}"
@@ -592,7 +597,7 @@ class TestCreatePipelineUseLocalSource:
                 main,
                 [
                     'create_pipeline', 'github', 'my_pipeline', '-n', 'my_conn',
-                    '-p', temp_pkg.name, '--use-local-source',
+                    '-p', temp_pkg.name, '--use-local-source', '--use-workspace-pipeline',
                 ],
             )
 
@@ -2146,7 +2151,7 @@ class TestUpdatePipelineCommand:
         with patch("databricks.labs.community_connector_cli.cli.WorkspaceClient"):
             result = runner.invoke(
                 main,
-                ["update_pipeline", "my_pipeline"],
+                ["update_pipeline", "my_pipeline", "--use-workspace-pipeline"],
             )
 
         assert result.exit_code != 0
@@ -2223,6 +2228,7 @@ class TestUpdatePipelineCommand:
                 "my_pipeline",
                 "-ps",
                 '{"connection_name": "my_conn", "objects": [{"table": {"source_table": "users"}}]}',
+                "--use-workspace-pipeline",
             ],
         )
 
@@ -2285,7 +2291,8 @@ class TestUpdatePipelineCommand:
                     '{"connection_name": "my_conn", '
                     '"objects": [{"table": {"source_table": "users"}}]}',
                     "--package",
-                    temp_pkg.name
+                    temp_pkg.name,
+                    "--use-workspace-pipeline",
                 ],
             )
 
@@ -2326,7 +2333,8 @@ class TestUpdatePipelineCommand:
 
             result = runner.invoke(
                 main,
-                ["update_pipeline", "my_pipeline", "-p", temp_pkg.name],
+                ["update_pipeline", "my_pipeline", "-p", temp_pkg.name,
+                 "--use-workspace-pipeline"],
             )
 
         assert result.exit_code == 0, f"Exit code: {result.exit_code}\nOutput: {result.output}"
@@ -2369,7 +2377,8 @@ class TestUpdatePipelineCommand:
 
             result = runner.invoke(
                 main,
-                ["update_pipeline", "my_pipeline", "-p", pkg1.name, "-p", pkg2.name],
+                ["update_pipeline", "my_pipeline", "-p", pkg1.name, "-p", pkg2.name,
+                 "--use-workspace-pipeline"],
             )
 
         assert result.exit_code == 0, f"Exit code: {result.exit_code}\nOutput: {result.output}"
@@ -2403,7 +2412,8 @@ class TestUpdatePipelineCommand:
                 "update_pipeline",
                 "my_pipeline",
                 "-ps",
-                '{"connection_name": "conn", "objects": []}',
+                '{"connection_name": "conn", "objects": [{"table": {"source_table": "t"}}]}',
+                "--use-workspace-pipeline",
             ],
         )
 
@@ -2443,7 +2453,8 @@ class TestUpdatePipelineCommand:
                 "update_pipeline",
                 "my_pipeline",
                 "-ps",
-                '{"connection_name": "conn", "objects": []}',
+                '{"connection_name": "conn", "objects": [{"table": {"source_table": "t"}}]}',
+                "--use-workspace-pipeline",
             ],
         )
 
@@ -2481,6 +2492,116 @@ objects:
                 assert "not found" in result.output
         finally:
             os.unlink(temp_path)
+
+
+class TestManagedCreatePipeline:
+    """Tests for the default (managed ingestion) create_pipeline mode."""
+
+    def _bare_spec(self):
+        return (
+            '{"connection_name": "my_conn", '
+            '"objects": [{"table": {"source_table": "commits"}}]}'
+        )
+
+    @patch("databricks.labs.community_connector_cli.cli._build_and_upload_managed_wheels")
+    @patch("databricks.labs.community_connector_cli.cli._resolve_managed_dest_dir")
+    @patch("databricks.labs.community_connector_cli.cli.WorkspaceClient")
+    def test_managed_create_bare_spec(
+        self, mock_ws_client, mock_dest_dir, mock_build_upload
+    ):
+        runner = CliRunner()
+        mock_ws = MagicMock()
+        mock_ws_client.return_value = mock_ws
+        mock_ws.config.host = "https://test.databricks.com"
+        mock_ws.api_client.do.return_value = {"pipeline_id": "pl-123"}
+        mock_dest_dir.return_value = "/Volumes/main/default/community_connector/packages"
+        mock_build_upload.return_value = ["/Volumes/main/default/community_connector/packages/w.whl"]
+
+        result = runner.invoke(
+            main,
+            ["create_pipeline", "github", "my_pipeline", "-ps", self._bare_spec(),
+             "-c", "cat", "-t", "sch"],
+        )
+
+        assert result.exit_code == 0, f"Output: {result.output}"
+        assert "Pipeline created!" in result.output
+        # POST to the pipelines endpoint with a managed body.
+        args, kwargs = mock_ws.api_client.do.call_args
+        assert args[0] == "POST"
+        assert args[1] == "/api/2.0/pipelines"
+        body = kwargs["body"]
+        assert body["ingestion_definition"]["source_type"] == "COMMUNITY"
+        assert body["ingestion_definition"]["connection_name"] == "my_conn"
+        assert body["catalog"] == "cat"
+        assert body["configuration"][
+            "pipelines.managedIngestion.registerPythonDataSource"] == "true"
+        assert body["environment"]["dependencies"]
+
+    def test_managed_create_requires_spec(self):
+        runner = CliRunner()
+        with patch("databricks.labs.community_connector_cli.cli.WorkspaceClient"):
+            result = runner.invoke(
+                main, ["create_pipeline", "github", "my_pipeline", "-n", "conn"]
+            )
+        assert result.exit_code != 0
+        assert "--pipeline-spec is required" in result.output
+
+    @patch("databricks.labs.community_connector_cli.cli._build_and_upload_managed_wheels")
+    @patch("databricks.labs.community_connector_cli.cli._resolve_managed_dest_dir")
+    @patch("databricks.labs.community_connector_cli.cli.WorkspaceClient")
+    def test_managed_create_full_spec_with_environment_skips_upload(
+        self, mock_ws_client, mock_dest_dir, mock_build_upload
+    ):
+        runner = CliRunner()
+        mock_ws = MagicMock()
+        mock_ws_client.return_value = mock_ws
+        mock_ws.config.host = "https://test.databricks.com"
+        mock_ws.api_client.do.return_value = {"pipeline_id": "pl-9"}
+
+        full_spec = (
+            '{"name": "p", "catalog": "cat", "schema": "sch", '
+            '"ingestion_definition": {"connection_name": "c", '
+            '"objects": [{"table": {"source_table": "t", '
+            '"destination_catalog": "cat", "destination_schema": "sch"}}]}, '
+            '"environment": {"dependencies": ["/Volumes/x/y/z/pre.whl"]}}'
+        )
+        result = runner.invoke(
+            main, ["create_pipeline", "github", "my_pipeline", "-ps", full_spec]
+        )
+
+        assert result.exit_code == 0, f"Output: {result.output}"
+        mock_build_upload.assert_not_called()
+        mock_dest_dir.assert_not_called()
+        body = mock_ws.api_client.do.call_args.kwargs["body"]
+        assert body["environment"]["dependencies"] == ["/Volumes/x/y/z/pre.whl"]
+
+    @patch("databricks.labs.community_connector_cli.cli._build_and_upload_managed_wheels")
+    @patch("databricks.labs.community_connector_cli.cli._resolve_managed_dest_dir")
+    @patch("databricks.labs.community_connector_cli.cli.WorkspaceClient")
+    def test_managed_update_uses_put(
+        self, mock_ws_client, mock_dest_dir, mock_build_upload
+    ):
+        runner = CliRunner()
+        mock_ws = MagicMock()
+        mock_ws_client.return_value = mock_ws
+        mock_ws.config.host = "https://test.databricks.com"
+        mock_pipeline_obj = MagicMock()
+        mock_pipeline_obj.pipeline_id = "pl-77"
+        mock_ws.pipelines.list_pipelines.return_value = [mock_pipeline_obj]
+        mock_dest_dir.return_value = "/Volumes/cat/sch/community_connector/packages"
+        mock_build_upload.return_value = ["/Volumes/cat/sch/community_connector/packages/w.whl"]
+
+        result = runner.invoke(
+            main,
+            ["update_pipeline", "my_pipeline", "-ps", self._bare_spec(),
+             "-s", "github", "-c", "cat", "-t", "sch"],
+        )
+
+        assert result.exit_code == 0, f"Output: {result.output}"
+        args, kwargs = mock_ws.api_client.do.call_args
+        assert args[0] == "PUT"
+        assert args[1] == "/api/2.0/pipelines/pl-77"
+        assert kwargs["body"]["id"] == "pl-77"
 
 
 def _make_fake_wheel(path: Path, source_name: str) -> Path:
