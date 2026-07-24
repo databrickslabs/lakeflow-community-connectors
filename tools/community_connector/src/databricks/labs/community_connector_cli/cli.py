@@ -1563,6 +1563,22 @@ def _update_managed_pipeline(
     )
 
 
+def _resolve_managed_catalog_schema(
+    spec: dict, is_full: bool, catalog: Optional[str], schema: Optional[str],
+) -> Tuple[Optional[str], Optional[str]]:
+    """Resolve the effective catalog/schema for a managed pipeline.
+
+    An explicit ``--catalog``/``--schema`` wins. Otherwise, for a full pipeline
+    spec, fall back to the spec's top-level ``catalog``/``schema`` so the wheel
+    volume and any backfilled destinations track what the user declared rather
+    than defaulting to ``main``/``default``.
+    """
+    if is_full:
+        catalog = catalog or spec.get("catalog")
+        schema = schema or spec.get("schema")
+    return catalog, schema
+
+
 # pylint: disable=too-many-arguments,too-many-positional-arguments,too-many-locals
 def _build_managed_pipeline_body(
     workspace_client, spec: dict, pipeline_name: Optional[str], source_name: Optional[str],
@@ -1576,6 +1592,8 @@ def _build_managed_pipeline_body(
             validate_ingestion_definition(spec)
         except ManagedPipelineSpecError as e:
             raise click.ClickException(f"Invalid ingestion definition: {e}")
+
+    catalog, schema = _resolve_managed_catalog_schema(spec, is_full, catalog, schema)
 
     dependencies = _managed_dependencies(
         workspace_client, spec, is_full, source_name,

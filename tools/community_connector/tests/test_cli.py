@@ -2578,6 +2578,38 @@ class TestManagedCreatePipeline:
     @patch("databricks.labs.community_connector_cli.cli._build_and_upload_managed_wheels")
     @patch("databricks.labs.community_connector_cli.cli._resolve_managed_dest_dir")
     @patch("databricks.labs.community_connector_cli.cli.WorkspaceClient")
+    def test_managed_create_full_spec_catalog_schema_from_spec(
+        self, mock_ws_client, mock_dest_dir, mock_build_upload
+    ):
+        """When --catalog/--schema are omitted, the volume uses the spec's values."""
+        runner = CliRunner()
+        mock_ws = MagicMock()
+        mock_ws_client.return_value = mock_ws
+        mock_ws.config.host = "https://test.databricks.com"
+        mock_ws.api_client.do.return_value = {"pipeline_id": "pl-1"}
+        mock_dest_dir.return_value = "/Volumes/spec_cat/spec_sch/community_connector/packages"
+        mock_build_upload.return_value = ["/Volumes/spec_cat/spec_sch/community_connector/packages/w.whl"]
+
+        full_spec = (
+            '{"name": "p", "catalog": "spec_cat", "schema": "spec_sch", '
+            '"ingestion_definition": {"connection_name": "c", '
+            '"objects": [{"table": {"source_table": "t", '
+            '"destination_catalog": "spec_cat", "destination_schema": "spec_sch"}}]}}'
+        )
+        result = runner.invoke(
+            main, ["create_pipeline", "github", "my_pipeline", "-ps", full_spec]
+        )
+
+        assert result.exit_code == 0, f"Output: {result.output}"
+        # Volume resolution is called with the spec's catalog/schema, not main/default.
+        # Positional args: (ws, volume_path, catalog, schema, debug)
+        call = mock_dest_dir.call_args
+        assert call.args[2] == "spec_cat"
+        assert call.args[3] == "spec_sch"
+
+    @patch("databricks.labs.community_connector_cli.cli._build_and_upload_managed_wheels")
+    @patch("databricks.labs.community_connector_cli.cli._resolve_managed_dest_dir")
+    @patch("databricks.labs.community_connector_cli.cli.WorkspaceClient")
     def test_managed_update_uses_put(
         self, mock_ws_client, mock_dest_dir, mock_build_upload
     ):
