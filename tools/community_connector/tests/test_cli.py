@@ -2635,6 +2635,40 @@ class TestManagedCreatePipeline:
         assert args[1] == "/api/2.0/pipelines/pl-77"
         assert kwargs["body"]["id"] == "pl-77"
 
+    @patch("databricks.labs.community_connector_cli.cli._build_and_upload_managed_wheels")
+    @patch("databricks.labs.community_connector_cli.cli._resolve_managed_dest_dir")
+    @patch("databricks.labs.community_connector_cli.cli.WorkspaceClient")
+    def test_managed_update_no_source_reuses_existing_deps(
+        self, mock_ws_client, mock_dest_dir, mock_build_upload
+    ):
+        """Update without -s/--package must not rebuild; it reuses existing deps."""
+        runner = CliRunner()
+        mock_ws = MagicMock()
+        mock_ws_client.return_value = mock_ws
+        mock_ws.config.host = "https://test.databricks.com"
+        mock_pipeline_obj = MagicMock()
+        mock_pipeline_obj.pipeline_id = "pl-88"
+        mock_ws.pipelines.list_pipelines.return_value = [mock_pipeline_obj]
+
+        # Existing pipeline already points at wheels on a volume.
+        existing = ["/Volumes/cat/sch/community_connector/packages/existing.whl"]
+        mock_info = MagicMock()
+        mock_info.spec.environment.dependencies = existing
+        mock_ws.pipelines.get.return_value = mock_info
+
+        result = runner.invoke(
+            main,
+            ["update_pipeline", "my_pipeline", "-ps", self._bare_spec()],
+        )
+
+        assert result.exit_code == 0, f"Output: {result.output}"
+        # No build/upload and no volume resolution.
+        mock_build_upload.assert_not_called()
+        mock_dest_dir.assert_not_called()
+        # Existing dependencies are carried into the new body.
+        body = mock_ws.api_client.do.call_args.kwargs["body"]
+        assert body["environment"]["dependencies"] == existing
+
 
 def _make_fake_wheel(path: Path, source_name: str) -> Path:
     """Build a minimal in-process zip that looks like a connector wheel.

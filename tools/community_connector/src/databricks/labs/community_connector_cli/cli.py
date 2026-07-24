@@ -1510,17 +1510,42 @@ def _build_and_upload_managed_wheels(  # pylint: disable=too-many-arguments,too-
             shutil.rmtree(cleanup_dir, ignore_errors=True)
 
 
-def _managed_dependencies(  # pylint: disable=too-many-arguments,too-many-positional-arguments
+def _existing_pipeline_dependencies(
+    workspace_client, pipeline_id: str, debug: bool
+) -> Optional[List[str]]:
+    """Return the existing pipeline's ``environment.dependencies``, or None.
+
+    Used on update when the caller does not ask to rebuild wheels, so the
+    pipeline keeps the connector packages it was already pointing at.
+    """
+    try:
+        pipeline_info = workspace_client.pipelines.get(pipeline_id)
+    except Exception as e:  # pragma: no cover - network/permission errors
+        raise click.ClickException(f"Failed to read existing pipeline: {e}")
+    spec = getattr(pipeline_info, "spec", None)
+    environment = getattr(spec, "environment", None) if spec else None
+    dependencies = getattr(environment, "dependencies", None) if environment else None
+    if debug:
+        click.echo(f"[DEBUG] Existing pipeline dependencies: {dependencies}")
+    return list(dependencies) if dependencies else None
+
+
+# pylint: disable=too-many-arguments,too-many-positional-arguments
+def _managed_dependencies(
     workspace_client, spec: dict, is_full: bool, source_name: Optional[str],
     volume_path: Optional[str], catalog: Optional[str], schema: Optional[str],
     package_paths: tuple, debug: bool,
+    build_wheels: bool = True, existing_dependencies: Optional[List[str]] = None,
 ) -> Optional[List[str]]:
     """Decide whether to build/upload wheels and return their volume paths.
 
-    A full spec that already declares an ``environment`` block is left untouched
-    (the user handles dependencies), so no build/upload happens and ``None`` is
-    returned. In every other case the connector wheels are uploaded and their
-    paths returned for ``environment.dependencies``.
+    - A full spec that already declares an ``environment`` block is left
+      untouched (the user handles dependencies): returns ``None``.
+    - When ``build_wheels`` is False (update with no ``--source-name`` /
+      ``--package``), the connector wheels are not rebuilt and the existing
+      pipeline dependencies are reused instead.
+    - Otherwise the connector wheels are built/uploaded and their paths returned
+      for ``environment.dependencies``.
     """
     if is_full and "environment" in spec:
         click.echo(
@@ -1528,6 +1553,13 @@ def _managed_dependencies(  # pylint: disable=too-many-arguments,too-many-positi
             "skipping wheel build/upload."
         )
         return None
+
+    if not build_wheels:
+        click.echo(
+            "\nNo --source-name or --package given; reusing the pipeline's "
+            "existing connector packages."
+        )
+        return existing_dependencies
 
     dest_dir = _resolve_managed_dest_dir(
         workspace_client, volume_path, catalog, schema, debug
@@ -1584,6 +1616,7 @@ def _build_managed_pipeline_body(
     workspace_client, spec: dict, pipeline_name: Optional[str], source_name: Optional[str],
     connection_name: Optional[str], catalog: Optional[str], schema: Optional[str],
     volume_path: Optional[str], package_paths: tuple, debug: bool,
+    build_wheels: bool = True, existing_dependencies: Optional[List[str]] = None,
 ) -> dict:
     """Build the full managed-ingestion pipeline body (bare or full spec)."""
     is_full = is_full_pipeline_spec(spec)
@@ -1598,6 +1631,7 @@ def _build_managed_pipeline_body(
     dependencies = _managed_dependencies(
         workspace_client, spec, is_full, source_name,
         volume_path, catalog, schema, package_paths, debug,
+        build_wheels=build_wheels, existing_dependencies=existing_dependencies,
     )
 
     if is_full:
@@ -2016,9 +2050,19 @@ def _update_managed_pipeline_cmd(
         pipeline_id = _find_pipeline_by_name(workspace_client, pipeline_name)
         click.echo(f"  ✓ Found pipeline ID: {pipeline_id}")
 
+        # On update, only rebuild wheels when the caller asked for it via
+        # --source-name or --package. Otherwise reuse the pipeline's existing
+        # environment.dependencies so the packages are left untouched.
+        build_wheels = bool(source_name or package_paths)
+        existing_dependencies = (
+            None if build_wheels
+            else _existing_pipeline_dependencies(workspace_client, pipeline_id, debug)
+        )
+
         body = _build_managed_pipeline_body(
             workspace_client, spec, pipeline_name, source_name, connection_name,
             catalog, schema, volume_path, package_paths, debug,
+            build_wheels=build_wheels, existing_dependencies=existing_dependencies,
         )
 
         click.echo("\nUpdating pipeline...")

@@ -179,7 +179,10 @@ automatically.
    - `-v` overrides the wheel upload volume path (defaults to
      `/Volumes/<catalog>/<schema>/community_connector/packages`).
    - Pass `-p <WHEEL>` to reuse pre-built wheels instead of building.
-   - `-s {{source_name}}` on update tells the CLI which connector wheels to build.
+   - `-s {{source_name}}` on update tells the CLI which connector wheels to
+     build. **Omit both `-s` and `-p` on update to leave the packages
+     untouched** — the CLI reuses the pipeline's existing
+     `environment.dependencies` and only applies the new spec.
 
 3. After success, delete the spec file.
 
