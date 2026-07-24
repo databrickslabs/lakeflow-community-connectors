@@ -1,0 +1,120 @@
+# Mailchimp Marketing API v3.0 — endpoints exercised by the connector.
+#
+# Connector flow:
+#   * campaigns/reports/lists  -> GET /{resource}
+#   * members                  -> GET /lists (enumerate audiences), then
+#                                 GET /lists/{list_id}/members per audience.
+#
+# Common patterns:
+#   * Pagination is offset/count (Mailchimp: count default 10, max 1000). We
+#     model it as ``offset_limit`` with ``count`` in the ``limit`` role and
+#     ``offset`` in the ``offset`` role.
+#   * List responses are wrapped: ``{"<resource>": [...], "total_items": N}``.
+#     The wrapper's ``total_items`` extra is a fixed placeholder; the connector
+#     terminates on a short page, so the exact value is not load-bearing.
+#   * Incremental filters use ISO-8601 timestamps: ``since_*`` (gt, EXCLUSIVE —
+#     matches the real Mailchimp API) and ``before_*`` (lt) on the cursor field.
+#     The connector applies a small lookback to ``since`` so the exclusive
+#     boundary row is not dropped.
+#   * The connector caps its window upper bound at an init-time snapshot, so
+#     each endpoint declares ``synthesize_future_records`` on its cursor field
+#     to inject a few post-now records that a correctly-capped connector must
+#     exclude — this drives ``test_read_terminates`` to converge.
+#   * default_sort is ascending on the cursor so the connector's count=1
+#     "peek oldest" probe returns the true oldest record in simulate mode.
+
+endpoints:
+  # ---- campaigns (CDC, create_time) ----
+  # Paths include the ``/3.0`` API-version prefix because the simulator matches
+  # against the full request URL path, and the connector's base_url is
+  # ``https://<dc>.api.mailchimp.com/3.0``.
+  - path: "/3.0/campaigns"
+    method: GET
+    corpus: campaigns
+    response:
+      pagination_style: offset_limit
+      default_sort: "create_time asc"
+      # Mailchimp wraps every list response with a HATEOAS ``_links`` array
+      # (and ``constraints`` on /lists, ``list_id`` on /members) that the
+      # connector never reads. ignore_extra_keys suppresses the live-validator
+      # "top-level keys missing from spec" noise for these envelope-only keys.
+      wrapper: {records_key: campaigns, extras: {total_items: 0}, ignore_extra_keys: true}
+    params:
+      count:               {role: limit, default: 10, max: 1000}
+      offset:              {role: offset}
+      since_create_time:   {role: filter, field: create_time, op: gt}
+      before_create_time:  {role: filter, field: create_time, op: lt}
+      since_send_time:     {role: filter, field: send_time, op: gt}
+      before_send_time:    {role: filter, field: send_time, op: lt}
+      sort_field:          {role: ignore}
+      sort_dir:            {role: ignore}
+      fields:              {role: ignore}
+      exclude_fields:      {role: ignore}
+    synthesize_future_records:
+      cursor_field: create_time
+      count: 3
+
+  # ---- reports (CDC, send_time) ----
+  - path: "/3.0/reports"
+    method: GET
+    corpus: reports
+    response:
+      pagination_style: offset_limit
+      default_sort: "send_time asc"
+      wrapper: {records_key: reports, extras: {total_items: 0}, ignore_extra_keys: true}
+    params:
+      count:             {role: limit, default: 10, max: 1000}
+      offset:            {role: offset}
+      since_send_time:   {role: filter, field: send_time, op: gt}
+      before_send_time:  {role: filter, field: send_time, op: lt}
+      sort_field:        {role: ignore}
+      sort_dir:          {role: ignore}
+      fields:            {role: ignore}
+      exclude_fields:    {role: ignore}
+    synthesize_future_records:
+      cursor_field: send_time
+      count: 3
+
+  # ---- lists / audiences (CDC, date_created) ----
+  - path: "/3.0/lists"
+    method: GET
+    corpus: lists
+    response:
+      pagination_style: offset_limit
+      default_sort: "date_created asc"
+      wrapper: {records_key: lists, extras: {total_items: 0}, ignore_extra_keys: true}
+    params:
+      count:                {role: limit, default: 10, max: 1000}
+      offset:               {role: offset}
+      since_date_created:   {role: filter, field: date_created, op: gt}
+      before_date_created:  {role: filter, field: date_created, op: lt}
+      sort_field:           {role: ignore}
+      sort_dir:             {role: ignore}
+      fields:               {role: ignore}
+      exclude_fields:       {role: ignore}
+    synthesize_future_records:
+      cursor_field: date_created
+      count: 3
+
+  # ---- members (CDC, last_changed) — nested under a list ----
+  - path: "/3.0/lists/{list_id}/members"
+    method: GET
+    corpus: members
+    response:
+      pagination_style: offset_limit
+      default_sort: "last_changed asc"
+      wrapper: {records_key: members, extras: {total_items: 0}, ignore_extra_keys: true}
+    params:
+      count:                 {role: limit, default: 10, max: 1000}
+      offset:                {role: offset}
+      since_last_changed:    {role: filter, field: last_changed, op: gt}
+      before_last_changed:   {role: filter, field: last_changed, op: lt}
+      since_timestamp_opt:   {role: filter, field: timestamp_opt, op: gt}
+      before_timestamp_opt:  {role: filter, field: timestamp_opt, op: lt}
+      sort_field:            {role: ignore}
+      sort_dir:              {role: ignore}
+      fields:                {role: ignore}
+      exclude_fields:        {role: ignore}
+    synthesize_future_records:
+      cursor_field: last_changed
+      count: 3
