@@ -31,13 +31,16 @@ class TestValidateIngestionDefinition:
     def test_valid_schema_object(self):
         validate_ingestion_definition({"objects": [{"schema": {"source_schema": "s"}}]})
 
-    def test_missing_objects(self):
-        with pytest.raises(ManagedPipelineSpecError):
-            validate_ingestion_definition({"connection_name": "c"})
+    def test_missing_objects_allowed(self):
+        # An empty pipeline (connection only, no tables) is valid.
+        validate_ingestion_definition({"connection_name": "c"})
 
-    def test_empty_objects(self):
+    def test_empty_objects_allowed(self):
+        validate_ingestion_definition({"objects": []})
+
+    def test_objects_wrong_type(self):
         with pytest.raises(ManagedPipelineSpecError):
-            validate_ingestion_definition({"objects": []})
+            validate_ingestion_definition({"objects": "not-a-list"})
 
     def test_object_without_selector(self):
         with pytest.raises(ManagedPipelineSpecError):

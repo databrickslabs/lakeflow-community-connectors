@@ -2537,14 +2537,43 @@ class TestManagedCreatePipeline:
             "pipelines.managedIngestion.registerPythonDataSource"] == "true"
         assert body["environment"]["dependencies"]
 
-    def test_managed_create_requires_spec(self):
+    def test_managed_create_requires_spec_or_connection(self):
         runner = CliRunner()
         with patch("databricks.labs.community_connector_cli.cli.WorkspaceClient"):
             result = runner.invoke(
-                main, ["create_pipeline", "github", "my_pipeline", "-n", "conn"]
+                main, ["create_pipeline", "github", "my_pipeline"]
             )
         assert result.exit_code != 0
-        assert "--pipeline-spec is required" in result.output
+        assert "Either --pipeline-spec or --connection-name" in result.output
+
+    @patch("databricks.labs.community_connector_cli.cli._build_and_upload_managed_wheels")
+    @patch("databricks.labs.community_connector_cli.cli._resolve_managed_dest_dir")
+    @patch("databricks.labs.community_connector_cli.cli.WorkspaceClient")
+    def test_managed_create_empty_pipeline_from_connection(
+        self, mock_ws_client, mock_dest_dir, mock_build_upload
+    ):
+        """No --pipeline-spec: create an empty pipeline (no objects) from -n."""
+        runner = CliRunner()
+        mock_ws = MagicMock()
+        mock_ws_client.return_value = mock_ws
+        mock_ws.config.host = "https://test.databricks.com"
+        mock_ws.api_client.do.return_value = {"pipeline_id": "pl-empty"}
+        mock_dest_dir.return_value = "/Volumes/cat/sch/community_connector/packages"
+        mock_build_upload.return_value = ["/Volumes/cat/sch/community_connector/packages/w.whl"]
+
+        result = runner.invoke(
+            main,
+            ["create_pipeline", "github", "my_pipeline", "-n", "my_conn",
+             "-c", "cat", "-t", "sch"],
+        )
+
+        assert result.exit_code == 0, f"Output: {result.output}"
+        assert "empty pipeline" in result.output
+        body = mock_ws.api_client.do.call_args.kwargs["body"]
+        assert body["ingestion_definition"]["connection_name"] == "my_conn"
+        assert body["ingestion_definition"]["objects"] == []
+        assert body["ingestion_definition"]["source_type"] == "COMMUNITY"
+        assert body["catalog"] == "cat"
 
     @patch("databricks.labs.community_connector_cli.cli._build_and_upload_managed_wheels")
     @patch("databricks.labs.community_connector_cli.cli._resolve_managed_dest_dir")

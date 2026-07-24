@@ -93,6 +93,11 @@ If multiple tables share options (e.g. same `owner`/`repo`), ask once and reuse 
 
 ## Step 3 — Generate the full pipeline spec
 
+> If the user just wants an **empty pipeline** (a connection but no tables yet,
+> to add later), skip the spec entirely: run `create_pipeline` with only
+> `-n <CONNECTION_NAME> -c <CATALOG> -t <SCHEMA>` (see Step 5). Otherwise build
+> the spec below.
+
 Build a **complete pipeline spec** as JSON or YAML. The CLI sends it to the
 pipelines API as-is, only adding the managed-ingestion configuration flag, the
 `ingestion_definition.source_type`, and the connector wheel `environment`. Since
@@ -165,6 +170,12 @@ automatically.
    community-connector create_pipeline {{source_name}} <PIPELINE_NAME> \
      -ps tests/unit/sources/{{source_name}}/configs/{PIPELINE_NAME}_spec.yaml \
      [-v <VOLUME_PATH>]
+   ```
+
+   **Create empty pipeline (no spec, add tables later):**
+   ```bash
+   community-connector create_pipeline {{source_name}} <PIPELINE_NAME> \
+     -n <CONNECTION_NAME> -c <CATALOG> -t <SCHEMA>
    ```
 
    **Update mode:**

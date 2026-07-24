@@ -58,18 +58,20 @@ def is_full_pipeline_spec(spec: dict) -> bool:
 def validate_ingestion_definition(ingestion_def: dict) -> None:
     """Light structural check for a bare ingestion definition.
 
-    Ensures there is a non-empty ``objects`` list and that each object selects a
-    source via ``table``, ``schema``, or ``report``. Everything else (connector
-    options, destinations) is passed through to the API verbatim.
+    ``objects`` may be absent or empty — that produces an "empty" managed
+    pipeline with a connection but no tables yet, which the user can populate
+    later. When ``objects`` is present it must be a list, and each object must
+    select a source via ``table``, ``schema``, or ``report``. Everything else
+    (connector options, destinations) is passed through to the API verbatim.
     """
     if not isinstance(ingestion_def, dict):
         raise ManagedPipelineSpecError("ingestion definition must be a mapping")
 
     objects = ingestion_def.get("objects")
-    if not isinstance(objects, list) or not objects:
-        raise ManagedPipelineSpecError(
-            "ingestion definition must contain a non-empty 'objects' list"
-        )
+    if objects is None:
+        return
+    if not isinstance(objects, list):
+        raise ManagedPipelineSpecError("'objects' must be a list")
 
     for i, obj in enumerate(objects):
         if not isinstance(obj, dict) or not any(

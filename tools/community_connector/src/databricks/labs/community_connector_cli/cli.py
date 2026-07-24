@@ -1677,14 +1677,24 @@ def _create_managed_pipeline_cmd(
     debug: bool,
 ) -> None:
     """Create a managed ingestion pipeline (default mode of create_pipeline)."""
-    if not pipeline_spec_input:
+    if not pipeline_spec_input and not connection_name:
         raise click.ClickException(
-            "--pipeline-spec is required for managed ingestion pipelines. "
-            "Pass --use-workspace-pipeline for the legacy workspace mode."
+            "Either --pipeline-spec or --connection-name must be provided for "
+            "managed ingestion pipelines. Pass --use-workspace-pipeline for the "
+            "legacy workspace mode."
         )
 
     click.echo(f"Creating managed ingestion pipeline: {pipeline_name}")
-    spec = _parse_managed_pipeline_spec(pipeline_spec_input)
+    if pipeline_spec_input:
+        spec = _parse_managed_pipeline_spec(pipeline_spec_input)
+    else:
+        # No spec: create an empty ingestion pipeline (connection only, no
+        # objects). Tables can be added later with update_pipeline.
+        click.echo(
+            "  No --pipeline-spec given; creating an empty pipeline "
+            "(no tables) from --connection-name."
+        )
+        spec = {"connection_name": connection_name, "objects": []}
 
     workspace_client = _make_workspace_client()
     body = _build_managed_pipeline_body(
@@ -1812,11 +1822,14 @@ def create_pipeline(
     --use-workspace-pipeline for the legacy mode that clones the repo into the
     workspace and runs ingest.py.
 
-    Managed mode: --pipeline-spec is required and may be either a bare
-    ingestion definition (connection_name + objects) or a full pipeline spec
-    (containing an 'ingestion_definition' block). Wheels are built from the
-    local source unless --package supplies pre-built ones. If a full spec
-    already declares an 'environment', wheel build/upload is skipped.
+    Managed mode: provide either --pipeline-spec or --connection-name.
+    --pipeline-spec may be a bare ingestion definition (connection_name +
+    objects) or a full pipeline spec (containing an 'ingestion_definition'
+    block). With only --connection-name (no spec) an empty pipeline is created
+    (a connection but no tables) that you can populate later with
+    update_pipeline. Wheels are built from the local source unless --package
+    supplies pre-built ones. If a full spec already declares an 'environment',
+    wheel build/upload is skipped.
 
     Workspace mode: either --connection-name or --pipeline-spec must be
     provided; when --package is given the uploaded wheels are used and no repo
@@ -1829,6 +1842,9 @@ def create_pipeline(
             -ps spec.yaml -n my_conn -c main -t raw
         community-connector create_pipeline github my_pipeline \\
             -ps full_pipeline.yaml
+        # Empty managed pipeline (add tables later):
+        community-connector create_pipeline github my_pipeline \\
+            -n my_conn -c main -t raw
         # Legacy workspace pipeline:
         community-connector create_pipeline github my_pipeline \\
             -n my_conn --use-workspace-pipeline
