@@ -615,6 +615,9 @@ def _parse_pipeline_spec(spec_input: str, validate: bool = True) -> dict:
         except json.JSONDecodeError as e:
             raise click.ClickException(f"Invalid JSON for --pipeline-spec: {e}")
 
+    if not isinstance(spec, dict):
+        raise click.ClickException("Pipeline spec must be a JSON/YAML object")
+
     # Validate the spec (connection_name is always required in spec)
     if validate:
         try:
@@ -1424,31 +1427,12 @@ _MANAGED_DEFAULT_SERVERLESS = True
 def _parse_managed_pipeline_spec(spec_input: str) -> dict:
     """Parse a managed-mode spec from a JSON string or .yaml/.json file.
 
-    Unlike ``_parse_pipeline_spec`` this does not run the friendly-spec
-    validator: a managed spec is either a bare ``ingestion_definition`` (whose
+    Unlike the default call, this does not run the friendly-spec validator: a
+    managed spec is either a bare ``ingestion_definition`` (whose
     connection_name may come from ``--connection-name`` rather than the file) or
     a full pipeline object, neither of which matches that validator's shape.
     """
-    if spec_input.endswith((".yaml", ".yml", ".json")):
-        try:
-            with open(spec_input, "r") as f:
-                if spec_input.endswith(".json"):
-                    spec = json.load(f)
-                else:
-                    spec = yaml.safe_load(f)
-        except FileNotFoundError:
-            raise click.ClickException(f"Pipeline spec file not found: {spec_input}")
-        except Exception as e:
-            raise click.ClickException(f"Failed to parse pipeline spec file: {e}")
-    else:
-        try:
-            spec = json.loads(spec_input)
-        except json.JSONDecodeError as e:
-            raise click.ClickException(f"Invalid JSON for --pipeline-spec: {e}")
-
-    if not isinstance(spec, dict):
-        raise click.ClickException("Pipeline spec must be a JSON/YAML object")
-    return spec
+    return _parse_pipeline_spec(spec_input, validate=False)
 
 
 def _resolve_managed_dest_dir(

@@ -43,6 +43,19 @@ class ManagedPipelineSpecError(Exception):
     """Raised when a managed ingestion spec is structurally invalid."""
 
 
+def _dict_field(body: dict, key: str) -> dict:
+    """Return ``body[key]`` as a dict, replacing a missing/non-dict value.
+
+    The returned dict is stored back on ``body`` so callers can mutate it in
+    place. Guards against a spec that carries a non-dict (e.g. null) at ``key``.
+    """
+    value = body.get(key)
+    if not isinstance(value, dict):
+        value = {}
+        body[key] = value
+    return value
+
+
 def is_full_pipeline_spec(spec: dict) -> bool:
     """Return True when ``spec`` is a full pipeline object, not a bare ingestion def.
 
@@ -173,18 +186,10 @@ def build_bare_pipeline_body(
     if serverless is not None:
         body["serverless"] = serverless
 
-    configuration = body.get("configuration")
-    if not isinstance(configuration, dict):
-        configuration = {}
-    configuration[REGISTER_PYTHON_DATA_SOURCE_KEY] = "true"
-    body["configuration"] = configuration
+    _dict_field(body, "configuration")[REGISTER_PYTHON_DATA_SOURCE_KEY] = "true"
 
     if dependencies:
-        environment = body.get("environment")
-        if not isinstance(environment, dict):
-            environment = {}
-        environment["dependencies"] = list(dependencies)
-        body["environment"] = environment
+        _dict_field(body, "environment")["dependencies"] = list(dependencies)
 
     return body
 
@@ -224,11 +229,7 @@ def augment_full_pipeline_body(
     if schema:
         body["schema"] = schema
 
-    configuration = body.get("configuration")
-    if not isinstance(configuration, dict):
-        configuration = {}
-    configuration.setdefault(REGISTER_PYTHON_DATA_SOURCE_KEY, "true")
-    body["configuration"] = configuration
+    _dict_field(body, "configuration").setdefault(REGISTER_PYTHON_DATA_SOURCE_KEY, "true")
 
     if "environment" not in body and dependencies:
         body["environment"] = {"dependencies": list(dependencies)}
