@@ -2515,7 +2515,8 @@ class TestManagedCreatePipeline:
         mock_ws.config.host = "https://test.databricks.com"
         mock_ws.api_client.do.return_value = {"pipeline_id": "pl-123"}
         mock_dest_dir.return_value = "/Volumes/main/default/community_connector/packages"
-        mock_build_upload.return_value = ["/Volumes/main/default/community_connector/packages/w.whl"]
+        mock_build_upload.return_value = [
+            "/Volumes/main/default/community_connector/packages/w.whl"]
 
         result = runner.invoke(
             main,
@@ -2617,7 +2618,8 @@ class TestManagedCreatePipeline:
         mock_ws.config.host = "https://test.databricks.com"
         mock_ws.api_client.do.return_value = {"pipeline_id": "pl-1"}
         mock_dest_dir.return_value = "/Volumes/spec_cat/spec_sch/community_connector/packages"
-        mock_build_upload.return_value = ["/Volumes/spec_cat/spec_sch/community_connector/packages/w.whl"]
+        mock_build_upload.return_value = [
+            "/Volumes/spec_cat/spec_sch/community_connector/packages/w.whl"]
 
         full_spec = (
             '{"name": "p", "catalog": "spec_cat", "schema": "spec_sch", '
@@ -2726,7 +2728,8 @@ class TestManagedCreatePipeline:
         mock_pipeline_obj.pipeline_id = "pl-99"
         mock_ws.pipelines.list_pipelines.return_value = [mock_pipeline_obj]
         mock_dest_dir.return_value = "/Volumes/livecat/livesch/community_connector/packages"
-        mock_build_upload.return_value = ["/Volumes/livecat/livesch/community_connector/packages/w.whl"]
+        mock_build_upload.return_value = [
+            "/Volumes/livecat/livesch/community_connector/packages/w.whl"]
 
         # Live pipeline has settings the CLI does not manage plus CURRENT channel.
         self._mock_get_with_spec(mock_ws, {
