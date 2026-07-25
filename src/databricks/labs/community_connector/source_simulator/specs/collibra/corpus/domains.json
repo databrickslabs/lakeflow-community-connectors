@@ -1,0 +1,127 @@
+[
+  {
+    "id": "juliet-8-pk0",
+    "createdBy": "lima-221",
+    "createdOn": 88739,
+    "lastModifiedBy": "yankee-916",
+    "lastModifiedOn": 996,
+    "system": true,
+    "name": "victor-663",
+    "description": "tango-914",
+    "meta": true,
+    "excludedFromAutoHyperlinking": false,
+    "community": {
+      "id": "quebec-268",
+      "name": "mike-788",
+      "resourceType": "papa-577",
+      "resourceDiscriminator": "papa-283"
+    },
+    "type": {
+      "id": "india-482",
+      "name": "oscar-471",
+      "resourceType": "charlie-583",
+      "resourceDiscriminator": "romeo-913"
+    },
+    "collibra_org": "papa-761"
+  },
+  {
+    "id": "lima-328-pk1",
+    "createdBy": "oscar-605",
+    "createdOn": 21534,
+    "lastModifiedBy": "kilo-575",
+    "lastModifiedOn": 29838,
+    "system": true,
+    "name": "hotel-226",
+    "description": "alpha-481",
+    "meta": false,
+    "excludedFromAutoHyperlinking": true,
+    "community": {
+      "id": "quebec-915",
+      "name": "november-891",
+      "resourceType": "alpha-695",
+      "resourceDiscriminator": "quebec-163"
+    },
+    "type": {
+      "id": "quebec-402",
+      "name": "zulu-954",
+      "resourceType": "zulu-804",
+      "resourceDiscriminator": "tango-538"
+    },
+    "collibra_org": "juliet-510"
+  },
+  {
+    "id": "hotel-62-pk2",
+    "createdBy": "xray-928",
+    "createdOn": 56354,
+    "lastModifiedBy": "alpha-652",
+    "lastModifiedOn": 15649,
+    "system": true,
+    "name": "foxtrot-985",
+    "description": "xray-479",
+    "meta": true,
+    "excludedFromAutoHyperlinking": true,
+    "community": {
+      "id": "delta-654",
+      "name": "whiskey-733",
+      "resourceType": "xray-213",
+      "resourceDiscriminator": "bravo-295"
+    },
+    "type": {
+      "id": "echo-656",
+      "name": "charlie-821",
+      "resourceType": "november-758",
+      "resourceDiscriminator": "hotel-452"
+    },
+    "collibra_org": "kilo-909"
+  },
+  {
+    "id": "romeo-23-pk3",
+    "createdBy": "sierra-344",
+    "createdOn": 63729,
+    "lastModifiedBy": "papa-598",
+    "lastModifiedOn": 46664,
+    "system": true,
+    "name": "papa-504",
+    "description": "romeo-290",
+    "meta": true,
+    "excludedFromAutoHyperlinking": false,
+    "community": {
+      "id": "romeo-169",
+      "name": "yankee-214",
+      "resourceType": "sierra-259",
+      "resourceDiscriminator": "quebec-480"
+    },
+    "type": {
+      "id": "mike-267",
+      "name": "quebec-572",
+      "resourceType": "oscar-654",
+      "resourceDiscriminator": "whiskey-660"
+    },
+    "collibra_org": "tango-102"
+  },
+  {
+    "id": "papa-198-pk4",
+    "createdBy": "xray-895",
+    "createdOn": 3835,
+    "lastModifiedBy": "xray-924",
+    "lastModifiedOn": 31337,
+    "system": false,
+    "name": "tango-604",
+    "description": "foxtrot-753",
+    "meta": false,
+    "excludedFromAutoHyperlinking": true,
+    "community": {
+      "id": "juliet-599",
+      "name": "juliet-104",
+      "resourceType": "alpha-416",
+      "resourceDiscriminator": "alpha-810"
+    },
+    "type": {
+      "id": "sierra-652",
+      "name": "charlie-169",
+      "resourceType": "delta-202",
+      "resourceDiscriminator": "foxtrot-107"
+    },
+    "collibra_org": "quebec-677"
+  }
+]
