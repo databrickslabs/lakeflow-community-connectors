@@ -1029,3 +1029,29 @@ is needed.
 | Official Docs  | https://developer.collibra.com/tutorials/getting-started-with-collibra-rest-api.md | 2026-07-24 | High | Base URL pattern: `https://{org}.collibra.com/rest/2.0` |
 | Official Docs  | https://developer.collibra.com/api/references/oauth-client-management.md | 2026-07-24 | Medium | OAuth2 Client Management API v1 exists; client_credentials grant type; registration required; limited detail available publicly |
 | Official Docs  | https://developer.collibra.com/api/guides/knowledge-graph.md | 2026-07-24 | Medium | GraphQL Knowledge Graph is read-only; performance warning for complex joins confirmed |
+
+---
+
+## LIVE FINDINGS (databricks.collibra.com ISV instance, 2026-07-25)
+
+Validated against the real instance with an Integration (m2m) OAuth app:
+
+1. **Scope:** the token endpoint rejects `scope=kg.view-all` (`invalid_scope`).
+   **Mint with NO `scope` parameter** — Integration apps are permissioned by app
+   config, not a requested scope. Token then reads all endpoints fine.
+2. **`/assets` `sortField`:** `LAST_MODIFIED` is INVALID (400). `NAME` is valid;
+   omitting `sortField` also works. (Update connector default accordingly.)
+3. **Scale:** 264,578 assets · 19,274 Tables · 236,924 Columns. Full unfiltered
+   reads are large/slow — the incremental `lastModifiedOn` cursor is essential for
+   steady state; confirm `max_records_per_batch` bounds the fetch loop, not just
+   the emitted count.
+4. **Asset naming (decisive for Block B FQN resolution):** Table/Column names are
+   hierarchy paths with `>` separators AND a leading source-system prefix, e.g.
+   `851023352977.tpch_sf001>AwsDataCatalog>tpch_sf001>dl_customer`
+   Columns carry a `(column)` suffix: `...>dl_customer>c_acctbal(column)`.
+   These are NOT UC FQNs — this instance's assets are AWS Glue-sourced. Block B's
+   resolver must map source-system hierarchy → UC namespace and RETURN NONE (skip)
+   for foreign-source assets rather than mis-hydrate. `Databricks Schema` type
+   returned 0 assets in this demo instance.
+5. **Type IDs:** Column = `...031008`, Database = `...031006`, Data Element =
+   `...031026`, Databricks Schema = `...031413`. (Standard Table id `...031007`.)

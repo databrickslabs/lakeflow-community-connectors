@@ -87,14 +87,15 @@ connection:
   #   token_url      — Collibra Cloud token endpoint. `{org}` is interpolated
   #                    from the user-supplied org option by the CLI
   #                    (see the connector-spec parameter-templating support).
-  #   scopes         — kg.view-all grants read access to all knowledge graph
-  #                    resources (assets, attributes, relations, responsibilities,
-  #                    domains, communities).
+  #   (no scopes)    — live-validated (databricks.collibra.com, 2026-07-25):
+  #                    Collibra Integration (m2m) apps reject a `scope`
+  #                    parameter on the token request (`invalid_scope`); they
+  #                    are permissioned by app configuration, not a requested
+  #                    scope. Mint the client-credentials token with NO scope.
   # ---------------------------------------------------------------------------
   oauth:
     flow: m2m
     token_url: https://{org}.collibra.com/rest/oauth/v2/token
-    scopes: kg.view-all
 
 # ============================================================================
 # External Options Allowlist

@@ -1009,17 +1009,16 @@ def register_lakeflow_source(spark):
         ) -> tuple[Iterator[dict], dict]:
             """Read assets incrementally on the ``lastModifiedOn`` cursor.
 
-            ``sortField`` is required on ``/assets``. The incremental strategy
-            needs LAST_MODIFIED ascending so the cursor advances monotonically
-            and client-side truncation is safe.
-
-            needs-live-testing: the ``/assets`` object schema documents
-            ``sortField`` as NAME / DISPLAY_NAME / ID, while the incremental
-            section documents ``sortField=LAST_MODIFIED``. We default to
-            LAST_MODIFIED (overridable via the ``sort_field`` table option); if
-            the live instance rejects it, fall back to ID-keyset pagination.
+            ``sortField`` is required on ``/assets``. Live-validated
+            (databricks.collibra.com, 2026-07-25): ``/assets`` accepts ONLY
+            ``NAME`` / ``DISPLAY_NAME`` / ``ID`` — ``LAST_MODIFIED`` is rejected
+            (400); that value is valid only on ``/responsibilities`` and
+            ``/relations``. We therefore default to ``ID`` (stable keyset order),
+            and the ``lastModifiedOn`` incremental cursor is applied CLIENT-SIDE
+            (see ``_read_cdc_incremental``) rather than relying on server ordering.
+            Overridable via the ``sort_field`` table option (NAME/DISPLAY_NAME/ID).
             """
-            sort_field = table_options.get("sort_field", "LAST_MODIFIED")
+            sort_field = table_options.get("sort_field", "ID")
             base_params = {
                 "limit": str(self._page_size),
                 "sortField": sort_field,
