@@ -128,6 +128,39 @@ class TestBuildBarePipelineBody:
         assert "environment" not in body
         assert "catalog" not in body
 
+    def test_merge_onto_base_preserves_unmanaged_fields(self):
+        base = {
+            "name": "p",
+            "catalog": "cat",
+            "schema": "sch",
+            "channel": "CURRENT",
+            "serverless": False,
+            "tags": {"team": "data"},
+            "environment": {"dependencies": ["/old.whl"]},
+        }
+        body = build_bare_pipeline_body(
+            {"objects": [{"table": {"source_table": "t"}}]},
+            pipeline_name="p", connection_name="c",
+            catalog=None, schema=None, dependencies=["/new.whl"],
+            channel=None, serverless=None, base=base,
+        )
+        # Unmanaged fields survive; channel/serverless not overridden.
+        assert body["tags"] == {"team": "data"}
+        assert body["channel"] == "CURRENT"
+        assert body["serverless"] is False
+        # Managed additions applied; deps replaced.
+        assert body["configuration"][REGISTER_PYTHON_DATA_SOURCE_KEY] == "true"
+        assert body["environment"]["dependencies"] == ["/new.whl"]
+        assert body["ingestion_definition"]["source_type"] == SOURCE_TYPE_COMMUNITY
+
+    def test_merge_does_not_mutate_base(self):
+        base = {"name": "p", "tags": {"t": "v"}, "configuration": {}}
+        build_bare_pipeline_body(
+            {"objects": []}, pipeline_name="p", connection_name="c",
+            catalog=None, schema=None, dependencies=None, base=base,
+        )
+        assert base == {"name": "p", "tags": {"t": "v"}, "configuration": {}}
+
 
 class TestAugmentFullPipelineBody:
     def _spec(self, **extra):

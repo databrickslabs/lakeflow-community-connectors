@@ -1510,23 +1510,35 @@ def _build_and_upload_managed_wheels(  # pylint: disable=too-many-arguments,too-
             shutil.rmtree(cleanup_dir, ignore_errors=True)
 
 
-def _existing_pipeline_dependencies(
+def _get_existing_pipeline_spec(
     workspace_client, pipeline_id: str, debug: bool
-) -> Optional[List[str]]:
-    """Return the existing pipeline's ``environment.dependencies``, or None.
+) -> Optional[dict]:
+    """Return the existing pipeline's spec as a plain dict, or None.
 
-    Used on update when the caller does not ask to rebuild wheels, so the
-    pipeline keeps the connector packages it was already pointing at.
+    Used on update: the pipelines PUT is a full-settings replace, so we merge
+    the managed fields onto this existing spec to preserve everything the CLI
+    does not manage (tags, notifications, budget policy, channel, serverless,
+    existing dependencies, …) instead of wiping it.
     """
     try:
         pipeline_info = workspace_client.pipelines.get(pipeline_id)
     except Exception as e:  # pragma: no cover - network/permission errors
         raise click.ClickException(f"Failed to read existing pipeline: {e}")
     spec = getattr(pipeline_info, "spec", None)
-    environment = getattr(spec, "environment", None) if spec else None
-    dependencies = getattr(environment, "dependencies", None) if environment else None
+    if spec is None:
+        return None
+    spec_dict = spec.as_dict() if hasattr(spec, "as_dict") else dict(spec)
     if debug:
-        click.echo(f"[DEBUG] Existing pipeline dependencies: {dependencies}")
+        click.echo(f"[DEBUG] Existing pipeline spec: {spec_dict}")
+    return spec_dict
+
+
+def _dependencies_from_spec(spec_dict: Optional[dict]) -> Optional[List[str]]:
+    """Extract ``environment.dependencies`` from an existing pipeline spec dict."""
+    if not spec_dict:
+        return None
+    environment = spec_dict.get("environment")
+    dependencies = environment.get("dependencies") if isinstance(environment, dict) else None
     return list(dependencies) if dependencies else None
 
 
@@ -1580,7 +1592,12 @@ def _create_managed_pipeline(workspace_client, body: dict, debug: bool) -> str:
     response = workspace_client.api_client.do(
         "POST", "/api/2.0/pipelines", body=body
     )
-    return response.get("pipeline_id")
+    pipeline_id = (response or {}).get("pipeline_id")
+    if not pipeline_id:
+        raise click.ClickException(
+            f"Pipeline create API returned no pipeline_id. Response: {response}"
+        )
+    return pipeline_id
 
 
 def _update_managed_pipeline(
@@ -1595,19 +1612,24 @@ def _update_managed_pipeline(
     )
 
 
-def _resolve_managed_catalog_schema(
+def _resolve_managed_catalog_schema(  # pylint: disable=too-many-arguments,too-many-positional-arguments
     spec: dict, is_full: bool, catalog: Optional[str], schema: Optional[str],
+    base_spec: Optional[dict] = None,
 ) -> Tuple[Optional[str], Optional[str]]:
     """Resolve the effective catalog/schema for a managed pipeline.
 
-    An explicit ``--catalog``/``--schema`` wins. Otherwise, for a full pipeline
-    spec, fall back to the spec's top-level ``catalog``/``schema`` so the wheel
-    volume and any backfilled destinations track what the user declared rather
-    than defaulting to ``main``/``default``.
+    Precedence: explicit ``--catalog``/``--schema`` win; then, for a full
+    pipeline spec, the spec's top-level ``catalog``/``schema``; then the
+    existing pipeline's ``catalog``/``schema`` on update (``base_spec``). This
+    keeps the wheel volume and per-object destination backfill tracking real
+    values rather than defaulting to ``main``/``default`` or dropping them.
     """
     if is_full:
         catalog = catalog or spec.get("catalog")
         schema = schema or spec.get("schema")
+    if base_spec:
+        catalog = catalog or base_spec.get("catalog")
+        schema = schema or base_spec.get("schema")
     return catalog, schema
 
 
@@ -1616,9 +1638,15 @@ def _build_managed_pipeline_body(
     workspace_client, spec: dict, pipeline_name: Optional[str], source_name: Optional[str],
     connection_name: Optional[str], catalog: Optional[str], schema: Optional[str],
     volume_path: Optional[str], package_paths: tuple, debug: bool,
-    build_wheels: bool = True, existing_dependencies: Optional[List[str]] = None,
+    build_wheels: bool = True, base_spec: Optional[dict] = None,
 ) -> dict:
-    """Build the full managed-ingestion pipeline body (bare or full spec)."""
+    """Build the full managed-ingestion pipeline body (bare or full spec).
+
+    ``base_spec`` is the existing pipeline spec on update (None on create). For
+    a bare spec it is the merge base so the full-replace PUT preserves unmanaged
+    fields; for either shape it supplies catalog/schema and dependency
+    fallbacks.
+    """
     is_full = is_full_pipeline_spec(spec)
     if not is_full:
         try:
@@ -1626,21 +1654,28 @@ def _build_managed_pipeline_body(
         except ManagedPipelineSpecError as e:
             raise click.ClickException(f"Invalid ingestion definition: {e}")
 
-    catalog, schema = _resolve_managed_catalog_schema(spec, is_full, catalog, schema)
+    catalog, schema = _resolve_managed_catalog_schema(
+        spec, is_full, catalog, schema, base_spec
+    )
 
     dependencies = _managed_dependencies(
         workspace_client, spec, is_full, source_name,
         volume_path, catalog, schema, package_paths, debug,
-        build_wheels=build_wheels, existing_dependencies=existing_dependencies,
+        build_wheels=build_wheels,
+        existing_dependencies=_dependencies_from_spec(base_spec),
     )
 
     if is_full:
         return augment_full_pipeline_body(
             spec, pipeline_name, connection_name, catalog, schema, dependencies,
         )
+    # On update (base_spec set) omit the managed channel/serverless defaults so
+    # the pipeline's existing values are preserved by the merge.
     return build_bare_pipeline_body(
         spec, pipeline_name, connection_name, catalog, schema, dependencies,
-        channel=_MANAGED_DEFAULT_CHANNEL, serverless=_MANAGED_DEFAULT_SERVERLESS,
+        channel=None if base_spec else _MANAGED_DEFAULT_CHANNEL,
+        serverless=None if base_spec else _MANAGED_DEFAULT_SERVERLESS,
+        base=base_spec,
     )
 
 
@@ -1698,16 +1733,21 @@ def _create_managed_pipeline_cmd(
 
     workspace_client = _make_workspace_client()
     body = _build_managed_pipeline_body(
-        workspace_client, spec, pipeline_name, source_name, connection_name,
-        catalog, schema, volume_path, package_paths, debug,
+        workspace_client, spec,
+        pipeline_name=pipeline_name, source_name=source_name,
+        connection_name=connection_name, catalog=catalog, schema=schema,
+        volume_path=volume_path, package_paths=package_paths, debug=debug,
     )
 
     click.echo("\nCreating pipeline...")
     try:
         pipeline_id = _create_managed_pipeline(workspace_client, body, debug)
+    except click.ClickException:
+        raise
     except Exception as e:
-        _handle_api_error(e, "create pipeline for", debug)
-        return
+        if debug:
+            click.echo(f"\n[DEBUG] Full exception: {traceback.format_exc()}", err=True)
+        raise click.ClickException(f"Failed to create pipeline: {e}")
     click.echo("  ✓ Pipeline created!")
     _print_pipeline_url(workspace_client, pipeline_id)
 
@@ -2066,19 +2106,22 @@ def _update_managed_pipeline_cmd(
         pipeline_id = _find_pipeline_by_name(workspace_client, pipeline_name)
         click.echo(f"  ✓ Found pipeline ID: {pipeline_id}")
 
-        # On update, only rebuild wheels when the caller asked for it via
-        # --source-name or --package. Otherwise reuse the pipeline's existing
-        # environment.dependencies so the packages are left untouched.
+        # Fetch the existing spec so the full-replace PUT preserves unmanaged
+        # fields (tags, notifications, budget, channel, serverless, …) and so
+        # catalog/schema/dependencies fall back to the live pipeline.
+        base_spec = _get_existing_pipeline_spec(workspace_client, pipeline_id, debug)
+
+        # Only rebuild wheels when the caller asked for it via --source-name or
+        # --package; otherwise the existing dependencies (from base_spec) are
+        # reused so the packages are left untouched.
         build_wheels = bool(source_name or package_paths)
-        existing_dependencies = (
-            None if build_wheels
-            else _existing_pipeline_dependencies(workspace_client, pipeline_id, debug)
-        )
 
         body = _build_managed_pipeline_body(
-            workspace_client, spec, pipeline_name, source_name, connection_name,
-            catalog, schema, volume_path, package_paths, debug,
-            build_wheels=build_wheels, existing_dependencies=existing_dependencies,
+            workspace_client, spec,
+            pipeline_name=pipeline_name, source_name=source_name,
+            connection_name=connection_name, catalog=catalog, schema=schema,
+            volume_path=volume_path, package_paths=package_paths, debug=debug,
+            build_wheels=build_wheels, base_spec=base_spec,
         )
 
         click.echo("\nUpdating pipeline...")

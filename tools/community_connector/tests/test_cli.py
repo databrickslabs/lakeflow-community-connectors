@@ -2636,6 +2636,13 @@ class TestManagedCreatePipeline:
         assert call.args[2] == "spec_cat"
         assert call.args[3] == "spec_sch"
 
+    @staticmethod
+    def _mock_get_with_spec(mock_ws, spec_dict):
+        """Wire pipelines.get(...) to return a spec whose as_dict() == spec_dict."""
+        mock_info = MagicMock()
+        mock_info.spec.as_dict.return_value = spec_dict
+        mock_ws.pipelines.get.return_value = mock_info
+
     @patch("databricks.labs.community_connector_cli.cli._build_and_upload_managed_wheels")
     @patch("databricks.labs.community_connector_cli.cli._resolve_managed_dest_dir")
     @patch("databricks.labs.community_connector_cli.cli.WorkspaceClient")
@@ -2649,6 +2656,7 @@ class TestManagedCreatePipeline:
         mock_pipeline_obj = MagicMock()
         mock_pipeline_obj.pipeline_id = "pl-77"
         mock_ws.pipelines.list_pipelines.return_value = [mock_pipeline_obj]
+        self._mock_get_with_spec(mock_ws, {"name": "my_pipeline", "catalog": "cat"})
         mock_dest_dir.return_value = "/Volumes/cat/sch/community_connector/packages"
         mock_build_upload.return_value = ["/Volumes/cat/sch/community_connector/packages/w.whl"]
 
@@ -2681,9 +2689,10 @@ class TestManagedCreatePipeline:
 
         # Existing pipeline already points at wheels on a volume.
         existing = ["/Volumes/cat/sch/community_connector/packages/existing.whl"]
-        mock_info = MagicMock()
-        mock_info.spec.environment.dependencies = existing
-        mock_ws.pipelines.get.return_value = mock_info
+        self._mock_get_with_spec(mock_ws, {
+            "catalog": "cat", "schema": "sch",
+            "environment": {"dependencies": existing},
+        })
 
         result = runner.invoke(
             main,
@@ -2697,6 +2706,70 @@ class TestManagedCreatePipeline:
         # Existing dependencies are carried into the new body.
         body = mock_ws.api_client.do.call_args.kwargs["body"]
         assert body["environment"]["dependencies"] == existing
+
+    @patch("databricks.labs.community_connector_cli.cli._build_and_upload_managed_wheels")
+    @patch("databricks.labs.community_connector_cli.cli._resolve_managed_dest_dir")
+    @patch("databricks.labs.community_connector_cli.cli.WorkspaceClient")
+    def test_managed_update_bare_spec_preserves_existing_settings(
+        self, mock_ws_client, mock_dest_dir, mock_build_upload
+    ):
+        """A bare-spec update must merge onto the existing spec (full-replace PUT).
+
+        Unmanaged fields (tags, notifications, channel, serverless) and
+        catalog/schema must survive even when the CLI options omit them.
+        """
+        runner = CliRunner()
+        mock_ws = MagicMock()
+        mock_ws_client.return_value = mock_ws
+        mock_ws.config.host = "https://test.databricks.com"
+        mock_pipeline_obj = MagicMock()
+        mock_pipeline_obj.pipeline_id = "pl-99"
+        mock_ws.pipelines.list_pipelines.return_value = [mock_pipeline_obj]
+        mock_dest_dir.return_value = "/Volumes/livecat/livesch/community_connector/packages"
+        mock_build_upload.return_value = ["/Volumes/livecat/livesch/community_connector/packages/w.whl"]
+
+        # Live pipeline has settings the CLI does not manage plus CURRENT channel.
+        self._mock_get_with_spec(mock_ws, {
+            "name": "my_pipeline",
+            "catalog": "livecat",
+            "schema": "livesch",
+            "channel": "CURRENT",
+            "serverless": False,
+            "tags": {"team": "data"},
+            "notifications": [{"email_recipients": ["a@b.com"]}],
+            "budget_policy_id": "bp-1",
+            "environment": {"dependencies": ["/Volumes/old/old/old/old.whl"]},
+        })
+
+        # Rebuild wheels (-s) but omit -c/-t, channel, serverless.
+        result = runner.invoke(
+            main,
+            ["update_pipeline", "my_pipeline", "-ps", self._bare_spec(), "-s", "github"],
+        )
+
+        assert result.exit_code == 0, f"Output: {result.output}"
+        body = mock_ws.api_client.do.call_args.kwargs["body"]
+        # Unmanaged fields preserved.
+        assert body["tags"] == {"team": "data"}
+        assert body["notifications"] == [{"email_recipients": ["a@b.com"]}]
+        assert body["budget_policy_id"] == "bp-1"
+        # Existing channel/serverless not overridden by managed defaults.
+        assert body["channel"] == "CURRENT"
+        assert body["serverless"] is False
+        # catalog/schema fall back to the live pipeline's values.
+        assert body["catalog"] == "livecat"
+        assert body["schema"] == "livesch"
+        # Managed additions still applied.
+        assert body["configuration"][
+            "pipelines.managedIngestion.registerPythonDataSource"] == "true"
+        assert body["ingestion_definition"]["source_type"] == "COMMUNITY"
+        # Rebuilt wheels replace the old dependencies.
+        assert body["environment"]["dependencies"] == [
+            "/Volumes/livecat/livesch/community_connector/packages/w.whl"]
+        # Per-table destinations backfilled from the live catalog/schema.
+        table = body["ingestion_definition"]["objects"][0]["table"]
+        assert table["destination_catalog"] == "livecat"
+        assert table["destination_schema"] == "livesch"
 
 
 def _make_fake_wheel(path: Path, source_name: str) -> Path:

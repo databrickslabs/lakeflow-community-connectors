@@ -141,6 +141,7 @@ def build_bare_pipeline_body(
     dependencies: Optional[List[str]],
     channel: Optional[str] = None,
     serverless: Optional[bool] = None,
+    base: Optional[dict] = None,
 ) -> dict:
     """Assemble a full pipeline body from a bare ingestion definition.
 
@@ -148,10 +149,21 @@ def build_bare_pipeline_body(
     schema, the managed-ingestion configuration flag, and the connector
     ``environment.dependencies`` are all filled in around the user's ingestion
     definition.
+
+    ``base`` is the existing pipeline spec to merge onto (update path). Because
+    the pipelines PUT is a full-settings replace, starting from the existing
+    spec preserves fields the CLI does not manage (tags, notifications, budget
+    policy, development/continuous, channel, serverless, …) instead of wiping
+    them. Managed fields below are overlaid on top. On create, ``base`` is None
+    and the body starts empty. A value already on ``base`` is only overwritten
+    when the corresponding argument is provided, so callers omit ``channel`` /
+    ``serverless`` on update to keep the pipeline's existing values.
     """
     ingestion_def = build_ingestion_definition(spec, connection_name, catalog, schema)
 
-    body: dict = {"name": pipeline_name, "ingestion_definition": ingestion_def}
+    body: dict = copy.deepcopy(base) if base else {}
+    body["name"] = pipeline_name
+    body["ingestion_definition"] = ingestion_def
     if catalog:
         body["catalog"] = catalog
     if schema:
@@ -161,10 +173,18 @@ def build_bare_pipeline_body(
     if serverless is not None:
         body["serverless"] = serverless
 
-    body["configuration"] = {REGISTER_PYTHON_DATA_SOURCE_KEY: "true"}
+    configuration = body.get("configuration")
+    if not isinstance(configuration, dict):
+        configuration = {}
+    configuration[REGISTER_PYTHON_DATA_SOURCE_KEY] = "true"
+    body["configuration"] = configuration
 
     if dependencies:
-        body["environment"] = {"dependencies": list(dependencies)}
+        environment = body.get("environment")
+        if not isinstance(environment, dict):
+            environment = {}
+        environment["dependencies"] = list(dependencies)
+        body["environment"] = environment
 
     return body
 
