@@ -1055,3 +1055,19 @@ Validated against the real instance with an Integration (m2m) OAuth app:
    returned 0 assets in this demo instance.
 5. **Type IDs:** Column = `...031008`, Database = `...031006`, Data Element =
    `...031026`, Databricks Schema = `...031413`. (Standard Table id `...031007`.)
+
+---
+
+## e2-dogfood VALIDATION (2026-07-25)
+
+End-to-end on e2-dogfood via the community-connector CLI (COMMUNITY m2m connection):
+- ✅ **UC minted the Collibra m2m token** (client-credentials, no-scope) and injected it — `credential_type: OAUTH_M2M`.
+- ✅ **`domains` (snapshot): full end-to-end pass** — 3,296 rows landed in `main.collibra_m2m_test.domains`, `collibra_org` stamped. Pipeline COMPLETED, no errors.
+- ✅ Read logic correct in isolation: direct + capped calls return the right rows fast (500 records / 0.3s); cursor advances; json-roundtrip offset works.
+
+### Known limitation — m2m token expiry on large full-loads (FRAMEWORK-LEVEL)
+- `assets` (264,578 rows) **FAILED**: `401 {"errorCode":"expiredToken"}` mid-run.
+- Root cause: the connector reads `access_token` once in `__init__` and caches it in the session header (the standard m2m pattern — it deliberately does NOT hold the client secret to re-mint). Over a `Trigger.AvailableNow` run, that object persists across many microbatches; `max_records_per_batch` caps batch *size*, not total *runtime*, so a large first-load drains all history over many minutes and outlives the ~1h UC token → 401.
+- **This is not Collibra-specific** — the Azure DevOps m2m connector caches the token identically; large full-loads there would hit the same wall (masked so far only because prior validations used tiny tables).
+- **Needs a framework/UC answer**, not a per-connector patch: either UC re-injects a fresh token per microbatch, or the framework exposes a token-refresh hook the connector can call. Raised with the connectors team.
+- Snapshot + small/incremental tables are unaffected. `domains` (and steady-state incremental) work today.
