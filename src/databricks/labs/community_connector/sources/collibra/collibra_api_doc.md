@@ -1071,3 +1071,14 @@ End-to-end on e2-dogfood via the community-connector CLI (COMMUNITY m2m connecti
 - **This is not Collibra-specific** — the Azure DevOps m2m connector caches the token identically; large full-loads there would hit the same wall (masked so far only because prior validations used tiny tables).
 - **Needs a framework/UC answer**, not a per-connector patch: either UC re-injects a fresh token per microbatch, or the framework exposes a token-refresh hook the connector can call. Raised with the connectors team.
 - Snapshot + small/incremental tables are unaffected. `domains` (and steady-state incremental) work today.
+
+### Workaround + roadmap (confirmed with connectors team, 2026-07-26)
+- **Workaround today:** re-run the pipeline. UC re-mints the temp m2m token on a
+  new update, and the incremental `lastModifiedOn` cursor resumes where the
+  prior run left off — so a large first-load that hits the ~1h token wall is
+  completed by re-triggering, not restarted from scratch.
+- **Roadmap (framework, not this connector):** a "managed" ingestion-pipeline
+  variant for community connectors is being explored that would detect this
+  error and auto-retry; the Python-data-source path additionally needs a Python
+  Data Source API change (Spark-team discussion). Tracked on the framework side
+  — no per-connector fix intended.
