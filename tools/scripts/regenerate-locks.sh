@@ -90,11 +90,24 @@ compile "${REQ_DIR}/pylint.txt" \
     --extra dev
 
 # Combined source-connector lock — shared across the test-source matrix in
-# .github/workflows/tests.yml. Unions third-party runtime deps from every
+# .github/workflows/tests.yml. Unions third-party runtime deps AND
+# test-only extras (e.g. `responses`, `azure-identity`) from every
 # `sources/*/pyproject.toml` and resolves them together with the root
 # pyproject's deps + dev extra (pytest, pytest-cov), so transitive
 # resolution is fully pinned. Without this lock, test-source falls back to
 # live PyPI against ranged constraints.
+#
+# Connector pyprojects cannot be passed to `uv pip compile` directly the
+# way root.txt/tools.txt pass theirs (their conflicting `pyspark` floors —
+# `>=3.5.0,<4.0` vs `>=4.2.0.dev0` — would collide in a single resolve), so
+# we scrape their requirement strings and union them. We harvest BOTH the
+# runtime `dependencies` array and every `[project.optional-dependencies]`
+# group, because a connector's test suite may import a dev-only extra at
+# collection time (e.g. odata's `import responses`); if that extra is not
+# in this lock, `pip install --no-deps` leaves it out and the whole test
+# module errors on import. The standard `pyspark`/`pytest`/`pytest-cov`
+# trio is filtered out — root's `--extra dev` provides the authoritative
+# (and non-conflicting) pins for those.
 #
 # A single union lock matches the one-lock-per-CI-job-context pattern of
 # root.txt / tools.txt / pylint.txt. Each connector job installs a
@@ -108,17 +121,13 @@ compile "${REQ_DIR}/pylint.txt" \
 # every run and trigger spurious lock-drift warnings.
 SOURCES_DIR="src/databricks/labs/community_connector/sources"
 for src_pyproject in "${SOURCES_DIR}"/*/pyproject.toml; do
-    sed -n '/^dependencies *= *\[/,/^\]/{
-        s/^[[:space:]]*"//
-        s/",\?[[:space:]]*$//
-        /^lakeflow-community-connectors/d
-        /^dependencies/d
-        /^\]/d
-        /^[[:space:]]*$/d
-        /^[[:space:]]*#/d
-        p
-    }' "${src_pyproject}"
-done | sort -u | compile "${REQ_DIR}/sources.txt" \
+    # Runtime `dependencies` array plus every optional-dependency group.
+    sed -n '/^dependencies *= *\[/,/^\]/p' "${src_pyproject}"
+    sed -n '/^\[project.optional-dependencies\]/,/^\[[^p]/p' "${src_pyproject}"
+done | grep -E '^[[:space:]]*"[A-Za-z]' \
+    | sed -e 's/^[[:space:]]*"//' -e 's/",\?[[:space:]]*$//' \
+    | grep -viE '^(lakeflow-community-connectors|pyspark|pytest|pytest-cov)\b' \
+    | sort -u | compile "${REQ_DIR}/sources.txt" \
     pyproject.toml \
     "${REQ_DIR}/_pip.in" \
     - \
