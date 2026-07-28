@@ -24,9 +24,14 @@ Auth (m2m, mirrors the Azure DevOps connector):
 
 Incremental model:
     ``assets``, ``attributes``, and ``responsibilities`` are ``cdc`` on the
-    ``lastModifiedOn`` cursor (int64 epoch ms). Because there is no
-    server-side modified-since filter, the connector sorts by LAST_MODIFIED
-    ascending and applies the cursor client-side. An init-time upper bound
+    ``lastModifiedOn`` cursor (int64 epoch ms). There is no server-side
+    modified-since filter, so the cursor is applied client-side. Sort order
+    differs by endpoint: ``attributes`` / ``responsibilities`` are server-sorted
+    ``LAST_MODIFIED ASC`` (so batches truncate on a soft, tie-group-aware cap),
+    but ``/assets`` rejects ``LAST_MODIFIED`` (400) and is sorted by ``ID`` —
+    records there do NOT arrive in cursor order, so the ``assets`` path drains
+    the full collection per run rather than advancing the watermark on a
+    partial slice (see ``_incremental_from_iter``). An init-time upper bound
     (``self._init_ts``) caps the returned cursor so a Trigger.AvailableNow
     microbatch terminates. ``domains`` is a ``snapshot``.
 """
@@ -209,8 +214,12 @@ class CollibraLakeflowConnect(LakeflowConnect):
         record_iter = cursor_paginate(
             self._session, f"{self.base_url}/assets", base_params, "assets"
         )
+        # assets are ID-sorted (LAST_MODIFIED is rejected 400 on /assets), so
+        # records do NOT arrive in lastModifiedOn order — count-based batch
+        # truncation cannot safely advance the watermark. Drain the full
+        # collection per run (bounded by _init_ts); see _incremental_from_iter.
         return self._incremental_from_iter(
-            record_iter, start_offset, table_options
+            record_iter, start_offset, table_options, cursor_sorted=False
         )
 
     def _read_attributes(
@@ -301,15 +310,37 @@ class CollibraLakeflowConnect(LakeflowConnect):
         start_offset: dict,
         table_options: dict[str, str],
         transform=None,
+        *,
+        cursor_sorted: bool = True,
     ) -> tuple[Iterator[dict], dict]:
         """Apply the client-side incremental cursor over a record iterator.
 
-        Records are assumed sorted ascending by ``lastModifiedOn``. Applies:
+        Applies, per record:
           * strict ``> since`` filtering (exclusive lower bound),
           * an init-time upper cap (skip records modified after
-            ``self._init_ts``) so Trigger.AvailableNow terminates,
-          * ``max_records_per_batch`` admission control — safe to truncate
-            client-side because these are CDC tables (upsert dedup).
+            ``self._init_ts``) so Trigger.AvailableNow terminates.
+
+        Truncation depends on the underlying sort order:
+
+        * ``cursor_sorted=True`` (``attributes`` / ``responsibilities`` —
+          server-sorted ``LAST_MODIFIED ASC``): ``max_records_per_batch`` acts
+          as a **soft** limit. Once the cap is reached we keep draining records
+          that share the current max ``lastModifiedOn`` (the boundary tie
+          group) before stopping, so the batch never splits a group sharing one
+          cursor value. Splitting it would advance the watermark to that value
+          and the next run's strict ``> since`` filter would permanently skip
+          the un-emitted remainder of the group.
+
+        * ``cursor_sorted=False`` (``assets`` — sorted by ``ID``, because
+          ``/assets`` rejects ``LAST_MODIFIED``): records do **not** arrive in
+          ``lastModifiedOn`` order, so no count-based truncation can safely
+          advance the ``lastModifiedOn`` watermark (a partial ID-ordered slice
+          has an arbitrary max cursor; advancing to it silently drops every
+          not-yet-seen asset modified at or before it). We therefore ignore
+          ``max_records`` and drain the full collection, bounded only by the
+          ``self._init_ts`` upper cap; ``max_seen`` is then the true max over
+          the whole scan. (A resumable ID-keyset cursor is the follow-up that
+          would let this path batch safely — see README.)
 
         Returns ``(records, end_offset)``. When nothing new is emitted, the
         offset is returned unchanged so ``end_offset == start_offset`` and the
@@ -326,10 +357,13 @@ class CollibraLakeflowConnect(LakeflowConnect):
         else:
             since_val = None
 
-        max_records = self._parse_max_records(table_options)
+        # Count-based truncation is only sound when records arrive in cursor
+        # order (see the assets note above).
+        max_records = self._parse_max_records(table_options) if cursor_sorted else None
 
         records: list[dict[str, Any]] = []
         max_seen = since_val
+        capped = False
         for raw in record_iter:
             cursor = self._as_cursor(raw.get("lastModifiedOn"))
             # Strict `>` so the inclusive nature of a resumed `since` doesn't
@@ -340,13 +374,18 @@ class CollibraLakeflowConnect(LakeflowConnect):
             if cursor is not None and cursor > self._init_ts:
                 continue
 
-            rec = transform(raw) if transform else self._shape_common(raw)
+            # Soft cap: past the limit we only keep draining the boundary tie
+            # group; the first record with a strictly greater cursor ends it.
+            if capped and cursor is not None and max_seen is not None and cursor > max_seen:
+                break
+
+            rec = transform(raw) if transform else self._shape_asset(raw)
             records.append(rec)
             if cursor is not None and (max_seen is None or cursor > max_seen):
                 max_seen = cursor
 
             if max_records is not None and len(records) >= max_records:
-                break
+                capped = True
 
         if not records or max_seen is None or max_seen == since_val:
             # No forward progress — return the offset unchanged so the
@@ -359,8 +398,13 @@ class CollibraLakeflowConnect(LakeflowConnect):
     # Record shaping
     # ------------------------------------------------------------------ #
 
-    def _shape_common(self, raw: dict[str, Any]) -> dict[str, Any]:
-        """Shape an asset record: normalize nested refs, stamp org."""
+    def _shape_asset(self, raw: dict[str, Any]) -> dict[str, Any]:
+        """Shape an asset record: normalize nested refs, stamp org.
+
+        Used as the default transform for the ``assets`` table only;
+        ``attributes`` / ``responsibilities`` / ``domains`` each pass their own
+        explicit shaper.
+        """
         rec = dict(raw)
         rec["domain"] = resource_ref(raw.get("domain"))
         rec["type"] = resource_ref(raw.get("type"))

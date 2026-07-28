@@ -109,12 +109,12 @@ All tables work with no options. Optional table-specific options narrow the extr
 
 | Table              | Required Options | Optional Options                                          | Notes |
 |--------------------|------------------|-----------------------------------------------------------|-------|
-| `assets`           | None             | `sort_field`, `domain_id`, `community_id`, `max_records_per_batch` | `sort_field` defaults to `LAST_MODIFIED` (needed for the incremental cursor); `domain_id` / `community_id` scope to a single domain or community. |
+| `assets`           | None             | `sort_field`, `domain_id`, `community_id` | `sort_field` defaults to `ID` — `/assets` accepts only `NAME` / `DISPLAY_NAME` / `ID` (`LAST_MODIFIED` is rejected 400), so the `lastModifiedOn` cursor is applied client-side. `domain_id` / `community_id` scope to a single domain or community. (`max_records_per_batch` is intentionally not honored here — see note below.) |
 | `attributes`       | None             | `asset_id`, `type_public_ids`, `max_records_per_batch`    | `asset_id` fetches attributes for a single asset; `type_public_ids` filters by attribute type public ID (e.g. `Description`, `Certification`). |
 | `responsibilities` | None             | `resource_ids`, `role_ids`, `max_records_per_batch`       | `resource_ids` scopes to specific asset/domain/community IDs; `role_ids` filters by role UUID. `includeInherited=true` is always set. |
 | `domains`          | None             | `community_id`                                            | Scope to domains within a specific community. |
 
-- **`max_records_per_batch`** (CDC tables): caps records emitted per microbatch. Defaults to `5000`; set to `0` (or negative) for no cap. Safe to truncate client-side because CDC tables upsert-dedup on the primary key.
+- **`max_records_per_batch`** (`attributes` / `responsibilities`): caps records emitted per microbatch. Defaults to `5000`; set to `0` (or negative) for no cap. It is a **soft** cap — once reached, the connector keeps draining records that share the boundary `lastModifiedOn` value (the tie group) before stopping, so a batch never splits a group sharing one cursor value (which would silently skip the remainder on the next run). Safe to truncate this way because these endpoints are server-sorted `LAST_MODIFIED ASC` and CDC tables upsert-dedup on the primary key. **Not honored on `assets`**: `/assets` is sorted by `ID` (not `LAST_MODIFIED`), so records don't arrive in cursor order and count-based truncation cannot safely advance the watermark — the `assets` path drains the full collection per run (bounded by the init-time cap). A resumable ID-keyset cursor for `assets` is a planned follow-up.
 - To use any of these table options, include them in the connection's `externalOptionsAllowList` so they are passed through.
 
 ### Schema highlights
@@ -228,7 +228,7 @@ The first run does a full backfill across all tables (the CDC tables fetch all h
 
 Because Collibra's Core REST API has **no server-side `lastModifiedAfter` filter**, the connector implements incremental sync client-side:
 
-- The `cdc` readers request pages sorted by `LAST_MODIFIED ASC` and apply the saved cursor as a strict `> since` filter, so the boundary record is not re-emitted on resume.
+- The `attributes` and `responsibilities` readers request pages sorted by `LAST_MODIFIED ASC` and apply the saved cursor as a strict `> since` filter, so the boundary record is not re-emitted on resume. `assets` is different: `/assets` rejects `LAST_MODIFIED` (400) and is sorted by `ID`, so its records don't arrive in cursor order — the same strict `> since` and `_init_ts` filters apply client-side, but the batch is not truncated by count (see the `max_records_per_batch` note above).
 - At startup the connector records an upper-bound timestamp (`_init_ts`) and skips any record modified after it. This caps a single `Trigger.AvailableNow` microbatch so it terminates; records modified after startup are picked up on the next trigger with a fresh bound.
 - When no new records are emitted, the offset is returned unchanged so the framework sees `end_offset == start_offset` and converges.
 
@@ -240,12 +240,12 @@ Because Collibra's Core REST API has **no server-side `lastModifiedAfter` filter
 
 **Causes:**
 - The injected bearer token expired or the UC connection could not mint one (bad `client_id` / `client_secret`).
-- The OAuth client lacks the `kg.view-all` scope.
+- The OAuth client (Collibra Integration app) is not permissioned for the resources being read. Collibra Integration apps are permissioned by app configuration, **not** by a requested OAuth scope — the token must be minted with **no `scope` parameter** (a `scope` is rejected with `invalid_scope`, live-validated 2026-07-25).
 - The `org` / `base_url` does not match the instance the client was registered on.
 
 **Fix:**
-- Verify the OAuth client is registered on the correct instance and has the `kg.view-all` scope.
-- Confirm the token endpoint `https://{org}.collibra.com/rest/oauth/v2/token` responds to a client-credentials grant.
+- Verify the OAuth client (Integration app) is registered on the correct instance and is granted access to the assets/domains/responsibilities being read.
+- Confirm the token endpoint `https://{org}.collibra.com/rest/oauth/v2/token` responds to a client-credentials grant **with no `scope`** (UC mints the token with no scope automatically).
 - Double-check `org` (or `base_url`).
 
 ### Empty results / no data

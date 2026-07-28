@@ -76,7 +76,7 @@ connection:
       required: false
       description: >
         Page size for paginated API requests. Valid range: 1–1000.
-        Default: 200. Larger pages reduce request count but increase
+        Default: 1000. Larger pages reduce request count but increase
         memory and latency per request.
 
   # ---------------------------------------------------------------------------
