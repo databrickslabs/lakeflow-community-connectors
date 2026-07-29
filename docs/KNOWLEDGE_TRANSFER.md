@@ -595,7 +595,162 @@ snapshot / append semantics the connector declared.
 
 ---
 
-## 12. End-to-end mental model
+## 12. Contributing a new connector (developer deep-dive)
+
+§11 gives the command-level flow; this section is the "what actually lands on
+disk and why" view for someone contributing a connector to the repo.
+
+### The anatomy of a connector directory
+
+Everything a connector needs lives under `sources/<source>/`. A complete
+contribution produces:
+
+| File | Produced by | Purpose |
+|------|-------------|---------|
+| `<source>.py` | you / `implement-connector` | The `LakeflowConnect` subclass (§3). |
+| `__init__.py` | you | The `LakeflowSource` subclass wiring `_lakeflow_connect_cls` (§4). |
+| `connector_spec.yaml` | `generate-connector-spec` | Connection params + `external_options_allowlist` (§6). |
+| `README.md` | `create-connector-document` | Public end-user docs (uses `templates/community_connector_doc_template.md`). |
+| `<source>_api_doc.md` | `research-source-api` | Research notes on the source API (uses `templates/source_api_doc_template.md`). |
+| `source_simulator/specs/<source>/endpoints.yaml` + corpus | `implement-connector`/`connector-tester` | Offline test fixtures (§9). |
+| `tests/unit/sources/<source>/test_*.py` | `connector-tester` | Test class extending `LakeflowConnectTests`. |
+
+The `templates/` directory standardizes these artifacts, and each template is
+consumed by a specific skill — so hand-authoring and AI-assisted authoring
+produce the same shapes.
+
+### Manual authoring loop (without the agents)
+
+The AI commands are orchestration on top of an ordinary dev loop. To build a
+connector by hand:
+
+1. **Scaffold** — create `sources/<source>/`, subclass `LakeflowConnect` in
+   `<source>.py`, and expose a `LakeflowSource` subclass in `__init__.py`:
+   ```python
+   # sources/foo/__init__.py
+   from databricks.labs.community_connector.sources.foo.foo import FooLakeflowConnect
+   from databricks.labs.community_connector.sparkpds import LakeflowSource
+
+   class FooDataSource(LakeflowSource):
+       _lakeflow_connect_cls = FooLakeflowConnect
+   ```
+2. **Implement the four methods** (`list_tables`, `get_table_schema`,
+   `read_table_metadata`, `read_table`), copying patterns from
+   `sources/example/example.py`. Add mixins only if the source needs them
+   (hierarchical catalog → `SupportsNamespaces`; large parallel reads →
+   `SupportsPartition`).
+3. **Write the connector spec** — declare connection params and the
+   `external_options_allowlist`. Any table option the connector reads from
+   `table_options` must be allowlisted here or it won't be injected.
+4. **Add offline test fixtures** — write `endpoints.yaml` describing the source
+   API's paths/params/pagination and a corpus of sample records, so the test
+   suite runs in `simulate` mode with no creds.
+5. **Add the test class** — subclass `LakeflowConnectTests`, set
+   `connector_class`, `simulator_source`, and `replay_config`. The harness
+   auto-generates the suite (§9).
+6. **Run** `pytest tests/unit/sources/<source>/` (offline by default). Iterate
+   until green, then optionally run live with `CONNECTOR_TEST_MODE=live` and
+   real creds to validate the connector against the real API and refresh the
+   corpus.
+
+### Design rules that keep a contribution mergeable
+
+- **Only touch `sources/<source>/`.** The repo `CLAUDE.md` forbids changing
+  interface/library/pipeline code as part of a connector PR — those are shared
+  and reviewed separately. If the framework is genuinely missing something,
+  raise it as its own change.
+- **Pickle-safety.** Connector instances are serialized to Spark executors.
+  Keep non-picklable state (HTTP sessions, locks) behind lazy properties, as
+  `example.py` does with `_api`.
+- **Return plain JSON dicts** from `read_table`; let the framework coerce to the
+  declared schema. Don't build Spark `Row`s yourself.
+- **Honor the offset fixed-point** (§3): emit a stable `end_offset` and return
+  it unchanged when there's no new data, or the pipeline will loop.
+- **Retries and rate limits** belong in the connector (see
+  `_request_with_retry` in `example.py`), not the framework.
+- **Idempotency** — reads must be safe to re-run from a checkpointed offset;
+  cap cursors at an init-time timestamp to avoid drift.
+
+### Getting a PR merged
+
+- Run `/self-review-connector for <source>` for a scored audit; it adds the
+  `connector-self-reviewed` label that **CI requires to merge**.
+- Fork PRs need a maintainer's `safe-to-test` label (re-applied per push) before
+  CI runs — see §11 and `CONTRIBUTING.md`.
+- **Write-back tests** (`write-back-testing` skill,
+  `lakeflow_connect_test_utils.py`) are recommended: they write to the real
+  source and verify the full read/incremental/delete cycle.
+
+### Migrating an existing implementation
+
+If a source was written against the raw Python Data Source API (approach #2),
+the `migrate-legacy-implementation` skill helps refactor it onto
+`LakeflowConnect` so it benefits from the shared streaming/offset/partition
+machinery and the generic test harness.
+
+---
+
+## 13. Customizing as a customer
+
+Customers don't have to fork the framework to adapt or extend connectors. There
+are three escalating levels of customization, from config-only to full BYO.
+
+### Level 1 — Configure an existing connector (no code)
+
+Everything about *what* and *how* to ingest is data, not code:
+
+- **Pipeline spec** (§5) — choose tables, destination catalog/schema/table,
+  `scd_type` (`SCD_TYPE_1` / `SCD_TYPE_2` / `APPEND_ONLY`), `primary_keys`,
+  `sequence_by`, `cluster_by`.
+- **Table options** — any key in the connector's `external_options_allowlist`
+  (e.g. GitHub `owner`/`repo`/`state`, or `max_records_per_batch` to size
+  micro-batches). Set them under `table_configuration` in the pipeline spec or
+  as connection options.
+- **Connection** — pick the auth mode the connector's spec supports (`static`,
+  `m2m`, `u2m`, `u2m_per_user`) and supply credentials via
+  `create_connection`.
+
+This covers most customer needs and requires only the UI or the CLI.
+
+### Level 2 — Bring your own connector repo
+
+The framework can run connectors from a **customer-owned repository** — no
+change to the upstream repo:
+
+- **UI:** *+New → Add or upload data → + Add Community Connector*, pointing at
+  your repo.
+- **CLI:** the `--repo-url` / `-r` flag on `create_pipeline`, and `--spec`/`-s`
+  on `create_connection`/`update_connection` accepting either a local
+  `connector_spec.yaml` path **or a GitHub repo URL** — the CLI fetches
+  `src/databricks/labs/community_connector/sources/<source>/connector_spec.yaml`
+  from that repo:
+  ```bash
+  community-connector create_connection github my_conn \
+    -o '{"token":"ghp_xxx"}' --spec https://github.com/myorg/my-connectors
+  ```
+- For **managed** pipelines, `upload` builds and ships your connector wheel (and
+  the framework wheel) to a UC Volume, and the pipeline installs from there via
+  `environment.dependencies` (§10) — so a private connector runs with the same
+  managed-ingestion experience as a built-in one.
+
+This is the path for a customer who has written a connector for an internal or
+proprietary system and wants to keep it in their own repo.
+
+### Level 3 — Fork and modify a connector
+
+Because a connector is a self-contained directory, a customer can copy
+`sources/<source>/` into their own repo, tweak the Python (add tables, change
+pagination, map extra fields), and deploy it via Level 2. Keep the
+`external_options_allowlist` in sync with any new options the modified connector
+reads, and keep the offline test fixtures so the change stays verifiable.
+
+> The same repo constraint applies for maintainability: customize inside the
+> connector directory rather than the shared framework, so upstream framework
+> upgrades remain drop-in.
+
+---
+
+## 14. End-to-end mental model
 
 ```
                  Connector author writes ONE class
@@ -625,7 +780,7 @@ snapshot / append semantics the connector declared.
 
 ---
 
-## 13. File index (jump-off points)
+## 15. File index (jump-off points)
 
 **This repo**
 - Interface: `src/databricks/labs/community_connector/interface/lakeflow_connect.py`
