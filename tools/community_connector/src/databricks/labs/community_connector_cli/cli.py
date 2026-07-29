@@ -293,6 +293,7 @@ def _prepare_connection_options(  # pylint: disable=too-many-arguments,too-many-
     flow_controls: dict = {}
     if parsed_spec and auth_type != AUTH_TYPE_STATIC and parsed_spec.oauth_defaults:
         conn_oauth, flow_controls = _resolve_oauth_block(parsed_spec.oauth_defaults)
+        conn_oauth = _interpolate_oauth_placeholders(conn_oauth, options_dict)
         _apply_oauth_defaults(options_dict, conn_oauth)
 
     # Validate the connector-spec connection parameters BEFORE running any
@@ -394,6 +395,44 @@ def _resolve_oauth_block(oauth_defaults: dict) -> Tuple[dict, dict]:
             continue
         conn_options[_OAUTH_SPEC_KEY_ALIASES.get(key, key)] = value
     return conn_options, flow_controls
+
+
+_OAUTH_PLACEHOLDER_RE = re.compile(r"\{([a-zA-Z_][a-zA-Z0-9_]*)\}")
+
+
+def _interpolate_oauth_placeholders(conn_oauth: dict, options_dict: dict) -> dict:
+    """Resolve ``{param}`` placeholders in resolved OAuth connection options.
+
+    A connector spec may reference another connection parameter inside an OAuth
+    value — most commonly a per-tenant token endpoint that depends on
+    ``tenant_id``::
+
+        token_url: https://login.microsoftonline.com/{tenant_id}/oauth2/v2.0/token
+
+    The referenced value is taken from the user-supplied ``--options``. A
+    missing (or empty) referenced option is a hard error rather than leaving a
+    literal ``{tenant_id}`` in the stored connection option.
+    """
+    resolved: dict = {}
+    for key, value in conn_oauth.items():
+        if not isinstance(value, str):
+            resolved[key] = value
+            continue
+        names = _OAUTH_PLACEHOLDER_RE.findall(value)
+        if not names:
+            resolved[key] = value
+            continue
+        missing = [n for n in names if not options_dict.get(n)]
+        if missing:
+            raise click.ClickException(
+                f"OAuth option '{key}' references connection parameter(s) "
+                + ", ".join("{" + m + "}" for m in missing)
+                + " which were not supplied. Provide them via --options."
+            )
+        resolved[key] = _OAUTH_PLACEHOLDER_RE.sub(
+            lambda m: str(options_dict[m.group(1)]), value
+        )
+    return resolved
 
 
 def _resolve_auth_type(explicit: Optional[str], parsed_spec) -> str:
