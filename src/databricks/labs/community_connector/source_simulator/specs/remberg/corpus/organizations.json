@@ -1,0 +1,127 @@
+[
+  {
+    "id": "papa-873-pk0",
+    "createdAt": "2024-01-18T19:40:43Z",
+    "updatedAt": "2024-01-01T00:00:00Z",
+    "name": "charlie-933",
+    "organizationNumber": "echo-110",
+    "phoneNumber": {
+      "number": "lima-528",
+      "countryPrefix": "november-911"
+    },
+    "email": "victor-608",
+    "shippingAddress": {
+      "company": "yankee-828",
+      "street": "mike-780",
+      "streetNumber": "zulu-623",
+      "zipPostCode": "delta-423",
+      "city": "quebec-418",
+      "countryProvince": "xray-239",
+      "country": "whiskey-985",
+      "other": "xray-143"
+    },
+    "website": "yankee-953",
+    "lang": "quebec-176",
+    "tz": "yankee-541"
+  },
+  {
+    "id": "oscar-91-pk1",
+    "createdAt": "2024-01-05T15:09:32Z",
+    "updatedAt": "2024-01-01T01:00:00Z",
+    "name": "juliet-444",
+    "organizationNumber": "xray-427",
+    "phoneNumber": {
+      "number": "sierra-946",
+      "countryPrefix": "oscar-486"
+    },
+    "email": "sierra-543",
+    "shippingAddress": {
+      "company": "uniform-921",
+      "street": "sierra-702",
+      "streetNumber": "oscar-547",
+      "zipPostCode": "golf-474",
+      "city": "mike-201",
+      "countryProvince": "whiskey-405",
+      "country": "delta-698",
+      "other": "november-542"
+    },
+    "website": "sierra-544",
+    "lang": "zulu-958",
+    "tz": "sierra-277"
+  },
+  {
+    "id": "alpha-96-pk2",
+    "createdAt": "2024-01-02T23:06:48Z",
+    "updatedAt": "2024-01-01T02:00:00Z",
+    "name": "alpha-486",
+    "organizationNumber": "yankee-706",
+    "phoneNumber": {
+      "number": "lima-445",
+      "countryPrefix": "whiskey-536"
+    },
+    "email": "kilo-381",
+    "shippingAddress": {
+      "company": "delta-896",
+      "street": "foxtrot-629",
+      "streetNumber": "hotel-588",
+      "zipPostCode": "sierra-740",
+      "city": "kilo-382",
+      "countryProvince": "yankee-623",
+      "country": "november-887",
+      "other": "india-526"
+    },
+    "website": "lima-588",
+    "lang": "whiskey-449",
+    "tz": "november-880"
+  },
+  {
+    "id": "kilo-955-pk3",
+    "createdAt": "2024-01-18T07:52:31Z",
+    "updatedAt": "2024-01-01T03:00:00Z",
+    "name": "bravo-212",
+    "organizationNumber": "tango-949",
+    "phoneNumber": {
+      "number": "kilo-707",
+      "countryPrefix": "xray-604"
+    },
+    "email": "bravo-372",
+    "shippingAddress": {
+      "company": "bravo-253",
+      "street": "golf-135",
+      "streetNumber": "lima-217",
+      "zipPostCode": "juliet-714",
+      "city": "golf-425",
+      "countryProvince": "golf-880",
+      "country": "tango-259",
+      "other": "zulu-643"
+    },
+    "website": "lima-695",
+    "lang": "juliet-371",
+    "tz": "delta-629"
+  },
+  {
+    "id": "oscar-34-pk4",
+    "createdAt": "2024-01-06T03:40:38Z",
+    "updatedAt": "2024-01-01T04:00:00Z",
+    "name": "juliet-875",
+    "organizationNumber": "tango-381",
+    "phoneNumber": {
+      "number": "oscar-679",
+      "countryPrefix": "sierra-745"
+    },
+    "email": "charlie-366",
+    "shippingAddress": {
+      "company": "papa-476",
+      "street": "bravo-362",
+      "streetNumber": "zulu-541",
+      "zipPostCode": "oscar-325",
+      "city": "papa-881",
+      "countryProvince": "india-855",
+      "country": "lima-170",
+      "other": "kilo-375"
+    },
+    "website": "charlie-761",
+    "lang": "november-943",
+    "tz": "quebec-625"
+  }
+]
