@@ -1,0 +1,19 @@
+[
+  {
+    "Id": "50",
+    "SyncToken": "6",
+    "MetaData": {
+      "CreateTime": "2025-01-09T08:00:00Z",
+      "LastUpdatedTime": "2026-07-20T17:00:00Z"
+    },
+    "DocNumber": "BILL-100",
+    "TxnDate": "2026-07-02",
+    "DueDate": "2026-08-01",
+    "VendorRef": {"value": "10"},
+    "APAccountRef": {"value": "43"},
+    "TotalAmt": 90.50,
+    "Balance": 90.50,
+    "CurrencyRef": {"value": "USD"},
+    "Line": [{"Id": "1", "Amount": 90.50, "DetailType": "AccountBasedExpenseLineDetail"}]
+  }
+]

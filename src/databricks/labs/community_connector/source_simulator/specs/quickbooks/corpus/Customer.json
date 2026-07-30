@@ -1,0 +1,29 @@
+[
+  {
+    "Id": "1",
+    "SyncToken": "2",
+    "MetaData": {
+      "CreateTime": "2025-01-01T08:00:00-08:00",
+      "LastUpdatedTime": "2026-07-20T09:30:00-08:00"
+    },
+    "DisplayName": "Acme Bakery",
+    "CompanyName": "Acme Bakery LLC",
+    "GivenName": "Ada",
+    "FamilyName": "Baker",
+    "PrimaryEmailAddr": {"Address": "ada@example.test"},
+    "PrimaryPhone": {"FreeFormNumber": "+1-555-0100"},
+    "Balance": 125.45,
+    "CurrencyRef": {"value": "USD", "name": "United States Dollar"},
+    "Active": true
+  },
+  {
+    "Id": "2",
+    "SyncToken": "0",
+    "MetaData": {
+      "CreateTime": "2025-02-01T08:00:00Z",
+      "LastUpdatedTime": "2026-07-21T09:30:00Z"
+    },
+    "DisplayName": "Inactive Customer",
+    "Active": false
+  }
+]

@@ -1,0 +1,12 @@
+# M1 smoke pipeline. Replace the connection name with the UC COMMUNITY
+# connection created for one QuickBooks realm.
+connection_name: quickbooks_sandbox
+objects:
+  - table:
+      source_table: customers
+      destination_table: customers
+      table_configuration:
+        scd_type: SCD_TYPE_1
+        primary_keys:
+          - realm_id
+          - id
