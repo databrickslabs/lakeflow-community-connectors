@@ -51,22 +51,42 @@ This installs the `community-connector` command globally.
 
 ### `create_pipeline`
 
-Create a community connector pipeline with a Git repo and DLT pipeline.
+Create a community connector pipeline. By default this creates a **managed
+ingestion** pipeline: the connector's Python wheels are built and uploaded to a
+UC Volume, and the pipeline's `ingestion_definition` is set from the spec — no
+Git repo is cloned. Pass `--use-workspace-pipeline` for the legacy mode that
+clones the repo into the workspace and runs `ingest.py`.
+
+Managed mode accepts either `--pipeline-spec` or `--connection-name`:
+- `--pipeline-spec` may be a **bare** ingestion definition (`connection_name` +
+  `objects`) or a **full** pipeline spec (containing an `ingestion_definition`
+  block). If a full spec already declares an `environment`, the wheel
+  build/upload is skipped and the spec's dependencies are used as-is.
+- With only `--connection-name` (no spec), an **empty** pipeline is created (a
+  connection but no tables) that you can use the Databricks ingestion wizard UI
+  or populate later with `update_pipeline`.
+
+Wheels are built from the local source tree unless `--package` supplies
+pre-built ones.
 
 ```bash
-# Basic usage with connection name (uses default template)
-community-connector create_pipeline github my_github_pipeline -n my_github_conn
-
-# With catalog and schema
-community-connector create_pipeline stripe my_stripe_pipeline -n stripe_conn \
-  --catalog main --target raw_data
-
-# With pipeline spec file
-community-connector create_pipeline github my_pipeline -ps pipeline_spec.yaml
-
-# With inline JSON spec
+# Managed ingestion (default): bare spec with catalog/schema
 community-connector create_pipeline github my_pipeline \
-  -ps '{"connection_name": "my_conn", "objects": [{"table": {"source_table": "users"}}]}'
+  -ps spec.yaml -n my_conn -c main -t raw
+
+# Managed ingestion: full pipeline spec (self-contained)
+community-connector create_pipeline github my_pipeline -ps full_pipeline.yaml
+
+# Empty managed pipeline (add tables later with update_pipeline)
+community-connector create_pipeline github my_pipeline -n my_conn -c main -t raw
+
+# Bring your own pre-built wheels instead of building from source
+community-connector create_pipeline github my_pipeline \
+  -ps spec.yaml -p framework.whl -p connector.whl
+
+# Legacy workspace pipeline (clones the repo, runs ingest.py)
+community-connector create_pipeline github my_pipeline \
+  -n my_conn --use-workspace-pipeline
 ```
 
 **Options:**
@@ -76,29 +96,54 @@ community-connector create_pipeline github my_pipeline \
 | `--pipeline-spec` | `-ps` | Pipeline spec as JSON string or path to .yaml/.json file |
 | `--catalog` | `-c` | Unity Catalog name for the pipeline |
 | `--target` | `-t` | Target schema for the pipeline |
-| `--repo-url` | `-r` | Git repository URL (overrides default) |
+| `--package` | `-p` | Pre-built connector wheel; skip building from source (managed mode). Repeatable. |
+| `--volume-path` | `-v` | UC Volume directory for the connector wheels (managed mode). Defaults to `/Volumes/<catalog>/<schema>/community_connector/packages`. |
+| `--use-workspace-pipeline` | | Use the legacy workspace pipeline mode (clone repo, run `ingest.py`) instead of managed ingestion. |
+| `--repo-url` | `-r` | Git repository URL (legacy workspace mode; overrides default). |
 | `--config` | `-f` | Path to custom config file |
 
 ### `update_pipeline`
 
-Update the `ingest.py` configuration for an existing pipeline. This command modifies only the pipeline spec in the workspace file; other pipeline settings remain unchanged.
+Update an existing community connector pipeline. By default this updates a
+**managed ingestion** pipeline: `--pipeline-spec` is rebuilt into the pipeline's
+`ingestion_definition`. Because the pipelines PUT is a full-settings replace, the
+existing pipeline settings the CLI does not manage (tags, notifications, budget
+policy, channel, serverless, …) are preserved.
+
+Connector wheels are rebuilt and re-uploaded only when `--source-name` or
+`--package` is given; otherwise the pipeline's existing packages are reused
+untouched. A full spec that already declares an `environment` keeps its own
+dependencies.
+
+Pass `--use-workspace-pipeline` for the legacy mode that rewrites `ingest.py`
+and/or updates package dependencies. Managed mode requires `--pipeline-spec`;
+legacy mode requires at least one of `--pipeline-spec` or `--package`.
 
 ```bash
-# Update with a YAML spec file
-community-connector update_pipeline my_github_pipeline -ps pipeline_spec.yaml
+# Managed ingestion (default): update the ingested tables, reuse existing wheels
+community-connector update_pipeline my_pipeline -ps spec.yaml
 
-# Update with a JSON spec file
-community-connector update_pipeline my_github_pipeline -ps pipeline_spec.json
+# Managed ingestion: also rebuild and re-upload the connector wheels
+community-connector update_pipeline my_pipeline -ps spec.yaml -s github
 
-# Update with inline JSON spec
-community-connector update_pipeline my_github_pipeline \
-  -ps '{"connection_name": "my_conn", "objects": [{"table": {"source_table": "users"}}]}'
+# Legacy workspace pipeline
+community-connector update_pipeline my_pipeline -ps spec.yaml \
+  --use-workspace-pipeline
+community-connector update_pipeline my_pipeline -p connector.whl \
+  --use-workspace-pipeline
 ```
 
 **Options:**
 | Option | Short | Description |
 |--------|-------|-------------|
-| `--pipeline-spec` | `-ps` | Pipeline spec as JSON string or path to .yaml/.json file (required) |
+| `--pipeline-spec` | `-ps` | Pipeline spec as JSON string or path to .yaml/.json file (required in managed mode) |
+| `--source-name` | `-s` | Connector source name; triggers rebuilding the wheels in managed mode. |
+| `--connection-name` | `-n` | UC connection name (managed mode). |
+| `--catalog` | `-c` | UC target catalog (managed mode). |
+| `--schema` | `-t` | Target schema (managed mode). |
+| `--package` | `-p` | Pre-built connector wheel; upload and use as pipeline dependency. Repeatable. |
+| `--volume-path` | `-v` | UC Volume directory for the connector wheels (managed mode). Defaults to `/Volumes/<catalog>/<schema>/community_connector/packages`. |
+| `--use-workspace-pipeline` | | Use the legacy workspace pipeline mode (rewrite `ingest.py` / update packages) instead of managed ingestion. |
 
 ### `run_pipeline`
 
@@ -314,12 +359,16 @@ The CLI uses a layered configuration system:
 ### Default Configuration
 
 The bundled defaults include:
-- Workspace path: `/Users/{CURRENT_USER}/.lakeflow_community_connectors/{PIPELINE_NAME}`
-- Git repo: `https://github.com/databrickslabs/lakeflow-community-connectors.git`
-- Sparse checkout patterns for connector source files
+- Workspace path: `/Users/{CURRENT_USER}/.lakeflow_community_connectors/{PIPELINE_NAME}` (legacy workspace mode)
+- Git repo: `https://github.com/databrickslabs/lakeflow-community-connectors.git` (legacy workspace mode)
+- Sparse checkout patterns for connector source files (legacy workspace mode)
 - Serverless mode enabled
 - Development mode enabled
 - Connection external options allowlist: Common table config options (e.g., `tableName`, `tableNameList`, `isDeleteFlow`)
+
+> The workspace path, Git repo, and sparse-checkout settings apply only to the
+> legacy `--use-workspace-pipeline` mode. Managed ingestion (the default) does
+> not clone a repo.
 
 ### Custom Config File
 
