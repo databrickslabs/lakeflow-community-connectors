@@ -69,16 +69,12 @@ from databricks.labs.community_connector_cli.connector_spec import (
 
 CONNECTION_TYPE = "COMMUNITY"
 
-# Home-dir subdirectory where the webapp saves community connector manifests, and
-# the file extension the workspace import API infers NodeType.CommunityConnector
-# from. Keep in sync with the webapp (workspaceManifestUtils.ts).
+# Workspace location and file extension for saved community connector manifests.
 COMMUNITY_CONNECTORS_DIR_NAME = ".community-connectors"
 COMMUNITY_CONNECTOR_EXTENSION = ".connector.json"
 
-# Filename-safe display names: letters, numbers, spaces, hyphens, underscores.
-# Mirrors the webapp's FILENAME_SAFE_DISPLAY_NAME check — the display name is
-# interpolated straight into the workspace path, so this blocks path traversal
-# and malformed writes.
+# Filename-safe display names. The display name becomes the workspace filename
+# verbatim, so this allowlist blocks path traversal and malformed writes.
 _FILENAME_SAFE_DISPLAY_NAME_RE = re.compile(r"^[a-zA-Z0-9 _-]+$")
 
 
@@ -2975,13 +2971,11 @@ def publish(
 
     click.echo(f"Publishing community connector: {source_name}")
 
+    # `_load_connector_spec` already warns with the reason when it can't load a
+    # spec; only add the consequence here so the message isn't duplicated.
     connector_spec = _load_connector_spec(source_name, spec_path)
     if connector_spec is None:
-        click.echo(
-            f"⚠️  Warning: Could not load connector spec for '{source_name}'. "
-            "Publishing with a null connectionSpec.",
-            err=True,
-        )
+        click.echo("  Publishing with a null connectionSpec.", err=True)
 
     resolved_display_name = _resolve_display_name(
         display_name, connector_spec, source_name

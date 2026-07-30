@@ -3469,6 +3469,17 @@ class TestWriteCommunityConnectorManifest:
                 overwrite=False,
             )
 
+    def test_mkdirs_error_other_than_already_exists_raises(self):
+        mock_ws = MagicMock()
+        mock_ws.workspace.mkdirs.side_effect = Exception("PERMISSION_DENIED")
+        with pytest.raises(click.ClickException, match="Failed to create workspace directory"):
+            _write_community_connector_manifest(
+                mock_ws, "/Users/me/.community-connectors",
+                "/Users/me/.community-connectors/x.connector.json", {"id": "X"},
+                overwrite=True,
+            )
+        assert mock_ws.workspace.import_.call_count == 0
+
 
 class TestPublishCommand:
     """Tests for the `publish` command."""
@@ -3558,3 +3569,76 @@ class TestPublishCommand:
         _, kwargs = mock_build_wheels.call_args
         passed_packages = mock_build_wheels.call_args[0][3]
         assert passed_packages == (str(wheel),)
+
+    @patch("databricks.labs.community_connector_cli.cli.WorkspaceClient")
+    @patch("databricks.labs.community_connector_cli.cli._upload_wheel")
+    @patch("databricks.labs.community_connector_cli.cli._resolve_managed_dest_dir")
+    @patch("databricks.labs.community_connector_cli.cli._load_connector_spec")
+    def test_publish_package_bypass_uploads_without_building(
+        self, mock_load_spec, mock_dest_dir, mock_upload_wheel, mock_ws_cls, tmp_path
+    ):
+        """--package uploads pre-built wheels as-is, exercising the real bypass
+        branch of _build_and_upload_managed_wheels (no build step)."""
+        runner = CliRunner()
+        mock_load_spec.return_value = {"connection": {}}
+        dest = "/Volumes/main/default/community_connector/packages"
+        mock_dest_dir.return_value = dest
+        mock_upload_wheel.side_effect = lambda _ws, wheel_path, _dest: f"{dest}/{Path(wheel_path).name}"
+        wheel = tmp_path / "conn.whl"
+        wheel.write_text("x")
+        mock_ws = MagicMock()
+        mock_ws_cls.return_value = mock_ws
+        mock_ws.current_user.me.return_value.user_name = "me@example.com"
+
+        result = runner.invoke(main, ["publish", "github", "-p", str(wheel)])
+
+        assert result.exit_code == 0, result.output
+        mock_upload_wheel.assert_called_once()
+        manifest = json.loads(
+            base64.b64decode(mock_ws.workspace.import_.call_args.kwargs["content"]).decode("utf-8")
+        )
+        assert manifest["dependencies"] == [f"{dest}/conn.whl"]
+
+    @patch("databricks.labs.community_connector_cli.cli.WorkspaceClient")
+    @patch("databricks.labs.community_connector_cli.cli._build_and_upload_managed_wheels")
+    @patch("databricks.labs.community_connector_cli.cli._resolve_managed_dest_dir")
+    @patch("databricks.labs.community_connector_cli.cli._load_connector_spec")
+    def test_publish_null_spec_writes_null_connection_spec_with_warning(
+        self, mock_load_spec, mock_dest_dir, mock_build_wheels, mock_ws_cls
+    ):
+        runner = CliRunner()
+        mock_load_spec.return_value = None
+        mock_dest_dir.return_value = "/Volumes/main/default/community_connector/packages"
+        mock_build_wheels.return_value = []
+        mock_ws = MagicMock()
+        mock_ws_cls.return_value = mock_ws
+        mock_ws.current_user.me.return_value.user_name = "me@example.com"
+
+        result = runner.invoke(main, ["publish", "github"])
+
+        assert result.exit_code == 0, result.output
+        assert "null connectionSpec" in result.output
+        manifest = json.loads(
+            base64.b64decode(mock_ws.workspace.import_.call_args.kwargs["content"]).decode("utf-8")
+        )
+        assert manifest["connectionSpec"] is None
+
+    @patch("databricks.labs.community_connector_cli.cli.WorkspaceClient")
+    @patch("databricks.labs.community_connector_cli.cli._build_and_upload_managed_wheels")
+    @patch("databricks.labs.community_connector_cli.cli._resolve_managed_dest_dir")
+    @patch("databricks.labs.community_connector_cli.cli._load_connector_spec")
+    def test_publish_forwards_overwrite_flag(
+        self, mock_load_spec, mock_dest_dir, mock_build_wheels, mock_ws_cls
+    ):
+        runner = CliRunner()
+        mock_load_spec.return_value = {"connection": {}}
+        mock_dest_dir.return_value = "/Volumes/main/default/community_connector/packages"
+        mock_build_wheels.return_value = []
+        mock_ws = MagicMock()
+        mock_ws_cls.return_value = mock_ws
+        mock_ws.current_user.me.return_value.user_name = "me@example.com"
+
+        result = runner.invoke(main, ["publish", "github", "--overwrite"])
+
+        assert result.exit_code == 0, result.output
+        assert mock_ws.workspace.import_.call_args.kwargs["overwrite"] is True
