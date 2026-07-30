@@ -344,6 +344,30 @@ community-connector publish github -d "My GitHub" --overwrite
 | `--schema` | `-t` | Schema for the wheel volume. |
 | `--overwrite` | | Overwrite an existing connector saved at the same path. |
 
+### `unpublish`
+
+Remove a previously published connector from your workspace — the inverse of
+`publish`. Deletes the `.connector.json` file at
+`/Users/<you>/.community-connectors/<display_name>.connector.json`, so the
+connector no longer appears as a **Custom** tile in Add Data. The display name is
+resolved the same way as `publish`; the command errors if no matching connector
+is found, and prompts for confirmation unless `--yes` is passed.
+
+```bash
+# Resolve the display name from the spec / source name, confirm, then delete
+community-connector unpublish github
+
+# Explicit display name, no prompt (works without repo access)
+community-connector unpublish github -d "My GitHub" --yes
+```
+
+**Options:**
+| Option | Short | Description |
+|--------|-------|-------------|
+| `--display-name` | `-d` | User-facing name of the connector to remove. Defaults to the spec's `display_name`, then the source name — must match what was used at publish time. |
+| `--spec` | `-s` | Local path to `connector_spec.yaml`, or a GitHub repo URL. Only used to resolve the display name when `--display-name` is not given. |
+| `--yes` | `-y` | Skip the confirmation prompt. |
+
 ## Pipeline Spec Format
 
 The pipeline spec defines which tables to ingest and how:

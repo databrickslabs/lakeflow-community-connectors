@@ -3016,5 +3016,98 @@ def publish(
     )
 
 
+def _workspace_object_exists(workspace_client, path: str) -> bool:
+    """Return True if a workspace object exists at ``path``."""
+    try:
+        workspace_client.workspace.get_status(path)
+        return True
+    except Exception as e:
+        if "RESOURCE_DOES_NOT_EXIST" in str(e) or "does not exist" in str(e).lower():
+            return False
+        raise click.ClickException(f"Failed to check {path}: {e}")
+
+
+@main.command("unpublish")
+@click.argument("source_name")
+@click.option(
+    "--display-name",
+    "-d",
+    "display_name",
+    default=None,
+    help="User-facing name of the connector to remove (the <name>.connector.json "
+    "filename). Defaults to the spec's display_name, then the source name — must "
+    "match what was used at publish time.",
+)
+@click.option(
+    "--spec",
+    "-s",
+    "spec_path",
+    default=None,
+    help="Optional: local path to connector_spec.yaml, or a GitHub repo URL. Only "
+    "used to resolve the display name when --display-name is not given.",
+)
+@click.option(
+    "--yes",
+    "-y",
+    "assume_yes",
+    is_flag=True,
+    default=False,
+    help="Skip the confirmation prompt.",
+)
+@click.pass_context
+def unpublish(
+    ctx: click.Context,
+    source_name: str,
+    display_name: Optional[str],
+    spec_path: Optional[str],
+    assume_yes: bool,
+):
+    """
+    Remove a published community connector from your workspace.
+
+    SOURCE_NAME is the name of the connector source (e.g., 'github', 'stripe').
+
+    Deletes the ``.connector.json`` file that ``publish`` wrote at
+    ``/Users/<you>/.community-connectors/<display_name>.connector.json``, so the
+    connector no longer appears as a "Custom" tile in Add Data. The display name
+    is resolved the same way as ``publish``; errors if no matching connector is
+    found.
+
+    \b
+    Example:
+        community-connector unpublish github
+        community-connector unpublish github -d "My GitHub" --yes
+    """
+    debug = ctx.obj.get("debug", False)
+
+    # Only load the spec to resolve the display name; skip it when --display-name
+    # is supplied so unpublish works without repo access.
+    connector_spec = None if display_name else _load_connector_spec(source_name, spec_path)
+    resolved_display_name = _resolve_display_name(display_name, connector_spec, source_name)
+
+    workspace_client = _make_workspace_client()
+    current_user = workspace_client.current_user.me()
+    dir_path = f"/Users/{current_user.user_name}/{COMMUNITY_CONNECTORS_DIR_NAME}"
+    file_path = f"{dir_path}/{resolved_display_name}{COMMUNITY_CONNECTOR_EXTENSION}"
+
+    if not _workspace_object_exists(workspace_client, file_path):
+        raise click.ClickException(
+            f"No published connector found at {file_path}. "
+            "Check the display name (use --display-name if it differs from the source name)."
+        )
+
+    if not assume_yes:
+        click.confirm(f"Delete published connector at {file_path}?", abort=True)
+
+    click.echo(f"Removing connector: {file_path}")
+    try:
+        workspace_client.workspace.delete(path=file_path)
+    except Exception as e:
+        if debug:
+            click.echo(f"\n[DEBUG] Full exception: {traceback.format_exc()}", err=True)
+        raise click.ClickException(f"Failed to delete {file_path}: {e}")
+    click.echo("  ✓ Unpublished!")
+
+
 if __name__ == "__main__":
     main()  # pylint: disable=no-value-for-parameter

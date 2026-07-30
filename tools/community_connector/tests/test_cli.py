@@ -3642,3 +3642,97 @@ class TestPublishCommand:
 
         assert result.exit_code == 0, result.output
         assert mock_ws.workspace.import_.call_args.kwargs["overwrite"] is True
+
+
+class TestUnpublishCommand:
+    """Tests for the `unpublish` command."""
+
+    @staticmethod
+    def _existing_ws(user="me@example.com"):
+        """A WorkspaceClient mock whose get_status succeeds (object exists)."""
+        mock_ws = MagicMock()
+        mock_ws.current_user.me.return_value.user_name = user
+        return mock_ws
+
+    @staticmethod
+    def _missing_ws(user="me@example.com"):
+        """A WorkspaceClient mock whose get_status raises RESOURCE_DOES_NOT_EXIST."""
+        mock_ws = MagicMock()
+        mock_ws.current_user.me.return_value.user_name = user
+        mock_ws.workspace.get_status.side_effect = Exception("RESOURCE_DOES_NOT_EXIST")
+        return mock_ws
+
+    @patch("databricks.labs.community_connector_cli.cli.WorkspaceClient")
+    @patch("databricks.labs.community_connector_cli.cli._load_connector_spec")
+    def test_unpublish_deletes_after_confirmation(self, mock_load_spec, mock_ws_cls):
+        runner = CliRunner()
+        mock_load_spec.return_value = {"display_name": "GitHub", "connection": {}}
+        mock_ws = self._existing_ws()
+        mock_ws_cls.return_value = mock_ws
+
+        # Confirm the prompt with "y".
+        result = runner.invoke(main, ["unpublish", "github"], input="y\n")
+
+        assert result.exit_code == 0, result.output
+        mock_ws.workspace.delete.assert_called_once_with(
+            path="/Users/me@example.com/.community-connectors/GitHub.connector.json"
+        )
+
+    @patch("databricks.labs.community_connector_cli.cli.WorkspaceClient")
+    @patch("databricks.labs.community_connector_cli.cli._load_connector_spec")
+    def test_unpublish_yes_skips_prompt(self, mock_load_spec, mock_ws_cls):
+        runner = CliRunner()
+        mock_load_spec.return_value = {"connection": {}}
+        mock_ws = self._existing_ws()
+        mock_ws_cls.return_value = mock_ws
+
+        result = runner.invoke(main, ["unpublish", "github", "--yes"])
+
+        assert result.exit_code == 0, result.output
+        mock_ws.workspace.delete.assert_called_once_with(
+            path="/Users/me@example.com/.community-connectors/github.connector.json"
+        )
+
+    @patch("databricks.labs.community_connector_cli.cli.WorkspaceClient")
+    @patch("databricks.labs.community_connector_cli.cli._load_connector_spec")
+    def test_unpublish_uses_display_name_without_loading_spec(self, mock_load_spec, mock_ws_cls):
+        runner = CliRunner()
+        mock_ws = self._existing_ws()
+        mock_ws_cls.return_value = mock_ws
+
+        result = runner.invoke(main, ["unpublish", "github", "-d", "My GitHub", "--yes"])
+
+        assert result.exit_code == 0, result.output
+        # --display-name provided → the spec is not loaded at all.
+        mock_load_spec.assert_not_called()
+        mock_ws.workspace.delete.assert_called_once_with(
+            path="/Users/me@example.com/.community-connectors/My GitHub.connector.json"
+        )
+
+    @patch("databricks.labs.community_connector_cli.cli.WorkspaceClient")
+    @patch("databricks.labs.community_connector_cli.cli._load_connector_spec")
+    def test_unpublish_errors_when_not_found(self, mock_load_spec, mock_ws_cls):
+        runner = CliRunner()
+        mock_load_spec.return_value = {"connection": {}}
+        mock_ws = self._missing_ws()
+        mock_ws_cls.return_value = mock_ws
+
+        result = runner.invoke(main, ["unpublish", "github", "--yes"])
+
+        assert result.exit_code != 0
+        assert "No published connector found" in result.output
+        mock_ws.workspace.delete.assert_not_called()
+
+    @patch("databricks.labs.community_connector_cli.cli.WorkspaceClient")
+    @patch("databricks.labs.community_connector_cli.cli._load_connector_spec")
+    def test_unpublish_aborts_when_declined(self, mock_load_spec, mock_ws_cls):
+        runner = CliRunner()
+        mock_load_spec.return_value = {"connection": {}}
+        mock_ws = self._existing_ws()
+        mock_ws_cls.return_value = mock_ws
+
+        # Decline the confirmation prompt with "n".
+        result = runner.invoke(main, ["unpublish", "github"], input="n\n")
+
+        assert result.exit_code != 0
+        mock_ws.workspace.delete.assert_not_called()
