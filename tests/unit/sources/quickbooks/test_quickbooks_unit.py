@@ -335,14 +335,13 @@ def test_customer_incremental_failure_replays_from_same_offset(
     connector = QuickBooksLakeflowConnect(_options())
     start_offset = _checkpoint("2026-07-26T10:30:00Z")
 
-    failed_records, failed_end_offset = connector.read_table("customers", start_offset, {})
     with pytest.raises(RuntimeError, match="LastUpdatedTime"):
-        list(failed_records)
+        connector.read_table("customers", start_offset, {})
 
     replayed_records, replayed_end_offset = connector.read_table("customers", start_offset, {})
 
     assert list(replayed_records) == []
-    assert failed_end_offset == replayed_end_offset
+    assert replayed_end_offset == _checkpoint("2026-07-26T12:30:00Z")
     assert (
         get.call_args_list[0].kwargs["params"]["query"]
         == get.call_args_list[1].kwargs["params"]["query"]
@@ -412,6 +411,8 @@ def test_cdc_requires_last_updated_time(
         ({"incremental_overlap_seconds": "bad"}, "incremental_overlap_seconds"),
         ({"max_incremental_window_seconds": "59"}, "max_incremental_window_seconds"),
         ({"max_incremental_window_seconds": "bad"}, "max_incremental_window_seconds"),
+        ({"max_records_per_batch": "0"}, "max_records_per_batch"),
+        ({"max_records_per_batch": "bad"}, "max_records_per_batch"),
     ],
 )
 def test_customer_incremental_option_validation(
@@ -423,6 +424,125 @@ def test_customer_incremental_option_validation(
 
     with pytest.raises(ValueError, match=match):
         connector.read_table("customers", start_offset, options)
+
+
+def test_incremental_admission_control_shrinks_and_drains_complete_window(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        quickbooks_module,
+        "_utc_now",
+        lambda: datetime(2026, 7, 26, 12, 30, tzinfo=timezone.utc),
+    )
+    connector = QuickBooksLakeflowConnect(_options())
+    calls: list[tuple[int, str]] = []
+
+    def iter_entity(
+        _entity: str,
+        *,
+        page_size: int,
+        where_clause: str,
+    ):
+        calls.append((page_size, where_clause))
+        upper = "2026-07-26T12:30:00Z"
+        count = 3
+        if upper not in where_clause:
+            count = 2
+        return iter(
+            {
+                "Id": str(index),
+                "MetaData": {"LastUpdatedTime": "2026-07-26T11:45:00Z"},
+            }
+            for index in range(count)
+        )
+
+    connector._client.iter_entity = iter_entity  # type: ignore[method-assign]  # noqa: SLF001
+    records, end_offset = connector.read_table(
+        "customers",
+        _checkpoint("2026-07-26T11:30:00Z"),
+        {
+            "incremental_overlap_seconds": "0",
+            "max_incremental_window_seconds": "3600",
+            "max_records_per_batch": "2",
+            "page_size": "1000",
+        },
+    )
+
+    assert [record["id"] for record in records] == ["0", "1"]
+    assert end_offset == _checkpoint("2026-07-26T12:00:00Z")
+    assert len(calls) == 2
+    assert all(page_size == 2 for page_size, _ in calls)
+    assert "LastUpdatedTime <= '2026-07-26T12:30:00Z'" in calls[0][1]
+    assert "LastUpdatedTime <= '2026-07-26T12:00:00Z'" in calls[1][1]
+
+
+def test_incremental_admission_control_keeps_indivisible_timestamp_cohort(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        quickbooks_module,
+        "_utc_now",
+        lambda: datetime(2026, 7, 26, 12, 30, tzinfo=timezone.utc),
+    )
+    connector = QuickBooksLakeflowConnect(_options())
+    connector._client.iter_entity = Mock(  # noqa: SLF001
+        return_value=iter(
+            [
+                {
+                    "Id": "1",
+                    "MetaData": {"LastUpdatedTime": "2026-07-26T12:30:00Z"},
+                },
+                {
+                    "Id": "2",
+                    "MetaData": {"LastUpdatedTime": "2026-07-26T12:30:00Z"},
+                },
+            ]
+        )
+    )
+
+    records, end_offset = connector.read_table(
+        "customers",
+        _checkpoint("2026-07-26T12:29:59Z"),
+        {
+            "incremental_overlap_seconds": "0",
+            "max_records_per_batch": "1",
+        },
+    )
+
+    assert [record["id"] for record in records] == ["1", "2"]
+    assert end_offset == _checkpoint("2026-07-26T12:30:00Z")
+
+
+def test_delete_admission_control_fails_without_advancing_checkpoint() -> None:
+    connector = QuickBooksLakeflowConnect(_options())
+    connector._client.get_entity_changes = Mock(  # noqa: SLF001
+        return_value=(
+            [
+                {
+                    "Id": "1",
+                    "status": "Deleted",
+                    "MetaData": {"LastUpdatedTime": "2026-07-26T12:01:00Z"},
+                },
+                {
+                    "Id": "2",
+                    "status": "Deleted",
+                    "MetaData": {"LastUpdatedTime": "2026-07-26T12:01:01Z"},
+                },
+            ],
+            "2026-07-26T12:02:00Z",
+        )
+    )
+
+    with pytest.raises(RuntimeError, match="max_records_per_batch"):
+        connector.read_table_deletes(
+            "invoices",
+            _checkpoint(
+                "2026-07-26T12:00:00Z",
+                table_name="invoices",
+                flow="deletes",
+            ),
+            {"max_records_per_batch": "1"},
+        )
 
 
 def test_pagination_requests_empty_page_after_exact_full_page(

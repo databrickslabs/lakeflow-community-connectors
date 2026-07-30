@@ -57,12 +57,42 @@ tie-breaker.
 | invoices | Invoice | realm_id + Id | cdc_with_deletes |
 | bills | Bill | realm_id + Id | cdc_with_deletes |
 
+## Destination columns
+
+Every table has these typed core columns:
+
+| Column | Spark type | Nullable | Meaning |
+|---|---|---:|---|
+| `realm_id` | string | no | QuickBooks company ID and tenant component of the primary key |
+| `id` | string | no | QuickBooks entity `Id` and entity component of the primary key |
+| `sync_token` | string | yes | QuickBooks optimistic-concurrency token |
+| `created_at` | timestamp | yes | `MetaData.CreateTime` |
+| `last_updated_at` | timestamp | yes | `MetaData.LastUpdatedTime` and CDC sequence cursor |
+| `raw_json` | string | no | Lossless, canonical JSON representation of the source object |
+
+Entity-specific columns are:
+
+| Table | Additional typed columns |
+|---|---|
+| `customers` | `display_name` string, `company_name` string, `given_name` string, `family_name` string, `primary_email` string, `primary_phone` string, `balance` decimal(38,9), `currency_ref` string, `active` boolean |
+| `vendors` | `display_name` string, `company_name` string, `given_name` string, `family_name` string, `primary_email` string, `primary_phone` string, `balance` decimal(38,9), `vendor_1099` boolean, `currency_ref` string, `active` boolean |
+| `accounts` | `name` string, `fully_qualified_name` string, `account_type` string, `account_sub_type` string, `classification` string, `current_balance` decimal(38,9), `currency_ref` string, `active` boolean |
+| `items` | `name` string, `fully_qualified_name` string, `item_type` string, `description` string, `unit_price` decimal(38,9), `purchase_cost` decimal(38,9), `quantity_on_hand` decimal(38,9), `income_account_ref` string, `expense_account_ref` string, `asset_account_ref` string, `active` boolean |
+| `invoices` | `doc_number` string, `txn_date` date, `due_date` date, `customer_ref` string, `total_amount` decimal(38,9), `balance` decimal(38,9), `currency_ref` string, `email_status` string, `print_status` string, `line_json` string |
+| `bills` | `doc_number` string, `txn_date` date, `due_date` date, `vendor_ref` string, `total_amount` decimal(38,9), `balance` decimal(38,9), `currency_ref` string, `ap_account_ref` string, `line_json` string |
+
+Except for `realm_id`, `id`, and `raw_json`, fields are nullable because
+QuickBooks returns sparse objects and entity shape varies by company
+configuration.
+
 ## Incremental status
 
 Inserts and updates for all six tables are implemented with an independent
 versioned `updated_through` offset, a frozen per-run upper bound, bounded
-update windows, and replay overlap. Each table's initial batch is a complete
-snapshot.
+update windows, replay overlap, and best-effort `max_records_per_batch`
+admission control. Oversized windows are retried with smaller time bounds and
+the checkpoint advances only after a complete window is drained. Each table's
+initial batch is a complete snapshot.
 
 QuickBooks list entities use soft deletion: `Active=false` is an update, and
 the row remains in the destination. Query API calls explicitly include active

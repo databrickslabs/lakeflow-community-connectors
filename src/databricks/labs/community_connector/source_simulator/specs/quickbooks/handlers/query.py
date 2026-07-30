@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import re
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 from urllib.parse import parse_qs, urlsplit
 
@@ -38,6 +38,11 @@ def serve_query(prep: PreparedRequest, spec: Any, corpus: Any) -> Response:  # n
     records = corpus.get(entity) or []
     if not isinstance(records, list):
         records = []
+    records = [
+        _give_synthetic_future_record_unique_id(record)
+        for record in records
+        if isinstance(record, dict)
+    ]
     lower = match.group("lower")
     upper = match.group("upper")
     if lower and upper:
@@ -67,6 +72,19 @@ def serve_query(prep: PreparedRequest, spec: Any, corpus: Any) -> Response:  # n
 
 def _parse_datetime(value: str) -> datetime:
     return datetime.fromisoformat(value.replace("Z", "+00:00"))
+
+
+def _give_synthetic_future_record_unique_id(record: dict) -> dict:
+    """Keep synthesized future rows distinct when a corpus record is cloned."""
+    metadata = record.get("MetaData")
+    if not isinstance(metadata, dict):
+        return record
+    timestamp = metadata.get("LastUpdatedTime")
+    if not isinstance(timestamp, str) or _parse_datetime(timestamp) <= datetime.now(timezone.utc):
+        return record
+    cloned = dict(record)
+    cloned["Id"] = f"{record.get('Id', 'record')}-future-{timestamp}"
+    return cloned
 
 
 def _response(prep: PreparedRequest, status: int, payload: dict) -> Response:

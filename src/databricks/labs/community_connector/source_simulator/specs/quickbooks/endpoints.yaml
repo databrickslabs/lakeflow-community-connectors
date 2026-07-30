@@ -5,7 +5,11 @@
 endpoints:
   - path: "/v3/company/{realm_id}/query"
     method: GET
+    corpus: Customer
     handler: databricks.labs.community_connector.source_simulator.specs.quickbooks.handlers.query:serve_query
+    synthesize_future_records:
+      cursor_field: MetaData.LastUpdatedTime
+      count: 3
   - path: "/v3/company/{realm_id}/cdc"
     method: GET
     handler: databricks.labs.community_connector.source_simulator.specs.quickbooks.handlers.cdc:serve_cdc

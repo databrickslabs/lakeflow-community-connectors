@@ -85,6 +85,7 @@ additionally use `(realm_id, id)` so identical QuickBooks IDs cannot collide.
 | `page_size` | `1000` | QuickBooks query page size, from 1 through 1000 |
 | `incremental_overlap_seconds` | `60` | Per-table lower-bound replay overlap, from 0 through 3600 seconds |
 | `max_incremental_window_seconds` | `86400` | Maximum per-table checkpoint window, from 60 through 604800 seconds |
+| `max_records_per_batch` | `100000` | Best-effort admission-control target for incremental windows, from 1 through 10000000 records |
 | `delete_overlap_seconds` | `60` | Invoice/Bill delete replay overlap, from 0 through 3600 seconds |
 | `initial_delete_lookback_seconds` | `300` | Invoice/Bill bootstrap delete lookback, from 0 through 86400 seconds |
 
@@ -94,6 +95,13 @@ All six tables start with a complete snapshot followed by bounded update
 queries with independent checkpoints. Customers, vendors, accounts, and items
 use `cdc` because `Active=false` must remain queryable. Invoices and bills use
 `cdc_with_deletes`, which adds independent tombstone flows.
+
+Incremental update windows that exceed `max_records_per_batch` are retried
+with progressively smaller upper time bounds. The connector drains an accepted
+window completely before advancing its checkpoint. A one-second timestamp
+cohort is indivisible and may exceed the configured target; this preserves all
+rows sharing that cursor. QuickBooks' delete CDC endpoint cannot paginate, so
+an oversized delete cohort fails without advancing its checkpoint.
 
 Run the offline connector suite from the repository root:
 

@@ -41,4 +41,4 @@ connection:
     token_url: https://oauth.platform.intuit.com/oauth2/v1/tokens/bearer
     oauth_credential_exchange_method: header_only
 
-external_options_allowlist: "delete_overlap_seconds,incremental_overlap_seconds,initial_delete_lookback_seconds,max_incremental_window_seconds,page_size"
+external_options_allowlist: "delete_overlap_seconds,incremental_overlap_seconds,initial_delete_lookback_seconds,max_incremental_window_seconds,max_records_per_batch,page_size"

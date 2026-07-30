@@ -707,6 +707,7 @@ def register_lakeflow_source(spark):
     DEFAULT_MAX_RETRIES = 5
     DEFAULT_INCREMENTAL_OVERLAP_SECONDS = 60
     DEFAULT_MAX_INCREMENTAL_WINDOW_SECONDS = 86400
+    DEFAULT_MAX_RECORDS_PER_BATCH = 100_000
     DEFAULT_DELETE_OVERLAP_SECONDS = 60
     DEFAULT_INITIAL_DELETE_LOOKBACK_SECONDS = 300
     MAX_CDC_LOOKBACK_SECONDS = 30 * 86400
@@ -939,12 +940,20 @@ def register_lakeflow_source(spark):
             page_size = int(table_options.get("page_size", str(DEFAULT_PAGE_SIZE)))
             if not 1 <= page_size <= 1000:
                 raise ValueError("page_size must be between 1 and 1000")
+            max_records = _bounded_int_option(
+                table_options,
+                "max_records_per_batch",
+                default=DEFAULT_MAX_RECORDS_PER_BATCH,
+                minimum=1,
+                maximum=10_000_000,
+            )
 
             return self._read_incrementally(
                 table_name,
                 start_offset,
                 table_options,
                 page_size=page_size,
+                max_records=max_records,
             )
 
         def _read_incrementally(
@@ -954,6 +963,7 @@ def register_lakeflow_source(spark):
             table_options: dict[str, str],
             *,
             page_size: int,
+            max_records: int,
         ) -> tuple[Iterator[dict], dict]:
             cursor = _parse_offset(
                 start_offset,
@@ -1003,36 +1013,50 @@ def register_lakeflow_source(spark):
                 maximum=604800,
             )
             lower_dt = cursor_dt - timedelta(seconds=overlap_seconds)
-            upper_dt = min(
+            candidate_upper_dt = min(
                 cursor_dt + timedelta(seconds=max_window_seconds),
                 init_dt,
             )
             lower = _format_qbo_datetime(lower_dt)
-            upper = _format_qbo_datetime(upper_dt)
-            predicates = []
-            if table_name in LIST_TABLES:
-                predicates.append("Active IN (true, false)")
-            predicates.extend(
-                [
-                    f"MetaData.LastUpdatedTime >= '{lower}'",
-                    f"MetaData.LastUpdatedTime <= '{upper}'",
-                ]
-            )
-            where_clause = " AND ".join(predicates)
-            records = (
-                _normalize_cdc_entity(table_name, row, realm_id=self._realm_id)
-                for row in self._client.iter_entity(
-                    entity,
-                    page_size=page_size,
-                    where_clause=where_clause,
+
+            # QuickBooks does not provide a reliable ascending cursor order for
+            # every entity. Drain a complete bounded window before advancing its
+            # checkpoint. If the window exceeds admission control, retry a smaller
+            # window. A one-second cursor cohort is indivisible and is therefore
+            # emitted whole as the repository's Strategy-A best-effort exception.
+            while True:
+                upper = _format_qbo_datetime(candidate_upper_dt)
+                predicates = []
+                if table_name in LIST_TABLES:
+                    predicates.append("Active IN (true, false)")
+                predicates.extend(
+                    [
+                        f"MetaData.LastUpdatedTime >= '{lower}'",
+                        f"MetaData.LastUpdatedTime <= '{upper}'",
+                    ]
                 )
-            )
-            return records, _offset(
-                upper,
-                realm_id=self._realm_id,
-                table_name=table_name,
-                flow="updates",
-            )
+                where_clause = " AND ".join(predicates)
+                source_records = (
+                    _normalize_cdc_entity(table_name, row, realm_id=self._realm_id)
+                    for row in self._client.iter_entity(
+                        entity,
+                        page_size=min(page_size, max_records),
+                        where_clause=where_clause,
+                    )
+                )
+                records, exceeded = _collect_through_limit(source_records, max_records)
+                window_seconds = int((candidate_upper_dt - cursor_dt).total_seconds())
+                if not exceeded or window_seconds <= 1:
+                    if exceeded:
+                        records.extend(source_records)
+                    return iter(records), _offset(
+                        upper,
+                        realm_id=self._realm_id,
+                        table_name=table_name,
+                        flow="updates",
+                    )
+
+                candidate_upper_dt = cursor_dt + timedelta(seconds=max(1, window_seconds // 2))
 
         def read_table_deletes(
             self,
@@ -1046,6 +1070,13 @@ def register_lakeflow_source(spark):
                 raise ValueError(
                     f"QuickBooks {TABLE_TO_ENTITY[table_name]} is inactivated, not hard-deleted"
                 )
+            max_records = _bounded_int_option(
+                table_options,
+                "max_records_per_batch",
+                default=DEFAULT_MAX_RECORDS_PER_BATCH,
+                minimum=1,
+                maximum=10_000_000,
+            )
 
             cursor = _parse_offset(
                 start_offset,
@@ -1092,12 +1123,19 @@ def register_lakeflow_source(spark):
             if response_dt < lower_dt:
                 raise RuntimeError("QuickBooks CDC server time precedes changedSince")
 
-            tombstones = (
+            tombstones = [
                 _normalize_delete_entity(table_name, row, realm_id=self._realm_id)
                 for row in changes
                 if str(row.get("status", "")).lower() == "deleted"
-            )
-            return tombstones, _offset(
+            ]
+            if len(tombstones) > max_records:
+                raise RuntimeError(
+                    "QuickBooks returned more delete tombstones than "
+                    "max_records_per_batch. The CDC endpoint cannot paginate this "
+                    "cohort, so the delete checkpoint was not advanced. Increase "
+                    "max_records_per_batch or run ingestion more frequently."
+                )
+            return iter(tombstones), _offset(
                 response_time,
                 realm_id=self._realm_id,
                 table_name=table_name,
@@ -1110,6 +1148,16 @@ def register_lakeflow_source(spark):
                     f"Unsupported QuickBooks table '{table_name}'. "
                     f"Supported tables: {self.list_tables()}"
                 )
+
+
+    def _collect_through_limit(records: Iterator[dict], limit: int) -> tuple[list[dict], bool]:
+        """Collect no more than ``limit + 1`` records to detect an oversized window."""
+        collected = []
+        for record in records:
+            collected.append(record)
+            if len(collected) > limit:
+                return collected, True
+        return collected, False
 
 
     def _normalize_entity(table_name: str, row: dict, *, realm_id: str) -> dict:
