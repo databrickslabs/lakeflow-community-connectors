@@ -41,6 +41,9 @@ from databricks.labs.community_connector_cli.cli import (
     _validate_framework_wheel,
     _find_repo_root,
     _interpolate_oauth_placeholders,
+    _resolve_display_name,
+    _build_community_connector_manifest,
+    _write_community_connector_manifest,
 )
 from databricks.labs.community_connector_cli.connector_spec import (
     ParsedConnectorSpec,
@@ -3373,3 +3376,185 @@ class TestInterpolateOauthPlaceholders:
     def test_no_placeholders_is_noop(self):
         conn = {"token_endpoint": "https://example.com/token"}
         assert _interpolate_oauth_placeholders(conn, {}) == conn
+
+
+class TestResolveDisplayName:
+    """Tests for _resolve_display_name."""
+
+    def test_explicit_wins(self):
+        assert _resolve_display_name("My Name", {"display_name": "GitHub"}, "github") == "My Name"
+
+    def test_falls_back_to_spec_display_name(self):
+        assert _resolve_display_name(None, {"display_name": "GitHub"}, "github") == "GitHub"
+
+    def test_falls_back_to_source_name(self):
+        assert _resolve_display_name(None, {}, "github") == "github"
+        assert _resolve_display_name(None, None, "github") == "github"
+
+    def test_rejects_unsafe_filename(self):
+        with pytest.raises(click.ClickException, match="not a valid filename"):
+            _resolve_display_name("../evil", None, "github")
+        with pytest.raises(click.ClickException, match="not a valid filename"):
+            _resolve_display_name(None, {"display_name": "a/b"}, "github")
+
+
+class TestBuildCommunityConnectorManifest:
+    """Tests for _build_community_connector_manifest."""
+
+    def test_field_derivation_and_null_logo(self):
+        spec = {"connection": {"parameters": []}}
+        manifest = _build_community_connector_manifest(
+            "azure-devops", "Azure DevOps", spec, None
+        )
+        assert manifest["id"] == "AZURE_DEVOPS"
+        assert manifest["sourceName"] == "azure-devops"
+        assert manifest["displayName"] == "Azure DevOps"
+        assert manifest["logo"] is None
+        assert manifest["repositoryPath"] == ""
+        assert manifest["readmeUrl"] == ""
+        assert manifest["connectionSpec"] == spec
+        # No dependencies key when none supplied.
+        assert "dependencies" not in manifest
+
+    def test_includes_dependencies_when_present(self):
+        manifest = _build_community_connector_manifest(
+            "github", "GitHub", None, ["/Volumes/main/default/community_connector/x.whl"]
+        )
+        assert manifest["connectionSpec"] is None
+        assert manifest["dependencies"] == [
+            "/Volumes/main/default/community_connector/x.whl"
+        ]
+
+
+class TestWriteCommunityConnectorManifest:
+    """Tests for _write_community_connector_manifest."""
+
+    def test_mkdirs_and_import_called(self):
+        mock_ws = MagicMock()
+        _write_community_connector_manifest(
+            mock_ws,
+            "/Users/me/.community-connectors",
+            "/Users/me/.community-connectors/GitHub.connector.json",
+            {"id": "GITHUB"},
+            overwrite=True,
+        )
+        mock_ws.workspace.mkdirs.assert_called_once_with(
+            "/Users/me/.community-connectors"
+        )
+        assert mock_ws.workspace.import_.call_count == 1
+        _, kwargs = mock_ws.workspace.import_.call_args
+        assert kwargs["path"] == "/Users/me/.community-connectors/GitHub.connector.json"
+        assert kwargs["overwrite"] is True
+        # Content is base64 of the JSON manifest.
+        decoded = base64.b64decode(kwargs["content"]).decode("utf-8")
+        assert json.loads(decoded) == {"id": "GITHUB"}
+
+    def test_existing_dir_is_tolerated(self):
+        mock_ws = MagicMock()
+        mock_ws.workspace.mkdirs.side_effect = Exception("RESOURCE_ALREADY_EXISTS")
+        _write_community_connector_manifest(
+            mock_ws, "/Users/me/.community-connectors",
+            "/Users/me/.community-connectors/x.connector.json", {"id": "X"},
+            overwrite=True,
+        )
+        assert mock_ws.workspace.import_.call_count == 1
+
+    def test_existing_file_without_overwrite_raises_hint(self):
+        mock_ws = MagicMock()
+        mock_ws.workspace.import_.side_effect = Exception("RESOURCE_ALREADY_EXISTS")
+        with pytest.raises(click.ClickException, match="--overwrite"):
+            _write_community_connector_manifest(
+                mock_ws, "/Users/me/.community-connectors",
+                "/Users/me/.community-connectors/x.connector.json", {"id": "X"},
+                overwrite=False,
+            )
+
+
+class TestPublishCommand:
+    """Tests for the `publish` command."""
+
+    @patch("databricks.labs.community_connector_cli.cli.WorkspaceClient")
+    @patch("databricks.labs.community_connector_cli.cli._build_and_upload_managed_wheels")
+    @patch("databricks.labs.community_connector_cli.cli._resolve_managed_dest_dir")
+    @patch("databricks.labs.community_connector_cli.cli._load_connector_spec")
+    def test_publish_builds_wheels_and_writes_manifest(
+        self, mock_load_spec, mock_dest_dir, mock_build_wheels, mock_ws_cls
+    ):
+        runner = CliRunner()
+        mock_load_spec.return_value = {"display_name": "GitHub", "connection": {}}
+        mock_dest_dir.return_value = "/Volumes/main/default/community_connector/packages"
+        mock_build_wheels.return_value = [
+            "/Volumes/main/default/community_connector/packages/fw.whl",
+            "/Volumes/main/default/community_connector/packages/conn.whl",
+        ]
+        mock_ws = MagicMock()
+        mock_ws_cls.return_value = mock_ws
+        mock_ws.current_user.me.return_value.user_name = "me@example.com"
+
+        result = runner.invoke(main, ["publish", "github"])
+
+        assert result.exit_code == 0, result.output
+        mock_build_wheels.assert_called_once()
+        # Wrote the manifest to the user's .community-connectors dir.
+        _, kwargs = mock_ws.workspace.import_.call_args
+        assert kwargs["path"] == (
+            "/Users/me@example.com/.community-connectors/GitHub.connector.json"
+        )
+        decoded = base64.b64decode(kwargs["content"]).decode("utf-8")
+        manifest = json.loads(decoded)
+        assert manifest["id"] == "GITHUB"
+        assert manifest["displayName"] == "GitHub"
+        assert manifest["logo"] is None
+        assert manifest["dependencies"] == mock_build_wheels.return_value
+
+    @patch("databricks.labs.community_connector_cli.cli.WorkspaceClient")
+    @patch("databricks.labs.community_connector_cli.cli._build_and_upload_managed_wheels")
+    @patch("databricks.labs.community_connector_cli.cli._resolve_managed_dest_dir")
+    @patch("databricks.labs.community_connector_cli.cli._load_connector_spec")
+    def test_publish_uses_custom_display_name_in_path(
+        self, mock_load_spec, mock_dest_dir, mock_build_wheels, mock_ws_cls
+    ):
+        runner = CliRunner()
+        mock_load_spec.return_value = {"connection": {}}
+        mock_dest_dir.return_value = "/Volumes/main/default/community_connector/packages"
+        mock_build_wheels.return_value = []
+        mock_ws = MagicMock()
+        mock_ws_cls.return_value = mock_ws
+        mock_ws.current_user.me.return_value.user_name = "me@example.com"
+
+        result = runner.invoke(main, ["publish", "github", "-d", "My GitHub"])
+
+        assert result.exit_code == 0, result.output
+        _, kwargs = mock_ws.workspace.import_.call_args
+        assert kwargs["path"] == (
+            "/Users/me@example.com/.community-connectors/My GitHub.connector.json"
+        )
+
+    @patch("databricks.labs.community_connector_cli.cli.WorkspaceClient")
+    @patch("databricks.labs.community_connector_cli.cli._build_and_upload_managed_wheels")
+    @patch("databricks.labs.community_connector_cli.cli._resolve_managed_dest_dir")
+    @patch("databricks.labs.community_connector_cli.cli._load_connector_spec")
+    def test_publish_with_package_bypasses_build(
+        self, mock_load_spec, mock_dest_dir, mock_build_wheels, mock_ws_cls, tmp_path
+    ):
+        runner = CliRunner()
+        mock_load_spec.return_value = {"connection": {}}
+        mock_dest_dir.return_value = "/Volumes/main/default/community_connector/packages"
+        wheel = tmp_path / "conn.whl"
+        wheel.write_text("x")
+        mock_build_wheels.return_value = [
+            "/Volumes/main/default/community_connector/packages/conn.whl"
+        ]
+        mock_ws = MagicMock()
+        mock_ws_cls.return_value = mock_ws
+        mock_ws.current_user.me.return_value.user_name = "me@example.com"
+
+        result = runner.invoke(
+            main, ["publish", "github", "-p", str(wheel)]
+        )
+
+        assert result.exit_code == 0, result.output
+        # Pre-built package path is forwarded to the upload helper as a tuple.
+        _, kwargs = mock_build_wheels.call_args
+        passed_packages = mock_build_wheels.call_args[0][3]
+        assert passed_packages == (str(wheel),)

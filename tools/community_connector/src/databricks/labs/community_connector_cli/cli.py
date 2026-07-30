@@ -69,6 +69,18 @@ from databricks.labs.community_connector_cli.connector_spec import (
 
 CONNECTION_TYPE = "COMMUNITY"
 
+# Home-dir subdirectory where the webapp saves community connector manifests, and
+# the file extension the workspace import API infers NodeType.CommunityConnector
+# from. Keep in sync with the webapp (workspaceManifestUtils.ts).
+COMMUNITY_CONNECTORS_DIR_NAME = ".community-connectors"
+COMMUNITY_CONNECTOR_EXTENSION = ".connector.json"
+
+# Filename-safe display names: letters, numbers, spaces, hyphens, underscores.
+# Mirrors the webapp's FILENAME_SAFE_DISPLAY_NAME check — the display name is
+# interpolated straight into the workspace path, so this blocks path traversal
+# and malformed writes.
+_FILENAME_SAFE_DISPLAY_NAME_RE = re.compile(r"^[a-zA-Z0-9 _-]+$")
+
 
 def _make_workspace_client() -> WorkspaceClient:
     """Construct a WorkspaceClient, forcing the DEFAULT profile when unset.
@@ -1666,6 +1678,95 @@ def _build_managed_pipeline_body(
 # ---- end managed ingestion helpers -------------------------------------------
 
 
+# ---- Publish (save .connector.json to the workspace) -------------------------
+
+
+def _resolve_display_name(
+    explicit: Optional[str], connector_spec: Optional[dict], source_name: str
+) -> str:
+    """Resolve the connector's user-facing display name.
+
+    Precedence: an explicit ``--display-name`` wins; then the connector spec's
+    ``display_name``; finally the technical ``source_name``. The result backs
+    the ``<displayName>.connector.json`` filename, so it must be filename-safe.
+    """
+    display_name = explicit or (
+        connector_spec.get("display_name") if connector_spec else None
+    ) or source_name
+    display_name = str(display_name).strip()
+    if not _FILENAME_SAFE_DISPLAY_NAME_RE.match(display_name):
+        raise click.ClickException(
+            f"Display name '{display_name}' is not a valid filename. "
+            "Use only letters, numbers, spaces, hyphens, and underscores."
+        )
+    return display_name
+
+
+def _build_community_connector_manifest(
+    source_name: str,
+    display_name: str,
+    connector_spec: Optional[dict],
+    dependencies: Optional[List[str]],
+) -> dict:
+    """Build the ``.connector.json`` manifest body.
+
+    Mirrors the webapp's ``buildCommunityConnectorAuthoringManifest`` shape: the
+    connector spec YAML becomes ``connectionSpec``; ``logo``/``repositoryPath``/
+    ``readmeUrl`` are left empty (the workspace UI does not consume them for
+    saved connectors); the wheel volume paths become ``dependencies``.
+    """
+    manifest: dict = {
+        "id": source_name.upper().replace("-", "_"),
+        "sourceName": source_name,
+        "displayName": display_name,
+        "logo": None,
+        "repositoryPath": "",
+        "readmeUrl": "",
+        "connectionSpec": connector_spec,
+    }
+    if dependencies:
+        manifest["dependencies"] = dependencies
+    return manifest
+
+
+def _write_community_connector_manifest(
+    workspace_client, dir_path: str, file_path: str, manifest: dict, overwrite: bool
+) -> None:
+    """Write the manifest to the workspace as a ``.connector.json`` file.
+
+    Creates the ``.community-connectors`` directory (idempotent) and imports the
+    file with ``format=AUTO`` so the server infers NodeType.CommunityConnector
+    from the ``.connector.json`` extension — the same call the webapp makes.
+    """
+    try:
+        workspace_client.workspace.mkdirs(dir_path)
+    except Exception as e:
+        if "RESOURCE_ALREADY_EXISTS" not in str(e):
+            raise click.ClickException(
+                f"Failed to create workspace directory {dir_path}: {e}"
+            )
+
+    content = json.dumps(manifest, indent=2) + "\n"
+    content_base64 = base64.b64encode(content.encode("utf-8")).decode("utf-8")
+    try:
+        workspace_client.workspace.import_(
+            path=file_path,
+            content=content_base64,
+            format=ImportFormat.AUTO,
+            overwrite=overwrite,
+        )
+    except Exception as e:
+        if not overwrite and "RESOURCE_ALREADY_EXISTS" in str(e):
+            raise click.ClickException(
+                f"A connector already exists at {file_path}. "
+                "Re-run with --overwrite to replace it."
+            )
+        raise click.ClickException(f"Failed to write {file_path}: {e}")
+
+
+# ---- end publish helpers -----------------------------------------------------
+
+
 @click.group(cls=OrderedGroup)
 @click.option("--debug", is_flag=True, help="Enable debug output")
 @click.pass_context
@@ -2788,6 +2889,137 @@ def upload(
     finally:
         if cleanup_dir and cleanup_dir.exists():
             shutil.rmtree(cleanup_dir, ignore_errors=True)
+
+
+@main.command("publish")
+@click.argument("source_name")
+@click.option(
+    "--display-name",
+    "-d",
+    "display_name",
+    default=None,
+    help="User-facing name for the connector (backs the <name>.connector.json "
+    "filename and the Add Data tile). Defaults to the spec's display_name, "
+    "then the source name.",
+)
+@click.option(
+    "--spec",
+    "-s",
+    "spec_path",
+    default=None,
+    help="Optional: local path to connector_spec.yaml, or a GitHub repo URL. "
+    "If a URL, the spec is fetched from sources/{source_name}/connector_spec.yaml.",
+)
+@click.option(
+    "--package",
+    "-p",
+    "package_paths",
+    type=click.Path(exists=True, dir_okay=False),
+    multiple=True,
+    help="Path to a pre-built connector wheel. Can be given multiple times. "
+    "When provided, wheels are uploaded as-is instead of being built from source.",
+)
+@click.option(
+    "--volume-path",
+    "-v",
+    "volume_path",
+    default=None,
+    help="UC Volume directory for the connector wheels. Defaults to "
+    "/Volumes/<catalog>/<schema>/community_connector/packages.",
+)
+@click.option("--catalog", "-c", default=None, help="UC catalog for the wheel volume.")
+@click.option("--schema", "-t", default=None, help="Schema for the wheel volume.")
+@click.option(
+    "--overwrite",
+    is_flag=True,
+    default=False,
+    help="Overwrite an existing connector saved at the same path.",
+)
+@click.pass_context
+# pylint: disable=too-many-arguments,too-many-positional-arguments,too-many-locals
+def publish(
+    ctx: click.Context,
+    source_name: str,
+    display_name: Optional[str],
+    spec_path: Optional[str],
+    package_paths: tuple,
+    volume_path: Optional[str],
+    catalog: Optional[str],
+    schema: Optional[str],
+    overwrite: bool,
+):
+    """
+    Publish a community connector to your workspace as a `.connector.json` asset.
+
+    SOURCE_NAME is the name of the connector source (e.g., 'github', 'stripe').
+
+    Writes a workspace file at
+    ``/Users/<you>/.community-connectors/<display_name>.connector.json``. The
+    server infers the CommunityConnector asset type from the `.connector.json`
+    extension, and the saved connector appears as a "Custom" tile in Add Data.
+
+    The manifest's ``connectionSpec`` is read from the connector's
+    ``connector_spec.yaml``. By default the framework + connector wheels are
+    built from the local source, uploaded to a UC Volume, and recorded in
+    ``dependencies``; pass --package (pre-built wheels) and/or --volume-path to
+    reuse pre-built wheels instead of building from source.
+
+    \b
+    Example:
+        # Build wheels from source and publish:
+        community-connector publish github
+        # Use a pre-built wheel, custom display name:
+        community-connector publish github -d "My GitHub" -p ./connector.whl
+    """
+    debug = ctx.obj.get("debug", False)
+
+    click.echo(f"Publishing community connector: {source_name}")
+
+    connector_spec = _load_connector_spec(source_name, spec_path)
+    if connector_spec is None:
+        click.echo(
+            f"⚠️  Warning: Could not load connector spec for '{source_name}'. "
+            "Publishing with a null connectionSpec.",
+            err=True,
+        )
+
+    resolved_display_name = _resolve_display_name(
+        display_name, connector_spec, source_name
+    )
+    click.echo(f"Display name: {resolved_display_name}")
+
+    workspace_client = _make_workspace_client()
+
+    dest_dir = _resolve_managed_dest_dir(
+        workspace_client, volume_path, catalog, schema, debug
+    )
+    dependencies = _build_and_upload_managed_wheels(
+        workspace_client, source_name, dest_dir, package_paths, debug
+    )
+
+    manifest = _build_community_connector_manifest(
+        source_name, resolved_display_name, connector_spec, dependencies
+    )
+    if debug:
+        click.echo(f"[DEBUG] Manifest:\n{json.dumps(manifest, indent=2)}")
+
+    current_user = workspace_client.current_user.me()
+    dir_path = f"/Users/{current_user.user_name}/{COMMUNITY_CONNECTORS_DIR_NAME}"
+    file_path = f"{dir_path}/{resolved_display_name}{COMMUNITY_CONNECTOR_EXTENSION}"
+
+    click.echo(f"\nWriting connector to: {file_path}")
+    _write_community_connector_manifest(
+        workspace_client, dir_path, file_path, manifest, overwrite
+    )
+    click.echo("  ✓ Published!")
+    click.echo(f"\n{'=' * 60}")
+    click.echo(f"Connector: {resolved_display_name}")
+    click.echo(f"Path:      {file_path}")
+    click.echo(f"{'=' * 60}")
+    click.echo(
+        "\nThe connector now appears as a 'Custom' tile in Add Data "
+        "(under Community connectors)."
+    )
 
 
 if __name__ == "__main__":
