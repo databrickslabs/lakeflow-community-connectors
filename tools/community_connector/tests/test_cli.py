@@ -3583,7 +3583,9 @@ class TestPublishCommand:
         mock_load_spec.return_value = {"connection": {}}
         dest = "/Volumes/main/default/community_connector/packages"
         mock_dest_dir.return_value = dest
-        mock_upload_wheel.side_effect = lambda _ws, wheel_path, _dest: f"{dest}/{Path(wheel_path).name}"
+        mock_upload_wheel.side_effect = (
+            lambda _ws, wheel_path, _dest: f"{dest}/{Path(wheel_path).name}"
+        )
         wheel = tmp_path / "conn.whl"
         wheel.write_text("x")
         mock_ws = MagicMock()
