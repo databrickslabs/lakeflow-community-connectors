@@ -1,0 +1,167 @@
+[
+  {
+    "id": "quebec-9-pk0",
+    "createdBy": "papa-253",
+    "createdOn": 98944,
+    "lastModifiedBy": "yankee-218",
+    "lastModifiedOn": 1704067200,
+    "system": true,
+    "name": "echo-868",
+    "displayName": "november-457",
+    "articulationScore": 533.51,
+    "excludedFromAutoHyperlinking": true,
+    "domain": {
+      "id": "hotel-581",
+      "name": "tango-449",
+      "resourceType": "tango-861",
+      "resourceDiscriminator": "echo-892"
+    },
+    "type": {
+      "id": "alpha-951",
+      "name": "lima-318",
+      "resourceType": "delta-284",
+      "resourceDiscriminator": "romeo-530"
+    },
+    "status": {
+      "id": "victor-236",
+      "name": "romeo-983",
+      "resourceType": "echo-823",
+      "resourceDiscriminator": "quebec-452"
+    },
+    "avgRating": 154.75,
+    "ratingsCount": 10226,
+    "collibra_org": "golf-522"
+  },
+  {
+    "id": "november-pk1",
+    "createdBy": "xray-789",
+    "createdOn": 33462,
+    "lastModifiedBy": "november-941",
+    "lastModifiedOn": 1704070800,
+    "system": false,
+    "name": "papa-735",
+    "displayName": "mike-895",
+    "articulationScore": 168.07,
+    "excludedFromAutoHyperlinking": false,
+    "domain": {
+      "id": "yankee-821",
+      "name": "uniform-369",
+      "resourceType": "alpha-608",
+      "resourceDiscriminator": "zulu-415"
+    },
+    "type": {
+      "id": "kilo-830",
+      "name": "india-932",
+      "resourceType": "november-238",
+      "resourceDiscriminator": "hotel-943"
+    },
+    "status": {
+      "id": "oscar-191",
+      "name": "delta-799",
+      "resourceType": "india-730",
+      "resourceDiscriminator": "sierra-353"
+    },
+    "avgRating": 436.35,
+    "ratingsCount": 67891,
+    "collibra_org": "lima-972"
+  },
+  {
+    "id": "juliet-3-pk2",
+    "createdBy": "alpha-336",
+    "createdOn": 54393,
+    "lastModifiedBy": "bravo-804",
+    "lastModifiedOn": 1704074400,
+    "system": true,
+    "name": "echo-157",
+    "displayName": "hotel-509",
+    "articulationScore": 655.28,
+    "excludedFromAutoHyperlinking": false,
+    "domain": {
+      "id": "oscar-977",
+      "name": "uniform-980",
+      "resourceType": "foxtrot-828",
+      "resourceDiscriminator": "november-883"
+    },
+    "type": {
+      "id": "papa-538",
+      "name": "victor-902",
+      "resourceType": "victor-941",
+      "resourceDiscriminator": "sierra-108"
+    },
+    "status": {
+      "id": "bravo-123",
+      "name": "xray-380",
+      "resourceType": "victor-780",
+      "resourceDiscriminator": "whiskey-887"
+    },
+    "avgRating": 317.35,
+    "ratingsCount": 51274,
+    "collibra_org": "bravo-766"
+  },
+  {
+    "id": "golf-289-pk3",
+    "createdBy": "tango-970",
+    "createdOn": 32831,
+    "lastModifiedBy": "lima-730",
+    "lastModifiedOn": 1704078000,
+    "system": true,
+    "name": "romeo-408",
+    "displayName": "romeo-429",
+    "articulationScore": 683.09,
+    "excludedFromAutoHyperlinking": true,
+    "domain": {
+      "id": "hotel-347",
+      "name": "yankee-764",
+      "resourceType": "lima-959",
+      "resourceDiscriminator": "juliet-879"
+    },
+    "type": {
+      "id": "kilo-279",
+      "name": "delta-150",
+      "resourceType": "papa-647",
+      "resourceDiscriminator": "golf-291"
+    },
+    "status": {
+      "id": "tango-379",
+      "name": "yankee-151",
+      "resourceType": "india-993",
+      "resourceDiscriminator": "november-817"
+    },
+    "avgRating": 947.32,
+    "ratingsCount": 4838,
+    "collibra_org": "whiskey-268"
+  },
+  {
+    "id": "alpha-69-pk4",
+    "createdBy": "romeo-771",
+    "createdOn": 15235,
+    "lastModifiedBy": "juliet-122",
+    "lastModifiedOn": 1704081600,
+    "system": false,
+    "name": "juliet-298",
+    "displayName": "foxtrot-356",
+    "articulationScore": 630.95,
+    "excludedFromAutoHyperlinking": true,
+    "domain": {
+      "id": "hotel-701",
+      "name": "india-919",
+      "resourceType": "oscar-523",
+      "resourceDiscriminator": "oscar-196"
+    },
+    "type": {
+      "id": "november-852",
+      "name": "foxtrot-111",
+      "resourceType": "papa-759",
+      "resourceDiscriminator": "mike-522"
+    },
+    "status": {
+      "id": "yankee-288",
+      "name": "bravo-969",
+      "resourceType": "juliet-624",
+      "resourceDiscriminator": "whiskey-925"
+    },
+    "avgRating": 834.4,
+    "ratingsCount": 10067,
+    "collibra_org": "uniform-644"
+  }
+]

@@ -42,6 +42,13 @@ from databricks.labs.community_connector_cli.oauth_flow import (
     OAUTH_OPTION_KEYS,
     run_u2m_authorization_code_flow,
 )
+from databricks.labs.community_connector_cli.managed_pipeline import (
+    ManagedPipelineSpecError,
+    augment_full_pipeline_body,
+    build_bare_pipeline_body,
+    is_full_pipeline_spec,
+    validate_ingestion_definition,
+)
 from databricks.labs.community_connector_cli.pipeline_client import PipelineClient
 from databricks.labs.community_connector_cli.pipeline_spec_validator import (
     PipelineSpecValidationError,
@@ -61,6 +68,14 @@ from databricks.labs.community_connector_cli.connector_spec import (
 
 
 CONNECTION_TYPE = "COMMUNITY"
+
+# Workspace location and file extension for saved community connector manifests.
+COMMUNITY_CONNECTORS_DIR_NAME = ".community-connectors"
+COMMUNITY_CONNECTOR_EXTENSION = ".connector.json"
+
+# Filename-safe display names. The display name becomes the workspace filename
+# verbatim, so this allowlist blocks path traversal and malformed writes.
+_FILENAME_SAFE_DISPLAY_NAME_RE = re.compile(r"^[a-zA-Z0-9 _-]+$")
 
 
 def _make_workspace_client() -> WorkspaceClient:
@@ -607,6 +622,9 @@ def _parse_pipeline_spec(spec_input: str, validate: bool = True) -> dict:
             spec = json.loads(spec_input)
         except json.JSONDecodeError as e:
             raise click.ClickException(f"Invalid JSON for --pipeline-spec: {e}")
+
+    if not isinstance(spec, dict):
+        raise click.ClickException("Pipeline spec must be a JSON/YAML object")
 
     # Validate the spec (connection_name is always required in spec)
     if validate:
@@ -1406,6 +1424,345 @@ def _create_and_show_pipeline(
         raise click.ClickException(f"Failed to create pipeline: {e}")
 
 
+# ---- Managed ingestion pipeline helpers --------------------------------------
+
+# Defaults applied to a bare-mode managed pipeline body. Managed ingestion runs
+# on serverless; PREVIEW is the channel community connectors are validated on.
+_MANAGED_DEFAULT_CHANNEL = "PREVIEW"
+_MANAGED_DEFAULT_SERVERLESS = True
+
+
+def _parse_managed_pipeline_spec(spec_input: str) -> dict:
+    """Parse a managed-mode spec from a JSON string or .yaml/.json file.
+
+    Unlike the default call, this does not run the friendly-spec validator: a
+    managed spec is either a bare ``ingestion_definition`` (whose
+    connection_name may come from ``--connection-name`` rather than the file) or
+    a full pipeline object, neither of which matches that validator's shape.
+    """
+    return _parse_pipeline_spec(spec_input, validate=False)
+
+
+def _resolve_managed_dest_dir(
+    workspace_client, volume_path: Optional[str],
+    catalog: Optional[str], schema: Optional[str], debug: bool,
+) -> str:
+    """Resolve (and create) the UC Volume directory for managed wheel uploads.
+
+    An explicit ``--volume-path`` wins. Otherwise the destination is derived as
+    ``/Volumes/<catalog>/<schema>/community_connector/packages``, falling back
+    to ``main``/``default`` when catalog/schema were not supplied — the wheels
+    only need *a* readable volume, independent of the pipeline's destination.
+    """
+    if volume_path:
+        return _ensure_volume_directory(workspace_client, volume_path, debug)
+    vol_catalog = catalog or "main"
+    vol_schema = schema or "default"
+    return _ensure_package_volume(workspace_client, vol_catalog, vol_schema, debug)
+
+
+def _build_and_upload_managed_wheels(  # pylint: disable=too-many-arguments,too-many-positional-arguments
+    workspace_client, source_name: Optional[str], dest_dir: str,
+    package_paths: tuple, debug: bool,
+) -> List[str]:
+    """Upload connector wheels to ``dest_dir`` for use as pipeline dependencies.
+
+    When ``--package`` wheels are supplied they are uploaded as-is. Otherwise the
+    framework + connector wheels are built from the local source tree (reusing
+    the ``upload`` command's build helpers) and then uploaded.
+    """
+    click.echo("\nPreparing connector packages...")
+    if package_paths:
+        click.echo(f"  Using pre-built packages: {', '.join(package_paths)}")
+        return [
+            _upload_wheel(workspace_client, Path(p), dest_dir) for p in package_paths
+        ]
+
+    if not source_name:
+        raise click.ClickException(
+            "Building connector wheels requires a source name. "
+            "Pass --package with pre-built wheels, or provide the source name."
+        )
+
+    src = _resolve_source_dir(source_name, None)
+    repo_root = _resolve_repo_root_for_upload(
+        src, skip_framework=False, framework_wheel_path=None
+    )
+    cleanup_dir = Path(tempfile.mkdtemp(prefix=f"cc-build-{source_name}-"))
+    try:
+        wheels = _prepare_upload_wheels(
+            source_name, src, repo_root, None, None, False, cleanup_dir, debug,
+        )
+        return [
+            _upload_wheel(workspace_client, wheel, dest_dir)
+            for wheel, _kind, _built in wheels
+        ]
+    finally:
+        if cleanup_dir.exists():
+            shutil.rmtree(cleanup_dir, ignore_errors=True)
+
+
+def _get_existing_pipeline_spec(
+    workspace_client, pipeline_id: str, debug: bool
+) -> Optional[dict]:
+    """Return the existing pipeline's spec as a plain dict, or None.
+
+    Used on update: the pipelines PUT is a full-settings replace, so we merge
+    the managed fields onto this existing spec to preserve everything the CLI
+    does not manage (tags, notifications, budget policy, channel, serverless,
+    existing dependencies, …) instead of wiping it.
+    """
+    try:
+        pipeline_info = workspace_client.pipelines.get(pipeline_id)
+    except Exception as e:  # pragma: no cover - network/permission errors
+        raise click.ClickException(f"Failed to read existing pipeline: {e}")
+    spec = getattr(pipeline_info, "spec", None)
+    if spec is None:
+        return None
+    spec_dict = spec.as_dict() if hasattr(spec, "as_dict") else dict(spec)
+    if debug:
+        click.echo(f"[DEBUG] Existing pipeline spec: {spec_dict}")
+    return spec_dict
+
+
+def _dependencies_from_spec(spec_dict: Optional[dict]) -> Optional[List[str]]:
+    """Extract ``environment.dependencies`` from an existing pipeline spec dict."""
+    if not spec_dict:
+        return None
+    environment = spec_dict.get("environment")
+    dependencies = environment.get("dependencies") if isinstance(environment, dict) else None
+    return list(dependencies) if dependencies else None
+
+
+# pylint: disable=too-many-arguments,too-many-positional-arguments
+def _managed_dependencies(
+    workspace_client, spec: dict, is_full: bool, source_name: Optional[str],
+    volume_path: Optional[str], catalog: Optional[str], schema: Optional[str],
+    package_paths: tuple, debug: bool,
+    build_wheels: bool = True, existing_dependencies: Optional[List[str]] = None,
+) -> Optional[List[str]]:
+    """Decide whether to build/upload wheels and return their volume paths.
+
+    - A full spec that already declares an ``environment`` block is left
+      untouched (the user handles dependencies): returns ``None``.
+    - When ``build_wheels`` is False (update with no ``--source-name`` /
+      ``--package``), the connector wheels are not rebuilt and the existing
+      pipeline dependencies are reused instead.
+    - Otherwise the connector wheels are built/uploaded and their paths returned
+      for ``environment.dependencies``.
+    """
+    if is_full and "environment" in spec:
+        click.echo(
+            "\nPipeline spec already declares an 'environment'; "
+            "skipping wheel build/upload."
+        )
+        return None
+
+    if not build_wheels:
+        click.echo(
+            "\nNo --source-name or --package given; reusing the pipeline's "
+            "existing connector packages."
+        )
+        return existing_dependencies
+
+    dest_dir = _resolve_managed_dest_dir(
+        workspace_client, volume_path, catalog, schema, debug
+    )
+    return _build_and_upload_managed_wheels(
+        workspace_client, source_name, dest_dir, package_paths, debug
+    )
+
+
+def _create_managed_pipeline(workspace_client, body: dict, debug: bool) -> str:
+    """POST a raw managed-ingestion pipeline body and return the new pipeline id.
+
+    The body is sent verbatim because the installed SDK cannot model the
+    COMMUNITY source type or community_connector_options.
+    """
+    if debug:
+        click.echo(f"[DEBUG] Managed pipeline body:\n{json.dumps(body, indent=2)}")
+    response = workspace_client.api_client.do(
+        "POST", "/api/2.0/pipelines", body=body
+    )
+    pipeline_id = (response or {}).get("pipeline_id")
+    if not pipeline_id:
+        raise click.ClickException(
+            f"Pipeline create API returned no pipeline_id. Response: {response}"
+        )
+    return pipeline_id
+
+
+def _update_managed_pipeline(
+    workspace_client, pipeline_id: str, body: dict, debug: bool
+) -> None:
+    """PUT a raw managed-ingestion pipeline body to replace an existing pipeline."""
+    body = {**body, "id": pipeline_id}
+    if debug:
+        click.echo(f"[DEBUG] Managed pipeline body:\n{json.dumps(body, indent=2)}")
+    workspace_client.api_client.do(
+        "PUT", f"/api/2.0/pipelines/{pipeline_id}", body=body
+    )
+
+
+def _resolve_managed_catalog_schema(  # pylint: disable=too-many-arguments,too-many-positional-arguments
+    spec: dict, is_full: bool, catalog: Optional[str], schema: Optional[str],
+    base_spec: Optional[dict] = None,
+) -> Tuple[Optional[str], Optional[str]]:
+    """Resolve the effective catalog/schema for a managed pipeline.
+
+    Precedence: explicit ``--catalog``/``--schema`` win; then, for a full
+    pipeline spec, the spec's top-level ``catalog``/``schema``; then the
+    existing pipeline's ``catalog``/``schema`` on update (``base_spec``). This
+    keeps the wheel volume and per-object destination backfill tracking real
+    values rather than defaulting to ``main``/``default`` or dropping them.
+    """
+    if is_full:
+        catalog = catalog or spec.get("catalog")
+        schema = schema or spec.get("schema")
+    if base_spec:
+        catalog = catalog or base_spec.get("catalog")
+        schema = schema or base_spec.get("schema")
+    return catalog, schema
+
+
+# pylint: disable=too-many-arguments,too-many-positional-arguments,too-many-locals
+def _build_managed_pipeline_body(
+    workspace_client, spec: dict, pipeline_name: Optional[str], source_name: Optional[str],
+    connection_name: Optional[str], catalog: Optional[str], schema: Optional[str],
+    volume_path: Optional[str], package_paths: tuple, debug: bool,
+    build_wheels: bool = True, base_spec: Optional[dict] = None,
+) -> dict:
+    """Build the full managed-ingestion pipeline body (bare or full spec).
+
+    ``base_spec`` is the existing pipeline spec on update (None on create). For
+    a bare spec it is the merge base so the full-replace PUT preserves unmanaged
+    fields; for either shape it supplies catalog/schema and dependency
+    fallbacks.
+    """
+    is_full = is_full_pipeline_spec(spec)
+    if not is_full:
+        try:
+            validate_ingestion_definition(spec)
+        except ManagedPipelineSpecError as e:
+            raise click.ClickException(f"Invalid ingestion definition: {e}")
+
+    catalog, schema = _resolve_managed_catalog_schema(
+        spec, is_full, catalog, schema, base_spec
+    )
+
+    dependencies = _managed_dependencies(
+        workspace_client, spec, is_full, source_name,
+        volume_path, catalog, schema, package_paths, debug,
+        build_wheels=build_wheels,
+        existing_dependencies=_dependencies_from_spec(base_spec),
+    )
+
+    if is_full:
+        return augment_full_pipeline_body(
+            spec, pipeline_name, connection_name, catalog, schema, dependencies,
+        )
+    # On update (base_spec set) omit the managed channel/serverless defaults so
+    # the pipeline's existing values are preserved by the merge.
+    return build_bare_pipeline_body(
+        spec, pipeline_name, connection_name, catalog, schema, dependencies,
+        channel=None if base_spec else _MANAGED_DEFAULT_CHANNEL,
+        serverless=None if base_spec else _MANAGED_DEFAULT_SERVERLESS,
+        base=base_spec,
+    )
+
+
+# ---- end managed ingestion helpers -------------------------------------------
+
+
+# ---- Publish (save .connector.json to the workspace) -------------------------
+
+
+def _resolve_display_name(
+    explicit: Optional[str], connector_spec: Optional[dict], source_name: str
+) -> str:
+    """Resolve the connector's user-facing display name.
+
+    Precedence: an explicit ``--display-name`` wins; then the connector spec's
+    ``display_name``; finally the technical ``source_name``. The result backs
+    the ``<displayName>.connector.json`` filename, so it must be filename-safe.
+    """
+    display_name = explicit or (
+        connector_spec.get("display_name") if connector_spec else None
+    ) or source_name
+    display_name = str(display_name).strip()
+    if not _FILENAME_SAFE_DISPLAY_NAME_RE.match(display_name):
+        raise click.ClickException(
+            f"Display name '{display_name}' is not a valid filename. "
+            "Use only letters, numbers, spaces, hyphens, and underscores."
+        )
+    return display_name
+
+
+def _build_community_connector_manifest(
+    source_name: str,
+    display_name: str,
+    connector_spec: Optional[dict],
+    dependencies: Optional[List[str]],
+) -> dict:
+    """Build the ``.connector.json`` manifest body.
+
+    Mirrors the webapp's ``buildCommunityConnectorAuthoringManifest`` shape: the
+    connector spec YAML becomes ``connectionSpec``; ``logo``/``repositoryPath``/
+    ``readmeUrl`` are left empty (the workspace UI does not consume them for
+    saved connectors); the wheel volume paths become ``dependencies``.
+    """
+    manifest: dict = {
+        "id": source_name.upper().replace("-", "_"),
+        "sourceName": source_name,
+        "displayName": display_name,
+        "logo": None,
+        "repositoryPath": "",
+        "readmeUrl": "",
+        "connectionSpec": connector_spec,
+    }
+    if dependencies:
+        manifest["dependencies"] = dependencies
+    return manifest
+
+
+def _write_community_connector_manifest(
+    workspace_client, dir_path: str, file_path: str, manifest: dict, overwrite: bool
+) -> None:
+    """Write the manifest to the workspace as a ``.connector.json`` file.
+
+    Creates the ``.community-connectors`` directory (idempotent) and imports the
+    file with ``format=AUTO`` so the server infers NodeType.CommunityConnector
+    from the ``.connector.json`` extension — the same call the webapp makes.
+    """
+    try:
+        workspace_client.workspace.mkdirs(dir_path)
+    except Exception as e:
+        if "RESOURCE_ALREADY_EXISTS" not in str(e):
+            raise click.ClickException(
+                f"Failed to create workspace directory {dir_path}: {e}"
+            )
+
+    content = json.dumps(manifest, indent=2) + "\n"
+    content_base64 = base64.b64encode(content.encode("utf-8")).decode("utf-8")
+    try:
+        workspace_client.workspace.import_(
+            path=file_path,
+            content=content_base64,
+            format=ImportFormat.AUTO,
+            overwrite=overwrite,
+        )
+    except Exception as e:
+        if not overwrite and "RESOURCE_ALREADY_EXISTS" in str(e):
+            raise click.ClickException(
+                f"A connector already exists at {file_path}. "
+                "Re-run with --overwrite to replace it."
+            )
+        raise click.ClickException(f"Failed to write {file_path}: {e}")
+
+
+# ---- end publish helpers -----------------------------------------------------
+
+
 @click.group(cls=OrderedGroup)
 @click.option("--debug", is_flag=True, help="Enable debug output")
 @click.pass_context
@@ -1421,6 +1778,59 @@ def main(ctx: click.Context, debug: bool):
     """
     ctx.ensure_object(dict)
     ctx.obj["debug"] = debug
+
+
+# pylint: disable=too-many-arguments,too-many-positional-arguments,too-many-locals
+def _create_managed_pipeline_cmd(
+    pipeline_name: str,
+    source_name: Optional[str],
+    pipeline_spec_input: Optional[str],
+    connection_name: Optional[str],
+    catalog: Optional[str],
+    schema: Optional[str],
+    volume_path: Optional[str],
+    package_paths: tuple,
+    debug: bool,
+) -> None:
+    """Create a managed ingestion pipeline (default mode of create_pipeline)."""
+    if not pipeline_spec_input and not connection_name:
+        raise click.ClickException(
+            "Either --pipeline-spec or --connection-name must be provided for "
+            "managed ingestion pipelines. Pass --use-workspace-pipeline for the "
+            "legacy workspace mode."
+        )
+
+    click.echo(f"Creating managed ingestion pipeline: {pipeline_name}")
+    if pipeline_spec_input:
+        spec = _parse_managed_pipeline_spec(pipeline_spec_input)
+    else:
+        # No spec: create an empty ingestion pipeline (connection only, no
+        # objects). Tables can be added later with update_pipeline.
+        click.echo(
+            "  No --pipeline-spec given; creating an empty pipeline "
+            "(no tables) from --connection-name."
+        )
+        spec = {"connection_name": connection_name, "objects": []}
+
+    workspace_client = _make_workspace_client()
+    body = _build_managed_pipeline_body(
+        workspace_client, spec,
+        pipeline_name=pipeline_name, source_name=source_name,
+        connection_name=connection_name, catalog=catalog, schema=schema,
+        volume_path=volume_path, package_paths=package_paths, debug=debug,
+    )
+
+    click.echo("\nCreating pipeline...")
+    try:
+        pipeline_id = _create_managed_pipeline(workspace_client, body, debug)
+    except click.ClickException:
+        raise
+    except Exception as e:
+        if debug:
+            click.echo(f"\n[DEBUG] Full exception: {traceback.format_exc()}", err=True)
+        raise click.ClickException(f"Failed to create pipeline: {e}")
+    click.echo("  ✓ Pipeline created!")
+    _print_pipeline_url(workspace_client, pipeline_id)
 
 
 def _echo_create_pipeline_summary(
@@ -1486,6 +1896,23 @@ def _echo_create_pipeline_summary(
     help="Upload local source files (*.py, README.md, connector_spec.yaml) "
     "to sources/{source_name} in the workspace repo.",
 )
+@click.option(
+    "--use-workspace-pipeline",
+    "use_workspace_pipeline",
+    is_flag=True,
+    default=False,
+    help="Use the legacy workspace pipeline mode (clone the repo into the "
+    "workspace and run ingest.py) instead of the default managed ingestion "
+    "pipeline.",
+)
+@click.option(
+    "--volume-path",
+    "-v",
+    "volume_path",
+    default=None,
+    help="UC Volume directory for the connector wheels in managed mode. "
+    "Defaults to /Volumes/<catalog>/<schema>/community_connector/packages.",
+)
 @click.pass_context
 # pylint: disable=too-many-arguments,too-many-positional-arguments,too-many-locals
 def create_pipeline(
@@ -1500,6 +1927,8 @@ def create_pipeline(
     schema: Optional[str],
     package_paths: tuple,
     use_local_source: bool,
+    use_workspace_pipeline: bool,
+    volume_path: Optional[str],
 ):
     """
     Create a community connector pipeline.
@@ -1508,28 +1937,54 @@ def create_pipeline(
 
     PIPELINE_NAME is a unique name for this pipeline instance.
 
-    When --package is provided, the pipeline uses the uploaded wheel packages
-    as dependencies and creates a workspace directory (no Git repo clone).
-    Otherwise, a Git repo is cloned into the workspace.
+    By default this creates a *managed ingestion* pipeline: the connector's
+    Python wheels are built and uploaded to a UC Volume, and the pipeline's
+    ``ingestion_definition`` is set from --pipeline-spec. Pass
+    --use-workspace-pipeline for the legacy mode that clones the repo into the
+    workspace and runs ingest.py.
 
-    Either --connection-name or --pipeline-spec must be provided.
-    If using --pipeline-spec, it must include 'connection_name'.
+    Managed mode: provide either --pipeline-spec or --connection-name.
+    --pipeline-spec may be a bare ingestion definition (connection_name +
+    objects) or a full pipeline spec (containing an 'ingestion_definition'
+    block). With only --connection-name (no spec) an empty pipeline is created
+    (a connection but no tables) that you can populate later with
+    update_pipeline. Wheels are built from the local source unless --package
+    supplies pre-built ones. If a full spec already declares an 'environment',
+    wheel build/upload is skipped.
 
-    Configuration is loaded from bundled defaults and can be overridden
-    with --config file or individual CLI options.
-
-    When --use-local-source is provided, the local source files (*.py, README.md,
-    connector_spec.yaml) are uploaded to sources/{source_name} in the workspace.
+    Workspace mode: either --connection-name or --pipeline-spec must be
+    provided; when --package is given the uploaded wheels are used and no repo
+    is cloned; otherwise a Git repo is cloned into the workspace.
 
     \b
     Example:
-        community-connector create_pipeline github my_github_pipeline -n my_conn
-        community-connector create_pipeline stripe my_stripe -n stripe_conn -c main
-        community-connector create_pipeline github my_pipeline -ps spec.yaml
-        community-connector create_pipeline github my_pipeline -p pkg1.whl -p pkg2.whl
-        community-connector create_pipeline github my_pipeline -n my_conn --use-local-source
+        # Managed ingestion (default):
+        community-connector create_pipeline github my_pipeline \\
+            -ps spec.yaml -n my_conn -c main -t raw
+        community-connector create_pipeline github my_pipeline \\
+            -ps full_pipeline.yaml
+        # Empty managed pipeline (add tables later):
+        community-connector create_pipeline github my_pipeline \\
+            -n my_conn -c main -t raw
+        # Legacy workspace pipeline:
+        community-connector create_pipeline github my_pipeline \\
+            -n my_conn --use-workspace-pipeline
     """
     debug = ctx.obj.get("debug", False)
+
+    if not use_workspace_pipeline:
+        _create_managed_pipeline_cmd(
+            pipeline_name=pipeline_name,
+            source_name=source_name,
+            pipeline_spec_input=pipeline_spec_input,
+            connection_name=connection_name,
+            catalog=catalog,
+            schema=schema,
+            volume_path=volume_path,
+            package_paths=package_paths,
+            debug=debug,
+        )
+        return
 
     if not connection_name and not pipeline_spec_input:
         raise click.ClickException(
@@ -1705,6 +2160,63 @@ def _print_pipeline_success(workspace_client, pipeline_id: str) -> None:
     click.echo("\nNote: Run the pipeline to apply the new configuration.")
 
 
+# pylint: disable=too-many-arguments,too-many-positional-arguments,too-many-locals
+def _update_managed_pipeline_cmd(
+    pipeline_name: str,
+    source_name: Optional[str],
+    pipeline_spec_input: Optional[str],
+    connection_name: Optional[str],
+    catalog: Optional[str],
+    schema: Optional[str],
+    volume_path: Optional[str],
+    package_paths: tuple,
+    debug: bool,
+) -> None:
+    """Update a managed ingestion pipeline (default mode of update_pipeline)."""
+    if not pipeline_spec_input:
+        raise click.ClickException(
+            "--pipeline-spec is required for managed ingestion pipelines. "
+            "Pass --use-workspace-pipeline for the legacy workspace mode."
+        )
+
+    click.echo(f"Updating managed ingestion pipeline: {pipeline_name}")
+    spec = _parse_managed_pipeline_spec(pipeline_spec_input)
+
+    workspace_client = _make_workspace_client()
+    try:
+        pipeline_id = _find_pipeline_by_name(workspace_client, pipeline_name)
+        click.echo(f"  ✓ Found pipeline ID: {pipeline_id}")
+
+        # Fetch the existing spec so the full-replace PUT preserves unmanaged
+        # fields (tags, notifications, budget, channel, serverless, …) and so
+        # catalog/schema/dependencies fall back to the live pipeline.
+        base_spec = _get_existing_pipeline_spec(workspace_client, pipeline_id, debug)
+
+        # Only rebuild wheels when the caller asked for it via --source-name or
+        # --package; otherwise the existing dependencies (from base_spec) are
+        # reused so the packages are left untouched.
+        build_wheels = bool(source_name or package_paths)
+
+        body = _build_managed_pipeline_body(
+            workspace_client, spec,
+            pipeline_name=pipeline_name, source_name=source_name,
+            connection_name=connection_name, catalog=catalog, schema=schema,
+            volume_path=volume_path, package_paths=package_paths, debug=debug,
+            build_wheels=build_wheels, base_spec=base_spec,
+        )
+
+        click.echo("\nUpdating pipeline...")
+        _update_managed_pipeline(workspace_client, pipeline_id, body, debug)
+        click.echo("  ✓ Pipeline updated!")
+        _print_pipeline_success(workspace_client, pipeline_id)
+    except click.ClickException:
+        raise
+    except Exception as e:
+        if debug:
+            click.echo(f"\n[DEBUG] Full exception: {traceback.format_exc()}", err=True)
+        raise click.ClickException(f"Failed to update pipeline: {e}")
+
+
 def _update_ingest_from_spec(
     workspace_client, pipeline_info, pipeline_spec_input: str, debug: bool,
 ) -> None:
@@ -1791,32 +2303,86 @@ def _upload_packages_for_update(
     help="Path to a local connector python wheel package. Can be specified multiple times. "
     "If provided, packages are uploaded and the pipeline is updated to use them.",
 )
+@click.option(
+    "--source-name",
+    "-s",
+    "source_name",
+    default=None,
+    help="Connector source name, used to build wheels in managed mode.",
+)
+@click.option("--connection-name", "-n", "connection_name", default=None,
+              help="UC connection name (managed mode).")
+@click.option("--catalog", "-c", default=None, help="UC target catalog (managed mode).")
+@click.option("--schema", "-t", default=None, help="Target schema (managed mode).")
+@click.option(
+    "--volume-path",
+    "-v",
+    "volume_path",
+    default=None,
+    help="UC Volume directory for the connector wheels in managed mode. "
+    "Defaults to /Volumes/<catalog>/<schema>/community_connector/packages.",
+)
+@click.option(
+    "--use-workspace-pipeline",
+    "use_workspace_pipeline",
+    is_flag=True,
+    default=False,
+    help="Use the legacy workspace pipeline mode (update ingest.py / packages) "
+    "instead of the default managed ingestion pipeline.",
+)
 @click.pass_context
+# pylint: disable=too-many-arguments,too-many-positional-arguments
 def update_pipeline(
     ctx: click.Context,
     pipeline_name: str,
     pipeline_spec_input: Optional[str],
     package_paths: tuple,
+    source_name: Optional[str],
+    connection_name: Optional[str],
+    catalog: Optional[str],
+    schema: Optional[str],
+    volume_path: Optional[str],
+    use_workspace_pipeline: bool,
 ):
     """
     Update an existing community connector pipeline.
 
     PIPELINE_NAME is the name of the pipeline to update.
 
-    When --pipeline-spec is provided, the ingest.py file is updated with the
-    new spec. When --package is provided, packages are uploaded and the pipeline
-    dependencies are updated. Both can be used together or independently.
+    By default this updates a *managed ingestion* pipeline: --pipeline-spec is
+    rebuilt into the pipeline's ingestion_definition and the connector wheels
+    are rebuilt/uploaded (unless a full spec already declares an
+    'environment'). Pass --use-workspace-pipeline for the legacy mode that
+    rewrites ingest.py and/or updates package dependencies.
 
-    At least one of --pipeline-spec or --package must be provided.
+    Managed mode requires --pipeline-spec. Legacy mode requires at least one of
+    --pipeline-spec or --package.
 
     \b
     Example:
-        community-connector update_pipeline my_pipeline -ps spec.yaml
-        community-connector update_pipeline my_pipeline -p connector.whl
-        community-connector update_pipeline my_pipeline -p a.whl -p b.whl
-        community-connector update_pipeline my_pipeline -ps spec.yaml -p pkg.whl
+        # Managed ingestion (default):
+        community-connector update_pipeline my_pipeline -ps spec.yaml -s github
+        # Legacy workspace pipeline:
+        community-connector update_pipeline my_pipeline -ps spec.yaml \\
+            --use-workspace-pipeline
+        community-connector update_pipeline my_pipeline -p connector.whl \\
+            --use-workspace-pipeline
     """
     debug = ctx.obj.get("debug", False)
+
+    if not use_workspace_pipeline:
+        _update_managed_pipeline_cmd(
+            pipeline_name=pipeline_name,
+            source_name=source_name,
+            pipeline_spec_input=pipeline_spec_input,
+            connection_name=connection_name,
+            catalog=catalog,
+            schema=schema,
+            volume_path=volume_path,
+            package_paths=package_paths,
+            debug=debug,
+        )
+        return
 
     if not pipeline_spec_input and not package_paths:
         raise click.ClickException(
@@ -2319,6 +2885,228 @@ def upload(
     finally:
         if cleanup_dir and cleanup_dir.exists():
             shutil.rmtree(cleanup_dir, ignore_errors=True)
+
+
+@main.command("publish")
+@click.argument("source_name")
+@click.option(
+    "--display-name",
+    "-d",
+    "display_name",
+    default=None,
+    help="User-facing name for the connector (backs the <name>.connector.json "
+    "filename and the Add Data tile). Defaults to the spec's display_name, "
+    "then the source name.",
+)
+@click.option(
+    "--spec",
+    "-s",
+    "spec_path",
+    default=None,
+    help="Optional: local path to connector_spec.yaml, or a GitHub repo URL. "
+    "If a URL, the spec is fetched from sources/{source_name}/connector_spec.yaml.",
+)
+@click.option(
+    "--package",
+    "-p",
+    "package_paths",
+    type=click.Path(exists=True, dir_okay=False),
+    multiple=True,
+    help="Path to a pre-built connector wheel. Can be given multiple times. "
+    "When provided, wheels are uploaded as-is instead of being built from source.",
+)
+@click.option(
+    "--volume-path",
+    "-v",
+    "volume_path",
+    default=None,
+    help="UC Volume directory for the connector wheels. Defaults to "
+    "/Volumes/<catalog>/<schema>/community_connector/packages.",
+)
+@click.option("--catalog", "-c", default=None, help="UC catalog for the wheel volume.")
+@click.option("--schema", "-t", default=None, help="Schema for the wheel volume.")
+@click.option(
+    "--overwrite",
+    is_flag=True,
+    default=False,
+    help="Overwrite an existing connector saved at the same path.",
+)
+@click.pass_context
+# pylint: disable=too-many-arguments,too-many-positional-arguments,too-many-locals
+def publish(
+    ctx: click.Context,
+    source_name: str,
+    display_name: Optional[str],
+    spec_path: Optional[str],
+    package_paths: tuple,
+    volume_path: Optional[str],
+    catalog: Optional[str],
+    schema: Optional[str],
+    overwrite: bool,
+):
+    """
+    Publish a community connector to your workspace as a `.connector.json` asset.
+
+    SOURCE_NAME is the name of the connector source (e.g., 'github', 'stripe').
+
+    Writes a workspace file at
+    ``/Users/<you>/.community-connectors/<display_name>.connector.json``. The
+    server infers the CommunityConnector asset type from the `.connector.json`
+    extension, and the saved connector appears as a "Custom" tile in Add Data.
+
+    The manifest's ``connectionSpec`` is read from the connector's
+    ``connector_spec.yaml``. By default the framework + connector wheels are
+    built from the local source, uploaded to a UC Volume, and recorded in
+    ``dependencies``; pass --package (pre-built wheels) and/or --volume-path to
+    reuse pre-built wheels instead of building from source.
+
+    \b
+    Example:
+        # Build wheels from source and publish:
+        community-connector publish github
+        # Use a pre-built wheel, custom display name:
+        community-connector publish github -d "My GitHub" -p ./connector.whl
+    """
+    debug = ctx.obj.get("debug", False)
+
+    click.echo(f"Publishing community connector: {source_name}")
+
+    # `_load_connector_spec` already warns with the reason when it can't load a
+    # spec; only add the consequence here so the message isn't duplicated.
+    connector_spec = _load_connector_spec(source_name, spec_path)
+    if connector_spec is None:
+        click.echo("  Publishing with a null connectionSpec.", err=True)
+
+    resolved_display_name = _resolve_display_name(
+        display_name, connector_spec, source_name
+    )
+    click.echo(f"Display name: {resolved_display_name}")
+
+    workspace_client = _make_workspace_client()
+
+    dest_dir = _resolve_managed_dest_dir(
+        workspace_client, volume_path, catalog, schema, debug
+    )
+    dependencies = _build_and_upload_managed_wheels(
+        workspace_client, source_name, dest_dir, package_paths, debug
+    )
+
+    manifest = _build_community_connector_manifest(
+        source_name, resolved_display_name, connector_spec, dependencies
+    )
+    if debug:
+        click.echo(f"[DEBUG] Manifest:\n{json.dumps(manifest, indent=2)}")
+
+    current_user = workspace_client.current_user.me()
+    dir_path = f"/Users/{current_user.user_name}/{COMMUNITY_CONNECTORS_DIR_NAME}"
+    file_path = f"{dir_path}/{resolved_display_name}{COMMUNITY_CONNECTOR_EXTENSION}"
+
+    click.echo(f"\nWriting connector to: {file_path}")
+    _write_community_connector_manifest(
+        workspace_client, dir_path, file_path, manifest, overwrite
+    )
+    click.echo("  ✓ Published!")
+    click.echo(f"\n{'=' * 60}")
+    click.echo(f"Connector: {resolved_display_name}")
+    click.echo(f"Path:      {file_path}")
+    click.echo(f"{'=' * 60}")
+    click.echo(
+        "\nThe connector now appears as a 'Custom' tile in Add Data "
+        "(under Community connectors)."
+    )
+
+
+def _workspace_object_exists(workspace_client, path: str) -> bool:
+    """Return True if a workspace object exists at ``path``."""
+    try:
+        workspace_client.workspace.get_status(path)
+        return True
+    except Exception as e:
+        if "RESOURCE_DOES_NOT_EXIST" in str(e) or "does not exist" in str(e).lower():
+            return False
+        raise click.ClickException(f"Failed to check {path}: {e}")
+
+
+@main.command("unpublish")
+@click.argument("source_name")
+@click.option(
+    "--display-name",
+    "-d",
+    "display_name",
+    default=None,
+    help="User-facing name of the connector to remove (the <name>.connector.json "
+    "filename). Defaults to the spec's display_name, then the source name — must "
+    "match what was used at publish time.",
+)
+@click.option(
+    "--spec",
+    "-s",
+    "spec_path",
+    default=None,
+    help="Optional: local path to connector_spec.yaml, or a GitHub repo URL. Only "
+    "used to resolve the display name when --display-name is not given.",
+)
+@click.option(
+    "--yes",
+    "-y",
+    "assume_yes",
+    is_flag=True,
+    default=False,
+    help="Skip the confirmation prompt.",
+)
+@click.pass_context
+def unpublish(
+    ctx: click.Context,
+    source_name: str,
+    display_name: Optional[str],
+    spec_path: Optional[str],
+    assume_yes: bool,
+):
+    """
+    Remove a published community connector from your workspace.
+
+    SOURCE_NAME is the name of the connector source (e.g., 'github', 'stripe').
+
+    Deletes the ``.connector.json`` file that ``publish`` wrote at
+    ``/Users/<you>/.community-connectors/<display_name>.connector.json``, so the
+    connector no longer appears as a "Custom" tile in Add Data. The display name
+    is resolved the same way as ``publish``; errors if no matching connector is
+    found.
+
+    \b
+    Example:
+        community-connector unpublish github
+        community-connector unpublish github -d "My GitHub" --yes
+    """
+    debug = ctx.obj.get("debug", False)
+
+    # Only load the spec to resolve the display name; skip it when --display-name
+    # is supplied so unpublish works without repo access.
+    connector_spec = None if display_name else _load_connector_spec(source_name, spec_path)
+    resolved_display_name = _resolve_display_name(display_name, connector_spec, source_name)
+
+    workspace_client = _make_workspace_client()
+    current_user = workspace_client.current_user.me()
+    dir_path = f"/Users/{current_user.user_name}/{COMMUNITY_CONNECTORS_DIR_NAME}"
+    file_path = f"{dir_path}/{resolved_display_name}{COMMUNITY_CONNECTOR_EXTENSION}"
+
+    if not _workspace_object_exists(workspace_client, file_path):
+        raise click.ClickException(
+            f"No published connector found at {file_path}. "
+            "Check the display name (use --display-name if it differs from the source name)."
+        )
+
+    if not assume_yes:
+        click.confirm(f"Delete published connector at {file_path}?", abort=True)
+
+    click.echo(f"Removing connector: {file_path}")
+    try:
+        workspace_client.workspace.delete(path=file_path)
+    except Exception as e:
+        if debug:
+            click.echo(f"\n[DEBUG] Full exception: {traceback.format_exc()}", err=True)
+        raise click.ClickException(f"Failed to delete {file_path}: {e}")
+    click.echo("  ✓ Unpublished!")
 
 
 if __name__ == "__main__":
