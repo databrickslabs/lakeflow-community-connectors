@@ -107,6 +107,62 @@ class TestRembergConnector(LakeflowConnectTests):
             _response_with_headers({"Retry-After-Base": "soon"})
         ) is None
 
+    def test_record_count_is_independent_of_page_size(self):
+        """Reading the same table at different page sizes must return the
+        same records.
+
+        Regression test for a live data-loss bug: remberg's ``page`` is
+        0-indexed (its prose docs claim 1-indexed), and the connector started
+        at page 1 — silently dropping the first ``limit`` records of every
+        list endpoint. It showed up as the record count varying with page
+        size: a tenant with 80 work orders yielded 60 rows at ``limit=20``
+        and 75 at ``limit=5``.
+
+        Covers flat, snapshot and fan-out reads, since all three paginate.
+        """
+        for table in ("work_orders", "contacts", "asset_status_signals"):
+            by_size = {}
+            for limit in ("1", "2", "3", "1000"):
+                records, _ = self.connector.read_table(table, {}, {"limit": limit})
+                by_size[limit] = sorted(r["id"] for r in records)
+
+            baseline = by_size["1000"]
+            assert baseline, f"[{table}] expected seeded corpus records"
+            for limit, ids in by_size.items():
+                assert ids == baseline, (
+                    f"[{table}] limit={limit} returned {len(ids)} records but "
+                    f"limit=1000 returned {len(baseline)}. Page size must not "
+                    f"change which records are read.\n"
+                    f"  missing: {sorted(set(baseline) - set(ids))}\n"
+                    f"  extra:   {sorted(set(ids) - set(baseline))}"
+                )
+
+    def test_first_page_is_page_zero(self):
+        """The very first request of a read must ask for page 0.
+
+        remberg is 0-indexed; asking for page 1 first skips a page. Asserted
+        on the wire rather than via counts so the intent is unmistakable if
+        someone later "corrects" PAGE_BASE back to 1.
+        """
+        seen: list[str] = []
+        original = self.connector._get_json
+
+        def spy(path, params=None, route=None, missing_ok=False):
+            if params and "page" in params:
+                seen.append(params["page"])
+            return original(path, params=params, route=route, missing_ok=missing_ok)
+
+        self.connector._get_json = spy
+        try:
+            list(self.connector.read_table("work_orders", {}, {"limit": "2"})[0])
+        finally:
+            self.connector._get_json = original
+
+        assert seen and seen[0] == "0", (
+            f"first request used page={seen[:1]}, expected '0' — a 1-indexed "
+            "start silently drops the first page against the live API"
+        )
+
     # ------------------------------------------------------------------
     # Fan-out (child) tables
     # ------------------------------------------------------------------

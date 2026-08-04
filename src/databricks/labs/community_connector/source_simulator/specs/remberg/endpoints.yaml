@@ -1,11 +1,15 @@
 # remberg public REST API endpoints exercised by the connector.
 #
 # Connector flow (per RembergLakeflowConnect):
-# * Every list endpoint uses 1-indexed page + limit pagination (server
+# * Every list endpoint uses **0-indexed** page + limit pagination (server
 #   default 20, max 1000); the connector detects the last page by a short
 #   page. Declared as ``pagination_style: page_number`` with ``page`` in the
-#   page role and ``limit`` in the per_page role so the simulator slices
-#   the corpus exactly like the live server.
+#   page role (``base: 0``) and ``limit`` in the per_page role so the
+#   simulator slices the corpus exactly like the live server.
+#   The ``base: 0`` matters: remberg's prose docs claim pages are 1-indexed,
+#   but they are not, and a simulator that shared the connector's original
+#   1-indexed assumption could not catch the resulting first-page data loss.
+#   See ``PAGE_BASE`` in remberg.py.
 # * CDC tables (assets, work_orders, tickets, work_requests, organizations,
 #   parts) → bounded updatedAt-range reads via the inclusive
 #   ``updatedAtFrom`` / ``updatedAtUntil`` filters (gte/lte on the record's
@@ -37,7 +41,7 @@ endpoints:
       wrapper:
         records_key: data
     params:
-      page:           {role: page}
+      page:           {role: page, base: 0}
       limit:          {role: per_page, default: 20, max: 1000}
       updatedAtFrom:  {role: filter, field: updatedAt, op: gte}
       updatedAtUntil: {role: filter, field: updatedAt, op: lte}
@@ -55,7 +59,7 @@ endpoints:
       wrapper:
         records_key: data
     params:
-      page:           {role: page}
+      page:           {role: page, base: 0}
       limit:          {role: per_page, default: 20, max: 1000}
       updatedAtFrom:  {role: filter, field: updatedAt, op: gte}
       updatedAtUntil: {role: filter, field: updatedAt, op: lte}
@@ -71,7 +75,7 @@ endpoints:
       wrapper:
         records_key: tickets
     params:
-      page:           {role: page}
+      page:           {role: page, base: 0}
       limit:          {role: per_page, default: 20, max: 1000}
       updatedAtFrom:  {role: filter, field: updatedAt, op: gte}
       updatedAtUntil: {role: filter, field: updatedAt, op: lte}
@@ -87,7 +91,7 @@ endpoints:
       wrapper:
         records_key: data
     params:
-      page:           {role: page}
+      page:           {role: page, base: 0}
       limit:          {role: per_page, default: 20, max: 1000}
       updatedAtFrom:  {role: filter, field: updatedAt, op: gte}
       updatedAtUntil: {role: filter, field: updatedAt, op: lte}
@@ -103,7 +107,7 @@ endpoints:
       wrapper:
         records_key: organizations
     params:
-      page:           {role: page}
+      page:           {role: page, base: 0}
       limit:          {role: per_page, default: 20, max: 1000}
       updatedAtFrom:  {role: filter, field: updatedAt, op: gte}
       updatedAtUntil: {role: filter, field: updatedAt, op: lte}
@@ -121,7 +125,7 @@ endpoints:
       wrapper:
         records_key: data
     params:
-      page:           {role: page}
+      page:           {role: page, base: 0}
       limit:          {role: per_page, default: 20, max: 1000}
       updatedAtFrom:  {role: filter, field: updatedAt, op: gte}
       updatedAtUntil: {role: filter, field: updatedAt, op: lte}
@@ -144,7 +148,7 @@ endpoints:
       wrapper:
         records_key: data
     params:
-      page:            {role: page}
+      page:            {role: page, base: 0}
       limit:           {role: per_page, default: 20, max: 1000}
       createdAtFrom:   {role: filter, field: createdAt, op: gte}
       createdAtUntil:  {role: filter, field: createdAt, op: lte}
@@ -187,7 +191,7 @@ endpoints:
         extras:
           count: 3
     params:
-      page:  {role: page}
+      page:  {role: page, base: 0}
       limit: {role: per_page, default: 20, max: 1000}
 
   - path: /v2/parts/{id}/inventories
@@ -200,7 +204,7 @@ endpoints:
         extras:
           count: 3
     params:
-      page:  {role: page}
+      page:  {role: page, base: 0}
       limit: {role: per_page, default: 20, max: 1000}
 
   - path: /v2/parts/{id}/stock-changes
@@ -211,7 +215,7 @@ endpoints:
       wrapper:
         records_key: data
     params:
-      page:  {role: page}
+      page:  {role: page, base: 0}
       limit: {role: per_page, default: 20, max: 1000}
       # The endpoint supports its own createdAt*/updatedAt* bounds, but the
       # connector filters on the parent range instead, so it never sends them.
@@ -239,7 +243,7 @@ endpoints:
       wrapper:
         records_key: contacts
     params:
-      page:           {role: page}
+      page:           {role: page, base: 0}
       limit:          {role: per_page, default: 20, max: 1000}
       # Live filters the connector never sends — contact records carry no
       # updatedAt field, so there is no usable cursor.
@@ -256,7 +260,7 @@ endpoints:
       wrapper:
         records_key: data
     params:
-      page:          {role: page}
+      page:          {role: page, base: 0}
       limit:         {role: per_page, default: 20, max: 1000}
       # Note: /v1/users names its upper bound ``updatedAtTo`` (not
       # ``Until``); the connector never sends either — user records carry
@@ -272,7 +276,7 @@ endpoints:
       wrapper:
         records_key: data
     params:
-      page:             {role: page}
+      page:             {role: page, base: 0}
       limit:            {role: per_page, default: 20, max: 1000}
       # /v1/forms only filters on finalizedAt, which is not a change
       # cursor (never set for inProgress forms) — connector treats the

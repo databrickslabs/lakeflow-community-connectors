@@ -324,8 +324,27 @@ All reads are plain `GET` list endpoints returning JSON.
 
 Every list endpoint uses **page-number pagination**:
 
-- `page` — 1-indexed page number
+- `page` — **0-indexed** page number
 - `limit` — page size; default 20, **maximum 1000**
+
+> **Doc bug — `page` is 0-indexed, not 1-indexed.** remberg's prose
+> documentation states "1-indexed page number", and the first version of this
+> connector took it at face value. It is wrong: the OpenAPI parameter
+> description for `/v2/work-orders/{id}/stock-changes` says `page` "defaults
+> to 0", and live counts confirm it. Reading a sandbox tenant holding 80 work
+> orders returned **60** records at `limit=20` and **75** at `limit=5` — in
+> both cases exactly `limit` records short, i.e. the first page was being
+> skipped. The tell is that the record count varies with page size, which
+> correct pagination never does.
+>
+> This affected every table, and shipped in the connector's first release
+> (`89190c3`). Fixed by `PAGE_BASE = 0`; regression-tested by
+> `test_record_count_is_independent_of_page_size` and
+> `test_first_page_is_page_zero`.
+>
+> Note the simulator could not have caught this on its own: it modelled pages
+> as 1-indexed too, so both sides agreed on the same wrong assumption. The
+> spec now declares `base: 0` explicitly.
 
 The last page is detected by receiving fewer than `limit` records (responses
 do not consistently expose a total count across resources). Example:

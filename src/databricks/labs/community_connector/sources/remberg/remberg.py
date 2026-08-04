@@ -31,9 +31,11 @@ security scheme declares: ``type: apiKey, in: header, name: authorization``).
 Keys are created under Settings > Data > API in the remberg web app and
 expire after one year.
 
-Every list endpoint paginates with 1-indexed ``page`` + ``limit`` (default
-20, max 1000) query parameters; the last page is detected by receiving fewer
-than ``limit`` records. The response envelope key varies per resource
+Every list endpoint paginates with **0-indexed** ``page`` + ``limit``
+(default 20, max 1000) query parameters; the last page is detected by
+receiving fewer than ``limit`` records. remberg's prose docs claim ``page``
+is 1-indexed — it is not; see ``PAGE_BASE``. The response envelope key
+varies per resource
 (``data`` for most, ``tickets``/``organizations``/``contacts`` for those
 resources) — see ``TABLE_ENDPOINTS``.
 
@@ -118,6 +120,14 @@ MIN_REQUEST_INTERVAL = 0.25
 # ``limit`` query param: remberg default is 20, server max is 1000.
 DEFAULT_PAGE_SIZE = 1000
 MAX_PAGE_SIZE = 1000
+
+# First page number. remberg's ``page`` parameter is **0-indexed** — the
+# prose docs claim "1-indexed page number", but the OpenAPI parameter
+# description says "defaults to 0" and live counts confirm it: reading a
+# tenant with 80 work orders returned 60 records at ``limit=20`` and 75 at
+# ``limit=5``, i.e. exactly ``limit`` records missing in each case. Starting
+# at page 1 silently drops the first page of every list endpoint.
+PAGE_BASE = 0
 
 # Read-time lookback for CDC ranges. Records updated while a bounded range
 # is being paginated fall out of the range's filter (their new ``updatedAt``
@@ -876,7 +886,7 @@ class RembergLakeflowConnect(LakeflowConnect):
         limit = _page_size(table_options)
 
         def generate() -> Iterator[dict]:
-            page = 1
+            page = PAGE_BASE
             while True:
                 body = self._get_json(path, params={"page": str(page), "limit": str(limit)})
                 records = self._unwrap_records(body, records_key)
@@ -994,7 +1004,7 @@ class RembergLakeflowConnect(LakeflowConnect):
             return (
                 offset.get("since"),
                 offset["until"],
-                int(offset.get("page", 1)),
+                int(offset.get("page", PAGE_BASE)),
                 int(offset.get("parent_index", 0)),
             )
 
@@ -1012,7 +1022,7 @@ class RembergLakeflowConnect(LakeflowConnect):
             since = _format_ts(_parse_ts(cursor) - timedelta(seconds=lookback))
         else:
             since = table_options.get("start_timestamp")
-        return since, self._init_ts_iso, 1, 0
+        return since, self._init_ts_iso, PAGE_BASE, 0
 
     @staticmethod
     def _range_params(
@@ -1147,7 +1157,7 @@ class RembergLakeflowConnect(LakeflowConnect):
             return [mapped(raw) for raw in self._unwrap_records(body, spec.records_key)]
 
         out: list[dict] = []
-        p = 1
+        p = PAGE_BASE
         while True:
             body = self._get_json(
                 path,
