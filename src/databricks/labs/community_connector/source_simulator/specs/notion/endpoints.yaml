@@ -1,0 +1,56 @@
+# Notion Simulator Spec
+# This file defines the API endpoints for the Notion simulator
+
+endpoints:
+  # Search endpoint (POST) - used for pages and data_sources incremental reads
+  - path: /v1/search
+    method: POST
+    corpus: search_results
+    response:
+      pagination_style: offset_limit
+      cursor_field: next_cursor
+      has_more_field: has_more
+      wrapper:
+        records_key: results
+    synthesize_future_records:
+      cursor_field: last_edited_time
+      count: 3
+
+  # Users endpoint (GET) - snapshot table
+  - path: /v1/users
+    method: GET
+    corpus: users_list
+    response:
+      pagination_style: offset_limit
+      cursor_field: next_cursor
+      has_more_field: has_more
+      wrapper:
+        records_key: results
+
+  # Blocks children endpoint (GET)
+  - path: /v1/blocks/{block_id}/children
+    method: GET
+    corpus: blocks_children
+    response:
+      pagination_style: offset_limit
+      cursor_field: next_cursor
+      has_more_field: has_more
+      wrapper:
+        records_key: results
+    synthesize_future_records:
+      cursor_field: last_edited_time
+      count: 3
+
+  # Comments endpoint (GET)
+  - path: /v1/comments
+    method: GET
+    corpus: comments_list
+    response:
+      pagination_style: offset_limit
+      cursor_field: next_cursor
+      has_more_field: has_more
+      wrapper:
+        records_key: results
+    synthesize_future_records:
+      cursor_field: created_time
+      count: 3
