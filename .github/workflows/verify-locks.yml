@@ -64,6 +64,10 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           ref: ${{ github.event.pull_request.head.sha }}
+          # Opt-in required by actions/checkout >= v6.0.3 to check out a fork
+          # head from pull_request_target. See the rationale on the checkout
+          # step in .github/workflows/pylint.yml.
+          allow-unsafe-pr-checkout: true
 
       - name: Setup uv
         uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9  # v9.0.0
