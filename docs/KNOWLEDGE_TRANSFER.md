@@ -409,10 +409,10 @@ service:
 
 - **Proto/RPC:** `spark/pipelines/api/protos/schemaexploration.proto` —
   `SchemaExplorationService` with:
-  - `listSourceObjects` → `GET /pipelines/{id}/source/objects` (hierarchical
-    `path[]`, pagination, optional search `query`) → `SourceObject[]`
-    (catalog/schema/table).
-  - `getSourceObjectDetails` → `GET /pipelines/{id}/source/object_details` →
+  - `listSourceObjects` → `GET /pipelines/{pipeline_id}/source/objects`
+    (hierarchical `path[]`, pagination, optional search `query`) →
+    `SourceObject[]` (catalog/schema/table).
+  - `getSourceObjectDetails` → `GET /pipelines/{pipeline_id}/source/object_details` →
     `SourceTableDetails` (columns, types, primary keys, sequence_by,
     ingestion_type).
 - **Backend:** `spark/pipelines/execution/service/schemaexploration/ExplorationBackend.scala`
@@ -472,8 +472,10 @@ Selected by `CONNECTOR_TEST_MODE`:
 - **`live`** (a.k.a. `record`) — forward to the real source, optionally recording
   responses and tracking endpoint coverage. Needs credentials.
 
-The `Simulator` (`source_simulator/simulator.py`) patches
-`requests.Session.send()` to intercept HTTP. Supporting pieces: `cassette.py`
+The `Simulator` (`source_simulator/simulator.py`) installs an `Interceptor`
+(`interceptor.py`) that patches `requests.sessions.Session.send` — and
+urllib3's `urlopen`, for connectors that bypass `requests` — to intercept HTTP.
+Supporting pieces: `cassette.py`
 (recorded interactions), `endpoint_spec.py` (per-endpoint YAML: paths, params
 with roles like `filter`/`page`/`per_page`, pagination style, response wrapper),
 `corpus.py` (sample records per endpoint), `coverage.py` (which endpoints were
@@ -498,7 +500,8 @@ schema/metadata correctness, snapshot reads, incremental reads with offset
 convergence, delete flows, "every column populated by at least one record",
 namespace-tree invariants, and partition invariants. Credential precedence:
 `CONNECTOR_TEST_CONFIG_JSON` → `CONNECTOR_TEST_CONFIG_PATH` → class
-`replay_config` → local gitignored file.
+`replay_config` → `configs/replay_config.json` next to the test file
+(gitignored, not committed).
 
 **Write-back testing** (recommended, `lakeflow_connect_test_utils.py`) writes
 data to the real source, reads it back, and verifies incremental reads and
@@ -514,19 +517,46 @@ auth (PAT or service principal; `DATABRICKS_CONFIG_PROFILE` selects a profile).
 
 | Command | What it does |
 |---------|--------------|
-| `create_connection <source> <name> -o '{...}'` | Create the UC `COMMUNITY` connection. Validates options against `connector_spec.yaml` and auto-sets `externalOptionsAllowList`. Supports `--auth-type static\|m2m\|u2m\|u2m_per_user` (defaults from the spec's `oauth.flow`). |
+| `create_connection <source> <name> -o '{...}'` | Create the UC `COMMUNITY` connection. Validates options against `connector_spec.yaml` and auto-sets `externalOptionsAllowList`. Supports `--auth-type static\|m2m\|u2m\|u2m_per_user` (defaults from the spec's `oauth.flow`) and `--spec/-s` (local path **or** GitHub repo URL). |
 | `update_connection` | Update a connection; re-runs the browser OAuth flow for `u2m`. |
-| `create_pipeline <source> <name> -n <conn>` | Create a pipeline. Workspace mode clones source files; managed mode sets `ingestion_definition`. Accepts `-ps` (pipeline spec file/JSON), `--catalog`, `--target`. |
-| `update_pipeline <name> -ps <spec>` | Replace the pipeline's spec (`ingest.py`), preserving other settings. |
+| `create_pipeline <source> <name> -n <conn>` | Create a pipeline. **Managed ingestion is the default**; `--use-workspace-pipeline` opts into the legacy clone-and-run-`ingest.py` mode. Accepts `-ps` (pipeline spec file/JSON), `--catalog/-c`, `--schema/-t`, `--package/-p` (pre-built wheel, repeatable), `--volume-path/-v`. |
+| `update_pipeline <name> -ps <spec>` | Update an existing pipeline's spec, preserving other settings. With `--package` and no `-ps`, updates only the wheels. |
 | `run_pipeline <name> [--full-refresh]` | Trigger a run. |
 | `show_pipeline <name>` | Status. |
 | `upload <source> --volume-path ...` | Build + upload the framework wheel **and** the connector wheel to a UC Volume (managed mode installs from there). `--skip-framework` when iterating. |
+| `publish <source>` | Save the connector as a **workspace asset** so it shows up as a "Custom" tile in *Add Data*. See below. |
+| `unpublish <source>` | Delete that asset again (`-d` display name, `-y` to skip the prompt). |
 
 The **managed** vs **workspace** distinction lives in
 `managed_pipeline.py`: managed pipelines send raw dict bodies to
 `POST/PUT /api/2.0/pipelines` (the installed `databricks-sdk` has no `COMMUNITY`
-`IngestionSourceType`), set `pipelines.managedIngestion.registerPythonDataSource`,
-and reference the uploaded wheels from `environment.dependencies`.
+`IngestionSourceType`), inject `ingestion_definition.source_type = COMMUNITY`,
+set `pipelines.managedIngestion.registerPythonDataSource`, and reference the
+uploaded wheels from `environment.dependencies`.
+
+### `publish` — the connector as a workspace asset
+
+`publish` is the bridge between a connector living in a repo and a connector
+being **discoverable in the Databricks UI** without any repo wiring:
+
+- It writes a JSON manifest to
+  `/Users/<you>/.community-connectors/<display_name>.connector.json`. The server
+  infers the `CommunityConnector` asset type from the `.connector.json`
+  extension — the same call the webapp makes — so the connector appears as a
+  "Custom" tile under *Add Data → Community connectors*.
+- The manifest (`_build_community_connector_manifest`) mirrors the webapp's
+  `buildCommunityConnectorAuthoringManifest` shape: `id`, `sourceName`,
+  `displayName`, `connectionSpec` (the connector spec YAML verbatim), and
+  `dependencies` (the uploaded wheel volume paths).
+- By default it builds the framework + connector wheels from local source and
+  uploads them to a UC Volume; `--package/-p` reuses pre-built wheels and
+  `--volume-path/-v` picks the volume. `--overwrite` replaces an existing asset.
+- Display name resolution (shared with `unpublish`): `--display-name` → the
+  spec's `display_name` → the source name.
+
+This is what makes a **customer-authored connector a first-class UI citizen**
+(§13, Level 2) — the user creates a connection and browses source objects from
+the tile, never touching the CLI again.
 
 ### Authentication modes
 
@@ -612,7 +642,7 @@ contribution produces:
 | `connector_spec.yaml` | `generate-connector-spec` | Connection params + `external_options_allowlist` (§6). |
 | `README.md` | `create-connector-document` | Public end-user docs (uses `templates/community_connector_doc_template.md`). |
 | `<source>_api_doc.md` | `research-source-api` | Research notes on the source API (uses `templates/source_api_doc_template.md`). |
-| `source_simulator/specs/<source>/endpoints.yaml` + corpus | `implement-connector`/`connector-tester` | Offline test fixtures (§9). |
+| `src/.../community_connector/source_simulator/specs/<source>/endpoints.yaml` + corpus | `implement-connector`/`connector-tester` | Offline test fixtures (§9). |
 | `tests/unit/sources/<source>/test_*.py` | `connector-tester` | Test class extending `LakeflowConnectTests`. |
 
 The `templates/` directory standardizes these artifacts, and each template is
@@ -732,6 +762,12 @@ change to the upstream repo:
   the framework wheel) to a UC Volume, and the pipeline installs from there via
   `environment.dependencies` (§10) — so a private connector runs with the same
   managed-ingestion experience as a built-in one.
+- **`publish`** (§10) goes one step further: it saves the connector as a
+  workspace asset so it appears as a "Custom" tile in *Add Data*, wheels and
+  connection spec included. After a one-time `community-connector publish
+  my_source`, your users get the same point-and-click experience as a built-in
+  connector — create a connection, browse objects, pick tables — with no CLI and
+  no repo URL to paste. `unpublish` removes the tile.
 
 This is the path for a customer who has written a connector for an internal or
 proprietary system and wants to keep it in their own repo.
@@ -789,9 +825,9 @@ reads, and keep the offline test fixtures so the change stays verifiable.
 - Spark adapter: `sparkpds/lakeflow_datasource.py`, `sparkpds/registry.py`
 - SDP orchestration: `pipeline/ingestion_pipeline.py`
 - Spec parsing: `libs/spec_parser.py`; type conversion: `libs/utils.py`
-- Simulator: `source_simulator/{simulator,modes,endpoint_spec,cassette,corpus}.py`
+- Simulator: `source_simulator/{simulator,interceptor,handler,modes,endpoint_spec,cassette,corpus,pagination}.py` (+ `DESIGN.md`)
 - Test harness: `tests/unit/sources/test_suite.py`
-- CLI: `tools/community_connector/src/databricks/labs/community_connector_cli/{cli,managed_pipeline,connector_spec}.py`
+- CLI: `tools/community_connector/src/databricks/labs/community_connector_cli/{cli,managed_pipeline,connector_spec,oauth_flow,pipeline_spec_validator}.py`
 - Interface contract doc: `src/databricks/labs/community_connector/interface/README.md`
 
 **universe (managed ingestion)**
