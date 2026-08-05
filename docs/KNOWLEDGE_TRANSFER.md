@@ -16,6 +16,9 @@ This doc spans three repos:
 
 > **Audience:** engineers picking up the project. It assumes familiarity with
 > Spark and Databricks but not with this codebase.
+>
+> **Start with §2** for the two user journeys the whole system exists to serve,
+> and **§16** for what is still unfinished.
 
 ---
 
@@ -43,13 +46,97 @@ management, partitioning, and pipeline generation.**
 2. **Direct Python Data Source API (escape hatch).** Implement Spark's
    `DataSource`/`DataSourceReader`/`DataSourceStreamReader` yourself for full
    control over partitioning/schema. Must still speak the framework's virtual-
-   table contract (see §4) so it integrates with the shared SDP.
+   table contract (see §5) so it integrates with the shared SDP.
 
 This doc focuses on approach #1.
 
 ---
 
-## 2. Repository layout
+## 2. The two main CUJs
+
+Before any of the internals, it helps to know **what a user actually does with
+this project**. There are two consumption journeys. They run the *same connector
+code* through the *same* Spark format, and differ in how the connector code
+reaches the cluster and how the pipeline is defined.
+
+| | **CUJ 1 — Repo → Python SDP** | **CUJ 2 — Packages → managed ingestion** |
+|--|-------------------------------|------------------------------------------|
+| How code arrives | Import/clone the **repo** into the workspace | Install connector **Python packages** (wheels) |
+| Pipeline definition | A Python source file you own (`ingest.py`) | Server-side `ingestion_definition` on the pipeline |
+| What the user writes | Python (a `pipeline_spec` dict) | Nothing — UI wizard or a CLI spec |
+| Browse-source UI | No | **Yes** |
+| Same UX as 1P connectors | No | **Yes** — identical steps to every other ingestion connector |
+| Status | The original path; still supported | **The default and strategic direction** |
+
+Everything later in this doc is, in some sense, an explanation of one of these
+two columns.
+
+### CUJ 1 — Import the repo into the workspace to create a Python SDP
+
+The user brings the connector code into their workspace as source files and
+drives ingestion from a Python pipeline they can read and edit.
+
+1. **Get the code into the workspace** — clone/import
+   `lakeflow-community-connectors` as a Git folder, or let
+   `create_pipeline --use-workspace-pipeline` do it (that flag is the legacy
+   workspace mode; see §11).
+2. **Create a UC connection** holding the credentials (`COMMUNITY` type), via
+   the UI or `create_connection`.
+3. **Author `ingest.py`** from `ingest_template.py`. This is the whole contract
+   the user sees:
+   ```python
+   spark.conf.set(
+       "spark.databricks.unityCatalog.connectionDfOptionInjection.enabled", "true")
+
+   source_name = "github"
+   pipeline_spec = {
+       "connection_name": "my_github_conn",
+       "objects": [{"table": {"source_table": "issues"}}],
+   }
+
+   register(spark, source_name)      # register the Spark data source
+   ingest(spark, pipeline_spec)      # build the SDP tables
+   ```
+4. **Create and run the SDP pipeline** pointing at that file.
+
+**Why it matters:** it is fully transparent and customizable — the user can
+inspect and modify the pipeline logic, and it works today with no dependency on
+managed-ingestion rollout. **The cost:** the user writes and maintains Python,
+gets no browse UI, and this is the path that drags in the `_generated_*` merged
+source files (`register(spark, name)` resolves a merged module and is explicitly
+a legacy shim — see §16.1), because SDP could not import multi-file Python data
+sources.
+
+### CUJ 2 — Import the source Python packages to create a managed ingestion pipeline
+
+The user installs the connector as **packages** and then follows **exactly the
+same steps as every other Lakeflow ingestion connector** — this is the point of
+the journey, and the reason it shares architecture with first-party connectors
+(§9).
+
+1. **Make the packages available** — the framework wheel and the connector
+   wheel, uploaded to a UC Volume (`upload`, or built automatically by
+   `create_pipeline`). Optionally `publish` the connector once so it appears as
+   a **"Custom" tile in *Add Data*** (§11), after which the user's experience is
+   pure point-and-click.
+2. **Create a UC connection** (`COMMUNITY` type) — same wizard as any connector.
+3. **Browse source objects** in the UI and pick tables. This is the
+   schema-exploration service calling the connector's `_community_*` virtual
+   tables (§9) — the step CUJ 1 cannot offer.
+4. **Create and run the pipeline.** No Python is authored: the selection becomes
+   a server-side `ingestion_definition`, and the wheels are referenced from
+   `environment.dependencies`.
+
+**Why it matters:** the user does not learn anything connector-specific — a
+community connector looks and behaves like a managed one, monitoring and all.
+Because the connector is a versioned package rather than source files, it also
+needs no merged-file hack. **The current cost:** the wheels must be built and
+uploaded first; publishing to PyPI would remove that step entirely and is the
+highest-leverage open item (§16.2).
+
+---
+
+## 3. Repository layout
 
 ```
 lakeflow-community-connectors/
@@ -82,7 +169,7 @@ allowlist), `README.md` (end-user docs), and an API doc.
 
 ---
 
-## 3. The connector interface (the contract)
+## 4. The connector interface (the contract)
 
 **File:** `src/databricks/labs/community_connector/interface/lakeflow_connect.py`
 
@@ -149,7 +236,7 @@ These are additive capabilities. A connector composes them alongside
   Implement `list_namespaces(prefix) -> list[list[str]]` (one level of children)
   and `list_tables_in_namespace(namespace) -> list[str]`. Flat connectors skip
   this and the framework reports each table under an empty namespace. This is
-  what powers the **browse UI's tree navigation** (§8).
+  what powers the **browse UI's tree navigation** (§9).
 - **`SupportsIngestionAgent`** (`supports_ingestion_agent.py`) — expose custom
   agent operations. Niche; skip on a first pass.
 
@@ -169,12 +256,12 @@ first — it demonstrates every pattern against an in-process simulated REST API
 
 ---
 
-## 4. From connector to Spark Data Source (`sparkpds/`)
+## 5. From connector to Spark Data Source (`sparkpds/`)
 
 **File:** `src/databricks/labs/community_connector/sparkpds/lakeflow_datasource.py`
 
 The framework adapts a `LakeflowConnect` into Spark's Python Data Source API.
-The Spark format name is **`lakeflow_connect`** (see §7 for why that matters for
+The Spark format name is **`lakeflow_connect`** (see §8 for why that matters for
 UC option injection). `LakeflowSource(DataSource)` is the entry point; each
 source ships a thin subclass:
 
@@ -232,7 +319,7 @@ package boundary so `github` never resolves to `github_enterprise`.
 
 ---
 
-## 5. From Data Source to declarative pipeline (`pipeline/`)
+## 6. From Data Source to declarative pipeline (`pipeline/`)
 
 **File:** `src/databricks/labs/community_connector/pipeline/ingestion_pipeline.py`
 
@@ -276,11 +363,11 @@ The user-facing config that says *what* to ingest and *where* to land it:
 
 `SpecParser` splits the special keys (`scd_type`, `primary_keys`, `sequence_by`,
 `cluster_by`) out from the rest; everything else becomes `table_options` passed
-through to the connector — but only if allowlisted (see §6).
+through to the connector — but only if allowlisted (see §7).
 
 ---
 
-## 6. The connector spec (`connector_spec.yaml`)
+## 7. The connector spec (`connector_spec.yaml`)
 
 **Files:** `sources/<source>/connector_spec.yaml`
 
@@ -315,7 +402,7 @@ external_options_allowlist: "owner,repo,state,per_page,start_date,org,pull_numbe
 
 ---
 
-## 7. How a connector actually runs — the runtime engine (`~/runtime`)
+## 8. How a connector actually runs — the runtime engine (`~/runtime`)
 
 At the bottom of the stack, the Databricks Spark engine executes the connector.
 Community connectors have **no special code in runtime** — they ride the
@@ -363,7 +450,7 @@ reads `self.options["token"]`.
 
 ---
 
-## 8. Running as a managed ingestion pipeline (`~/universe`)
+## 9. Running as a managed ingestion pipeline (`~/universe`)
 
 A community connector can run two ways. Both execute the *same* connector code
 through the *same* `lakeflow_connect` Spark format; they differ in how the
@@ -450,12 +537,12 @@ Delta tables in Unity Catalog (CDC / snapshot / append via apply_changes)
 ```
 
 Contrast with the workspace flow, where the deployed `ingest.py` calls
-`ingest(spark, pipeline_spec)` directly (§5) and there's no schema-exploration
+`ingest(spark, pipeline_spec)` directly (§6) and there's no schema-exploration
 service in front.
 
 ---
 
-## 9. Testing (`source_simulator/` + `test_suite.py`)
+## 10. Testing (`source_simulator/` + `test_suite.py`)
 
 Tests run **offline by default** — no creds, no network. Live runs happen on
 demand to refresh recorded data or triage regressions.
@@ -509,7 +596,7 @@ deletes end-to-end.
 
 ---
 
-## 10. The CLI (`tools/community_connector/`)
+## 11. The CLI (`tools/community_connector/`)
 
 Installed as `community-connector` (`pip install -e tools/community_connector`).
 It mirrors the Databricks "Add Data" UI flow and uses the Databricks SDK for
@@ -555,7 +642,7 @@ being **discoverable in the Databricks UI** without any repo wiring:
   spec's `display_name` → the source name.
 
 This is what makes a **customer-authored connector a first-class UI citizen**
-(§13, Level 2) — the user creates a connection and browses source objects from
+(§14, Level 2) — the user creates a connection and browses source objects from
 the tile, never touching the CLI again.
 
 ### Authentication modes
@@ -568,7 +655,7 @@ OAuth-issued tokens are injected at query time, never entered by hand.
 
 ---
 
-## 11. Developer & end-user journeys (CUJs)
+## 12. The developer journey (building a connector)
 
 ### Building a connector (developer, AI-assisted)
 
@@ -615,6 +702,8 @@ runner. Internal-branch PRs run CI automatically.
 
 ### Consuming a connector (end user)
 
+§2 covers the two consumption journeys in full. In short:
+
 1. **UI:** *+New → Add or upload data → Community connectors* (or *+ Add
    Community Connector* for a custom repo). Create a connection, browse source
    objects, pick tables, create the pipeline.
@@ -625,9 +714,9 @@ snapshot / append semantics the connector declared.
 
 ---
 
-## 12. Contributing a new connector (developer deep-dive)
+## 13. Contributing a new connector (developer deep-dive)
 
-§11 gives the command-level flow; this section is the "what actually lands on
+§12 gives the command-level flow; this section is the "what actually lands on
 disk and why" view for someone contributing a connector to the repo.
 
 ### The anatomy of a connector directory
@@ -637,12 +726,12 @@ contribution produces:
 
 | File | Produced by | Purpose |
 |------|-------------|---------|
-| `<source>.py` | you / `implement-connector` | The `LakeflowConnect` subclass (§3). |
-| `__init__.py` | you | The `LakeflowSource` subclass wiring `_lakeflow_connect_cls` (§4). |
-| `connector_spec.yaml` | `generate-connector-spec` | Connection params + `external_options_allowlist` (§6). |
+| `<source>.py` | you / `implement-connector` | The `LakeflowConnect` subclass (§4). |
+| `__init__.py` | you | The `LakeflowSource` subclass wiring `_lakeflow_connect_cls` (§5). |
+| `connector_spec.yaml` | `generate-connector-spec` | Connection params + `external_options_allowlist` (§7). |
 | `README.md` | `create-connector-document` | Public end-user docs (uses `templates/community_connector_doc_template.md`). |
 | `<source>_api_doc.md` | `research-source-api` | Research notes on the source API (uses `templates/source_api_doc_template.md`). |
-| `src/.../community_connector/source_simulator/specs/<source>/endpoints.yaml` + corpus | `implement-connector`/`connector-tester` | Offline test fixtures (§9). |
+| `src/.../community_connector/source_simulator/specs/<source>/endpoints.yaml` + corpus | `implement-connector`/`connector-tester` | Offline test fixtures (§10). |
 | `tests/unit/sources/<source>/test_*.py` | `connector-tester` | Test class extending `LakeflowConnectTests`. |
 
 The `templates/` directory standardizes these artifacts, and each template is
@@ -677,7 +766,7 @@ connector by hand:
    suite runs in `simulate` mode with no creds.
 5. **Add the test class** — subclass `LakeflowConnectTests`, set
    `connector_class`, `simulator_source`, and `replay_config`. The harness
-   auto-generates the suite (§9).
+   auto-generates the suite (§10).
 6. **Run** `pytest tests/unit/sources/<source>/` (offline by default). Iterate
    until green, then optionally run live with `CONNECTOR_TEST_MODE=live` and
    real creds to validate the connector against the real API and refresh the
@@ -694,7 +783,7 @@ connector by hand:
   `example.py` does with `_api`.
 - **Return plain JSON dicts** from `read_table`; let the framework coerce to the
   declared schema. Don't build Spark `Row`s yourself.
-- **Honor the offset fixed-point** (§3): emit a stable `end_offset` and return
+- **Honor the offset fixed-point** (§4): emit a stable `end_offset` and return
   it unchanged when there's no new data, or the pipeline will loop.
 - **Retries and rate limits** belong in the connector (see
   `_request_with_retry` in `example.py`), not the framework.
@@ -706,7 +795,7 @@ connector by hand:
 - Run `/self-review-connector for <source>` for a scored audit; it adds the
   `connector-self-reviewed` label that **CI requires to merge**.
 - Fork PRs need a maintainer's `safe-to-test` label (re-applied per push) before
-  CI runs — see §11 and `CONTRIBUTING.md`.
+  CI runs — see §12 and `CONTRIBUTING.md`.
 - **Write-back tests** (`write-back-testing` skill,
   `lakeflow_connect_test_utils.py`) are recommended: they write to the real
   source and verify the full read/incremental/delete cycle.
@@ -720,7 +809,7 @@ machinery and the generic test harness.
 
 ---
 
-## 13. Customizing as a customer
+## 14. Customizing as a customer
 
 Customers don't have to fork the framework to adapt or extend connectors. There
 are three escalating levels of customization, from config-only to full BYO.
@@ -729,7 +818,7 @@ are three escalating levels of customization, from config-only to full BYO.
 
 Everything about *what* and *how* to ingest is data, not code:
 
-- **Pipeline spec** (§5) — choose tables, destination catalog/schema/table,
+- **Pipeline spec** (§6) — choose tables, destination catalog/schema/table,
   `scd_type` (`SCD_TYPE_1` / `SCD_TYPE_2` / `APPEND_ONLY`), `primary_keys`,
   `sequence_by`, `cluster_by`.
 - **Table options** — any key in the connector's `external_options_allowlist`
@@ -760,9 +849,9 @@ change to the upstream repo:
   ```
 - For **managed** pipelines, `upload` builds and ships your connector wheel (and
   the framework wheel) to a UC Volume, and the pipeline installs from there via
-  `environment.dependencies` (§10) — so a private connector runs with the same
+  `environment.dependencies` (§11) — so a private connector runs with the same
   managed-ingestion experience as a built-in one.
-- **`publish`** (§10) goes one step further: it saves the connector as a
+- **`publish`** (§11) goes one step further: it saves the connector as a
   workspace asset so it appears as a "Custom" tile in *Add Data*, wheels and
   connection spec included. After a one-time `community-connector publish
   my_source`, your users get the same point-and-click experience as a built-in
@@ -786,7 +875,7 @@ reads, and keep the offline test fixtures so the change stays verifiable.
 
 ---
 
-## 14. End-to-end mental model
+## 15. End-to-end mental model
 
 ```
                  Connector author writes ONE class
@@ -816,7 +905,7 @@ reads, and keep the offline test fixtures so the change stays verifiable.
 
 ---
 
-## 15. Unfinished work and future directions
+## 16. Unfinished work and future directions
 
 Everything above describes the system as it is. This section is the honest
 counterpart: known debt, deliberate hacks, and directions worth taking. It is
@@ -825,7 +914,7 @@ recorded rather than just the task.
 
 Ordered roughly by a combination of pain and leverage.
 
-### 15.1 Retire the `_generated_*` merged source files (biggest pain point)
+### 16.1 Retire the `_generated_*` merged source files (biggest pain point)
 
 **The hack.** Every connector ships a machine-merged single file —
 `sources/<source>/_generated_<source>_python_source.py` — that inlines the
@@ -851,7 +940,7 @@ to catching stale merged files), and inflates diffs on every PR.
 
 **What unblocks it.** The **managed ingestion flow does not need it** — managed
 pipelines install real wheels from a UC Volume via
-`environment.dependencies` (§8, §10). The blocker is purely rollout: managed
+`environment.dependencies` (§9, §11). The blocker is purely rollout: managed
 ingestion is the CLI default but is not fully launched yet. Once it is, the
 merge script, the generated files, the CI workflow, the registry's generated-
 module path, and the C6 review item can all be deleted together.
@@ -861,7 +950,7 @@ generate a Python data source and run it directly in an SDP pipeline." Worth
 noting that Genie is likely the wrong tool for that job — a specialized coding
 agent is a much better fit for code generation of this shape.
 
-### 15.2 Publish the packages to PyPI
+### 16.2 Publish the packages to PyPI
 
 **Current state.** There is no publish workflow — `.github/workflows/` has no
 PyPI job. Users (and the CLI) build wheels locally and upload them to a UC
@@ -889,7 +978,7 @@ Together this gives the community connector framework the **fastest dev loop for
 building managed connectors, with full customization** — worth stating plainly
 because it is the strategic case for the whole project.
 
-### 15.3 Let connectors declare their own Spark format name
+### 16.3 Let connectors declare their own Spark format name
 
 **Current state.** Every connector is read via `format("lakeflow_connect")`,
 with the actual source selected by a separate option. The single generic format
@@ -899,19 +988,19 @@ name was chosen on the belief that unifying would be simpler.
 `format("lakeflow_connect")` on users is confusing and poor public-API design —
 `format("github")` is what anyone would expect, and the generic name leaks an
 internal framework detail into the user-facing surface. It also makes the
-published packages (§15.2) less useful and harder to explain.
+published packages (§16.2) less useful and harder to explain.
 
 **What unblocks it.** [runtime#229659][rt] — "Allow Python data source UC
 connection injection to use the connection `sourceName` as format" — **merged
 2026-07-01**. The engine now permits injection when the format matches the
-connection's `sourceName` *or* the literal `lakeflow_connect` (§7), so the
+connection's `sourceName` *or* the literal `lakeflow_connect` (§8), so the
 platform side is done and this is now a **framework-side follow-up**: register
 each source under its own format name and keep `lakeflow_connect` as a
 deprecated alias for back-compat.
 
 [rt]: https://github.com/databricks-eng/runtime/pull/229659
 
-### 15.4 Deprecate the legacy `GENERIC_LAKEFLOW_CONNECT` connection type
+### 16.4 Deprecate the legacy `GENERIC_LAKEFLOW_CONNECT` connection type
 
 The project has moved to the `COMMUNITY` UC connection type; the older
 `GENERIC_LAKEFLOW_CONNECT` type remains only for back-compat.
@@ -919,18 +1008,18 @@ The project has moved to the `COMMUNITY` UC connection type; the older
 **Scope.** Encouragingly, **this repo has no remaining references** to the
 legacy type — the cleanup is entirely on the platform side (`models.scala` in
 runtime, `connection.proto` in universe, where both types are still defined; see
-§7 and §8). The work is to deprecate and remove the old path there, to avoid
+§8 and §9). The work is to deprecate and remove the old path there, to avoid
 confusion and the bug risk of two parallel connection types that must be kept in
 sync.
 
-### 15.5 Decide the fate of the ingestion-agent interface
+### 16.5 Decide the fate of the ingestion-agent interface
 
 **Current state.** The interface changes needed to support the ingestion-agent
 APIs, including **dynamic tool discovery**, are already implemented:
 `interface/supports_ingestion_agent.py`, `interface/agent_protocol.py`, and
 `sparkpds/ingestion_agent_datasource.py`. But it is **undocumented and
 unsupported by any skill** — no connector implements the mixin, and nothing in
-`.claude/` or `templates/` mentions it. §3 flags it as "niche; skip on a first
+`.claude/` or `templates/` mentions it. §4 flags it as "niche; skip on a first
 pass," which is the current reality.
 
 **This is a fork in the road, and it should be resolved deliberately:**
@@ -945,16 +1034,16 @@ pass," which is the current reality.
 
 Leaving it in limbo is the one option with no upside.
 
-### 15.6 Add higher-level abstractions for common connector patterns
+### 16.6 Add higher-level abstractions for common connector patterns
 
 Because a connector has the full expressiveness of the Python Data Source API,
 there is room for **specialized abstractions above `LakeflowConnect`** that
 collapse recurring patterns into far less code — file-based sources are the
 clearest example, where much of each implementation is boilerplate. The existing
-mixins (§3) are the precedent; the idea is pattern-specific base classes rather
+mixins (§4) are the precedent; the idea is pattern-specific base classes rather
 than another general-purpose layer.
 
-### 15.7 Add more reviewers
+### 16.7 Add more reviewers
 
 `.github/CODEOWNERS` currently has a **single owner** (`* @yyoli-db`) and
 already carries a TODO to replace it with a team handle once one exists. This is
@@ -966,7 +1055,7 @@ rotates — is straightforward and overdue.
 
 ---
 
-## 16. File index (jump-off points)
+## 17. File index (jump-off points)
 
 **This repo**
 - Interface: `src/databricks/labs/community_connector/interface/lakeflow_connect.py`
