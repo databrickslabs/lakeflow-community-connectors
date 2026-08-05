@@ -18,7 +18,8 @@ This doc spans three repos:
 > Spark and Databricks but not with this codebase.
 >
 > **Start with §2** for the two user journeys the whole system exists to serve,
-> and **§16** for what is still unfinished.
+> **§13** for how quality is enforced when contributors are outside the core
+> team, and **§17** for what is still unfinished.
 
 ---
 
@@ -104,7 +105,7 @@ inspect and modify the pipeline logic, and it works today with no dependency on
 managed-ingestion rollout. **The cost:** the user writes and maintains Python,
 gets no browse UI, and this is the path that drags in the `_generated_*` merged
 source files (`register(spark, name)` resolves a merged module and is explicitly
-a legacy shim — see §16.1), because SDP could not import multi-file Python data
+a legacy shim — see §17.1), because SDP could not import multi-file Python data
 sources.
 
 ### CUJ 2 — Import the source Python packages to create a managed ingestion pipeline
@@ -132,7 +133,7 @@ community connector looks and behaves like a managed one, monitoring and all.
 Because the connector is a versioned package rather than source files, it also
 needs no merged-file hack. **The current cost:** the wheels must be built and
 uploaded first; publishing to PyPI would remove that step entirely and is the
-highest-leverage open item (§16.2).
+highest-leverage open item (§17.2).
 
 ---
 
@@ -642,7 +643,7 @@ being **discoverable in the Databricks UI** without any repo wiring:
   spec's `display_name` → the source name.
 
 This is what makes a **customer-authored connector a first-class UI citizen**
-(§14, Level 2) — the user creates a connection and browses source objects from
+(§15, Level 2) — the user creates a connection and browses source objects from
 the tile, never touching the CLI again.
 
 ### Authentication modes
@@ -679,7 +680,8 @@ runs Phase 1 across many sources unattended.
 
 Before human review, `/self-review-connector for <source>` writes a scored
 `SELF_REVIEW.md`, posts it on the PR, and adds the `connector-self-reviewed`
-label that CI requires to merge. The individual skills
+label that CI requires to merge — §13 covers that audit and the rest of the
+quality machinery in detail. The individual skills
 (`/research-source-api`, `/implement-connector`, `/test-and-fix-connector`,
 `/generate-connector-spec`, `/deploy-connector`, `/write-back-testing`) are the
 building blocks these commands orchestrate.
@@ -691,14 +693,6 @@ research and implementation.
 > **Repo constraint (from `CLAUDE.md`):** when developing a connector, only
 > modify files under `sources/<source>/`. Don't touch library, pipeline, or
 > interface code unless explicitly asked.
-
-### CI on fork PRs (from `CONTRIBUTING.md`)
-
-Fork PRs don't run CI until a maintainer applies the `safe-to-test` label
-(auto-stripped on every new push, so each commit needs a fresh sign-off). This
-gates arbitrary-code-execution vectors — `.github/**`, `pyproject.toml`,
-`conftest.py`, entry points — that would otherwise run on the privileged
-runner. Internal-branch PRs run CI automatically.
 
 ### Consuming a connector (end user)
 
@@ -714,7 +708,203 @@ snapshot / append semantics the connector declared.
 
 ---
 
-## 13. Contributing a new connector (developer deep-dive)
+## 13. Enabling field & partners: how quality is enforced
+
+The strategic bet of this project is that **people outside the core team — field
+engineers, partners, customers — can build production connectors.** That only
+works if quality is enforced by *machinery* rather than by a reviewer who
+happens to know the source API. This section describes that machinery.
+
+The core problem: a reviewer cannot meaningfully verify a Stripe connector
+without Stripe credentials, and asking every contributor to hand over live
+credentials does not scale and is not acceptable. So the framework is built so
+that **correctness is demonstrable without credentials, and drift from reality
+is detected separately.**
+
+Five mechanisms, layered:
+
+| Layer | Enforces | Needs creds? | Blocks merge? |
+|-------|----------|--------------|---------------|
+| Simulator-based tests | The connector actually works | No | Yes |
+| Generic test harness | Contract compliance, uniformly | No | Yes |
+| Live validator + coverage | The simulation matches reality | Yes, once | Via self-review |
+| Self-review audit (54 checks) | Everything a reviewer would check | No | Yes (label) |
+| CI workflows + fork gating | All of the above, per-source | No | Yes |
+
+### 13.1 Simulation-based testing: correctness without credentials
+
+The pivotal design decision. Instead of mocks (which encode the author's
+assumptions and prove nothing) or live-only tests (which need credentials and
+are flaky), the framework runs connectors against an **in-process simulation of
+the source API** (§10).
+
+A contributor declares the API's shape once, as data:
+
+- `endpoints.yaml` — paths, params and their **roles** (`filter`, `page`,
+  `per_page`), pagination style, response wrapper.
+- `corpus/*.json` — sample records per endpoint.
+
+The `Simulator` then serves requests with **real query and pagination
+semantics** — so filtering, paging, and cursor advancement are genuinely
+exercised, not stubbed. This is why offline tests are meaningful: a connector
+that paginates incorrectly fails in `simulate` mode, with no credentials
+anywhere.
+
+For enablement this is the whole ballgame:
+
+- A contributor can develop and prove a connector **without production access**
+  to the source, and reviewers can verify it the same way.
+- CI runs the full suite on every PR with **no secrets in the CI environment** —
+  which is what makes accepting fork PRs from partners tractable at all.
+- Phase 1 of the developer flow (`/develop-connector`) needs no credentials,
+  so it is fully automatable and batchable across many sources.
+
+### 13.2 The generic harness: contract compliance for free
+
+A contributor writes a test class with a handful of attributes (§10) and
+inherits **~9 auto-generated test families** covering `list_tables` validity,
+invalid-table handling, schema and metadata correctness, snapshot and
+incremental reads, delete flows, offset **termination**, and "every declared
+column is populated by at least one record."
+
+Two things this buys for enablement:
+
+1. **Uniform quality floor.** Every connector is held to the same contract
+   regardless of who wrote it or how much Spark they know. A partner cannot
+   accidentally ship a connector that never terminates — `test_read_terminates`
+   is generated for them.
+2. **Contract violations surface as test failures, not review comments.** The
+   offset fixed-point rule (§4) is the single easiest thing to get wrong and the
+   most damaging in production; it is machine-checked.
+
+### 13.3 Closing the loop: detecting simulation drift
+
+The obvious objection to simulation is: *what if the spec is wrong, or the API
+changed?* Then tests pass and production breaks. The framework answers this
+directly.
+
+In live mode the `Simulator` doubles as a **proxy + spec validator**
+(`source_simulator/validator.py`). For every request it: forwards to the real
+source, runs the *same* request through the simulate handler, and **diffs the
+two responses**, writing a JSON report at the end of the run. Severity is
+graduated by how decisive the mismatch is:
+
+- **status_code** — live 404 vs simulated 200: the spec is fundamentally wrong
+  about the endpoint.
+- **shape** — dict vs array: wrapper config is wrong.
+- **field set** — keys in live but not the corpus: corpus needs refresh.
+- **type** — live `id` is an int, corpus has a string: schema drift.
+
+Alongside it, `coverage.py` tracks which endpoints were actually exercised,
+catching **spec endpoints never hit by any test** and **endpoints the connector
+hits with no spec entry**.
+
+This is the honest framing of the quality story: **offline tests prove the
+connector obeys its contract; the live validator proves the contract matches
+reality.** The two are separable, which is exactly why credentials are needed
+once (Phase 2, `/validate-connector`) rather than continuously. The self-review
+audit then checks that a clean live run actually happened (B11) and that
+coverage was complete (B12) — so "I only ever ran it offline" is a detectable
+state, not an invisible one.
+
+### 13.4 The self-review audit: encoding reviewer expertise
+
+`/self-review-connector` runs **54 checks** in five sections and writes a scored
+`SELF_REVIEW.md`:
+
+| Section | Checks | Covers |
+|---------|--------|--------|
+| A — Implementation | 13 | Interface compliance, read-pattern choice, `_init_time` termination cap, admission control, request timeouts, schema types, import hygiene, pylint |
+| B — Testing & simulator | 14 | Test class wiring, spec/corpus presence, every hit URL has a spec entry, offline tests pass, **live run happened and validated cleanly**, coverage complete |
+| C — Artifacts | 10 | Implementation, API doc, connector spec, README, package metadata, simulator spec/corpus — each parseable and consistent |
+| D — Security | 10 | Hardcoded secrets, `eval`/`exec`, `subprocess`/`shell=True` |
+| E — Cross-doc consistency | 7 | README, spec, and code agree on tables and parameters |
+
+Findings are severity-weighted (BLOCKER ±3/−10, MAJOR +2/−3, MINOR +1/−1),
+normalized to 0–100, and bucketed `READY` (90+) / `ALMOST` (75–89) /
+`NEEDS WORK` (50–74) / `NOT READY`. **Any BLOCKER failure caps the verdict at
+`NOT READY` regardless of score** — missing abstract methods or failing tests
+mean it cannot ship even if everything else is perfect.
+
+Why this matters for enablement: it **transfers reviewer expertise into a
+checklist a contributor can run themselves, before a human looks at the PR.**
+The hard-won lessons — cap the cursor at `_init_time` or reads never terminate;
+always pass `timeout=`; use `LongType` not `IntegerType`; don't declare
+`pyspark` as a runtime dependency because it conflicts with the cluster's — are
+encoded as checks with exact remediation text rather than living in a
+reviewer's head. A partner gets that feedback in minutes instead of a review
+round-trip, and the maintainer's scarce attention goes to design rather than
+mechanics.
+
+The skill is **read-mostly**: it audits and reports, and does not modify
+connector code, so its verdict means something.
+
+### 13.5 CI: the merge gates
+
+Five workflows, all running on a hardened runner group
+(`databrickslabs-protected-runner-group`) whose only PyPI egress is a JFrog
+proxy authenticated by GitHub OIDC:
+
+| Workflow | Gate |
+|----------|------|
+| **Tests** | `changes` detects which sources a PR touches, then a **per-source matrix** fans out `pytest tests/unit/sources/<source>/` with `fail-fast: false`. Plus `test-libs`, `test-pipeline`, `test-example`, `test-community-connector`. `Tests / summary` is the required check. |
+| **Pylint** | Lint gate on changed code, mirrored by the A11 self-review check so a contributor sees it before CI does. |
+| **Connector Self-Review** | Detects significant connector-source changes and requires the `connector-self-reviewed` label. **Removed automatically on every new push**, so each revision needs a fresh audit. |
+| **Verify Dependency Locks** | Regenerates locks and fails on drift, so `requirements/` always matches the declared deps. |
+| **Generate Merged Source File** | Keeps the `_generated_*` files in sync (§17.1 — this one exists to be deleted). |
+
+Two structural choices worth noting:
+
+- **Per-source matrix isolation.** One partner's broken connector fails only its
+  own matrix leg. With `fail-fast: false`, unrelated connectors still report
+  green — essential when many contributors work in one repo.
+- **`summary` treats `skipped` as pass.** Path-filtering legitimately skips
+  whole jobs, so the aggregate gate must not confuse "nothing to do" with
+  failure.
+
+### 13.6 Accepting code from outside: the fork-PR gate
+
+CI runs on a privileged runner with an OIDC token in scope, which GitHub only
+issues in base-repo context. So fork PRs cannot run CI unmediated, and the
+naive fix — clicking "approve and run" — turns the approval into an
+arbitrary-code-execution channel.
+
+Instead (`CONTRIBUTING.md`): fork-PR CI is gated on an explicit **`safe-to-test`
+label**, applied by a maintainer after scanning the diff, and **auto-stripped on
+every new push** so each commit needs fresh sign-off. The label model makes the
+approval **auditable** in a way a UI click is not. Maintainers are told to check
+the classic pwn-request vectors before labeling — `.github/**`,
+`pyproject.toml`/`requirements/**`, `conftest.py` (pytest auto-loads it),
+`setup.py` entry points, new top-level `__init__.py` — and to treat the click
+like merging unreviewed code into a privileged context, because that is what it
+is. Internal-branch PRs run automatically.
+
+This is the security counterpart to enablement: the same openness that lets a
+partner contribute is what makes CI an attack surface, so the trust boundary is
+drawn explicitly at the label rather than left implicit.
+
+### 13.7 Where the model is weakest
+
+Stated plainly, since these are the gaps a new maintainer should know:
+
+- **Live validation is point-in-time.** A clean validator run proves the spec
+  matched reality *that day*. Nothing re-runs it on a schedule, so a source API
+  that changes after merge is not detected until someone runs live mode again.
+  The self-review checks recency (it flags a stale run — e.g. "last record-mode
+  run was 23 days ago"), but recency is not freshness.
+- **The corpus is synthetic.** Field *values* are never compared, only shapes
+  and types, so semantic drift is invisible.
+- **Coverage is spec-relative.** It catches endpoints in the spec that no test
+  hit, but cannot know about a source endpoint the author never declared.
+- **Self-review is self-attested.** It is a skill a contributor runs, and the
+  CI gate checks for the *label*, not for an independently reproduced audit.
+  It raises the floor; it is not an adversarial control.
+- **One reviewer.** All of the above still funnels through a single CODEOWNER
+  (§17.7).
+
+---
+
+## 14. Contributing a new connector (developer deep-dive)
 
 §12 gives the command-level flow; this section is the "what actually lands on
 disk and why" view for someone contributing a connector to the repo.
@@ -793,9 +983,9 @@ connector by hand:
 ### Getting a PR merged
 
 - Run `/self-review-connector for <source>` for a scored audit; it adds the
-  `connector-self-reviewed` label that **CI requires to merge**.
+  `connector-self-reviewed` label that **CI requires to merge** (§13.4).
 - Fork PRs need a maintainer's `safe-to-test` label (re-applied per push) before
-  CI runs — see §12 and `CONTRIBUTING.md`.
+  CI runs — see §13.6 and `CONTRIBUTING.md`.
 - **Write-back tests** (`write-back-testing` skill,
   `lakeflow_connect_test_utils.py`) are recommended: they write to the real
   source and verify the full read/incremental/delete cycle.
@@ -809,7 +999,7 @@ machinery and the generic test harness.
 
 ---
 
-## 14. Customizing as a customer
+## 15. Customizing as a customer
 
 Customers don't have to fork the framework to adapt or extend connectors. There
 are three escalating levels of customization, from config-only to full BYO.
@@ -875,7 +1065,7 @@ reads, and keep the offline test fixtures so the change stays verifiable.
 
 ---
 
-## 15. End-to-end mental model
+## 16. End-to-end mental model
 
 ```
                  Connector author writes ONE class
@@ -905,7 +1095,7 @@ reads, and keep the offline test fixtures so the change stays verifiable.
 
 ---
 
-## 16. Unfinished work and future directions
+## 17. Unfinished work and future directions
 
 Everything above describes the system as it is. This section is the honest
 counterpart: known debt, deliberate hacks, and directions worth taking. It is
@@ -914,7 +1104,7 @@ recorded rather than just the task.
 
 Ordered roughly by a combination of pain and leverage.
 
-### 16.1 Retire the `_generated_*` merged source files (biggest pain point)
+### 17.1 Retire the `_generated_*` merged source files (biggest pain point)
 
 **The hack.** Every connector ships a machine-merged single file —
 `sources/<source>/_generated_<source>_python_source.py` — that inlines the
@@ -950,7 +1140,7 @@ generate a Python data source and run it directly in an SDP pipeline." Worth
 noting that Genie is likely the wrong tool for that job — a specialized coding
 agent is a much better fit for code generation of this shape.
 
-### 16.2 Publish the packages to PyPI
+### 17.2 Publish the packages to PyPI
 
 **Current state.** There is no publish workflow — `.github/workflows/` has no
 PyPI job. Users (and the CLI) build wheels locally and upload them to a UC
@@ -978,7 +1168,7 @@ Together this gives the community connector framework the **fastest dev loop for
 building managed connectors, with full customization** — worth stating plainly
 because it is the strategic case for the whole project.
 
-### 16.3 Let connectors declare their own Spark format name
+### 17.3 Let connectors declare their own Spark format name
 
 **Current state.** Every connector is read via `format("lakeflow_connect")`,
 with the actual source selected by a separate option. The single generic format
@@ -988,7 +1178,7 @@ name was chosen on the belief that unifying would be simpler.
 `format("lakeflow_connect")` on users is confusing and poor public-API design —
 `format("github")` is what anyone would expect, and the generic name leaks an
 internal framework detail into the user-facing surface. It also makes the
-published packages (§16.2) less useful and harder to explain.
+published packages (§17.2) less useful and harder to explain.
 
 **What unblocks it.** [runtime#229659][rt] — "Allow Python data source UC
 connection injection to use the connection `sourceName` as format" — **merged
@@ -1000,7 +1190,7 @@ deprecated alias for back-compat.
 
 [rt]: https://github.com/databricks-eng/runtime/pull/229659
 
-### 16.4 Deprecate the legacy `GENERIC_LAKEFLOW_CONNECT` connection type
+### 17.4 Deprecate the legacy `GENERIC_LAKEFLOW_CONNECT` connection type
 
 The project has moved to the `COMMUNITY` UC connection type; the older
 `GENERIC_LAKEFLOW_CONNECT` type remains only for back-compat.
@@ -1012,7 +1202,7 @@ runtime, `connection.proto` in universe, where both types are still defined; see
 confusion and the bug risk of two parallel connection types that must be kept in
 sync.
 
-### 16.5 Decide the fate of the ingestion-agent interface
+### 17.5 Decide the fate of the ingestion-agent interface
 
 **Current state.** The interface changes needed to support the ingestion-agent
 APIs, including **dynamic tool discovery**, are already implemented:
@@ -1034,7 +1224,7 @@ pass," which is the current reality.
 
 Leaving it in limbo is the one option with no upside.
 
-### 16.6 Add higher-level abstractions for common connector patterns
+### 17.6 Add higher-level abstractions for common connector patterns
 
 Because a connector has the full expressiveness of the Python Data Source API,
 there is room for **specialized abstractions above `LakeflowConnect`** that
@@ -1043,7 +1233,7 @@ clearest example, where much of each implementation is boilerplate. The existing
 mixins (§4) are the precedent; the idea is pattern-specific base classes rather
 than another general-purpose layer.
 
-### 16.7 Add more reviewers
+### 17.7 Add more reviewers
 
 `.github/CODEOWNERS` currently has a **single owner** (`* @yyoli-db`) and
 already carries a TODO to replace it with a team handle once one exists. This is
@@ -1055,7 +1245,7 @@ rotates — is straightforward and overdue.
 
 ---
 
-## 17. File index (jump-off points)
+## 18. File index (jump-off points)
 
 **This repo**
 - Interface: `src/databricks/labs/community_connector/interface/lakeflow_connect.py`
