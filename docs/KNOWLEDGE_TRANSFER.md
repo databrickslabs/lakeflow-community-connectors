@@ -816,7 +816,157 @@ reads, and keep the offline test fixtures so the change stays verifiable.
 
 ---
 
-## 15. File index (jump-off points)
+## 15. Unfinished work and future directions
+
+Everything above describes the system as it is. This section is the honest
+counterpart: known debt, deliberate hacks, and directions worth taking. It is
+written for whoever picks the project up, so the reasoning behind each item is
+recorded rather than just the task.
+
+Ordered roughly by a combination of pain and leverage.
+
+### 15.1 Retire the `_generated_*` merged source files (biggest pain point)
+
+**The hack.** Every connector ships a machine-merged single file —
+`sources/<source>/_generated_<source>_python_source.py` — that inlines the
+connector, the interface, the Spark adapter, and the utils into one module.
+There are currently **29 of them totalling ~84k lines** of duplicated code,
+produced by a **990-line** merge script (`tools/scripts/merge_python_source.py`)
+with its own exclusion config, a dedicated CI workflow
+(`.github/workflows/generate-merged-source-file.yml`), and a
+branch-protection-required status check. `sparkpds/registry.py` knows how to
+import these modules by name.
+
+**Why it exists.** SDP / Python Data Source did not support module imports for
+Python Data Source implementations, so a connector could not be deployed as a
+normal package — everything had to be one file. See
+`#es-1607732-pds-multi-file-import` for the history. This was a platform gap
+that never got fixed on that side.
+
+**Why it should go.** It is the most confusing part of the framework and the
+least defensible. It duplicates every connector's code, guarantees the copy
+will drift from the original, forces contributors through a regeneration step
+they routinely forget (the self-review checklist has a whole item, C6, dedicated
+to catching stale merged files), and inflates diffs on every PR.
+
+**What unblocks it.** The **managed ingestion flow does not need it** — managed
+pipelines install real wheels from a UC Volume via
+`environment.dependencies` (§8, §10). The blocker is purely rollout: managed
+ingestion is the CLI default but is not fully launched yet. Once it is, the
+merge script, the generated files, the CI workflow, the registry's generated-
+module path, and the C6 review item can all be deleted together.
+
+**Secondary consequence.** This hack is also what would block "have an agent
+generate a Python data source and run it directly in an SDP pipeline." Worth
+noting that Genie is likely the wrong tool for that job — a specialized coding
+agent is a much better fit for code generation of this shape.
+
+### 15.2 Publish the packages to PyPI
+
+**Current state.** There is no publish workflow — `.github/workflows/` has no
+PyPI job. Users (and the CLI) build wheels locally and upload them to a UC
+Volume before a managed pipeline can install them.
+
+**Why it isn't done.** In response to supply-chain security issues,
+`databrickslabs` repos now have stricter rules for workflows that publish Python
+packages to PyPI, and the org has not yet set up an approved workflow for this.
+**We could be the first repo to pioneer it** — which means the work is partly
+technical and partly getting org-level sign-off on a trusted-publishing setup.
+
+**Why it is high leverage.** This is arguably the single biggest unlock in the
+list:
+
+- For pre-built connectors, users **skip building and uploading wheels
+  entirely** during setup — the pipeline just installs from PyPI.
+- **Release becomes fully independent of SDP/DBR.** Bug fixes and features ship
+  on their own cadence: turnaround measured in **minutes or hours instead of
+  days**. This is the framework's core advantage over first-party connectors and
+  it is currently unrealized.
+- The packages become directly usable, so a user can consume a connector source
+  from a **workspace Python SDP pipeline** without any of the volume plumbing.
+
+Together this gives the community connector framework the **fastest dev loop for
+building managed connectors, with full customization** — worth stating plainly
+because it is the strategic case for the whole project.
+
+### 15.3 Let connectors declare their own Spark format name
+
+**Current state.** Every connector is read via `format("lakeflow_connect")`,
+with the actual source selected by a separate option. The single generic format
+name was chosen on the belief that unifying would be simpler.
+
+**Why it should change.** In hindsight this was the wrong call. Forcing
+`format("lakeflow_connect")` on users is confusing and poor public-API design —
+`format("github")` is what anyone would expect, and the generic name leaks an
+internal framework detail into the user-facing surface. It also makes the
+published packages (§15.2) less useful and harder to explain.
+
+**What unblocks it.** [runtime#229659][rt] — "Allow Python data source UC
+connection injection to use the connection `sourceName` as format" — **merged
+2026-07-01**. The engine now permits injection when the format matches the
+connection's `sourceName` *or* the literal `lakeflow_connect` (§7), so the
+platform side is done and this is now a **framework-side follow-up**: register
+each source under its own format name and keep `lakeflow_connect` as a
+deprecated alias for back-compat.
+
+[rt]: https://github.com/databricks-eng/runtime/pull/229659
+
+### 15.4 Deprecate the legacy `GENERIC_LAKEFLOW_CONNECT` connection type
+
+The project has moved to the `COMMUNITY` UC connection type; the older
+`GENERIC_LAKEFLOW_CONNECT` type remains only for back-compat.
+
+**Scope.** Encouragingly, **this repo has no remaining references** to the
+legacy type — the cleanup is entirely on the platform side (`models.scala` in
+runtime, `connection.proto` in universe, where both types are still defined; see
+§7 and §8). The work is to deprecate and remove the old path there, to avoid
+confusion and the bug risk of two parallel connection types that must be kept in
+sync.
+
+### 15.5 Decide the fate of the ingestion-agent interface
+
+**Current state.** The interface changes needed to support the ingestion-agent
+APIs, including **dynamic tool discovery**, are already implemented:
+`interface/supports_ingestion_agent.py`, `interface/agent_protocol.py`, and
+`sparkpds/ingestion_agent_datasource.py`. But it is **undocumented and
+unsupported by any skill** — no connector implements the mixin, and nothing in
+`.claude/` or `templates/` mentions it. §3 flags it as "niche; skip on a first
+pass," which is the current reality.
+
+**This is a fork in the road, and it should be resolved deliberately:**
+
+- **Pursue it.** Worth exploring once the ingestion agent itself is ready. The
+  appeal is letting users **build and customize tools quickly** — dynamic tool
+  discovery means a connector can expose source-specific operations to an agent
+  without framework changes.
+- **Or remove it.** If there is no plan to invest, the code should be deleted.
+  Dormant, undocumented interface code pollutes the surrounding modules and
+  actively confuses developers reading the interface for the first time.
+
+Leaving it in limbo is the one option with no upside.
+
+### 15.6 Add higher-level abstractions for common connector patterns
+
+Because a connector has the full expressiveness of the Python Data Source API,
+there is room for **specialized abstractions above `LakeflowConnect`** that
+collapse recurring patterns into far less code — file-based sources are the
+clearest example, where much of each implementation is boilerplate. The existing
+mixins (§3) are the precedent; the idea is pattern-specific base classes rather
+than another general-purpose layer.
+
+### 15.7 Add more reviewers
+
+`.github/CODEOWNERS` currently has a **single owner** (`* @yyoli-db`) and
+already carries a TODO to replace it with a team handle once one exists. This is
+a bus-factor and throughput risk: one person's unavailability blocks every
+merge, since branch protection requires code-owner review. Growing the reviewer
+pool — ideally behind a
+`@databrickslabs/lakeflow-community-connectors-maintainers` team so load
+rotates — is straightforward and overdue.
+
+---
+
+## 16. File index (jump-off points)
 
 **This repo**
 - Interface: `src/databricks/labs/community_connector/interface/lakeflow_connect.py`
