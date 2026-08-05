@@ -1,0 +1,41 @@
+# Klaviyo Community Connector Spec
+# This file defines the specification for the connector including
+# connection parameters and allowlist options.
+
+# ============================================================================
+# Connection Parameters
+# These are provided when creating the Unity Catalog connection.
+# ============================================================================
+display_name: Klaviyo
+connection:
+  parameters:
+    - name: api_key
+      type: string
+      required: true
+      secret: true
+      description: >
+        Klaviyo private API key (prefix "pk_"). Generate from
+        https://www.klaviyo.com/account#api-keys. Required for all requests.
+
+    - name: api_revision
+      type: string
+      required: false
+      description: >
+        Klaviyo API revision sent as the "revision" request header. Controls
+        the shape and behavior of responses. Defaults to "2024-10-15".
+        See https://developers.klaviyo.com/en/docs/api_versioning for revision
+        strategy.
+
+# ============================================================================
+# External Options Allowlist
+# These table-specific options must be included in the externalOptionsAllowList
+# parameter of the UC connection to allow them to be passed through.
+# Use a comma-separated string of option names.
+#
+# CRITICAL: Connection-level fields (api_key, api_revision) must NOT appear
+# in this allowlist. Per Databricks spec, any field in connection.parameters
+# will be rejected at deploy time if it also appears in external_options_allowlist
+# (INVALID_DATASOURCE_OPTION_OVERRIDE_ATTEMPT). This is a safety guard against
+# per-table overrides of connection-level secrets/credentials.
+# ============================================================================
+external_options_allowlist: "max_records_per_batch,lookback_seconds,page_size,window_seconds,start_timestamp"

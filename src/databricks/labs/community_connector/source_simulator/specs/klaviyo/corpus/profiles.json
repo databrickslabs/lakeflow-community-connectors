@@ -1,0 +1,63 @@
+[
+  {
+    "type": "profile",
+    "id": "01KDKF4EWZM5DQRMZB3KEKRKB3",
+    "attributes": {
+      "email": "redacted@example.com",
+      "phone_number": null,
+      "external_id": null,
+      "anonymous_id": null,
+      "first_name": null,
+      "last_name": null,
+      "organization": null,
+      "locale": null,
+      "title": null,
+      "image": null,
+      "created": "2025-12-28T21:51:50+00:00",
+      "updated": "2026-01-17T08:13:29+00:00",
+      "last_event_date": "2026-01-17T07:37:25+00:00",
+      "location": {
+        "address1": null,
+        "address2": null,
+        "city": null,
+        "country": null,
+        "latitude": null,
+        "longitude": null,
+        "region": null,
+        "zip": null,
+        "timezone": null,
+        "ip": null
+      },
+      "properties": {}
+    },
+    "relationships": {
+      "lists": {
+        "links": {
+          "self": "https://a.klaviyo.com/api/profiles/01KDKF4EWZM5DQRMZB3KEKRKB3/relationships/lists/",
+          "related": "https://a.klaviyo.com/api/profiles/01KDKF4EWZM5DQRMZB3KEKRKB3/lists/"
+        }
+      },
+      "segments": {
+        "links": {
+          "self": "https://a.klaviyo.com/api/profiles/01KDKF4EWZM5DQRMZB3KEKRKB3/relationships/segments/",
+          "related": "https://a.klaviyo.com/api/profiles/01KDKF4EWZM5DQRMZB3KEKRKB3/segments/"
+        }
+      },
+      "push-tokens": {
+        "links": {
+          "self": "https://a.klaviyo.com/api/profiles/01KDKF4EWZM5DQRMZB3KEKRKB3/relationships/push-tokens/",
+          "related": "https://a.klaviyo.com/api/profiles/01KDKF4EWZM5DQRMZB3KEKRKB3/push-tokens/"
+        }
+      },
+      "conversation": {
+        "links": {
+          "self": "https://a.klaviyo.com/api/profiles/01KDKF4EWZM5DQRMZB3KEKRKB3/relationships/conversation/",
+          "related": "https://a.klaviyo.com/api/profiles/01KDKF4EWZM5DQRMZB3KEKRKB3/conversation/"
+        }
+      }
+    },
+    "links": {
+      "self": "https://a.klaviyo.com/api/profiles/01KDKF4EWZM5DQRMZB3KEKRKB3/"
+    }
+  }
+]

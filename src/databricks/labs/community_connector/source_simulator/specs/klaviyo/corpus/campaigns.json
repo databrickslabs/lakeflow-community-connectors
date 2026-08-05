@@ -1,0 +1,64 @@
+[
+  {
+    "type": "campaign",
+    "id": "01KEHJR78C97SRDZ65QKW082EH",
+    "attributes": {
+      "name": "Email 1",
+      "status": "Sent",
+      "archived": false,
+      "audiences": {
+        "included": [
+          "Vdhjfg"
+        ],
+        "excluded": []
+      },
+      "send_options": {
+        "use_smart_sending": true,
+        "ignore_unsubscribes": false
+      },
+      "tracking_options": {
+        "add_tracking_params": false,
+        "custom_tracking_params": [],
+        "is_tracking_clicks": true,
+        "is_tracking_opens": true
+      },
+      "send_strategy": {
+        "method": "static",
+        "options_static": {
+          "datetime": "2026-01-10T15:32:00+00:00",
+          "is_local": true,
+          "send_past_recipients_immediately": true
+        },
+        "options_throttled": null,
+        "options_sto": null
+      },
+      "created_at": "2026-01-09T14:32:15.887765+00:00",
+      "scheduled_at": "2026-01-09T14:33:42.857565+00:00",
+      "updated_at": "2026-01-10T15:33:30.871961+00:00",
+      "send_time": "2026-01-10T15:32:00+00:00"
+    },
+    "relationships": {
+      "campaign-messages": {
+        "data": [
+          {
+            "type": "campaign-message",
+            "id": "01KEHJR78V7FZER3YH6S33ZGP0"
+          }
+        ],
+        "links": {
+          "self": "https://a.klaviyo.com/api/campaigns/01KEHJR78C97SRDZ65QKW082EH/relationships/campaign-messages/",
+          "related": "https://a.klaviyo.com/api/campaigns/01KEHJR78C97SRDZ65QKW082EH/campaign-messages/"
+        }
+      },
+      "tags": {
+        "links": {
+          "self": "https://a.klaviyo.com/api/campaigns/01KEHJR78C97SRDZ65QKW082EH/relationships/tags/",
+          "related": "https://a.klaviyo.com/api/campaigns/01KEHJR78C97SRDZ65QKW082EH/tags/"
+        }
+      }
+    },
+    "links": {
+      "self": "https://a.klaviyo.com/api/campaigns/01KEHJR78C97SRDZ65QKW082EH/"
+    }
+  }
+]
