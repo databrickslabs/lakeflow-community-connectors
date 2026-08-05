@@ -1,0 +1,20 @@
+[
+  {
+    "Id": "40",
+    "SyncToken": "5",
+    "MetaData": {
+      "CreateTime": "2025-01-08T08:00:00Z",
+      "LastUpdatedTime": "2026-07-20T16:00:00Z"
+    },
+    "DocNumber": "INV-100",
+    "TxnDate": "2026-07-01",
+    "DueDate": "2026-07-31",
+    "CustomerRef": {"value": "1"},
+    "TotalAmt": 250.75,
+    "Balance": 50.25,
+    "CurrencyRef": {"value": "USD"},
+    "EmailStatus": "EmailSent",
+    "PrintStatus": "NeedToPrint",
+    "Line": [{"Id": "1", "Amount": 250.75, "DetailType": "SalesItemLineDetail"}]
+  }
+]

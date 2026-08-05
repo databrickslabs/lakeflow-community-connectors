@@ -1,0 +1,28 @@
+[
+  {
+    "Id": "20",
+    "SyncToken": "3",
+    "MetaData": {
+      "CreateTime": "2025-01-04T08:00:00Z",
+      "LastUpdatedTime": "2026-07-20T12:00:00Z"
+    },
+    "Name": "Checking",
+    "FullyQualifiedName": "Checking",
+    "AccountType": "Bank",
+    "AccountSubType": "Checking",
+    "Classification": "Asset",
+    "CurrentBalance": 12345.67,
+    "CurrencyRef": {"value": "USD"},
+    "Active": true
+  },
+  {
+    "Id": "21",
+    "SyncToken": "0",
+    "MetaData": {
+      "CreateTime": "2025-01-05T08:00:00Z",
+      "LastUpdatedTime": "2026-07-20T13:00:00Z"
+    },
+    "Name": "Old Account",
+    "Active": false
+  }
+]
