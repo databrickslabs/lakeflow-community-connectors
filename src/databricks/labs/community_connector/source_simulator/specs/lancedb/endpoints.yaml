@@ -1,0 +1,69 @@
+# LanceDB Cloud REST API endpoints exercised by the connector.
+#
+# Auth is an ``x-api-key`` header and is ignored by the simulator.
+#
+# Connector flow:
+# * ``list_tables``      → GET  /v1/table/                       (page_token paginated)
+# * ``get_table_schema`` → POST /v1/table/{table_name}/describe/ (Arrow-derived schema)
+# * ``read_table``       → POST /v1/table/{table_name}/query/    (Apache Arrow IPC)
+#
+# Discovery endpoints return empty/minimal responses so the connector falls
+# back to its built-in example schemas — the same minimal-fallback pattern
+# HubSpot uses:
+# * GET /v1/table/  → {"tables": [], "page_token": null}; the connector then
+#   falls back to its example table list (documents, embeddings).
+# * POST .../describe/ → {} (no fields); the connector falls back to the
+#   example schema in TABLE_SCHEMAS and uses a length-1 dummy scan vector.
+#
+# The query endpoint is vector-first in production and returns Apache Arrow
+# IPC.  It backs all three ingestion modes (``snapshot`` default, ``cdc``,
+# ``append``), selected by the connector via the ``ingestion_type`` table
+# option.  Pagination (offset/k), ``with_row_id``, ordering, and the ``cdc``
+# ``{cursor_field} > {since}`` filter are all sent in the JSON *body*, which the
+# simulator does not interpret — it returns the whole corpus for the table on
+# every call.  Because the simulator ignores the body, it does not synthesize
+# the ``_rowid`` system column that ``with_row_id: true`` would add against the
+# live API, so the corpus rows carry an explicit ``_rowid`` (Long) value.
+# ``_rowid`` is LanceDB's guaranteed-unique row id and is the default merge
+# (primary) key for ``snapshot`` / ``cdc``.  The connector's parser accepts the
+# simulator's plain-JSON array (its Arrow path is only taken against the live
+# API), and termination is driven by the connector:
+# * ``snapshot`` / ``append`` return all rows in one batch with an empty offset,
+#   so the stream stops after one batch.
+# * ``cdc`` tracks the max cursor value and converges once the simulator's
+#   (static) corpus yields nothing newer than the incoming cursor — the
+#   connector returns an empty iterator + unchanged offset.  No init-time cursor
+#   cap is used, so ``synthesize_future_records`` is intentionally NOT set (it
+#   would make the static-corpus cursor advance forever and never converge).
+
+endpoints:
+  # ---- list_tables (discovery; empty → connector fallback) ----
+  - path: /v1/table/
+    method: GET
+    corpus: tables
+    response:
+      single_entity: true
+      pagination_style: none
+    params:
+      limit: {role: ignore}
+      page_token: {role: ignore}
+
+  # ---- get_table_schema + vector-dimension probe (empty → fallback) ----
+  - path: /v1/table/{table_name}/describe/
+    method: POST
+    corpus: describe
+    response:
+      single_entity: true
+      pagination_style: none
+
+  # ---- read_table (query; one endpoint per example table) ----
+  - path: /v1/table/documents/query/
+    method: POST
+    corpus: documents
+    response:
+      pagination_style: none
+  - path: /v1/table/embeddings/query/
+    method: POST
+    corpus: embeddings
+    response:
+      pagination_style: none

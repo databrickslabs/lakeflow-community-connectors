@@ -1,0 +1,6 @@
+{
+  "documents": {
+    "columns": "[\"id\", \"text\", \"category\", \"updated_at\"]",
+    "batch_size": "1000"
+  }
+}
