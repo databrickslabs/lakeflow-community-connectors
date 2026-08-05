@@ -18,8 +18,8 @@ This doc spans three repos:
 > Spark and Databricks but not with this codebase.
 >
 > **Start with §2** for the two user journeys the whole system exists to serve,
-> **§13** for how quality is enforced when contributors are outside the core
-> team, and **§17** for what is still unfinished.
+> **§13–§14** for how quality is enforced and how the AI tooling works, and
+> **§18** for what is still unfinished.
 
 ---
 
@@ -105,7 +105,7 @@ inspect and modify the pipeline logic, and it works today with no dependency on
 managed-ingestion rollout. **The cost:** the user writes and maintains Python,
 gets no browse UI, and this is the path that drags in the `_generated_*` merged
 source files (`register(spark, name)` resolves a merged module and is explicitly
-a legacy shim — see §17.1), because SDP could not import multi-file Python data
+a legacy shim — see §18.1), because SDP could not import multi-file Python data
 sources.
 
 ### CUJ 2 — Import the source Python packages to create a managed ingestion pipeline
@@ -133,7 +133,7 @@ community connector looks and behaves like a managed one, monitoring and all.
 Because the connector is a versioned package rather than source files, it also
 needs no merged-file hack. **The current cost:** the wheels must be built and
 uploaded first; publishing to PyPI would remove that step entirely and is the
-highest-leverage open item (§17.2).
+highest-leverage open item (§18.2).
 
 ---
 
@@ -643,7 +643,7 @@ being **discoverable in the Databricks UI** without any repo wiring:
   spec's `display_name` → the source name.
 
 This is what makes a **customer-authored connector a first-class UI citizen**
-(§15, Level 2) — the user creates a connection and browses source objects from
+(§16, Level 2) — the user creates a connection and browses source objects from
 the tile, never touching the CLI again.
 
 ### Authentication modes
@@ -851,7 +851,7 @@ proxy authenticated by GitHub OIDC:
 | **Pylint** | Lint gate on changed code, mirrored by the A11 self-review check so a contributor sees it before CI does. |
 | **Connector Self-Review** | Detects significant connector-source changes and requires the `connector-self-reviewed` label. **Removed automatically on every new push**, so each revision needs a fresh audit. |
 | **Verify Dependency Locks** | Regenerates locks and fails on drift, so `requirements/` always matches the declared deps. |
-| **Generate Merged Source File** | Keeps the `_generated_*` files in sync (§17.1 — this one exists to be deleted). |
+| **Generate Merged Source File** | Keeps the `_generated_*` files in sync (§18.1 — this one exists to be deleted). |
 
 Two structural choices worth noting:
 
@@ -900,11 +900,153 @@ Stated plainly, since these are the gaps a new maintainer should know:
   CI gate checks for the *label*, not for an independently reproduced audit.
   It raises the floor; it is not an adversarial control.
 - **One reviewer.** All of the above still funnels through a single CODEOWNER
-  (§17.7).
+  (§18.7).
 
 ---
 
-## 14. Contributing a new connector (developer deep-dive)
+## 14. The AI tooling: commands, skills, and agents
+
+§12 and §13 describe *what* the developer flow does. This section describes the
+**machinery under `.claude/`** that does it, because that machinery is a
+deliberate design and a substantial part of the project's value: it is how a
+connector gets built in an afternoon instead of a week, and how the quality bar
+in §13 gets applied consistently regardless of who is driving.
+
+Everything lives in `.claude/` and is auto-discovered by both Claude Code and
+Cursor, so it is not tied to one tool.
+
+### 14.1 Three layers, and why they're separate
+
+| Layer | Count | What it is | Where |
+|-------|-------|------------|-------|
+| **Commands** | 4 | End-to-end orchestrators a human invokes: `/develop-connector`, `/validate-connector`, `/batch-develop-connectors`, `/create-connector` | `.claude/commands/*.md` |
+| **Agents** | 9 | Isolated execution contexts with their own tool allowlist and model | `.claude/agents/*.md` |
+| **Skills** | 16 | The actual domain knowledge — procedures, rules, checklists | `.claude/skills/*/SKILL.md` |
+
+The important relationship is that **skills hold the knowledge and agents
+provide the context to apply it.** Most agents declare a skill in frontmatter
+and are otherwise thin:
+
+```yaml
+# .claude/agents/connector-tester.md
+name: connector-tester
+skills:
+  - test-and-fix-connector
+model: opus
+```
+
+This near-1:1 pairing (`source-api-researcher` ↔ `research-source-api`,
+`connector-doc-writer` ↔ `create-connector-document`, and so on) is what keeps
+the knowledge in **one** place. A lesson learned about connector implementation
+is written into `implement-connector/SKILL.md`, and it then applies whether the
+skill is invoked directly by a developer, or by the `connector-dev` agent inside
+an unattended batch run. There is no second copy to drift.
+
+`connector-dev` is the instructive exception: it loads **two** skills
+(`implement-connector` and `implement-partitioned-connector`) and its own body is
+mostly a **decision procedure** for choosing between them — when a source needs
+a plain `LakeflowConnect` versus `SupportsPartitionedStream`. That is the right
+division of labor: the skills carry the *how*, the agent carries the *which*.
+
+### 14.2 Why agents at all — context isolation
+
+Subagents are not used for parallelism here (the orchestrators run them
+`run_in_background=false`, strictly sequentially). They are used for **context
+isolation**, and the commands say so explicitly: *"Subagents have no prior
+context."*
+
+This is a deliberate constraint with real benefits:
+
+- **The orchestrator's context stays clean.** Researching a sprawling REST API
+  can consume enormous context; that cost is paid inside the researcher agent
+  and only its output file — `<source>_api_doc.md` — crosses back. Building six
+  artifacts in one context would exhaust it.
+- **Handoffs are files, not conversation.** Each step's contract is "produce this
+  path." The orchestrator then **verifies with `Glob` that the file exists** and
+  stops if it doesn't, rather than assuming success or redoing the work itself.
+  That makes failures loud and localized.
+- **Every prompt must be self-contained** — source name, all relevant paths,
+  table scope. Awkward to write, but it means a step can be re-run in isolation.
+
+### 14.3 Model tiering
+
+Agents pin a model to the difficulty of their job, which matters when a batch
+run may invoke dozens of them:
+
+| Model | Agents | Why |
+|-------|--------|-----|
+| **opus** | `connector-dev`, `connector-tester`, `connector-doc-writer`, `connector-write-back-tester` | Open-ended reasoning: writing a connector, diagnosing test failures, judging what an end user needs to know |
+| **sonnet** | `source-api-researcher`, `source-write-api-researcher`, `connector-auth-validator`, `connector-package-builder` | Bounded, mechanical-ish work: read docs and summarize, build a wheel, verify creds |
+| **haiku** | `connector-spec-generator` | Nearly deterministic: translate a finished connector into a YAML spec |
+
+Worth preserving as a principle when adding agents — cost and latency scale with
+the number of connectors, and most steps genuinely don't need the strongest
+model.
+
+### 14.4 Skills as executable institutional memory
+
+The skills are where the project's hard-won knowledge actually lives, and they
+are written to be *executed*, not read. `self-review-connector/SKILL.md` is the
+clearest case: 54 checks (§13.4), each with the exact `grep` or command to run,
+a severity, and remediation text.
+
+Two conventions worth knowing:
+
+- **Single-step guards.** Most skills open with *"Single step only: … Do NOT use
+  for full connector creation."* This stops a skill invoked mid-flow from
+  running away with the whole pipeline.
+- **`disable-model-invocation: true`** on **12 of the 16** skills — they run only
+  when explicitly invoked, never auto-selected. For a repo where an
+  auto-triggered skill could rewrite a connector, that default is correct.
+
+This is the mechanism by which §13's quality bar is actually enforceable: rules
+like "cap the cursor at `_init_time`," "always pass `timeout=`," and "never
+declare `pyspark` as a runtime dependency" exist as skill text and checklist
+items rather than as tribal knowledge, so they survive people leaving.
+
+### 14.5 The command layer
+
+The four commands differ mainly in **where they sit relative to the credential
+boundary** (§12):
+
+- **`/develop-connector`** — Phase 1. Chains `source-api-researcher` →
+  `connector-dev` → `connector-spec-generator` → `connector-doc-writer` →
+  `connector-tester`, verifying each output, then opens a PR labeled
+  `needs-live-testing`. No credentials, so it needs no human present.
+- **`/validate-connector`** — Phase 2. Credentials, live tests, optional deploy.
+- **`/batch-develop-connectors`** — the same per-connector pipeline embedded
+  inline so it can track state across sources. Two rules make unattended runs
+  work: **no `AskUserQuestion` gates**, and **fail-forward** — a failing source
+  is recorded and the batch continues. It is sequential, one connector fully
+  finishing before the next.
+- **`/create-connector`** — the legacy one-shot flow, kept for end users;
+  discouraged for developers precisely because it blocks on credentials in the
+  middle (§12).
+
+Note the layering: `/batch-develop-connectors` duplicates `/develop-connector`'s
+pipeline inline rather than calling it. That is a real (if small) piece of
+duplication — a change to the Phase 1 flow must be made in both files.
+
+### 14.6 Honest limitations
+
+- **The AI tooling only targets the `LakeflowConnect` path.** A connector
+  written directly against the Python Data Source API (approach #2, §1) gets
+  none of this.
+- **Skills can drift from the repo.** They are prose referencing real paths and
+  commands, and nothing type-checks them. A concrete instance found while
+  writing this doc: `self-review-connector/SKILL.md` cites
+  `tools/scripts/precommit_pylint.sh`, which **does not exist**.
+- **`migrate-legacy-implementation` is narrower than its name suggests** — it
+  moves a connector from the old top-level `sources/` directory into the
+  packaged layout under `src/databricks/labs/community_connector/sources/`. It is
+  not a tool for refactoring an approach-#2 implementation onto
+  `LakeflowConnect`.
+- **The one-agent-per-skill pairing adds a file to keep in sync.** Cheap, but
+  adding a capability usually means editing two files, not one.
+
+---
+
+## 15. Contributing a new connector (developer deep-dive)
 
 §12 gives the command-level flow; this section is the "what actually lands on
 disk and why" view for someone contributing a connector to the repo.
@@ -992,14 +1134,19 @@ connector by hand:
 
 ### Migrating an existing implementation
 
-If a source was written against the raw Python Data Source API (approach #2),
-the `migrate-legacy-implementation` skill helps refactor it onto
-`LakeflowConnect` so it benefits from the shared streaming/offset/partition
-machinery and the generic test harness.
+The `migrate-legacy-implementation` skill moves a connector from the old
+top-level `sources/` directory into the packaged layout under
+`src/databricks/labs/community_connector/sources/`, updating imports, conforming
+to the `LakeflowConnect` interface, and regenerating specs and build files. It
+handles one source at a time.
+
+Note that this is a **layout** migration, not a tool for refactoring an
+approach-#2 (raw Python Data Source API) implementation onto `LakeflowConnect` —
+that remains a manual job.
 
 ---
 
-## 15. Customizing as a customer
+## 16. Customizing as a customer
 
 Customers don't have to fork the framework to adapt or extend connectors. There
 are three escalating levels of customization, from config-only to full BYO.
@@ -1065,7 +1212,7 @@ reads, and keep the offline test fixtures so the change stays verifiable.
 
 ---
 
-## 16. End-to-end mental model
+## 17. End-to-end mental model
 
 ```
                  Connector author writes ONE class
@@ -1095,7 +1242,7 @@ reads, and keep the offline test fixtures so the change stays verifiable.
 
 ---
 
-## 17. Unfinished work and future directions
+## 18. Unfinished work and future directions
 
 Everything above describes the system as it is. This section is the honest
 counterpart: known debt, deliberate hacks, and directions worth taking. It is
@@ -1104,7 +1251,7 @@ recorded rather than just the task.
 
 Ordered roughly by a combination of pain and leverage.
 
-### 17.1 Retire the `_generated_*` merged source files (biggest pain point)
+### 18.1 Retire the `_generated_*` merged source files (biggest pain point)
 
 **The hack.** Every connector ships a machine-merged single file —
 `sources/<source>/_generated_<source>_python_source.py` — that inlines the
@@ -1140,7 +1287,7 @@ generate a Python data source and run it directly in an SDP pipeline." Worth
 noting that Genie is likely the wrong tool for that job — a specialized coding
 agent is a much better fit for code generation of this shape.
 
-### 17.2 Publish the packages to PyPI
+### 18.2 Publish the packages to PyPI
 
 **Current state.** There is no publish workflow — `.github/workflows/` has no
 PyPI job. Users (and the CLI) build wheels locally and upload them to a UC
@@ -1168,7 +1315,7 @@ Together this gives the community connector framework the **fastest dev loop for
 building managed connectors, with full customization** — worth stating plainly
 because it is the strategic case for the whole project.
 
-### 17.3 Let connectors declare their own Spark format name
+### 18.3 Let connectors declare their own Spark format name
 
 **Current state.** Every connector is read via `format("lakeflow_connect")`,
 with the actual source selected by a separate option. The single generic format
@@ -1178,7 +1325,7 @@ name was chosen on the belief that unifying would be simpler.
 `format("lakeflow_connect")` on users is confusing and poor public-API design —
 `format("github")` is what anyone would expect, and the generic name leaks an
 internal framework detail into the user-facing surface. It also makes the
-published packages (§17.2) less useful and harder to explain.
+published packages (§18.2) less useful and harder to explain.
 
 **What unblocks it.** [runtime#229659][rt] — "Allow Python data source UC
 connection injection to use the connection `sourceName` as format" — **merged
@@ -1190,7 +1337,7 @@ deprecated alias for back-compat.
 
 [rt]: https://github.com/databricks-eng/runtime/pull/229659
 
-### 17.4 Deprecate the legacy `GENERIC_LAKEFLOW_CONNECT` connection type
+### 18.4 Deprecate the legacy `GENERIC_LAKEFLOW_CONNECT` connection type
 
 The project has moved to the `COMMUNITY` UC connection type; the older
 `GENERIC_LAKEFLOW_CONNECT` type remains only for back-compat.
@@ -1202,7 +1349,7 @@ runtime, `connection.proto` in universe, where both types are still defined; see
 confusion and the bug risk of two parallel connection types that must be kept in
 sync.
 
-### 17.5 Decide the fate of the ingestion-agent interface
+### 18.5 Decide the fate of the ingestion-agent interface
 
 **Current state.** The interface changes needed to support the ingestion-agent
 APIs, including **dynamic tool discovery**, are already implemented:
@@ -1224,7 +1371,7 @@ pass," which is the current reality.
 
 Leaving it in limbo is the one option with no upside.
 
-### 17.6 Add higher-level abstractions for common connector patterns
+### 18.6 Add higher-level abstractions for common connector patterns
 
 Because a connector has the full expressiveness of the Python Data Source API,
 there is room for **specialized abstractions above `LakeflowConnect`** that
@@ -1233,7 +1380,7 @@ clearest example, where much of each implementation is boilerplate. The existing
 mixins (§4) are the precedent; the idea is pattern-specific base classes rather
 than another general-purpose layer.
 
-### 17.7 Add more reviewers
+### 18.7 Add more reviewers
 
 `.github/CODEOWNERS` currently has a **single owner** (`* @yyoli-db`) and
 already carries a TODO to replace it with a team handle once one exists. This is
@@ -1245,7 +1392,7 @@ rotates — is straightforward and overdue.
 
 ---
 
-## 18. File index (jump-off points)
+## 19. File index (jump-off points)
 
 **This repo**
 - Interface: `src/databricks/labs/community_connector/interface/lakeflow_connect.py`
@@ -1258,6 +1405,8 @@ rotates — is straightforward and overdue.
 - Test harness: `tests/unit/sources/test_suite.py`
 - CLI: `tools/community_connector/src/databricks/labs/community_connector_cli/{cli,managed_pipeline,connector_spec,oauth_flow,pipeline_spec_validator}.py`
 - Interface contract doc: `src/databricks/labs/community_connector/interface/README.md`
+- AI tooling: `.claude/{commands,agents,skills}/` — orchestrators, execution contexts, and the domain knowledge (§14)
+- CI gates: `.github/workflows/{tests,pylint,connector-self-review,verify-locks}.yml`; `CONTRIBUTING.md` for the fork-PR gate (§13)
 
 **universe (managed ingestion)**
 - `spark/pipelines/api/protos/extensions/ingestion.proto` — `IngestionPipelineDefinition`, `CommunityConnectorOptions`
