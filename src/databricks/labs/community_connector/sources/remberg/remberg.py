@@ -2,11 +2,28 @@
 
 Implements the :class:`LakeflowConnect` interface against the remberg public
 REST API (https://developers.remberg.de). remberg is an asset-centric
-maintenance / field-service platform; nine tables are exposed:
+maintenance / field-service platform; fifteen tables are exposed:
 
     CDC (incremental): assets, work_orders, tickets, work_requests,
-                       organizations, parts
+                       organizations, parts, asset_status_signals
     Snapshot:          contacts, users, forms
+    CDC via fan-out:   work_order_times, work_order_stock_changes,
+                       part_inventories, part_stock_changes,
+                       ticket_conversations
+
+The last group are per-parent sub-resources: remberg serves them only under
+a parent record's id (``/v2/work-orders/{id}/times``) with no list-all
+variant, so the connector lists the parent over a bounded ``updatedAt``
+range and issues one request per parent in that range. See
+``ChildEndpoint`` and ``_read_child``. Their cost tracks parent churn
+rather than table size, which is what keeps them affordable under the rate
+limits described below; ``full_parent_scan`` trades that back for
+completeness when needed.
+
+``asset_status_signals`` is NOT a fan-out table: ``/v2/assets/status-signals``
+lists every signal across assets with embedded asset info. It is a plain CDC
+read, but keyed on ``createdAt`` because that endpoint offers no
+``updatedAt`` bound — see the caveat in ``remberg_api_doc.md``.
 
 Authentication is a static API key sent in an HTTP header literally named
 ``authorization`` (no ``Bearer`` prefix — this is what the official OpenAPI
@@ -14,9 +31,11 @@ security scheme declares: ``type: apiKey, in: header, name: authorization``).
 Keys are created under Settings > Data > API in the remberg web app and
 expire after one year.
 
-Every list endpoint paginates with 1-indexed ``page`` + ``limit`` (default
-20, max 1000) query parameters; the last page is detected by receiving fewer
-than ``limit`` records. The response envelope key varies per resource
+Every list endpoint paginates with **0-indexed** ``page`` + ``limit``
+(default 20, max 1000) query parameters; the last page is detected by
+receiving fewer than ``limit`` records. remberg's prose docs claim ``page``
+is 1-indexed — it is not; see ``PAGE_BASE``. The response envelope key
+varies per resource
 (``data`` for most, ``tickets``/``organizations``/``contacts`` for those
 resources) — see ``TABLE_ENDPOINTS``.
 
@@ -63,9 +82,10 @@ import json
 import logging
 import sys
 import time
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any, Iterator
-from urllib.parse import urljoin
+from urllib.parse import quote, urljoin
 
 import requests
 from pyspark.sql.types import (
@@ -101,6 +121,14 @@ MIN_REQUEST_INTERVAL = 0.25
 DEFAULT_PAGE_SIZE = 1000
 MAX_PAGE_SIZE = 1000
 
+# First page number. remberg's ``page`` parameter is **0-indexed** — the
+# prose docs claim "1-indexed page number", but the OpenAPI parameter
+# description says "defaults to 0" and live counts confirm it: reading a
+# tenant with 80 work orders returned 60 records at ``limit=20`` and 75 at
+# ``limit=5``, i.e. exactly ``limit`` records missing in each case. Starting
+# at page 1 silently drops the first page of every list endpoint.
+PAGE_BASE = 0
+
 # Read-time lookback for CDC ranges. Records updated while a bounded range
 # is being paginated fall out of the range's filter (their new ``updatedAt``
 # exceeds the pinned upper bound) and can shift pagination; re-reading a
@@ -122,6 +150,92 @@ TABLE_ENDPOINTS: dict[str, tuple[str, str]] = {
     "contacts": ("v1/contacts", "contacts"),
     "users": ("v1/users", "data"),
     "forms": ("v1/forms", "data"),
+    "asset_status_signals": ("v2/assets/status-signals", "data"),
+}
+
+
+# CDC range-filter query-param names per table. Almost every remberg list
+# endpoint filters on ``updatedAt`` via ``updatedAtFrom`` / ``updatedAtUntil``;
+# ``/v2/assets/status-signals`` only offers ``createdAt`` bounds (plus
+# ``resolvedAt`` bounds, which are not a change cursor).
+DEFAULT_RANGE_PARAMS = ("updatedAtFrom", "updatedAtUntil")
+RANGE_PARAMS: dict[str, tuple[str, str]] = {
+    "asset_status_signals": ("createdAtFrom", "createdAtUntil"),
+}
+
+
+@dataclass(frozen=True)
+class ChildEndpoint:
+    """A per-parent sub-resource served only under a parent record's ID.
+
+    remberg exposes these as ``/<parent>/{id}/<sub-resource>`` with no
+    list-all variant, so the connector lists the parent table over a bounded
+    ``updatedAt`` range and issues one request per parent in that range.
+
+    ``route`` is the path *template*: it doubles as the client-side throttle
+    key, because remberg rate-limits per endpoint route rather than per
+    concrete URL (see ``_throttle``).
+
+    Child records carry no independent change cursor — several have no ``id``
+    at all — so the parent's ``updatedAt`` is injected onto every row as
+    ``parent_cursor_field`` and used as the table's ``cursor_field``. That is
+    the value the connector actually advances on, which keeps the CDC
+    contract honest.
+    """
+
+    parent: str  # parent table name in TABLE_ENDPOINTS
+    route: str  # path template, ``{id}`` substituted per parent
+    records_key: str  # envelope key holding the child array
+    parent_id_field: str  # column the parent's id is injected into
+    parent_cursor_field: str  # column the parent's updatedAt is injected into
+    paginated: bool  # child endpoint accepts page/limit
+
+
+# Child (fan-out) tables. Note ``/v2/work-orders/{id}/checklist`` is POST-only
+# in the remberg API — there is no GET, so work-order checklists cannot be
+# ingested. Asset status signals are NOT here: ``/v2/assets/status-signals``
+# lists them all with embedded asset info, so that table is a plain CDC read.
+CHILD_ENDPOINTS: dict[str, ChildEndpoint] = {
+    "work_order_times": ChildEndpoint(
+        parent="work_orders",
+        route="v2/work-orders/{id}/times",
+        records_key="timeEntries",
+        parent_id_field="workOrderId",
+        parent_cursor_field="workOrderUpdatedAt",
+        paginated=False,
+    ),
+    "work_order_stock_changes": ChildEndpoint(
+        parent="work_orders",
+        route="v2/work-orders/{id}/stock-changes",
+        records_key="data",
+        parent_id_field="workOrderId",
+        parent_cursor_field="workOrderUpdatedAt",
+        paginated=True,
+    ),
+    "part_inventories": ChildEndpoint(
+        parent="parts",
+        route="v2/parts/{id}/inventories",
+        records_key="data",
+        parent_id_field="partTypeId",
+        parent_cursor_field="partUpdatedAt",
+        paginated=True,
+    ),
+    "part_stock_changes": ChildEndpoint(
+        parent="parts",
+        route="v2/parts/{id}/stock-changes",
+        records_key="data",
+        parent_id_field="partTypeId",
+        parent_cursor_field="partUpdatedAt",
+        paginated=True,
+    ),
+    "ticket_conversations": ChildEndpoint(
+        parent="tickets",
+        route="v2/tickets/{id}/conversations",
+        records_key="activities",
+        parent_id_field="ticketId",
+        parent_cursor_field="ticketUpdatedAt",
+        paginated=False,
+    ),
 }
 
 
@@ -151,6 +265,45 @@ TABLE_METADATA: dict[str, dict] = {
     "contacts": {"primary_keys": ["id"], "ingestion_type": "snapshot"},
     "users": {"primary_keys": ["id"], "ingestion_type": "snapshot"},
     "forms": {"primary_keys": ["id"], "ingestion_type": "snapshot"},
+    # Flat CDC read over /v2/assets/status-signals — cursor is ``createdAt``
+    # because the endpoint offers no ``updatedAt`` bound.
+    "asset_status_signals": {
+        "primary_keys": ["id"],
+        "cursor_field": "createdAt",
+        "ingestion_type": "cdc",
+    },
+    # Child (fan-out) tables. The cursor is always the injected parent
+    # ``updatedAt`` — see ``ChildEndpoint``. Primary keys are composite
+    # because remberg gives several of these sub-resources no ``id``.
+    "work_order_times": {
+        # No ``id`` on a time entry; a work order cannot hold two entries for
+        # the same person starting at the same instant.
+        "primary_keys": ["workOrderId", "performingPersonId", "startTime"],
+        "cursor_field": "workOrderUpdatedAt",
+        "ingestion_type": "cdc",
+    },
+    "work_order_stock_changes": {
+        "primary_keys": ["id"],
+        "cursor_field": "workOrderUpdatedAt",
+        "ingestion_type": "cdc",
+    },
+    "part_inventories": {
+        "primary_keys": ["id"],
+        "cursor_field": "partUpdatedAt",
+        "ingestion_type": "cdc",
+    },
+    "part_stock_changes": {
+        "primary_keys": ["id"],
+        "cursor_field": "partUpdatedAt",
+        "ingestion_type": "cdc",
+    },
+    "ticket_conversations": {
+        # No ``id`` on a conversation activity; ``createdAt`` + ``kind``
+        # disambiguates the (rare) same-instant note and email.
+        "primary_keys": ["ticketId", "createdAt", "kind"],
+        "cursor_field": "ticketUpdatedAt",
+        "ingestion_type": "cdc",
+    },
 }
 
 
@@ -187,6 +340,23 @@ def _build_schemas() -> dict[str, StructType]:
             StructField("firstName", StringType()),
             StructField("lastName", StringType()),
             StructField("email", StringType()),
+        ]
+    )
+    # AssetInfoCfaResponseDto / PartTypeInfoCfaResponseDto — the embedded
+    # reference objects the sub-resource DTOs share.
+    asset_info = StructType(
+        [
+            StructField("id", StringType()),
+            StructField("assetNumber", StringType()),
+            StructField("assetType", StringType()),
+        ]
+    )
+    part_type_info = StructType(
+        [
+            StructField("id", StringType()),
+            StructField("partNumber", StringType()),
+            StructField("externalReference", StringType()),
+            StructField("name", StringType()),
         ]
     )
 
@@ -406,6 +576,105 @@ def _build_schemas() -> dict[str, StructType]:
                 StructField("finalizedAt", TimestampType()),
             ]
         ),
+        # ---- flat sub-resource table ----
+        # AssetStatusSignalWithAssetInfoCfaResponseDto
+        "asset_status_signals": StructType(
+            [
+                StructField("id", StringType()),
+                StructField("createdAt", TimestampType()),
+                StructField("reportedAt", TimestampType()),
+                StructField("resolvedAt", TimestampType()),
+                StructField("status", StringType()),
+                StructField("asset", asset_info),
+            ]
+        ),
+        # ---- child (fan-out) tables ----
+        # The first two columns of each are injected by ``_map_child``: the
+        # parent's id and the parent's ``updatedAt`` (the CDC cursor).
+        # WorkOrderTimeEntryCfaResponseDto. The response's root-level
+        # ``totalDurationInSeconds`` is deliberately dropped — it is exactly
+        # SUM(durationInSeconds) per work order, so carrying it on every row
+        # would denormalize an aggregate that SQL derives trivially.
+        "work_order_times": StructType(
+            [
+                StructField("workOrderId", StringType()),
+                StructField("workOrderUpdatedAt", TimestampType()),
+                StructField("performingPersonId", StringType()),
+                StructField("startTime", TimestampType()),
+                StructField("endTime", TimestampType()),
+                StructField("durationInSeconds", DoubleType()),
+            ]
+        ),
+        # WorkOrderCfaPartStockChangeResponseDto
+        "work_order_stock_changes": StructType(
+            [
+                StructField("workOrderId", StringType()),
+                StructField("workOrderUpdatedAt", TimestampType()),
+                StructField("id", StringType()),
+                StructField("createdAt", TimestampType()),
+                StructField("updatedAt", TimestampType()),
+                StructField("change", DoubleType()),
+                StructField("action", StringType()),
+                StructField("partType", part_type_info),
+                StructField("storageAsset", asset_info),
+            ]
+        ),
+        # PartInventoryWithStorageCfaResponseDto. ``partTypeId`` is already on
+        # the wire record; the injection just guarantees it is populated.
+        "part_inventories": StructType(
+            [
+                StructField("partTypeId", StringType()),
+                StructField("partUpdatedAt", TimestampType()),
+                StructField("id", StringType()),
+                StructField("storageAsset", asset_info),
+                StructField("availableStock", DoubleType()),
+                StructField("totalStock", DoubleType()),
+                StructField("createdAt", TimestampType()),
+            ]
+        ),
+        # PartStockChangeCfaResponseDto. ``createdAt`` / ``updatedAt`` are
+        # declared as free-form objects in the OpenAPI spec (the same doc bug
+        # as tickets/assets/work_orders) but are ISO date-time strings on the
+        # wire.
+        "part_stock_changes": StructType(
+            [
+                StructField("partTypeId", StringType()),
+                StructField("partUpdatedAt", TimestampType()),
+                StructField("id", StringType()),
+                StructField("createdAt", TimestampType()),
+                StructField("updatedAt", TimestampType()),
+                StructField("change", DoubleType()),
+                StructField("comment", StringType()),
+                StructField("action", StringType()),
+                StructField("storageAsset", asset_info),
+            ]
+        ),
+        # TicketCfaConversationActivityResponseDto. ``creator`` is an untyped
+        # object in the OpenAPI spec (no declared properties), so it is
+        # JSON-serialized to a string in ``_map_record`` rather than guessed
+        # at as a struct.
+        "ticket_conversations": StructType(
+            [
+                StructField("ticketId", StringType()),
+                StructField("ticketUpdatedAt", TimestampType()),
+                StructField("createdAt", TimestampType()),
+                StructField("kind", StringType()),
+                StructField("creator", StringType()),
+                StructField("subject", StringType()),
+                StructField("plainText", StringType()),
+                StructField(
+                    "header",
+                    StructType(
+                        [
+                            StructField("from", StringType()),
+                            StructField("to", ArrayType(StringType())),
+                            StructField("cc", ArrayType(StringType())),
+                            StructField("bcc", ArrayType(StringType())),
+                        ]
+                    ),
+                ),
+            ]
+        ),
     }
 
 
@@ -455,17 +724,30 @@ class RembergLakeflowConnect(LakeflowConnect):
         """Join *path* (no leading slash) onto the API root."""
         return urljoin(self._root, path.lstrip("/"))
 
-    def _throttle(self, path: str) -> None:
-        """Space requests to the same endpoint ≥ MIN_REQUEST_INTERVAL apart."""
-        last = self._last_request_at.get(path)
+    def _throttle(self, route: str) -> None:
+        """Space requests to the same endpoint ≥ MIN_REQUEST_INTERVAL apart.
+
+        *route* must be the endpoint **template**, not the concrete path.
+        remberg throttles per endpoint route, so the fan-out reads — which hit
+        ``v2/work-orders/{id}/times`` once per work order — have to share a
+        single bucket. Keying on the concrete path would give every parent id
+        its own bucket, space nothing, and 429-storm on the first fan-out.
+        """
+        last = self._last_request_at.get(route)
         if last is not None:
             elapsed = time.monotonic() - last
             if elapsed < MIN_REQUEST_INTERVAL:
                 time.sleep(MIN_REQUEST_INTERVAL - elapsed)
-        self._last_request_at[path] = time.monotonic()
+        self._last_request_at[route] = time.monotonic()
 
-    def _request(self, path: str, params: dict | None = None) -> requests.Response:
+    def _request(
+        self, path: str, params: dict | None = None, route: str | None = None
+    ) -> requests.Response:
         """GET *path* with retry on 429/5xx; honour ``Retry-After-*``.
+
+        *route* is the throttle key — pass the endpoint template when *path*
+        embeds a record id. Defaults to *path* for the flat list endpoints,
+        where the two are the same string.
 
         remberg 429s carry ``Retry-After-Burst`` or ``Retry-After-Base``
         (seconds) depending on which throttler tripped — and the 429 itself
@@ -475,10 +757,11 @@ class RembergLakeflowConnect(LakeflowConnect):
         ``RequestException`` errors propagate so the framework retries the
         microbatch.
         """
+        throttle_key = route or path
         backoff = INITIAL_BACKOFF
         resp: requests.Response | None = None
         for attempt in range(MAX_RETRIES):
-            self._throttle(path)
+            self._throttle(throttle_key)
             resp = requests.get(
                 self._url(path),
                 headers=self._headers,
@@ -494,7 +777,7 @@ class RembergLakeflowConnect(LakeflowConnect):
                 sleep_s = max(sleep_s, retry_after)
             logger.warning(
                 "remberg %s returned %s; retrying in %.1fs (attempt %d/%d)",
-                path,
+                throttle_key,
                 resp.status_code,
                 sleep_s,
                 attempt + 1,
@@ -507,9 +790,24 @@ class RembergLakeflowConnect(LakeflowConnect):
         assert resp is not None  # for type-checkers; always set inside the loop
         return resp
 
-    def _get_json(self, path: str, params: dict | None = None):
-        """Issue a GET, raise on non-2xx, return the decoded JSON body."""
-        resp = self._request(path, params=params)
+    def _get_json(
+        self,
+        path: str,
+        params: dict | None = None,
+        route: str | None = None,
+        missing_ok: bool = False,
+    ):
+        """Issue a GET, raise on non-2xx, return the decoded JSON body.
+
+        ``missing_ok`` returns ``None`` on 404 instead of raising — used by
+        the fan-out reads, where a parent listed at the start of a range can
+        be deleted before its sub-resource is fetched. Failing the whole
+        microbatch over one vanished parent would stall the table.
+        """
+        resp = self._request(path, params=params, route=route)
+        if missing_ok and resp.status_code == 404:
+            logger.debug("remberg GET %s returned 404; treating as empty", path)
+            return None
         if resp.status_code // 100 != 2:
             raise RuntimeError(
                 f"remberg API GET {path} failed with HTTP {resp.status_code}: {resp.text[:500]}"
@@ -561,6 +859,8 @@ class RembergLakeflowConnect(LakeflowConnect):
         self._validate_table(table_name)
         if TABLE_METADATA[table_name]["ingestion_type"] == "snapshot":
             return self._read_snapshot(table_name, start_offset, table_options)
+        if table_name in CHILD_ENDPOINTS:
+            return self._read_child(table_name, start_offset, table_options)
         return self._read_incremental(table_name, start_offset, table_options)
 
     # ------------------------------------------------------------------
@@ -586,7 +886,7 @@ class RembergLakeflowConnect(LakeflowConnect):
         limit = _page_size(table_options)
 
         def generate() -> Iterator[dict]:
-            page = 1
+            page = PAGE_BASE
             while True:
                 body = self._get_json(path, params={"page": str(page), "limit": str(limit)})
                 records = self._unwrap_records(body, records_key)
@@ -627,32 +927,15 @@ class RembergLakeflowConnect(LakeflowConnect):
         limit = _page_size(table_options)
         max_records = int(table_options.get("max_records_per_batch", str(sys.maxsize)))
 
-        if offset.get("until"):
-            # Resume a partially-drained range with its bounds pinned.
-            since = offset.get("since")
-            until = offset["until"]
-            page = int(offset.get("page", 1))
-        else:
-            cursor = offset.get("cursor")
-            if cursor and _parse_ts(cursor) >= self._init_dt:
-                # Caught up to init time — short-circuit so the trigger
-                # terminates (end_offset == start_offset contract).
-                return iter([]), start_offset
-            until = self._init_ts_iso
-            page = 1
-            if cursor:
-                lookback = max(
-                    0,
-                    int(table_options.get("lookback_seconds", str(DEFAULT_LOOKBACK_SECONDS))),
-                )
-                since = _format_ts(_parse_ts(cursor) - timedelta(seconds=lookback))
-            else:
-                since = table_options.get("start_timestamp")
+        resolved = self._resolve_range(offset, table_options)
+        if resolved is None:
+            # Caught up to init time — short-circuit so the trigger
+            # terminates (end_offset == start_offset contract).
+            return iter([]), start_offset
+        since, until, page, _ = resolved
 
         path, records_key = TABLE_ENDPOINTS[table_name]
-        params: dict[str, str] = {"updatedAtUntil": until, "limit": str(limit)}
-        if since:
-            params["updatedAtFrom"] = since
+        params = self._range_params(table_name, since, until, limit)
 
         if max_records >= sys.maxsize:
             # Unbounded (the default): stream pages lazily so driver memory
@@ -699,6 +982,212 @@ class RembergLakeflowConnect(LakeflowConnect):
                 return iter(records), next_offset
 
     # ------------------------------------------------------------------
+    # Bounded-range plumbing (shared by flat and fan-out incremental reads)
+    # ------------------------------------------------------------------
+
+    def _resolve_range(
+        self, offset: dict, table_options: dict[str, str]
+    ) -> tuple[str | None, str, int, int] | None:
+        """Resolve the bounded range to read, or ``None`` when caught up.
+
+        Returns ``(since, until, page, parent_index)``. ``parent_index`` is
+        only meaningful for fan-out reads; flat reads ignore it.
+
+        ``full_parent_scan`` widens a fan-out read to every parent regardless
+        of the stored cursor — for backfills, or if a source's child edits
+        turn out not to bump the parent's ``updatedAt``. It deliberately does
+        NOT bypass the caught-up check: without that the trigger could never
+        satisfy the ``end_offset == start_offset`` termination contract.
+        """
+        if offset.get("until"):
+            # Resume a partially-drained range with its bounds pinned.
+            return (
+                offset.get("since"),
+                offset["until"],
+                int(offset.get("page", PAGE_BASE)),
+                int(offset.get("parent_index", 0)),
+            )
+
+        cursor = offset.get("cursor")
+        if cursor and _parse_ts(cursor) >= self._init_dt:
+            return None
+
+        if _is_true(table_options.get("full_parent_scan")):
+            since = None
+        elif cursor:
+            lookback = max(
+                0,
+                int(table_options.get("lookback_seconds", str(DEFAULT_LOOKBACK_SECONDS))),
+            )
+            since = _format_ts(_parse_ts(cursor) - timedelta(seconds=lookback))
+        else:
+            since = table_options.get("start_timestamp")
+        return since, self._init_ts_iso, PAGE_BASE, 0
+
+    @staticmethod
+    def _range_params(
+        table_name: str, since: str | None, until: str, limit: int
+    ) -> dict[str, str]:
+        """Build the list-endpoint query params for a bounded range."""
+        from_param, until_param = RANGE_PARAMS.get(table_name, DEFAULT_RANGE_PARAMS)
+        params = {until_param: until, "limit": str(limit)}
+        if since:
+            params[from_param] = since
+        return params
+
+    # ------------------------------------------------------------------
+    # Fan-out reads (per-parent sub-resources)
+    # ------------------------------------------------------------------
+
+    def _read_child(
+        self,
+        table_name: str,
+        start_offset: dict,
+        table_options: dict[str, str],
+    ) -> tuple[Iterator[dict], dict]:
+        """Read a per-parent sub-resource by fanning out over its parent.
+
+        The parent table is listed over the same bounded ``updatedAt`` range
+        the flat CDC reads use, and each parent in that range costs one
+        request (or one page-loop) against the child endpoint. Steady-state
+        cost is therefore proportional to parent churn, not to table size —
+        which is what makes these endpoints affordable under remberg's
+        10 req/s ceiling.
+
+        Offset shapes mirror ``_read_incremental``, with one addition:
+          ``{"cursor": <iso>}``  — caught-up steady state.
+          ``{"since", "until", "page", "parent_index"}`` — mid-range, emitted
+              only when ``max_records_per_batch`` split the range.
+              ``parent_index`` is the offset *within* the pinned parent page,
+              so a split never re-reads or skips a parent's children.
+        """
+        spec = CHILD_ENDPOINTS[table_name]
+        offset = dict(start_offset or {})
+        limit = _page_size(table_options)
+        max_records = int(table_options.get("max_records_per_batch", str(sys.maxsize)))
+
+        resolved = self._resolve_range(offset, table_options)
+        if resolved is None:
+            return iter([]), start_offset
+        since, until, page, parent_index = resolved
+
+        parent_path, parent_key = TABLE_ENDPOINTS[spec.parent]
+        parent_params = self._range_params(spec.parent, since, until, limit)
+
+        if max_records >= sys.maxsize:
+            # Unbounded (the default): stream lazily so driver memory tracks
+            # one parent page plus one parent's children, not the whole range.
+            # The range always fully drains here, so the end offset is known
+            # up front.
+            def generate() -> Iterator[dict]:
+                p = page
+                while True:
+                    parents = self._unwrap_records(
+                        self._get_json(parent_path, params={**parent_params, "page": str(p)}),
+                        parent_key,
+                    )
+                    for parent in parents:
+                        yield from self._fetch_children(table_name, spec, parent, limit)
+                    if len(parents) < limit:
+                        return
+                    p += 1
+
+            return generate(), {"cursor": until}
+
+        # Bounded by ``max_records_per_batch``: accumulate until the cap is
+        # reached, then split. The cap is applied at *parent* granularity —
+        # a parent's children are always emitted together, so resuming at
+        # ``parent_index`` cannot tear one parent's child set across batches.
+        records: list[dict] = []
+        while True:
+            parents = self._unwrap_records(
+                self._get_json(parent_path, params={**parent_params, "page": str(page)}),
+                parent_key,
+            )
+            for idx in range(parent_index, len(parents)):
+                records.extend(
+                    self._fetch_children(table_name, spec, parents[idx], limit)
+                )
+                if len(records) < max_records:
+                    continue
+                # Cap hit. If this was the page's last parent, roll the split
+                # forward to the next page rather than re-fetching a page we
+                # have fully consumed.
+                if idx + 1 >= len(parents):
+                    if len(parents) < limit:
+                        return iter(records), {"cursor": until}
+                    next_offset = {"until": until, "page": page + 1, "parent_index": 0}
+                else:
+                    next_offset = {"until": until, "page": page, "parent_index": idx + 1}
+                if since:
+                    next_offset["since"] = since
+                return iter(records), next_offset
+
+            parent_index = 0
+            if len(parents) < limit:
+                # Parent range drained — advance the cursor to its upper bound.
+                return iter(records), {"cursor": until}
+            page += 1
+
+    def _fetch_children(
+        self,
+        table_name: str,
+        spec: ChildEndpoint,
+        parent: dict,
+        limit: int,
+    ) -> list[dict]:
+        """Fetch and map one parent's child records.
+
+        Returns ``[]`` for a parent with no id, or one that 404s because it
+        was deleted between the parent listing and this request.
+        """
+        parent_id = parent.get("id")
+        if not parent_id:
+            return []
+        # Parent ids are opaque strings from the API, but quote them anyway so
+        # an unexpected value can never alter the request's path structure.
+        path = spec.route.format(id=quote(str(parent_id), safe=""))
+        parent_cursor = parent.get("updatedAt")
+
+        def mapped(raw: dict) -> dict:
+            return self._map_child(table_name, spec, parent_id, parent_cursor, raw)
+
+        if not spec.paginated:
+            body = self._get_json(path, route=spec.route, missing_ok=True)
+            return [mapped(raw) for raw in self._unwrap_records(body, spec.records_key)]
+
+        out: list[dict] = []
+        p = PAGE_BASE
+        while True:
+            body = self._get_json(
+                path,
+                params={"page": str(p), "limit": str(limit)},
+                route=spec.route,
+                missing_ok=True,
+            )
+            page_records = self._unwrap_records(body, spec.records_key)
+            out.extend(mapped(raw) for raw in page_records)
+            if len(page_records) < limit:
+                return out
+            p += 1
+
+    def _map_child(
+        self,
+        table_name: str,
+        spec: ChildEndpoint,
+        parent_id: str,
+        parent_cursor: Any,
+        raw: dict,
+    ) -> dict:
+        """Inject the parent id + cursor onto a child record, then project."""
+        enriched = {
+            **raw,
+            spec.parent_id_field: parent_id,
+            spec.parent_cursor_field: parent_cursor,
+        }
+        return self._map_record(table_name, enriched)
+
+    # ------------------------------------------------------------------
     # Validation & field mapping
     # ------------------------------------------------------------------
 
@@ -720,6 +1209,8 @@ class RembergLakeflowConnect(LakeflowConnect):
         """
         if table_name == "tickets":
             raw = _normalize_ticket(raw)
+        elif table_name == "ticket_conversations":
+            raw = {**raw, "creator": _json_str(raw.get("creator"))}
         projected = _project(raw, TABLE_SCHEMAS[table_name])
         return projected if projected is not None else {}
 
@@ -747,6 +1238,11 @@ def _retry_after_seconds(resp: requests.Response) -> float | None:
             except ValueError:
                 pass
     return max(values) if values else None
+
+
+def _is_true(value: str | None) -> bool:
+    """Parse a boolean table option; table options arrive as strings."""
+    return str(value).strip().lower() in ("1", "true", "yes", "on")
 
 
 def _page_size(table_options: dict[str, str]) -> int:
