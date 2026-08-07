@@ -1,0 +1,93 @@
+[
+  {
+    "id": "juliet-9-pk0",
+    "type": "charlie-236",
+    "name": "oscar-458",
+    "email": "tango-354",
+    "job_title": "yankee-605",
+    "away_mode_enabled": false,
+    "away_mode_reassign": true,
+    "away_status_reason_id": 22923,
+    "has_inbox_seat": false,
+    "team_ids": [],
+    "avatar": "yankee-341",
+    "team_priority_level": {
+      "key_0": "oscar-976",
+      "key_1": "echo-415"
+    }
+  },
+  {
+    "id": "mike-790-pk1",
+    "type": "mike-194",
+    "name": "india-738",
+    "email": "mike-536",
+    "job_title": "india-483",
+    "away_mode_enabled": true,
+    "away_mode_reassign": false,
+    "away_status_reason_id": 65465,
+    "has_inbox_seat": true,
+    "team_ids": [
+      85103,
+      68711
+    ],
+    "avatar": "india-675",
+    "team_priority_level": {
+      "key_0": "golf-457",
+      "key_1": "juliet-953"
+    }
+  },
+  {
+    "id": "india-40-pk2",
+    "type": "november-184",
+    "name": "whiskey-133",
+    "email": "echo-922",
+    "job_title": "romeo-493",
+    "away_mode_enabled": true,
+    "away_mode_reassign": true,
+    "away_status_reason_id": 44506,
+    "has_inbox_seat": false,
+    "team_ids": [
+      10788,
+      59785
+    ],
+    "avatar": "lima-953",
+    "team_priority_level": {}
+  },
+  {
+    "id": "yankee-6-pk3",
+    "type": "india-397",
+    "name": "papa-789",
+    "email": "sierra-876",
+    "job_title": "mike-619",
+    "away_mode_enabled": false,
+    "away_mode_reassign": false,
+    "away_status_reason_id": 4215,
+    "has_inbox_seat": true,
+    "team_ids": [
+      97907
+    ],
+    "avatar": "delta-739",
+    "team_priority_level": {
+      "key_0": "yankee-813"
+    }
+  },
+  {
+    "id": "zulu-456-pk4",
+    "type": "uniform-583",
+    "name": "romeo-364",
+    "email": "whiskey-618",
+    "job_title": "kilo-151",
+    "away_mode_enabled": false,
+    "away_mode_reassign": true,
+    "away_status_reason_id": 20797,
+    "has_inbox_seat": false,
+    "team_ids": [
+      57874
+    ],
+    "avatar": "xray-677",
+    "team_priority_level": {
+      "key_0": "charlie-418",
+      "key_1": "yankee-673"
+    }
+  }
+]
