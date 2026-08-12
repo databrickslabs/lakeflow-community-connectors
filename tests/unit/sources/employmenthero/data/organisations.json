@@ -1,0 +1,29 @@
+{
+  "total_items": 2,
+  "total_pages": 1,
+  "item_per_page": 2,
+  "pages": [
+    {
+      "page_index": 1,
+      "item_per_page": 2,
+      "total_items": 2,
+      "total_pages": 1,
+      "items": [
+        {
+          "id": "bdfcb02b-fcc3-4f09-8636-c06c14345b86",
+          "name": "Example Company Alpha Pty Ltd",
+          "phone": "+61000000001",
+          "country": "AU",
+          "logo_url": "https://example.com/logos/org-alpha.png"
+        },
+        {
+          "id": "5a2704b0-e8a2-4765-9aec-b193e30672e4",
+          "name": "Sample Org Beta Ltd",
+          "phone": "+61000000002",
+          "country": "AU",
+          "logo_url": "https://example.com/logos/org-beta.png"
+        }
+      ]
+    }
+  ]
+}
