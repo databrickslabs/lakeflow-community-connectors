@@ -1,2 +1,0 @@
-# Klaviyo connector tests
-
