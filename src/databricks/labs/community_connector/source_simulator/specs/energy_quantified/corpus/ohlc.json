@@ -1,0 +1,17 @@
+[
+  {
+    "product": {
+      "traded_at": "2026-04-13",
+      "period": "month",
+      "delivery": "2026-05-01",
+      "front": 1
+    },
+    "open": 109.0,
+    "high": 110.0,
+    "low": 106.4,
+    "close": 106.4,
+    "settlement": 107.35,
+    "volume": 193.0,
+    "open_interest": 1937.0
+  }
+]
