@@ -37,29 +37,32 @@ class GmailLakeflowConnect(LakeflowConnect):
 
     def __init__(self, options: dict[str, str]) -> None:
         """
-        Initialize the Gmail connector with OAuth 2.0 credentials.
+        Initialize the Gmail connector.
+
+        Authentication is a pre-issued access token. The Unity Catalog
+        COMMUNITY connection (``community_oauth_flow=u2m`` or
+        ``u2m_per_user``) owns the OAuth dance — Databricks performs the
+        authorization-code exchange (and per-user refresh in u2m_per_user
+        mode) and injects a valid bearer token at query time. The connector
+        treats it as opaque: no client_id/secret, no refresh, no token
+        endpoint. A 401 mid-query means the token expired or was revoked;
+        the user re-authorizes through the connection.
 
         Expected options:
-            - client_id: OAuth 2.0 client ID from Google Cloud Console
-            - client_secret: OAuth 2.0 client secret
-            - refresh_token: Long-lived refresh token obtained via OAuth flow
-            - user_id (optional): User email or 'me' (default: 'me')
+            - access_token: OAuth 2.0 bearer token injected by the connection
+            - user_id (optional): user email or 'me' (default: 'me')
         """
-        self.client_id = options.get("client_id")
-        self.client_secret = options.get("client_secret")
-        self.refresh_token = options.get("refresh_token")
+        self.access_token = options.get("access_token")
         self.user_id = options.get("user_id", "me")
 
-        if not self.client_id:
-            raise ValueError("Gmail connector requires 'client_id' in options")
-        if not self.client_secret:
-            raise ValueError("Gmail connector requires 'client_secret' in options")
-        if not self.refresh_token:
-            raise ValueError("Gmail connector requires 'refresh_token' in options")
+        if not self.access_token:
+            raise ValueError(
+                "Gmail connector requires 'access_token' in options. The "
+                "Unity Catalog COMMUNITY connection's u2m / u2m_per_user "
+                "OAuth flow injects it at query time."
+            )
 
-        self.api = GmailApiClient(
-            self.client_id, self.client_secret, self.refresh_token, self.user_id
-        )
+        self.api = GmailApiClient(self.access_token, self.user_id)
 
         # Snapshot the mailbox historyId at init time. Gmail's mailbox
         # historyId advances on every write (new mail, reads, label edits),

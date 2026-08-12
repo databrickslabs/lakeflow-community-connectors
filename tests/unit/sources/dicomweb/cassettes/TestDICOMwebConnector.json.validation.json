@@ -1,0 +1,89 @@
+{
+  "version": 1,
+  "generated_at": "2026-06-03T14:55:36.839630Z",
+  "endpoints": [
+    {
+      "method": "GET",
+      "spec_path": "/{root_p1}/{root_p2}/studies",
+      "sample_url": "https://orthanc.uclouvain.be/demo/dicom-web/studies?StudyDate=20090101-20260603&limit=100&offset=0",
+      "status": "validated",
+      "calls": 7,
+      "matched": 7,
+      "mismatched": 0,
+      "no_spec": 0,
+      "issues": []
+    },
+    {
+      "method": "GET",
+      "spec_path": "/{root_p1}/{root_p2}/studies/{study_uid}",
+      "sample_url": "https://orthanc.uclouvain.be/demo/dicom-web/studies/2.16.840.1.113669.632.20.1211.10000315526",
+      "status": "validated",
+      "calls": 1,
+      "matched": 1,
+      "mismatched": 0,
+      "no_spec": 0,
+      "issues": []
+    },
+    {
+      "method": "GET",
+      "spec_path": "/{root_p1}/{root_p2}/studies/{study_uid}/series",
+      "sample_url": "https://orthanc.uclouvain.be/demo/dicom-web/studies/1.3.6.1.4.1.14519.5.2.1.2193.7172.847236098565581057121195872945/series?Modality=RTDOSE",
+      "status": "validated",
+      "calls": 2,
+      "matched": 2,
+      "mismatched": 0,
+      "no_spec": 0,
+      "issues": []
+    },
+    {
+      "method": "GET",
+      "spec_path": "/{root_p1}/{root_p2}/studies/{study_uid}/series/{series_uid}/instances",
+      "sample_url": "https://orthanc.uclouvain.be/demo/dicom-web/studies/1.3.6.1.4.1.14519.5.2.1.2193.7172.847236098565581057121195872945/series/1.3.6.1.4.1.14519.5.2.1.2193.7172.329574933994116044160154909094/instances",
+      "status": "validated",
+      "calls": 2,
+      "matched": 2,
+      "mismatched": 0,
+      "no_spec": 0,
+      "issues": []
+    },
+    {
+      "method": "GET",
+      "spec_path": "/{root_p1}/{root_p2}/studies/{study_uid}/series/{series_uid}/instances/{sop_uid}",
+      "sample_url": "https://orthanc.uclouvain.be/demo/dicom-web/studies/1.3.6.1.4.1.14519.5.2.1.2193.7172.847236098565581057121195872945/series/1.3.6.1.4.1.14519.5.2.1.2193.7172.329574933994116044160154909094/instances/1.3.6.1.4.1.14519.5.2.1.2193.7172.227588763982019545194084732872",
+      "status": "validated",
+      "calls": 2,
+      "matched": 2,
+      "mismatched": 0,
+      "no_spec": 0,
+      "issues": []
+    },
+    {
+      "method": "GET",
+      "spec_path": "/{root_p1}/{root_p2}/studies/{study_uid}/series/{series_uid}/instances/{sop_uid}/metadata",
+      "sample_url": "https://orthanc.uclouvain.be/demo/dicom-web/studies/2.16.840.1.113669.632.20.1211.10000315526/series/1.3.12.2.1107.5.1.4.54693.30000006100507010800000005268/instances/1.3.12.2.1107.5.1.4.54693.30000006100507010800000005328/metadata",
+      "status": "validated",
+      "calls": 1,
+      "matched": 1,
+      "mismatched": 0,
+      "no_spec": 0,
+      "issues": []
+    },
+    {
+      "method": "GET",
+      "spec_path": "/{root_p1}/{root_p2}/studies/{study_uid}/series/{series_uid}/metadata",
+      "sample_url": "https://orthanc.uclouvain.be/demo/dicom-web/studies/1.3.6.1.4.1.14519.5.2.1.2193.7172.847236098565581057121195872945/series/1.3.6.1.4.1.14519.5.2.1.2193.7172.329574933994116044160154909094/metadata",
+      "status": "validated",
+      "calls": 2,
+      "matched": 2,
+      "mismatched": 0,
+      "no_spec": 0,
+      "issues": []
+    }
+  ],
+  "summary": {
+    "endpoints_total": 7,
+    "endpoints_validated": 7,
+    "endpoints_mismatched": 0,
+    "endpoints_missing_spec": 0
+  }
+}

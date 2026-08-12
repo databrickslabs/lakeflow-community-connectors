@@ -1,0 +1,328 @@
+# actiTIME REST API v1 endpoints exercised by the connector.
+#
+# Connector flow (per ActitimeLakeflowConnect):
+# * Snapshot tables (departments, userGroups, typesOfWork, leaveTypes,
+#   workflowStatuses, timeZoneGroups, holidays, users) → GET /api/v1/<table>
+#   with offset/limit pagination (the connector reads until a short page).
+# * /settings → GET /api/v1/settings — singleton (returns a JSON object).
+# * /userRates → GET /api/v1/userRates/{userId} — fanned out per user from
+#   /api/v1/users.
+# * CDC tables (customers, projects, tasks) → same offset/limit shape; the
+#   connector does a full-list refresh and upserts on id since the API has
+#   no ``modifiedAt`` filter.
+# * timetrack / leavetime → GET with dateFrom/dateTo/stopAfter and a
+#   ``{data: [...]}`` envelope. See per-endpoint notes below.
+# * approvalStatus → GET with dateFrom/dateTo (no stopAfter).
+#
+# Response wrapping — verified against the live API:
+# * Every list endpoint wraps the records array in
+#       {"items": [...], "offset": N, "limit": M}
+#   so each entry below declares ``wrapper: {records_key: items}``.
+# * timetrack / leavetime use a different envelope:
+#       {"dateFrom": ..., "dateTo": ..., "data": [...]}
+#   declared as ``wrapper: {records_key: data}``.
+# * /settings is a singleton — no wrapper, no array.
+#
+# Envelope detail (timetrack vs leavetime):
+# * /timetrack — ``data[]`` items are nested:
+#       {"userId": 1, "dayOffset": 2, "date": "2026-04-13",
+#        "records": [{"taskId": 116, "time": 120}, ...]}
+#   The connector flattens to one row per inner ``records[]`` entry,
+#   copying userId/date/dayOffset onto each. The simulator corpus is
+#   therefore stored at the OUTER level (one entry per user-day with a
+#   nested ``records`` array), exactly how the live API emits it.
+# * /leavetime — ``data[]`` items are already flat:
+#       {"userId": 13, "dayOffset": 2, "date": "2026-04-13",
+#        "leaveTypeId": 3, "leaveTime": 420}
+#   The connector maps each entry directly via ``_map_record``.
+#
+# Pagination: most endpoints accept offset/limit but the simulator does
+# not slice for them — we just pass them through and serve the corpus.
+# Where the connector understands these we declare them with the right
+# roles so the simulator's coverage and validator behave correctly.
+
+endpoints:
+  # ---- snapshot / CDC list resources (wrapped in {items: [...]}) ----
+
+  - path: /{tenant}/api/v1/customers
+    method: GET
+    corpus: customers
+    response:
+      pagination_style: none
+      wrapper:
+        records_key: items
+        extras:
+          offset: 0
+          limit: 1000
+    params:
+      offset:     {role: offset}
+      limit:      {role: limit, default: 1000, max: 1000}
+      sort:       {role: ignore}
+      # ``words`` is a free-text search filter (no equality op supported by
+      # the simulator's FilterOp enum). The connector never sends it; mark
+      # as ignore so the spec loads.
+      words:      {role: ignore}
+      ids:        {role: filter, field: id, op: in}
+      archived:   {role: ignore}
+      includeReferenced: {role: ignore}
+
+  - path: /{tenant}/api/v1/projects
+    method: GET
+    corpus: projects
+    response:
+      pagination_style: none
+      wrapper:
+        records_key: items
+        extras:
+          offset: 0
+          limit: 1000
+    params:
+      offset:      {role: offset}
+      limit:       {role: limit, default: 1000, max: 1000}
+      sort:        {role: ignore}
+      words:       {role: ignore}
+      ids:         {role: filter, field: id, op: in}
+      archived:    {role: ignore}
+      customerIds: {role: filter, field: customerId, op: in}
+      includeReferenced: {role: ignore}
+
+  - path: /{tenant}/api/v1/tasks
+    method: GET
+    corpus: tasks
+    response:
+      pagination_style: none
+      wrapper:
+        records_key: items
+        extras:
+          offset: 0
+          limit: 1000
+    params:
+      offset:             {role: offset}
+      limit:              {role: limit, default: 1000, max: 1000}
+      sort:               {role: ignore}
+      words:              {role: ignore}
+      ids:                {role: filter, field: id, op: in}
+      archived:           {role: ignore}
+      projectIds:         {role: filter, field: projectId, op: in}
+      customerIds:        {role: filter, field: customerId, op: in}
+      typeOfWorkIds:      {role: filter, field: typeOfWorkId, op: in}
+      workflowStatusIds:  {role: filter, field: workflowStatusId, op: in}
+      includeReferenced:  {role: ignore}
+
+  - path: /{tenant}/api/v1/users
+    method: GET
+    corpus: users
+    response:
+      pagination_style: none
+      wrapper:
+        records_key: items
+        extras:
+          offset: 0
+          limit: 1000
+    params:
+      offset:        {role: offset}
+      limit:         {role: limit, default: 1000, max: 1000}
+      sort:          {role: ignore}
+      ids:           {role: filter, field: id, op: in}
+      departmentIds: {role: filter, field: departmentId, op: in}
+      active:        {role: filter, field: active, op: eq}
+      archived:      {role: ignore}
+      includeReferenced: {role: ignore}
+
+  - path: /{tenant}/api/v1/departments
+    method: GET
+    corpus: departments
+    response:
+      pagination_style: none
+      wrapper:
+        records_key: items
+        extras:
+          offset: 0
+          limit: 1000
+    params:
+      offset: {role: offset}
+      limit:  {role: limit, default: 1000, max: 1000}
+
+  - path: /{tenant}/api/v1/userGroups
+    method: GET
+    corpus: userGroups
+    response:
+      pagination_style: none
+      wrapper:
+        records_key: items
+        extras:
+          offset: 0
+          limit: 1000
+    params:
+      offset: {role: offset}
+      limit:  {role: limit, default: 1000, max: 1000}
+
+  - path: /{tenant}/api/v1/typesOfWork
+    method: GET
+    corpus: typesOfWork
+    response:
+      pagination_style: none
+      wrapper:
+        records_key: items
+        extras:
+          offset: 0
+          limit: 1000
+    params:
+      offset:   {role: offset}
+      limit:    {role: limit, default: 1000, max: 1000}
+      archived: {role: ignore}
+
+  - path: /{tenant}/api/v1/leaveTypes
+    method: GET
+    corpus: leaveTypes
+    response:
+      pagination_style: none
+      wrapper:
+        records_key: items
+        extras:
+          offset: 0
+          limit: 1000
+    params:
+      offset:   {role: offset}
+      limit:    {role: limit, default: 1000, max: 1000}
+      archived: {role: ignore}
+
+  - path: /{tenant}/api/v1/workflowStatuses
+    method: GET
+    corpus: workflowStatuses
+    response:
+      pagination_style: none
+      wrapper:
+        records_key: items
+        extras:
+          offset: 0
+          limit: 1000
+    params:
+      offset: {role: offset}
+      limit:  {role: limit, default: 1000, max: 1000}
+
+  - path: /{tenant}/api/v1/timeZoneGroups
+    method: GET
+    corpus: timeZoneGroups
+    response:
+      pagination_style: none
+      wrapper:
+        records_key: items
+        extras:
+          offset: 0
+          limit: 1000
+    params:
+      offset: {role: offset}
+      limit:  {role: limit, default: 1000, max: 1000}
+
+  - path: /{tenant}/api/v1/holidays
+    method: GET
+    corpus: holidays
+    response:
+      pagination_style: none
+      wrapper:
+        records_key: items
+        extras:
+          offset: 0
+          limit: 1000
+    params:
+      offset:   {role: offset}
+      limit:    {role: limit, default: 1000, max: 1000}
+      dateFrom: {role: filter, field: date, op: gte}
+      dateTo:   {role: filter, field: date, op: lte}
+
+  # ---- singleton ----
+
+  - path: /{tenant}/api/v1/settings
+    method: GET
+    corpus: settings
+    response:
+      single_entity: true
+      pagination_style: none
+
+  # ---- per-user fan-out: /userRates/{userId} ----
+  # The connector lists /users first then issues one GET per user. We
+  # route any {userId} through the same corpus for simulate-mode; the
+  # connector injects the path id back into each row before yielding.
+  - path: /{tenant}/api/v1/userRates/{user_id}
+    method: GET
+    corpus: userRates
+    response:
+      pagination_style: none
+      # Bare-array response (per-user fan-out endpoint — no pagination wrapper).
+
+  # ---- time-windowed tables ----
+  # Live envelope: {"dateFrom": ..., "dateTo": ..., "data": [...]}
+  # For timetrack each ``data[]`` entry contains a nested ``records``
+  # array; for leavetime each entry is itself a leave record.
+
+  - path: /{tenant}/api/v1/timetrack
+    method: GET
+    corpus: timetrack
+    response:
+      pagination_style: none
+      wrapper:
+        records_key: data
+        extras:
+          dateFrom: ""
+          dateTo: ""
+          # When the requested window is wider than the server's internal
+          # cap, ``/timetrack`` truncates ``dateTo`` and returns a
+          # ``nextDateFrom`` pointer at which the next call should resume.
+          # Declared here so the live validator stops flagging it as
+          # missing-from-spec drift. The connector does not consume it
+          # today: with the default ``window_days=7`` the server never
+          # truncates, and ``lookback_days`` provides safety on widened
+          # windows. If we ever push window_days large enough to trip
+          # server-side chunking on a high-activity tenant, we'd need to
+          # honor this pointer to avoid silently skipping rows.
+          nextDateFrom: ""
+    params:
+      dateFrom:          {role: filter, field: date, op: gte}
+      dateTo:            {role: filter, field: date, op: lte}
+      userIds:           {role: filter, field: userId, op: in}
+      taskIds:           {role: ignore}
+      projectIds:        {role: ignore}
+      customerIds:       {role: ignore}
+      approved:          {role: ignore}
+      stopAfter:         {role: limit, default: 1000, max: 10000}
+      includeReferenced: {role: ignore}
+    synthesize_future_records:
+      cursor_field: date
+      count: 3
+
+  - path: /{tenant}/api/v1/leavetime
+    method: GET
+    corpus: leavetime
+    response:
+      pagination_style: none
+      wrapper:
+        records_key: data
+        extras:
+          dateFrom: ""
+          dateTo: ""
+    params:
+      dateFrom:          {role: filter, field: date, op: gte}
+      dateTo:            {role: filter, field: date, op: lte}
+      userIds:           {role: filter, field: userId, op: in}
+      leaveTypeIds:      {role: filter, field: leaveTypeId, op: in}
+      stopAfter:         {role: limit, default: 1000, max: 10000}
+      includeReferenced: {role: ignore}
+    synthesize_future_records:
+      cursor_field: date
+      count: 3
+
+  - path: /{tenant}/api/v1/approvalStatus
+    method: GET
+    corpus: approvalStatus
+    response:
+      pagination_style: none
+      wrapper:
+        records_key: items
+    params:
+      dateFrom: {role: filter, field: weekStartDate, op: gte}
+      dateTo:   {role: filter, field: weekStartDate, op: lte}
+      userIds:  {role: filter, field: userId, op: in}
+    synthesize_future_records:
+      cursor_field: weekStartDate
+      count: 3

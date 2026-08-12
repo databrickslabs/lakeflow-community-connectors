@@ -8,7 +8,8 @@ version = "0.1.0"
 description = "Gmail connector for Lakeflow Community Connectors"
 requires-python = ">=3.10"
 dependencies = [
-    "pyspark>=4.2.0.dev0",
+    # PySpark is provided by the Databricks runtime; not declared here to
+    # avoid install-time conflicts with the cluster's pyspark.
     "pydantic>=2.0.0,<3.0",
     "requests>=2.28.0,<3.0",
     "lakeflow-community-connectors>=0.1.0",
@@ -16,6 +17,7 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = [
+    "pyspark>=4.2.0.dev0",
     "pytest>=7.0.0,<9.0",
     "pytest-cov>=4.0.0,<7.0",
 ]

@@ -9,19 +9,10 @@ description = "Lakeflow community connectors built on Spark Python Data Source A
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
-    # PySpark is intentionally unpinned (only a prerelease-permitting floor).
-    # Rationale:
-    #   1. This library targets the Databricks runtime where PySpark is
-    #      always provided; production never installs from this lock.
-    #   2. We adopt new PySpark APIs eagerly (VariantType, datasource,
-    #      streaming.datasource, pipelines) and want the lock to track
-    #      upstream as it ships, including dev/RC releases when GA isn't out.
-    #   3. Hash pinning in the lock still guarantees a specific wheel.
-    #   4. verify-locks is intentionally non-blocking, so a fresh PySpark
-    #      release that triggers drift doesn't fail PRs — just regenerate.
-    # The `>=4.2.0.dev0` floor signals to uv that prereleases of 4.2 are
-    # eligible (PEP 440 ordering), without committing to a specific version.
-    "pyspark>=4.2.0.dev0",
+    # PySpark is provided by the Databricks runtime — declaring it as a
+    # runtime dep here causes version conflicts when the wheel is installed
+    # on a cluster (e.g. cluster has pyspark==4.1.0, lock wants >=4.2.0.dev0).
+    # It stays available for local dev/test via the `dev` extra below.
     "pydantic>=2.0.0,<3.0",
     "pyyaml>=6.0,<7.0",
     "pyjwt[crypto]>=2.4.0,<3.0",
@@ -33,6 +24,14 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = [
+    # PySpark is intentionally unpinned (only a prerelease-permitting floor).
+    # We adopt new PySpark APIs eagerly (VariantType, datasource,
+    # streaming.datasource, pipelines) and want the lock to track upstream
+    # as it ships, including dev/RC releases when GA isn't out. Hash pinning
+    # in the lock still guarantees a specific wheel. The `>=4.2.0.dev0` floor
+    # signals to uv that prereleases of 4.2 are eligible (PEP 440 ordering),
+    # without committing to a specific version.
+    "pyspark>=4.2.0.dev0",
     "pytest>=7.0.0,<9.0",
     "pytest-cov>=4.0.0,<7.0",
 ]

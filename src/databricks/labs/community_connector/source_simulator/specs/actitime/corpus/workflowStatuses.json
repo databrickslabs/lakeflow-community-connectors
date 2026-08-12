@@ -1,0 +1,57 @@
+[
+  {
+    "id": 1,
+    "name": "New",
+    "type": "open",
+    "allowedActions": {
+      "canModify": true,
+      "canDelete": false
+    }
+  },
+  {
+    "id": 2,
+    "name": "Done",
+    "type": "completed",
+    "allowedActions": {
+      "canModify": true,
+      "canDelete": false
+    }
+  },
+  {
+    "id": 3,
+    "name": "Planning",
+    "type": "open",
+    "allowedActions": {
+      "canModify": true,
+      "canDelete": false
+    }
+  },
+  {
+    "id": 4,
+    "name": "In Progress",
+    "type": "open",
+    "allowedActions": {
+      "canModify": true,
+      "canDelete": false
+    }
+  },
+  {
+    "id": 5,
+    "name": "Review",
+    "type": "open",
+    "allowedActions": {
+      "canModify": true,
+      "canDelete": false
+    }
+  },
+  {
+    "id": 99001,
+    "name": "Synthetic — column coverage augmentation",
+    "type": "open",
+    "order": 99,
+    "allowedActions": {
+      "canModify": false,
+      "canDelete": false
+    }
+  }
+]

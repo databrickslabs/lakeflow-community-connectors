@@ -1,11 +1,27 @@
 name: Tests
 
 # Triggers: see pull_request_target rationale in .github/workflows/pylint.yml.
+#
+# This workflow fires on every PR (no workflow-level paths filter) so the
+# `summary` job's check_run is always reported on the PR head — branch
+# protection requires `Tests / summary` and would block any PR that
+# silently skipped the workflow. The `changes` job below does *granular*
+# sub-test selection: downstream test-* jobs are conditional and skip
+# when no relevant files changed, while `summary` still runs and
+# aggregates (skipped is treated as success).
 on:
   push:
     branches: [master]
+    paths:
+      - '**/*.py'
+      - '**/pyproject.toml'
+      - 'requirements/**'
+      - '.github/workflows/tests.yml'
   pull_request_target:
     branches: [master]
+    # Default types (opened, synchronize, reopened) plus `labeled` so a
+    # maintainer's `safe-to-test` add fires CI on the exact labeled SHA.
+    types: [opened, synchronize, reopened, labeled]
 
 permissions:
   contents: read
@@ -24,12 +40,51 @@ jobs:
       community_connector: ${{ steps.check.outputs.community_connector }}
       sources: ${{ steps.check.outputs.sources }}
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+      # First step (runs before any fork-controlled code is on disk).
+      # Fork PRs only run CI when a maintainer adds the `safe-to-test`
+      # label, and only on the *exact event* (`action == 'labeled' &&
+      # label.name == 'safe-to-test'`) — a `synchronize` after labeling
+      # does NOT pass, so the label gates the exact SHA the maintainer
+      # reviewed, not whatever gets pushed afterward. (H1 #3730634
+      # pwn-request gate; see CONTRIBUTING.md.)
+      #
+      # We do this as an explicit failing shell step rather than a job-
+      # level `if:` so the workflow conclusion is `failure` (not
+      # `skipped`) when unauthorized — branch protection treats `failure`
+      # unambiguously, whereas `skipped` has historically been treated as
+      # `success`.
+      - name: Authorize
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
+          BASE_REPO: ${{ github.repository }}
+          ACTION: ${{ github.event.action }}
+          LABEL_NAME: ${{ github.event.label.name }}
+        run: |
+          if [ "$EVENT_NAME" = "push" ]; then
+            echo "OK: push to master."
+            exit 0
+          fi
+          if [ "$HEAD_REPO" = "$BASE_REPO" ]; then
+            echo "OK: same-repo PR ($HEAD_REPO)."
+            exit 0
+          fi
+          if [ "$ACTION" = "labeled" ] && [ "$LABEL_NAME" = "safe-to-test" ]; then
+            echo "OK: fork PR was just labeled 'safe-to-test'."
+            exit 0
+          fi
+          echo "::error title=Fork PR not authorized::Apply (or re-apply) the 'safe-to-test' label to authorize CI on this commit. See CONTRIBUTING.md."
+          exit 1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
       # cannot use dorny because of ip allowlisting
       # - uses: dorny/paths-filter@v3
         with:
           fetch-depth: 0
           ref: ${{ github.event.pull_request.head.sha }}
+          # Opt-in required by actions/checkout >= v6.0.3 to check out a fork
+          # head from pull_request_target. See the rationale on the checkout
+          # step in .github/workflows/pylint.yml.
+          allow-unsafe-pr-checkout: true
       - name: Check changed paths
         id: check
         run: |
@@ -85,10 +140,17 @@ jobs:
           fi
 
           # Detect per-source connector changes
-          # Triggers when source code, test code, or libs/utils.py changes
-          UTILS_CHANGED=false
-          if echo "$CHANGED_FILES" | grep -qE '^src/databricks/labs/community_connector/libs/utils\.py$'; then
-            UTILS_CHANGED=true
+          # Triggers when source code, test code, or shared infra (utils.py,
+          # the LakeflowConnect interface, or the shared test harness) changes.
+          # Without the test-harness trigger, a PR adding a new check in
+          # test_suite.py is only validated against the example connector
+          # (per the `example` trigger above), leaving other connectors
+          # untested until someone happens to modify their source — which
+          # silently allowed corpus drift on 6 connectors to be merged
+          # before PR #205 surfaced it by changing every source pyproject.
+          SHARED_INFRA_CHANGED=false
+          if echo "$CHANGED_FILES" | grep -qE '^(src/databricks/labs/community_connector/(libs/utils\.py|interface/)|tests/unit/sources/(test_suite\.py|test_partition_suite\.py|test_utils\.py|lakeflow_connect_test_utils\.py))$'; then
+            SHARED_INFRA_CHANGED=true
           fi
 
           # Read exclude list into a temp file (skip comments and blank lines)
@@ -108,9 +170,9 @@ jobs:
               continue
             fi
 
-            # Check if this source's code, tests, or utils.py changed
+            # Check if this source's code, tests, or shared infra changed
             SOURCE_TRIGGERED=false
-            if [ "$UTILS_CHANGED" = "true" ]; then
+            if [ "$SHARED_INFRA_CHANGED" = "true" ]; then
               SOURCE_TRIGGERED=true
             elif echo "$CHANGED_FILES" | grep -qE "^src/databricks/labs/community_connector/sources/${source_name}/"; then
               SOURCE_TRIGGERED=true
@@ -152,11 +214,15 @@ jobs:
       matrix:
         python-version: ["3.10"]
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           ref: ${{ github.event.pull_request.head.sha }}
+          # Opt-in required by actions/checkout >= v6.0.3 to check out a fork
+          # head from pull_request_target. See the rationale on the checkout
+          # step in .github/workflows/pylint.yml.
+          allow-unsafe-pr-checkout: true
       - name: Set up Python ${{ matrix.python-version }}
-        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405  # v6.2.0
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7.0.0
         with:
           python-version: ${{ matrix.python-version }}
       - name: Configure pip via JFrog proxy
@@ -185,11 +251,15 @@ jobs:
       matrix:
         python-version: ["3.10"]
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           ref: ${{ github.event.pull_request.head.sha }}
+          # Opt-in required by actions/checkout >= v6.0.3 to check out a fork
+          # head from pull_request_target. See the rationale on the checkout
+          # step in .github/workflows/pylint.yml.
+          allow-unsafe-pr-checkout: true
       - name: Set up Python ${{ matrix.python-version }}
-        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405  # v6.2.0
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7.0.0
         with:
           python-version: ${{ matrix.python-version }}
       - name: Configure pip via JFrog proxy
@@ -218,11 +288,15 @@ jobs:
       matrix:
         python-version: ["3.10"]
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           ref: ${{ github.event.pull_request.head.sha }}
+          # Opt-in required by actions/checkout >= v6.0.3 to check out a fork
+          # head from pull_request_target. See the rationale on the checkout
+          # step in .github/workflows/pylint.yml.
+          allow-unsafe-pr-checkout: true
       - name: Set up Python ${{ matrix.python-version }}
-        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405  # v6.2.0
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7.0.0
         with:
           python-version: ${{ matrix.python-version }}
       - name: Configure pip via JFrog proxy
@@ -251,11 +325,15 @@ jobs:
       matrix:
         python-version: ["3.10"]
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           ref: ${{ github.event.pull_request.head.sha }}
+          # Opt-in required by actions/checkout >= v6.0.3 to check out a fork
+          # head from pull_request_target. See the rationale on the checkout
+          # step in .github/workflows/pylint.yml.
+          allow-unsafe-pr-checkout: true
       - name: Set up Python ${{ matrix.python-version }}
-        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405  # v6.2.0
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7.0.0
         with:
           python-version: ${{ matrix.python-version }}
       - name: Configure pip via JFrog proxy
@@ -286,11 +364,15 @@ jobs:
         source: ${{ fromJson(needs.changes.outputs.sources) }}
       fail-fast: false
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           ref: ${{ github.event.pull_request.head.sha }}
+          # Opt-in required by actions/checkout >= v6.0.3 to check out a fork
+          # head from pull_request_target. See the rationale on the checkout
+          # step in .github/workflows/pylint.yml.
+          allow-unsafe-pr-checkout: true
       - name: Set up Python 3.10
-        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405  # v6.2.0
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7.0.0
         with:
           python-version: "3.10"
       - name: Configure pip via JFrog proxy
@@ -331,3 +413,42 @@ jobs:
           fi
           echo "Ignore flags: $IGNORE_FLAGS"
           pytest "tests/unit/sources/${SOURCE}/" $IGNORE_FLAGS -v
+
+  # Required merge gate. Branch protection requires `Tests / summary`.
+  # `if: always()` so this fires even when upstream jobs are skipped
+  # (no relevant files changed) or fail. We treat `skipped` as a pass
+  # because matching-paths logic in `changes` legitimately skips entire
+  # sub-suites on PRs that don't touch their files. Anything else
+  # (failure, cancelled) is a hard fail.
+  summary:
+    if: always()
+    needs:
+      - changes
+      - test-libs
+      - test-pipeline
+      - test-example
+      - test-community-connector
+      - test-source
+    runs-on:
+      group: databrickslabs-protected-runner-group
+      labels: linux-ubuntu-latest
+    steps:
+      - name: Aggregate job results
+        env:
+          RESULTS: ${{ toJSON(needs) }}
+        run: |
+          set -euo pipefail
+          echo "Per-job results:"
+          echo "$RESULTS" | jq -r 'to_entries[] | "  \(.key): \(.value.result)"'
+          echo
+          FAILED=$(echo "$RESULTS" | jq -r '
+            to_entries
+            | map(select(.value.result != "success" and .value.result != "skipped"))
+            | .[].key
+          ')
+          if [ -n "$FAILED" ]; then
+            echo "::error::Required jobs did not pass:"
+            echo "$FAILED"
+            exit 1
+          fi
+          echo "All Tests jobs passed or were skipped."

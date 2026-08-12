@@ -1,0 +1,284 @@
+[
+  {
+    "id": "victor-5-pk0",
+    "name": "tango-750",
+    "appId": 63736,
+    "archived": false,
+    "description": "papa-862",
+    "finished": true,
+    "published": false,
+    "hidden": false,
+    "size": 18270,
+    "type": "foxtrot-222",
+    "owners": [
+      "november-834",
+      "mike-853"
+    ],
+    "viewers": [
+      "zulu-259"
+    ],
+    "lastMod": 54658,
+    "createdAt": 41877,
+    "lastComputed": 67499,
+    "metadata": [
+      "whiskey-247",
+      "tango-886"
+    ],
+    "view_count": 99522,
+    "popularity": 60343,
+    "last_viewed": 17524,
+    "chart_id": "tango-849",
+    "edit_id": "echo-201",
+    "is_predictive": true,
+    "is_official_content": false,
+    "location_id": "romeo-884",
+    "shortcut_ids": [
+      "golf-795",
+      "delta-861"
+    ],
+    "definition": "hotel-190"
+  },
+  {
+    "id": "tango-14-pk1",
+    "name": "romeo-836",
+    "appId": 89208,
+    "archived": false,
+    "description": "delta-399",
+    "finished": true,
+    "published": false,
+    "hidden": false,
+    "size": 72640,
+    "type": "delta-378",
+    "owners": [],
+    "viewers": [
+      "romeo-318"
+    ],
+    "lastMod": 85370,
+    "createdAt": 83511,
+    "lastComputed": 719,
+    "metadata": [
+      "foxtrot-128"
+    ],
+    "view_count": 21018,
+    "popularity": 57254,
+    "last_viewed": 63966,
+    "chart_id": "whiskey-248",
+    "edit_id": "victor-572",
+    "is_predictive": false,
+    "is_official_content": true,
+    "location_id": "echo-795",
+    "shortcut_ids": [
+      "golf-216",
+      "juliet-679"
+    ],
+    "definition": "kilo-749"
+  },
+  {
+    "id": "india-67-pk2",
+    "name": "india-620",
+    "appId": 9195,
+    "archived": false,
+    "description": "sierra-230",
+    "finished": true,
+    "published": false,
+    "hidden": false,
+    "size": 56996,
+    "type": "echo-268",
+    "owners": [
+      "victor-293"
+    ],
+    "viewers": [
+      "romeo-921",
+      "hotel-953"
+    ],
+    "lastMod": 58057,
+    "createdAt": 87937,
+    "lastComputed": 28770,
+    "metadata": [
+      "hotel-337",
+      "zulu-951"
+    ],
+    "view_count": 54963,
+    "popularity": 63125,
+    "last_viewed": 40150,
+    "chart_id": "yankee-614",
+    "edit_id": "tango-613",
+    "is_predictive": true,
+    "is_official_content": true,
+    "location_id": "bravo-823",
+    "shortcut_ids": [
+      "charlie-581"
+    ],
+    "definition": "kilo-442"
+  },
+  {
+    "id": "quebec-2-pk3",
+    "name": "papa-524",
+    "appId": 18087,
+    "archived": false,
+    "description": "echo-585",
+    "finished": false,
+    "published": false,
+    "hidden": true,
+    "size": 94281,
+    "type": "xray-892",
+    "owners": [
+      "oscar-287",
+      "alpha-969"
+    ],
+    "viewers": [],
+    "lastMod": 39716,
+    "createdAt": 89310,
+    "lastComputed": 72667,
+    "metadata": [
+      "whiskey-833"
+    ],
+    "view_count": 53499,
+    "popularity": 31584,
+    "last_viewed": 34047,
+    "chart_id": "echo-194",
+    "edit_id": "romeo-280",
+    "is_predictive": false,
+    "is_official_content": true,
+    "location_id": "juliet-244",
+    "shortcut_ids": [],
+    "definition": "uniform-321"
+  },
+  {
+    "id": "juliet-9-pk4",
+    "name": "yankee-181",
+    "appId": 28126,
+    "archived": true,
+    "description": "tango-655",
+    "finished": false,
+    "published": false,
+    "hidden": false,
+    "size": 2693,
+    "type": "oscar-198",
+    "owners": [
+      "foxtrot-292",
+      "foxtrot-973"
+    ],
+    "viewers": [
+      "mike-961",
+      "quebec-902"
+    ],
+    "lastMod": 27255,
+    "createdAt": 46372,
+    "lastComputed": 11936,
+    "metadata": [],
+    "view_count": 56420,
+    "popularity": 18734,
+    "last_viewed": 34285,
+    "chart_id": "kilo-516",
+    "edit_id": "oscar-700",
+    "is_predictive": false,
+    "is_official_content": true,
+    "location_id": "juliet-919",
+    "shortcut_ids": [
+      "echo-576",
+      "mike-532"
+    ],
+    "definition": "kilo-884"
+  },
+  {
+    "id": "india-33-pk5",
+    "name": "romeo-575",
+    "appId": 61131,
+    "archived": true,
+    "description": "whiskey-611",
+    "finished": false,
+    "published": true,
+    "hidden": true,
+    "size": 12485,
+    "type": "india-769",
+    "owners": [
+      "bravo-726"
+    ],
+    "viewers": [],
+    "lastMod": 61710,
+    "createdAt": 60396,
+    "lastComputed": 27976,
+    "metadata": [
+      "whiskey-152"
+    ],
+    "view_count": 13159,
+    "popularity": 37527,
+    "last_viewed": 24492,
+    "chart_id": "charlie-386",
+    "edit_id": "romeo-281",
+    "is_predictive": true,
+    "is_official_content": true,
+    "location_id": "india-735",
+    "shortcut_ids": [
+      "xray-286",
+      "papa-975"
+    ],
+    "definition": "uniform-878"
+  },
+  {
+    "id": "bravo-59-pk6",
+    "name": "uniform-271",
+    "appId": 7236,
+    "archived": true,
+    "description": "uniform-198",
+    "finished": true,
+    "published": false,
+    "hidden": true,
+    "size": 10561,
+    "type": "tango-245",
+    "owners": [
+      "november-230"
+    ],
+    "viewers": [
+      "november-886"
+    ],
+    "lastMod": 39647,
+    "createdAt": 71020,
+    "lastComputed": 55414,
+    "metadata": [
+      "lima-952",
+      "charlie-636"
+    ],
+    "view_count": 81319,
+    "popularity": 67235,
+    "last_viewed": 51869,
+    "chart_id": "papa-408",
+    "edit_id": "golf-656",
+    "is_predictive": false,
+    "is_official_content": true,
+    "location_id": "juliet-985",
+    "shortcut_ids": [],
+    "definition": "charlie-102"
+  },
+  {
+    "id": "oscar-33-pk7",
+    "name": "mike-585",
+    "appId": 59938,
+    "archived": false,
+    "description": "juliet-909",
+    "finished": true,
+    "published": false,
+    "hidden": false,
+    "size": 67629,
+    "type": "charlie-741",
+    "owners": [],
+    "viewers": [
+      "bravo-351"
+    ],
+    "lastMod": 91436,
+    "createdAt": 41756,
+    "lastComputed": 94147,
+    "metadata": [],
+    "view_count": 54754,
+    "popularity": 33321,
+    "last_viewed": 19621,
+    "chart_id": "sierra-665",
+    "edit_id": "quebec-224",
+    "is_predictive": false,
+    "is_official_content": true,
+    "location_id": "tango-718",
+    "shortcut_ids": [],
+    "definition": "juliet-805"
+  }
+]

@@ -24,13 +24,19 @@ class ExampleLakeflowConnect(LakeflowConnect):
 
     def __init__(self, options: dict[str, str]) -> None:
         super().__init__(options)
-        username = options.get("username", "default_user")
-        password = options.get("password", "default_pass")
-        self._api = get_api(username, password)
+        self._username = options.get("username", "default_user")
+        self._password = options.get("password", "default_pass")
 
         # Cap cursors at init time so a trigger never chases new data.
         # The next trigger creates a fresh instance and picks up from here.
         self._init_ts = datetime.now(timezone.utc).isoformat()
+
+    @property
+    def _api(self):
+        # Resolved lazily so the connector instance carries no non-picklable
+        # state — the underlying simulator holds a threading.Lock that Spark
+        # cannot serialize when shipping the reader to executors.
+        return get_api(self._username, self._password)
 
     def _request_with_retry(self, method: str, path: str, **kwargs):
         """Issue an API request, retrying on 429/500/503 with exponential backoff."""

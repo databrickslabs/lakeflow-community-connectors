@@ -1,0 +1,28 @@
+Table Name,PK,FK / References
+ACCOUNT,id,"owner_id → USERS(id), created_by → USERS(id), modified_by → USERS(id)"
+CONTACT,id,"account_id → ACCOUNT(id), owner_id → USERS(id), vendor_name → VENDOR(id)"
+LEAD,id,"owner_id → USERS(id), converted_account_id → ACCOUNT(id), converted_contact_id → CONTACT(id)"
+DEAL,id,"account_id → ACCOUNT(id), contact_id → CONTACT(id), owner_id → USERS(id), campaign_id → CAMPAIGN(id)"
+CAMPAIGN,id,owner_id → USERS(id)
+VENDOR,id,owner_id → USERS(id)
+PRODUCT,id,"vendor_name → VENDOR(id), owner_id → USERS(id)"
+PRICE_BOOK,id,owner_id → USERS(id)
+QUOTE,id,"account_id → ACCOUNT(id), contact_id → CONTACT(id), deal_id → DEAL(id)"
+SALES_ORDER,id,"account_id → ACCOUNT(id), contact_id → CONTACT(id), deal_id → DEAL(id), quote_id → QUOTE(id)"
+PURCHASE_ORDER,id,"vendor_name → VENDOR(id), contact_id → CONTACT(id)"
+INVOICE,id,"account_id → ACCOUNT(id), contact_id → CONTACT(id), sales_order_id → SALES_ORDER(id)"
+CASE,id,"account_id → ACCOUNT(id), contact_id → CONTACT(id), deal_id → DEAL(id), product_id → PRODUCT(id)"
+SOLUTION,id,owner_id → USERS(id)
+TASK,id,"who_id (Polymorphic: CONTACT/LEAD), what_id (Polymorphic: ACCOUNT/DEAL/etc.), owner_id → USERS"
+EVENT,id,"who_id (CONTACT/LEAD), what_id (ACCOUNT/DEAL/etc.), owner_id → USERS"
+CALL,id,"who_id (CONTACT/LEAD), what_id (ACCOUNT/DEAL/etc.), owner_id → USERS"
+NOTE,id,"parent_id (Polymorphic: Refers to any module record), owner_id → USERS"
+ATTACHMENT,id,parent_id (Polymorphic: Refers to any module record)
+USERS,id,"role_id → ROLE(id), profile_id → PROFILE(id)"
+ROLE,id,reporting_to → ROLE(id)
+PROFILE,id,N/A
+CAMPAIGN_MEMBER,_junction_id,"campaign_id → CAMPAIGN(id), lead_id → LEAD(id), contact_id → CONTACT(id)"
+DEAL_CONTACT_ROLE,_junction_id,"deal_id → DEAL(id), contact_id → CONTACT(id)"
+QUOTED_ITEM,_junction_id,"quote_id → QUOTE(id), product_id → PRODUCT(id)"
+INVOICED_ITEM,_junction_id,"invoice_id → INVOICE(id), product_id → PRODUCT(id)"
+ORDERED_ITEM,_junction_id,"sales_order_id → SALES_ORDER(id), product_id → PRODUCT(id)"

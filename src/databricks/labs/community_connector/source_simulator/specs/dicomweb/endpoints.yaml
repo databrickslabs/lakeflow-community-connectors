@@ -4,39 +4,104 @@
 # patches both. Endpoints return raw arrays; QIDO-RS treats an empty
 # response as "no records", which is exactly what we want for offline
 # tests.
+#
+# Path-prefix handling
+# --------------------
+# Real DICOMweb deployments mount QIDO-RS / WADO-RS under a server-
+# specific base path, e.g. Orthanc demo serves at
+# ``/demo/dicom-web/studies/...`` and Google Cloud Healthcare at
+# ``/v1/projects/.../dicomStores/.../dicomWeb/studies/...``.
+# To make the spec match both the simulate-mode base URL
+# (``https://simulator.example.com/sim/dicomweb``) AND any live
+# 2-segment-prefix server (Orthanc, etc.), every path is prefixed
+# with two placeholder segments ``{root_p1}/{root_p2}``. The
+# placeholders are throwaway path-param captures — the handler does
+# not consult them.
+#
+# If a live deployment uses a different prefix depth (single segment,
+# or three+ segments like GCP Healthcare), a fresh cassette + spec
+# variant must be authored to match.
 
 endpoints:
-  - path: /studies
+  # ``synthesize_future_records`` is intentionally **not** declared on
+  # any DICOMweb endpoint. The directive's contract — clone records
+  # with a cursor field rewritten to ISO-8601 timestamps strictly past
+  # ``now()`` — does not fit DICOMweb for two reasons:
+  #
+  # 1. DICOM JSON encodes scalars under ``"<tag>": {"vr": "DA",
+  #    "Value": ["20240101"]}`` (a list at depth 2). The simulator's
+  #    ``set_field`` walks dotted paths through dicts only and
+  #    overwrites the ``Value`` list with a dict, which corrupts the
+  #    record before the connector ever sees it.
+  # 2. DICOMweb's ``StudyDate`` query parameter uses the custom
+  #    ``YYYYMMDD-YYYYMMDD`` range syntax. The simulator's filter ops
+  #    (``eq``/``gte``/``lte``/``in``) cannot express this, so the
+  #    spec has no ``StudyDate`` filter declared and the simulator
+  #    returns every record regardless of the connector's date
+  #    bounds — future or otherwise. There is nothing for the
+  #    directive to gate.
+  #
+  # Cap engagement is still tested. The connector freezes
+  # ``self._init_date`` to wall-clock ``now()`` in ``__init__`` and
+  # ``latest_offset`` returns ``min(next_end, self._init_date)`` —
+  # math, not corpus data. ``test_microbatch_offset_convergence``
+  # exercises this on every run: drift the cursor past today and the
+  # cap forces ``end_offset == start_offset``. A bug that lifted the
+  # cap would surface here directly without needing synthesized
+  # future corpus rows.
+  - path: /{root_p1}/{root_p2}/studies
     method: GET
     corpus: studies
     response:
       pagination_style: none
       single_entity: true
 
-  - path: /studies/{study_uid}/series
+  - path: /{root_p1}/{root_p2}/studies/{study_uid}/series
     method: GET
     corpus: series
     response:
       pagination_style: none
       single_entity: true
 
-  - path: /studies/{study_uid}/series/{series_uid}/instances
+  - path: /{root_p1}/{root_p2}/studies/{study_uid}/series/{series_uid}/instances
     method: GET
     corpus: instances
     response:
       pagination_style: none
       single_entity: true
 
-  - path: /studies/{study_uid}/series/{series_uid}/metadata
+  - path: /{root_p1}/{root_p2}/studies/{study_uid}/series/{series_uid}/metadata
     method: GET
     corpus: instances
     response:
       pagination_style: none
       single_entity: true
 
-  - path: /studies/{study_uid}/series/{series_uid}/instances/{sop_uid}/metadata
+  - path: /{root_p1}/{root_p2}/studies/{study_uid}/series/{series_uid}/instances/{sop_uid}/metadata
     method: GET
     corpus: instances
+    response:
+      pagination_style: none
+      single_entity: true
+
+  # WADO-RS instance retrieval. The connector calls this when
+  # fetch_dicom_files=true (dicomweb.py::_attach_dicom_file). A real server
+  # returns multipart/related DICOM bytes; the corpus stores JSON only, so
+  # this endpoint serves a stub response. The connector treats any non
+  # multipart/related body as raw DICOM bytes and writes it to the volume,
+  # which is enough to populate the dicom_file_path column for tests.
+  - path: /{root_p1}/{root_p2}/studies/{study_uid}/series/{series_uid}/instances/{sop_uid}
+    method: GET
+    response:
+      pagination_style: none
+      single_entity: true
+
+  # Single-study WADO-RS retrieval used by the diagnostics probe and by
+  # any caller that fetches a study by UID without descending the
+  # hierarchy. Not exercised by the main read path but appears in live
+  # cassettes (probe traffic), so the spec needs to match it.
+  - path: /{root_p1}/{root_p2}/studies/{study_uid}
+    method: GET
     response:
       pagination_style: none
       single_entity: true

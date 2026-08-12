@@ -23,6 +23,9 @@ from databricks.labs.community_connector.interface.supports_partition import (
     SupportsPartitionedStream,
 )
 from databricks.labs.community_connector.libs.utils import parse_value
+from databricks.labs.community_connector.source_simulator import MODE_SIMULATE
+
+from tests.unit.sources.test_suite import _resolve_env_mode_for_simulator
 
 
 class SupportsPartitionTests:
@@ -219,6 +222,85 @@ class SupportsPartitionTests:
             )
 
         return None
+
+    # ------------------------------------------------------------------
+    # test_every_column_populated_by_at_least_one_partition_record
+    # ------------------------------------------------------------------
+
+    def test_every_column_populated_by_at_least_one_partition_record(self):
+        """Partition-side mirror of
+        ``LakeflowConnectTests.test_every_column_populated_by_at_least_one_record``.
+
+        For every column the connector advertises in ``get_table_schema``,
+        at least one record returned across ``read_partition`` calls must
+        be non-null. Honors ``allow_null_columns`` on the host test class.
+        Simulate mode only — see the non-partitioned twin for the rationale.
+        """
+        tables = self._partitioned_tables()
+        if not tables:
+            pytest.skip("No partitioned tables")
+        if _resolve_env_mode_for_simulator(self.simulator_source) != MODE_SIMULATE:
+            pytest.skip("Column-coverage invariant only enforced in simulate mode")
+        errors = []
+        for table in tables:
+            err = self._validate_column_population_partitioned(table)
+            if err:
+                errors.append(err)
+        if errors:
+            pytest.fail("\n\n".join(errors))
+
+    def _validate_column_population_partitioned(self, table: str) -> Optional[str]:
+        """Returns error string or None.
+
+        Mirrors ``_validate_column_population`` on the non-partitioned path
+        but consumes records from ``get_partitions`` + ``read_partition``,
+        capped at ``sample_records`` total across all partitions. Top-level
+        columns only.
+        """
+        try:
+            schema = self.connector.get_table_schema(table, self._opts(table))
+        except Exception:
+            # test_get_table_schema will surface the underlying error.
+            return None
+
+        try:
+            partitions = self.connector.get_partitions(table, self._opts(table))
+        except Exception:
+            # test_get_partitions will surface the underlying error.
+            return None
+        if not partitions:
+            # test_read_partition reports the empty-partitions case.
+            return None
+
+        records: List[dict] = []
+        budget = self.sample_records
+        for partition in partitions:
+            if budget <= 0:
+                break
+            try:
+                iterator = self.connector.read_partition(
+                    table, partition, self._opts(table)
+                )
+            except Exception:
+                return None
+            if not hasattr(iterator, "__iter__"):
+                return None
+            try:
+                for rec in iterator:
+                    if not isinstance(rec, dict):
+                        continue
+                    records.append(rec)
+                    if len(records) >= self.sample_records:
+                        break
+            except Exception:
+                return None
+            budget = self.sample_records - len(records)
+
+        if not records:
+            # test_read_partition reports the zero-records case.
+            return None
+
+        return self._check_column_population(table, schema, records)
 
     def _validate_partition_records(
         self, table: str, partition_idx: int, records: list, schema: StructType

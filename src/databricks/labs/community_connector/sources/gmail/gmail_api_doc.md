@@ -4,17 +4,17 @@
 
 ### OAuth 2.0 (Preferred Method)
 
-Gmail API uses OAuth 2.0 for authentication. The connector stores `client_id`, `client_secret`, and `refresh_token`, then exchanges for an access token at runtime.
-
-**Required Credentials:**
-- `client_id`: OAuth 2.0 client ID from Google Cloud Console
-- `client_secret`: OAuth 2.0 client secret
-- `refresh_token`: Long-lived refresh token obtained via OAuth flow
+Gmail API uses OAuth 2.0 for authentication. The Unity Catalog COMMUNITY
+connection (u2m / u2m_per_user flow) owns the OAuth dance — it stores the
+`client_id`/`client_secret`, runs the authorization-code + PKCE exchange,
+and refreshes tokens — then injects a runtime `access_token` into the
+connector's options at query time. The connector treats the token as
+opaque: no refresh, no token endpoint.
 
 **Required Scopes:**
 - `https://www.googleapis.com/auth/gmail.readonly` - Read-only access to Gmail
 
-**Token Exchange Request:**
+**Token Exchange (performed by the connection, not the connector):**
 ```http
 POST https://oauth2.googleapis.com/token
 Content-Type: application/x-www-form-urlencoded

@@ -526,6 +526,79 @@ def register_lakeflow_source(spark):
 
 
     ########################################################
+    # src/databricks/labs/community_connector/interface/supports_namespaces.py
+    ########################################################
+
+    class SupportsNamespaces(ABC):
+        """Mixin for connectors whose tables live under hierarchical namespaces.
+
+        A namespace is a path of zero or more string segments (e.g. ``["org",
+        "repo"]`` for GitHub, ``["tenant", "project"]`` for Azure DevOps).
+        Connectors with a flat catalog do not need this mixin — the framework
+        falls back to :meth:`LakeflowConnect.list_tables` and reports each table
+        with an empty namespace.
+
+        Output ordering on the ``_community_namespaces`` and ``_community_tables``
+        Spark virtual tables is normalized by the framework via ``sorted(...)``,
+        so connector implementations of :meth:`list_namespaces` and
+        :meth:`list_tables_in_namespace` are free to return their results in
+        any order (including from a :class:`set` or generator).
+
+        Must be used together with :class:`LakeflowConnect`.
+
+        Usage::
+
+            class MyConnector(LakeflowConnect, SupportsNamespaces):
+                ...
+        """
+
+        @abstractmethod
+        def list_namespaces(
+            self,
+            prefix: list[str] | None = None,
+        ) -> list[list[str]]:
+            """Return the immediate child namespaces under ``prefix``.
+
+            This method returns one level of *namespace* children only — it
+            never returns tables. A namespace can hold tables and child
+            namespaces independently; callers must always call
+            :meth:`list_tables_in_namespace` for every namespace they care
+            about, regardless of whether :meth:`list_namespaces` returned
+            children for it. An empty return value just means there are no
+            further child namespaces under ``prefix``.
+
+            Walk the full tree by recursing on each returned child.
+
+            Args:
+                prefix: A namespace path under which to list children. ``None`` or
+                    an empty list lists the root-level namespaces.
+            Returns:
+                A list of full namespace paths (each path includes the prefix).
+            """
+
+        @abstractmethod
+        def list_tables_in_namespace(
+            self,
+            namespace: list[str],
+        ) -> list[str]:
+            """Return the table names that live directly under ``namespace``.
+
+            Callers that want every table across the whole catalog walk the
+            namespace tree via :meth:`list_namespaces` and call this method
+            once per leaf — there is no "list everything" shortcut.
+
+            Args:
+                namespace: The namespace path. An empty list ``[]`` selects
+                    root-level tables (those that live outside any namespace).
+            Returns:
+                A list of table names. The full ``(namespace, table_name)``
+                row exposed on ``_community_tables`` is reconstructed by the
+                framework from the namespace the caller already supplied, so
+                the connector does not need to echo it back.
+            """
+
+
+    ########################################################
     # src/databricks/labs/community_connector/sources/gmail/gmail_schemas.py
     ########################################################
 
@@ -868,55 +941,29 @@ def register_lakeflow_source(spark):
 
 
     class GmailApiClient:
-        """Handles Gmail API communication: auth, requests, batch, and parallel fetching."""
+        """Gmail HTTP client authenticated with a pre-issued access token.
+
+        The ``access_token`` is injected by the Unity Catalog COMMUNITY
+        connection's u2m / u2m_per_user OAuth flow and treated as opaque — the
+        client never refreshes it or contacts a token endpoint.
+        """
 
         BASE_URL = "https://gmail.googleapis.com/gmail/v1"
         BATCH_URL = "https://gmail.googleapis.com/batch/gmail/v1"
 
         def __init__(
             self,
-            client_id: str,
-            client_secret: str,
-            refresh_token: str,
+            access_token: str,
             user_id: str = "me",
         ) -> None:
-            self.client_id = client_id
-            self.client_secret = client_secret
-            self.refresh_token = refresh_token
             self.user_id = user_id
-
-            self._access_token = None
-            self._token_expires_at = 0
             self._session = requests.Session()
-
-        def get_access_token(self) -> str:
-            """Exchange refresh token for access token with caching."""
-            # Return cached token if still valid (with 60s buffer)
-            if self._access_token and time.time() < self._token_expires_at - 60:
-                return self._access_token
-
-            response = requests.post(
-                "https://oauth2.googleapis.com/token",
-                data={
-                    "client_id": self.client_id,
-                    "client_secret": self.client_secret,
-                    "refresh_token": self.refresh_token,
-                    "grant_type": "refresh_token",
-                },
-                timeout=30,
-            )
-            response.raise_for_status()
-            data = response.json()
-
-            self._access_token = data["access_token"]
-            self._token_expires_at = time.time() + data.get("expires_in", 3600)
-
-            return self._access_token
+            self.access_token = access_token
 
         def get_headers(self) -> Dict[str, str]:
-            """Get headers with valid access token."""
+            """Bearer-token headers for Gmail API calls."""
             return {
-                "Authorization": f"Bearer {self.get_access_token()}",
+                "Authorization": f"Bearer {self.access_token}",
                 "Accept": "application/json",
             }
 
@@ -1066,29 +1113,32 @@ def register_lakeflow_source(spark):
 
         def __init__(self, options: dict[str, str]) -> None:
             """
-            Initialize the Gmail connector with OAuth 2.0 credentials.
+            Initialize the Gmail connector.
+
+            Authentication is a pre-issued access token. The Unity Catalog
+            COMMUNITY connection (``community_oauth_flow=u2m`` or
+            ``u2m_per_user``) owns the OAuth dance — Databricks performs the
+            authorization-code exchange (and per-user refresh in u2m_per_user
+            mode) and injects a valid bearer token at query time. The connector
+            treats it as opaque: no client_id/secret, no refresh, no token
+            endpoint. A 401 mid-query means the token expired or was revoked;
+            the user re-authorizes through the connection.
 
             Expected options:
-                - client_id: OAuth 2.0 client ID from Google Cloud Console
-                - client_secret: OAuth 2.0 client secret
-                - refresh_token: Long-lived refresh token obtained via OAuth flow
-                - user_id (optional): User email or 'me' (default: 'me')
+                - access_token: OAuth 2.0 bearer token injected by the connection
+                - user_id (optional): user email or 'me' (default: 'me')
             """
-            self.client_id = options.get("client_id")
-            self.client_secret = options.get("client_secret")
-            self.refresh_token = options.get("refresh_token")
+            self.access_token = options.get("access_token")
             self.user_id = options.get("user_id", "me")
 
-            if not self.client_id:
-                raise ValueError("Gmail connector requires 'client_id' in options")
-            if not self.client_secret:
-                raise ValueError("Gmail connector requires 'client_secret' in options")
-            if not self.refresh_token:
-                raise ValueError("Gmail connector requires 'refresh_token' in options")
+            if not self.access_token:
+                raise ValueError(
+                    "Gmail connector requires 'access_token' in options. The "
+                    "Unity Catalog COMMUNITY connection's u2m / u2m_per_user "
+                    "OAuth flow injects it at query time."
+                )
 
-            self.api = GmailApiClient(
-                self.client_id, self.client_secret, self.refresh_token, self.user_id
-            )
+            self.api = GmailApiClient(self.access_token, self.user_id)
 
             # Snapshot the mailbox historyId at init time. Gmail's mailbox
             # historyId advances on every write (new mail, reads, label edits),
@@ -1708,11 +1758,58 @@ def register_lakeflow_source(spark):
 
     LakeflowConnectImpl = GmailLakeflowConnect
     # Constant option or column names
-    METADATA_TABLE = "_lakeflow_metadata"
+    METADATA_TABLE = "_community_table_metadata"
+    NAMESPACES_TABLE = "_community_namespaces"
+    TABLES_TABLE = "_community_tables"
+    VIRTUAL_TABLES = (METADATA_TABLE, NAMESPACES_TABLE, TABLES_TABLE)
     TABLE_NAME = "tableName"
     TABLE_NAME_LIST = "tableNameList"
     TABLE_CONFIGS = "tableConfigs"
     IS_DELETE_FLOW = "isDeleteFlow"
+    NAMESPACE_PREFIX = "namespacePrefix"
+    NAMESPACE = "namespace"
+
+
+    def _decode_list_of_str_option(option_name: str, value: str | None) -> list[str] | None:
+        """Decode and validate a JSON-encoded ``list[str]`` Spark option.
+
+        Returns ``None`` if the option is absent; otherwise the parsed list.
+        Raises ``ValueError`` with the offending value if the JSON is malformed
+        or the decoded value is not a list of strings.
+        """
+        if value is None:
+            return None
+        try:
+            decoded = json.loads(value)
+        except json.JSONDecodeError as e:
+            raise ValueError(
+                f"option '{option_name}' must be a JSON-encoded list[str]; "
+                f"got non-JSON value: {value!r}"
+            ) from e
+        if not isinstance(decoded, list) or not all(isinstance(s, str) for s in decoded):
+            raise ValueError(
+                f"option '{option_name}' must be a JSON-encoded list[str]; "
+                f"got: {decoded!r}"
+            )
+        return decoded
+
+
+    def _decode_dict_option(option_name: str, value: str | None) -> dict:
+        """Decode and validate a JSON-encoded ``dict`` Spark option."""
+        if value is None:
+            return {}
+        try:
+            decoded = json.loads(value)
+        except json.JSONDecodeError as e:
+            raise ValueError(
+                f"option '{option_name}' must be a JSON-encoded dict; "
+                f"got non-JSON value: {value!r}"
+            ) from e
+        if not isinstance(decoded, dict):
+            raise ValueError(
+                f"option '{option_name}' must be a JSON-encoded dict; got: {decoded!r}"
+            )
+        return decoded
 
 
     # PySpark's DataSource API requires camelCase method names and inherits
@@ -1844,7 +1941,7 @@ def register_lakeflow_source(spark):
             self._supports_partition = isinstance(lakeflow_connect, SupportsPartition)
 
         def partitions(self):
-            if self._supports_partition and self.table_name != METADATA_TABLE:
+            if self._supports_partition and self.table_name not in VIRTUAL_TABLES:
                 try:
                     partition_descs = self.lakeflow_connect.get_partitions(
                         self.table_name, self.options
@@ -1857,6 +1954,10 @@ def register_lakeflow_source(spark):
         def read(self, partition):
             if self.table_name == METADATA_TABLE:
                 records = self._read_table_metadata()
+            elif self.table_name == NAMESPACES_TABLE:
+                records = self._read_namespaces()
+            elif self.table_name == TABLES_TABLE:
+                records = self._read_tables()
             elif self._supports_partition and partition.value is not None:
                 partition_desc = json.loads(partition.value)
                 records = self.lakeflow_connect.read_partition(
@@ -1867,10 +1968,14 @@ def register_lakeflow_source(spark):
             return map(lambda x: parse_value(x, self.schema), records)
 
         def _read_table_metadata(self):
-            table_name_list = self.options.get(TABLE_NAME_LIST, "")
-            table_names = [o.strip() for o in table_name_list.split(",") if o.strip()]
+            table_names = _decode_list_of_str_option(
+                TABLE_NAME_LIST, self.options.get(TABLE_NAME_LIST)
+            ) or []
+            table_configs = _decode_dict_option(
+                TABLE_CONFIGS, self.options.get(TABLE_CONFIGS)
+            )
             all_records = []
-            table_configs = json.loads(self.options.get(TABLE_CONFIGS, "{}"))
+            # Preserve caller-supplied table order — caller controls it.
             for table in table_names:
                 metadata = self.lakeflow_connect.read_table_metadata(
                     table, table_configs.get(table, {})
@@ -1878,21 +1983,104 @@ def register_lakeflow_source(spark):
                 all_records.append({TABLE_NAME: table, **metadata})
             return all_records
 
+        def _read_namespaces(self):
+            # Connectors without SupportsNamespaces are flat — no rows.
+            if not isinstance(self.lakeflow_connect, SupportsNamespaces):
+                return []
+            prefix = _decode_list_of_str_option(
+                NAMESPACE_PREFIX, self.options.get(NAMESPACE_PREFIX)
+            )
+            namespaces = self.lakeflow_connect.list_namespaces(prefix)
+            # Sort framework-side for deterministic output regardless of
+            # connector iteration order.
+            return [{"namespace": ns} for ns in sorted(namespaces)]
+
+        def _read_tables(self):
+            namespace_supplied = NAMESPACE in self.options
+            if isinstance(self.lakeflow_connect, SupportsNamespaces):
+                if not namespace_supplied:
+                    raise ValueError(
+                        f"option '{NAMESPACE}' is required when reading "
+                        f"'{TABLES_TABLE}' against a connector that implements "
+                        f"SupportsNamespaces. Pass a JSON-encoded list[str] "
+                        f"(use '[]' for root-level tables; walk the tree via "
+                        f"'{NAMESPACES_TABLE}' to enumerate every namespace)."
+                    )
+                namespace = _decode_list_of_str_option(
+                    NAMESPACE, self.options[NAMESPACE]
+                )
+                tables = self.lakeflow_connect.list_tables_in_namespace(namespace)
+                return [
+                    {"namespace": namespace, TABLE_NAME: tn}
+                    for tn in sorted(tables)
+                ]
+            # Flat connector path. Reject a stray `namespace` option — the
+            # caller probably mistook this connector for namespace-aware and
+            # silently ignoring the option would mask the bug.
+            if namespace_supplied:
+                raise ValueError(
+                    f"option '{NAMESPACE}' was supplied but the connector does "
+                    f"not implement SupportsNamespaces. Either omit the option "
+                    f"or use a namespace-aware connector."
+                )
+            return [
+                {"namespace": [], TABLE_NAME: tn}
+                for tn in sorted(self.lakeflow_connect.list_tables())
+            ]
+
 
     class LakeflowSource(DataSource):
         """
-        PySpark DataSource implementation for Lakeflow Connect.
+        PySpark DataSource base for Lakeflow Connect.
+
+        Two ways the connector implementation is bound:
+
+        - Per-source subclass (wheel / multi-file deployment): subclass and set
+          ``_lakeflow_connect_cls``::
+
+              class GmailDataSource(LakeflowSource):
+                  _lakeflow_connect_cls = GmailLakeflowConnect
+
+              spark.dataSource.register(GmailDataSource)
+
+        - Merged single-file deployment (SDP): ``_lakeflow_connect_cls`` is left
+          ``None`` and the connector is taken from the module-level
+          ``LakeflowConnectImpl`` placeholder, which the merge script substitutes
+          with the actual implementation class.
         """
+
+        # Per-source subclasses set this. Left ``None`` on the base so the merged
+        # single-file path falls back to the ``LakeflowConnectImpl`` placeholder.
+        _lakeflow_connect_cls = None
+
+        # Spark format name. Defaults to "lakeflow_connect" because Unity Catalog
+        # connection-option injection looks for that exact string. A per-source
+        # subclass may override this with its source name once it no longer relies
+        # on UC injection (see the commented override in each source's __init__.py).
+        _format_name = "lakeflow_connect"
 
         def __init__(self, options):
             self.options = options
-            # TEMPORARY: LakeflowConnectImpl is replaced with the actual implementation
-            # class during merge. See the placeholder comment at the top of this file.
-            self.lakeflow_connect = LakeflowConnectImpl(options)  # pylint: disable=abstract-class-instantiated
+            table = options.get(TABLE_NAME)
+            # Catch typos against the framework's reserved virtual-table namespace
+            # early — falling through to the connector with an unknown
+            # `_community_*` name yields a confusing per-connector error.
+            if table and table.startswith("_community_") and table not in VIRTUAL_TABLES:
+                raise ValueError(
+                    f"unknown framework virtual table '{table}'. Valid framework "
+                    f"virtual tables are: {', '.join(VIRTUAL_TABLES)}. "
+                    f"For a regular source table, use a name that does not start "
+                    f"with '_community_'."
+                )
+            # Per-source subclasses bind the implementation via _lakeflow_connect_cls.
+            # The merged single-file path leaves it None and relies on the
+            # LakeflowConnectImpl placeholder (substituted by the merge script).
+            connect_cls = type(self)._lakeflow_connect_cls or LakeflowConnectImpl
+            self.lakeflow_connect = connect_cls(options)  # pylint: disable=abstract-class-instantiated
 
         @classmethod
         def name(cls):
-            return "lakeflow_connect"
+            return cls._format_name
 
         def schema(self):
             table = self.options[TABLE_NAME]
@@ -1905,8 +2093,20 @@ def register_lakeflow_source(spark):
                         StructField("ingestion_type", StringType(), True),
                     ]
                 )
-            else:
-                return self.lakeflow_connect.get_table_schema(table, self.options)
+            if table == NAMESPACES_TABLE:
+                return StructType(
+                    [
+                        StructField("namespace", ArrayType(StringType()), False),
+                    ]
+                )
+            if table == TABLES_TABLE:
+                return StructType(
+                    [
+                        StructField("namespace", ArrayType(StringType()), False),
+                        StructField(TABLE_NAME, StringType(), False),
+                    ]
+                )
+            return self.lakeflow_connect.get_table_schema(table, self.options)
 
         def reader(self, schema: StructType):
             return LakeflowBatchReader(self.options, schema, self.lakeflow_connect)

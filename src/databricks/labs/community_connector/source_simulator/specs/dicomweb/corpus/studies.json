@@ -1,18 +1,38 @@
 [
   {
-    "0020000D": {"vr": "UI", "Value": ["1.2.3.4.5.1"]},
-    "00100010": {"vr": "PN", "Value": [{"Alphabetic": "Sim^Patient"}]},
-    "00100020": {"vr": "LO", "Value": ["SIM-PAT-001"]},
+    "00080005": {"vr": "CS", "Value": ["ISO_IR 192"]},
     "00080020": {"vr": "DA", "Value": ["20240101"]},
     "00080030": {"vr": "TM", "Value": ["120000"]},
-    "00200010": {"vr": "SH", "Value": ["STUDY001"]}
+    "00080050": {"vr": "SH", "Value": ["ACC-0000001"]},
+    "00080061": {"vr": "CS", "Value": ["CT", "SR"]},
+    "00080090": {"vr": "PN"},
+    "00081030": {"vr": "LO", "Value": ["CT CHEST W/O CONTRAST"]},
+    "00081190": {"vr": "UR", "Value": ["https://simulator.example.com/sim/dicomweb/studies/1.2.3.4.5.1"]},
+    "00100010": {"vr": "PN", "Value": [{"Alphabetic": "Sim^Patient"}]},
+    "00100020": {"vr": "LO", "Value": ["SIM-PAT-001"]},
+    "00100030": {"vr": "DA"},
+    "00100040": {"vr": "CS", "Value": ["M"]},
+    "0020000D": {"vr": "UI", "Value": ["1.2.3.4.5.1"]},
+    "00200010": {"vr": "SH", "Value": ["STUDY001"]},
+    "00201206": {"vr": "IS", "Value": ["2"]},
+    "00201208": {"vr": "IS", "Value": ["1"]}
   },
   {
-    "0020000D": {"vr": "UI", "Value": ["1.2.3.4.5.2"]},
-    "00100010": {"vr": "PN", "Value": [{"Alphabetic": "Sim^Patient2"}]},
-    "00100020": {"vr": "LO", "Value": ["SIM-PAT-002"]},
+    "00080005": {"vr": "CS", "Value": ["ISO_IR 192"]},
     "00080020": {"vr": "DA", "Value": ["20240102"]},
     "00080030": {"vr": "TM", "Value": ["130000"]},
-    "00200010": {"vr": "SH", "Value": ["STUDY002"]}
+    "00080050": {"vr": "SH", "Value": ["ACC-0000002"]},
+    "00080061": {"vr": "CS", "Value": ["MR"]},
+    "00080090": {"vr": "PN"},
+    "00081030": {"vr": "LO", "Value": ["MR BRAIN W/O CONTRAST"]},
+    "00081190": {"vr": "UR", "Value": ["https://simulator.example.com/sim/dicomweb/studies/1.2.3.4.5.2"]},
+    "00100010": {"vr": "PN", "Value": [{"Alphabetic": "Sim^Patient2"}]},
+    "00100020": {"vr": "LO", "Value": ["SIM-PAT-002"]},
+    "00100030": {"vr": "DA"},
+    "00100040": {"vr": "CS", "Value": ["F"]},
+    "0020000D": {"vr": "UI", "Value": ["1.2.3.4.5.2"]},
+    "00200010": {"vr": "SH", "Value": ["STUDY002"]},
+    "00201206": {"vr": "IS", "Value": ["1"]},
+    "00201208": {"vr": "IS", "Value": ["1"]}
   }
 ]

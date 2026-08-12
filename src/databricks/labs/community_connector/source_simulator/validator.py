@@ -230,10 +230,22 @@ def _diff(
     """Return a list of issue strings; empty means responses match."""
     issues: List[str] = []
 
-    if live.status_code != spec_response.status_code:
+    _allowed_codes = spec.response.expected_status_codes or []
+    _is_alternative_code = (
+        live.status_code != spec_response.status_code
+        and live.status_code in _allowed_codes
+    )
+    _status_ok = live.status_code == spec_response.status_code or _is_alternative_code
+    if not _status_ok:
         issues.append(
             f"status_code: live={live.status_code} spec={spec_response.status_code}"
         )
+
+    # When the live endpoint returned an explicitly-accepted alternative status
+    # code (e.g. 404 for "no data"), body diffing is meaningless — the response
+    # shape will differ from the success corpus by design.  Skip it.
+    if _is_alternative_code:
+        return issues
 
     live_body = _try_json(live)
     spec_body = _try_json(spec_response)
@@ -250,14 +262,24 @@ def _diff(
         return issues
 
     if isinstance(live_body, dict):
-        live_keys = set(live_body.keys())
-        spec_keys = set(spec_body.keys())
-        missing_in_spec = live_keys - spec_keys
-        if missing_in_spec:
-            issues.append(
-                f"top-level keys in live missing from spec: "
-                f"{sorted(list(missing_in_spec))[:5]}"
-            )
+        # When the spec declares ignore_extra_keys on its wrapper, skip the
+        # top-level key diff entirely.  This is the right escape hatch for
+        # APIs (e.g. Amplitude) that return dynamically-varying internal
+        # metadata fields (caching telemetry, cost annotations, etc.) that
+        # change on every call and are never read by the connector.
+        _ignore_extra = (
+            spec.response.wrapper is not None
+            and spec.response.wrapper.ignore_extra_keys
+        )
+        if not _ignore_extra:
+            live_keys = set(live_body.keys())
+            spec_keys = set(spec_body.keys())
+            missing_in_spec = live_keys - spec_keys
+            if missing_in_spec:
+                issues.append(
+                    f"top-level keys in live missing from spec: "
+                    f"{sorted(list(missing_in_spec))[:5]}"
+                )
 
     live_records = _extract_records(live_body, spec)
     spec_records = _extract_records(spec_body, spec)
