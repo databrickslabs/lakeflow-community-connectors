@@ -143,6 +143,76 @@ class TestQIDORS:
             result = client.query_instances_for_series("1.2.3", "1.2.3.4")
         assert len(result) == 3
 
+    def test_query_studies_extra_filters_appended_to_url(self):
+        captured = {}
+
+        def fake_urlopen(req, timeout=None):
+            captured["url"] = req.full_url
+            return MockResponse(b"[]")
+
+        with patch("urllib.request.urlopen", side_effect=fake_urlopen):
+            client = DICOMwebClient(BASE_URL)
+            client.query_studies(
+                "20231201-20231215",
+                extra_filters={"ModalitiesInStudy": "CT", "PatientID": "PID-1"},
+            )
+
+        qs = urllib.parse.parse_qs(urllib.parse.urlparse(captured["url"]).query)
+        assert qs["ModalitiesInStudy"] == ["CT"]
+        assert qs["PatientID"] == ["PID-1"]
+        assert qs["StudyDate"] == ["20231201-20231215"]
+
+    def test_query_studies_list_filter_renders_as_repeated_param(self):
+        """QIDO-RS multi-valued matching uses repeated query params (doseq=True)."""
+        captured = {}
+
+        def fake_urlopen(req, timeout=None):
+            captured["url"] = req.full_url
+            return MockResponse(b"[]")
+
+        with patch("urllib.request.urlopen", side_effect=fake_urlopen):
+            client = DICOMwebClient(BASE_URL)
+            client.query_studies(
+                "20231201-20231215",
+                extra_filters={"ModalitiesInStudy": ["CT", "MR"]},
+            )
+
+        qs = urllib.parse.parse_qs(urllib.parse.urlparse(captured["url"]).query)
+        assert qs["ModalitiesInStudy"] == ["CT", "MR"]
+
+    def test_query_series_extra_filters_appended_to_url(self):
+        captured = {}
+
+        def fake_urlopen(req, timeout=None):
+            captured["url"] = req.full_url
+            return MockResponse(b"[]")
+
+        with patch("urllib.request.urlopen", side_effect=fake_urlopen):
+            client = DICOMwebClient(BASE_URL)
+            client.query_series_for_study(
+                "1.2.3", extra_filters={"Modality": "CT"}
+            )
+
+        qs = urllib.parse.parse_qs(urllib.parse.urlparse(captured["url"]).query)
+        assert qs["Modality"] == ["CT"]
+
+    def test_query_instances_extra_filters_appended_to_url(self):
+        captured = {}
+
+        def fake_urlopen(req, timeout=None):
+            captured["url"] = req.full_url
+            return MockResponse(b"[]")
+
+        with patch("urllib.request.urlopen", side_effect=fake_urlopen):
+            client = DICOMwebClient(BASE_URL)
+            client.query_instances_for_series(
+                "1.2.3", "1.2.3.4",
+                extra_filters={"includefield": "00080070"},
+            )
+
+        qs = urllib.parse.parse_qs(urllib.parse.urlparse(captured["url"]).query)
+        assert qs["includefield"] == ["00080070"]
+
     def test_http_error_raises(self):
         with patch("urllib.request.urlopen", side_effect=_mock_http_error(500)):
             client = DICOMwebClient(BASE_URL)

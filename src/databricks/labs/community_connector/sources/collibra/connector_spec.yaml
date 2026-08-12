@@ -1,0 +1,106 @@
+# collibra Community Connector Spec
+# This file defines the specification for the connector including
+# connection parameters and allowlist options.
+#
+# The Collibra connector supports two authentication methods:
+# 1. token             - Personal/API token (Bearer auth).
+# 2. service_principal - OAuth 2.0 client-credentials (m2m). The UC COMMUNITY
+#                        connection runs the flow and injects the bearer token at
+#                        query time; the connector never holds the client secret
+#                        or runs the exchange.
+
+display_name: Collibra
+connection:
+  # ---------------------------------------------------------------------------
+  # Authentication Methods
+  # Choose ONE of the following authentication approaches.
+  # ---------------------------------------------------------------------------
+  auth_methods:
+    - name: token
+      description: >
+        Authenticate with a personal or API token via Bearer auth.
+        Simplest for a single user / quick setup.
+      parameters:
+        - name: token
+          type: string
+          required: true
+          secret: true
+          description: >
+            Personal or API token for the Collibra Core REST API v2.
+            Passed as "Authorization: Bearer {token}" on all requests.
+
+    - name: service_principal
+      description: >
+        Authenticate as a service principal using the OAuth 2.0
+        client-credentials (m2m) flow — no interactive user. The
+        service principal must be registered as an OAuth app in Collibra.
+        The token is minted and refreshed by the Unity Catalog connection;
+        the connector receives it as access_token.
+      parameters:
+        - name: client_id
+          type: string
+          required: true
+          description: >
+            OAuth 2.0 client ID registered in Collibra.
+
+        - name: client_secret
+          type: string
+          required: true
+          secret: true
+          description: >
+            OAuth 2.0 client secret for the registered app.
+
+  # ---------------------------------------------------------------------------
+  # Common Parameters (shared across all authentication methods)
+  # ---------------------------------------------------------------------------
+  parameters:
+    - name: org
+      type: string
+      required: true
+      description: >
+        Collibra Cloud subdomain (e.g., "databricks" for
+        https://databricks.collibra.com). Alternatively, pass base_url
+        with the full REST base URL.
+
+    - name: base_url
+      type: string
+      required: false
+      description: >
+        Full Collibra REST base URL (e.g.,
+        https://databricks.collibra.com/rest/2.0). If provided, overrides
+        org-based URL construction. Useful for on-premises or custom URL
+        routing.
+
+    - name: page_size
+      type: string
+      required: false
+      description: >
+        Page size for paginated API requests. Valid range: 1–1000.
+        Default: 1000. Larger pages reduce request count but increase
+        memory and latency per request.
+
+  # ---------------------------------------------------------------------------
+  # OAuth 2.0 flow definition (used by the service_principal auth method).
+  #   flow           — m2m: client-credentials, non-interactive. Maps to UC's
+  #                    community_oauth_flow=m2m; UC runs the exchange + refresh
+  #                    server-side and injects `access_token` at query time.
+  #   token_url      — Collibra Cloud token endpoint. `{org}` is interpolated
+  #                    from the user-supplied org option by the CLI
+  #                    (see the connector-spec parameter-templating support).
+  #   (no scopes)    — live-validated (databricks.collibra.com, 2026-07-25):
+  #                    Collibra Integration (m2m) apps reject a `scope`
+  #                    parameter on the token request (`invalid_scope`); they
+  #                    are permissioned by app configuration, not a requested
+  #                    scope. Mint the client-credentials token with NO scope.
+  # ---------------------------------------------------------------------------
+  oauth:
+    flow: m2m
+    token_url: https://{org}.collibra.com/rest/oauth/v2/token
+
+# ============================================================================
+# External Options Allowlist
+# These table-specific options must be included in the externalOptionsAllowList
+# parameter of the UC connection to allow them to be passed through.
+# Use a comma-separated string of option names.
+# ============================================================================
+external_options_allowlist: "domain_id,community_id,sort_field,asset_id,type_public_ids,resource_ids,role_ids,max_records_per_batch,page_size"

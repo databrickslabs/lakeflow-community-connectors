@@ -1,0 +1,185 @@
+# remberg public REST API endpoints exercised by the connector.
+#
+# Connector flow (per RembergLakeflowConnect):
+# * Every list endpoint uses 1-indexed page + limit pagination (server
+#   default 20, max 1000); the connector detects the last page by a short
+#   page. Declared as ``pagination_style: page_number`` with ``page`` in the
+#   page role and ``limit`` in the per_page role so the simulator slices
+#   the corpus exactly like the live server.
+# * CDC tables (assets, work_orders, tickets, work_requests, organizations,
+#   parts) → bounded updatedAt-range reads via the inclusive
+#   ``updatedAtFrom`` / ``updatedAtUntil`` filters (gte/lte on the record's
+#   ``updatedAt``, ISO-8601 strings — lexicographic comparison is correct).
+#   ``synthesize_future_records`` seeds post-now records so the termination
+#   test proves the connector's ``updatedAtUntil = _init_ts`` cap works.
+# * Snapshot tables (contacts, users, forms) → plain paged full listing;
+#   the connector sends no filters. Filter params those endpoints support
+#   live (contacts' updatedAt*, users' updatedAtFrom/updatedAtTo, forms'
+#   finalizedAt*) are declared as ignore since the connector never sends
+#   them and the records carry no usable cursor field.
+#
+# Response wrapping — per the official OpenAPI response DTOs: the envelope
+# key is ``data`` for most resources but resource-named for tickets
+# (``tickets``), organizations (``organizations``) and contacts
+# (``contacts``).
+#
+# Sort params (``sortField`` / ``sortDirection``) exist on some endpoints
+# live but the connector never sends them — declared as ignore.
+
+endpoints:
+  # ---- CDC tables: bounded updatedAt-range reads ----
+
+  - path: /v2/assets
+    method: GET
+    corpus: assets
+    response:
+      pagination_style: page_number
+      wrapper:
+        records_key: data
+    params:
+      page:           {role: page}
+      limit:          {role: per_page, default: 20, max: 1000}
+      updatedAtFrom:  {role: filter, field: updatedAt, op: gte}
+      updatedAtUntil: {role: filter, field: updatedAt, op: lte}
+      sortField:      {role: ignore}
+      sortDirection:  {role: ignore}
+    synthesize_future_records:
+      cursor_field: updatedAt
+      count: 3
+
+  - path: /v2/work-orders
+    method: GET
+    corpus: work_orders
+    response:
+      pagination_style: page_number
+      wrapper:
+        records_key: data
+    params:
+      page:           {role: page}
+      limit:          {role: per_page, default: 20, max: 1000}
+      updatedAtFrom:  {role: filter, field: updatedAt, op: gte}
+      updatedAtUntil: {role: filter, field: updatedAt, op: lte}
+    synthesize_future_records:
+      cursor_field: updatedAt
+      count: 3
+
+  - path: /v2/tickets
+    method: GET
+    corpus: tickets
+    response:
+      pagination_style: page_number
+      wrapper:
+        records_key: tickets
+    params:
+      page:           {role: page}
+      limit:          {role: per_page, default: 20, max: 1000}
+      updatedAtFrom:  {role: filter, field: updatedAt, op: gte}
+      updatedAtUntil: {role: filter, field: updatedAt, op: lte}
+    synthesize_future_records:
+      cursor_field: updatedAt
+      count: 3
+
+  - path: /v1/work-requests
+    method: GET
+    corpus: work_requests
+    response:
+      pagination_style: page_number
+      wrapper:
+        records_key: data
+    params:
+      page:           {role: page}
+      limit:          {role: per_page, default: 20, max: 1000}
+      updatedAtFrom:  {role: filter, field: updatedAt, op: gte}
+      updatedAtUntil: {role: filter, field: updatedAt, op: lte}
+    synthesize_future_records:
+      cursor_field: updatedAt
+      count: 3
+
+  - path: /v1/organizations
+    method: GET
+    corpus: organizations
+    response:
+      pagination_style: page_number
+      wrapper:
+        records_key: organizations
+    params:
+      page:           {role: page}
+      limit:          {role: per_page, default: 20, max: 1000}
+      updatedAtFrom:  {role: filter, field: updatedAt, op: gte}
+      updatedAtUntil: {role: filter, field: updatedAt, op: lte}
+      sortField:      {role: ignore}
+      sortDirection:  {role: ignore}
+    synthesize_future_records:
+      cursor_field: updatedAt
+      count: 3
+
+  - path: /v2/parts
+    method: GET
+    corpus: parts
+    response:
+      pagination_style: page_number
+      wrapper:
+        records_key: data
+    params:
+      page:           {role: page}
+      limit:          {role: per_page, default: 20, max: 1000}
+      updatedAtFrom:  {role: filter, field: updatedAt, op: gte}
+      updatedAtUntil: {role: filter, field: updatedAt, op: lte}
+      sortField:      {role: ignore}
+      sortDirection:  {role: ignore}
+    synthesize_future_records:
+      cursor_field: updatedAt
+      count: 3
+
+  # ---- snapshot tables: plain paged full listing ----
+
+  - path: /v1/contacts
+    method: GET
+    corpus: contacts
+    response:
+      pagination_style: page_number
+      wrapper:
+        records_key: contacts
+    params:
+      page:           {role: page}
+      limit:          {role: per_page, default: 20, max: 1000}
+      # Live filters the connector never sends — contact records carry no
+      # updatedAt field, so there is no usable cursor.
+      updatedAtFrom:  {role: ignore}
+      updatedAtUntil: {role: ignore}
+      sortField:      {role: ignore}
+      sortDirection:  {role: ignore}
+
+  - path: /v1/users
+    method: GET
+    corpus: users
+    response:
+      pagination_style: page_number
+      wrapper:
+        records_key: data
+    params:
+      page:          {role: page}
+      limit:         {role: per_page, default: 20, max: 1000}
+      # Note: /v1/users names its upper bound ``updatedAtTo`` (not
+      # ``Until``); the connector never sends either — user records carry
+      # no timestamps.
+      updatedAtFrom: {role: ignore}
+      updatedAtTo:   {role: ignore}
+
+  - path: /v1/forms
+    method: GET
+    corpus: forms
+    response:
+      pagination_style: page_number
+      wrapper:
+        records_key: data
+    params:
+      page:             {role: page}
+      limit:            {role: per_page, default: 20, max: 1000}
+      # /v1/forms only filters on finalizedAt, which is not a change
+      # cursor (never set for inProgress forms) — connector treats the
+      # table as a snapshot and sends no filters.
+      finalizedAtFrom:  {role: ignore}
+      finalizedAtUntil: {role: ignore}
+      sortField:        {role: ignore}
+      sortDirection:    {role: ignore}

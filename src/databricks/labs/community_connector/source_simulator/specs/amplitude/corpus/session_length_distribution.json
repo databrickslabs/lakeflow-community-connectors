@@ -1,0 +1,8 @@
+[
+  {"bucket": "0s-60s",         "count": 0},
+  {"bucket": "60s-300s",       "count": 120408},
+  {"bucket": "300s-600s",      "count": 54529},
+  {"bucket": "600s-1800s",     "count": 210614},
+  {"bucket": "1800s-3600s",    "count": 336605},
+  {"bucket": "3600s-86400s",   "count": 54148}
+]

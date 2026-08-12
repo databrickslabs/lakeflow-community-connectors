@@ -1,0 +1,34 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "lakeflow-community-connectors-palantir"
+version = "0.1.0"
+description = "Palantir Foundry connector for Lakeflow Community Connectors"
+requires-python = ">=3.10"
+dependencies = [
+    "requests>=2.28.0,<3.0",
+    "lakeflow-community-connectors>=0.1.0,<1.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    # PySpark is provided by the Databricks runtime. Declaring it as a
+    # runtime dependency causes pip-install version conflicts on
+    # clusters (the wheel would pin a pyspark version that differs from
+    # the one the cluster ships). Keep it dev-only — used for local
+    # tests and type checking.
+    "pyspark>=4.2.0.dev0,<5.0",
+    "pytest>=7.0.0,<9.0",
+    "pytest-cov>=4.0.0,<7.0",
+]
+
+[tool.setuptools]
+packages = ["databricks.labs.community_connector.sources.palantir"]
+
+[tool.setuptools.package-dir]
+"databricks.labs.community_connector.sources.palantir" = "."
+
+[tool.setuptools.package-data]
+"*" = ["*.json", "*.md", "*.yaml"]

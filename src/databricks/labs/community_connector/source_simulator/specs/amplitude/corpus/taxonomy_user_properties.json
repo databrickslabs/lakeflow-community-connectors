@@ -1,0 +1,35 @@
+[
+  {
+    "user_property": "device_id",
+    "description": null,
+    "type": null,
+    "enum_values": null,
+    "regex": null,
+    "is_array_type": false,
+    "is_hidden": false,
+    "classifications": ["PII"],
+    "deleted": false
+  },
+  {
+    "user_property": "gp:plan_type",
+    "description": "User's subscription plan.",
+    "type": "string",
+    "enum_values": ["free", "pro", "enterprise"],
+    "regex": "^(free|pro|enterprise)$",
+    "is_array_type": false,
+    "is_hidden": false,
+    "classifications": [],
+    "deleted": false
+  },
+  {
+    "user_property": "gp:country",
+    "description": "User's country derived from IP.",
+    "type": "string",
+    "enum_values": null,
+    "regex": null,
+    "is_array_type": false,
+    "is_hidden": false,
+    "classifications": [],
+    "deleted": false
+  }
+]

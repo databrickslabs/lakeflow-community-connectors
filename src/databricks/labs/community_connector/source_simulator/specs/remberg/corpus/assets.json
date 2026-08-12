@@ -1,0 +1,117 @@
+[
+  {
+    "id": "quebec-9-pk0",
+    "assetNumber": "papa-253",
+    "assetType": "zulu-872",
+    "assetCategory": "yankee-218",
+    "assetTypeId": "hotel-984",
+    "name": "alpha-249",
+    "createdAt": "2024-01-25T14:59:49Z",
+    "updatedAt": "2024-01-01T00:00:00Z",
+    "location": {
+      "company": "sierra-237",
+      "street": "hotel-581",
+      "streetNumber": "tango-449",
+      "zipPostCode": "tango-861",
+      "city": "echo-892",
+      "countryProvince": "alpha-951",
+      "country": "lima-318",
+      "other": "delta-284"
+    },
+    "criticality": "romeo-530",
+    "status": "victor-236",
+    "installationDate": "2024-01-18T05:34:57Z"
+  },
+  {
+    "id": "november-pk1",
+    "assetNumber": "xray-789",
+    "assetType": "india-526",
+    "assetCategory": "hotel-974",
+    "assetTypeId": "tango-827",
+    "name": "papa-580",
+    "createdAt": "2024-01-20T13:46:05Z",
+    "updatedAt": "2024-01-01T01:00:00Z",
+    "location": {
+      "company": "echo-749",
+      "street": "november-887",
+      "streetNumber": "whiskey-757",
+      "zipPostCode": "india-119",
+      "city": "papa-902",
+      "countryProvince": "juliet-422",
+      "country": "whiskey-386",
+      "other": "november-238"
+    },
+    "criticality": "hotel-943",
+    "status": "oscar-191",
+    "installationDate": "2024-01-27T03:44:36Z"
+  },
+  {
+    "id": "juliet-3-pk2",
+    "assetNumber": "alpha-336",
+    "assetType": "november-138",
+    "assetCategory": "whiskey-958",
+    "assetTypeId": "papa-179",
+    "name": "echo-157",
+    "createdAt": "2024-01-08T14:32:34Z",
+    "updatedAt": "2024-01-01T02:00:00Z",
+    "location": {
+      "company": "quebec-673",
+      "street": "mike-551",
+      "streetNumber": "uniform-980",
+      "zipPostCode": "foxtrot-828",
+      "city": "november-883",
+      "countryProvince": "papa-538",
+      "country": "victor-902",
+      "other": "victor-941"
+    },
+    "criticality": "sierra-108",
+    "status": "bravo-123",
+    "installationDate": "2024-01-24T09:58:57Z"
+  },
+  {
+    "id": "golf-289-pk3",
+    "assetNumber": "tango-970",
+    "assetType": "india-471",
+    "assetCategory": "tango-988",
+    "assetTypeId": "quebec-243",
+    "name": "romeo-408",
+    "createdAt": "2024-01-18T11:41:52Z",
+    "updatedAt": "2024-01-01T03:00:00Z",
+    "location": {
+      "company": "tango-138",
+      "street": "hotel-347",
+      "streetNumber": "yankee-764",
+      "zipPostCode": "lima-959",
+      "city": "juliet-879",
+      "countryProvince": "kilo-279",
+      "country": "delta-150",
+      "other": "papa-647"
+    },
+    "criticality": "golf-291",
+    "status": "tango-379",
+    "installationDate": "2024-01-25T01:50:01Z"
+  },
+  {
+    "id": "alpha-69-pk4",
+    "assetNumber": "romeo-771",
+    "assetType": "delta-417",
+    "assetCategory": "alpha-658",
+    "assetTypeId": "romeo-681",
+    "name": "tango-784",
+    "createdAt": "2024-01-31T18:58:10Z",
+    "updatedAt": "2024-01-01T04:00:00Z",
+    "location": {
+      "company": "juliet-298",
+      "street": "foxtrot-356",
+      "streetNumber": "uniform-888",
+      "zipPostCode": "xray-327",
+      "city": "hotel-701",
+      "countryProvince": "india-919",
+      "country": "oscar-523",
+      "other": "oscar-196"
+    },
+    "criticality": "november-852",
+    "status": "foxtrot-111",
+    "installationDate": "2024-01-16T23:26:43Z"
+  }
+]

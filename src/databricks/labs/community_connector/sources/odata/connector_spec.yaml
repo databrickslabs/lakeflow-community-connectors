@@ -1,0 +1,202 @@
+# odata Community Connector Spec
+# Connection-level options live here; table-level options must appear in
+# external_options_allowlist so the pipeline can pass them through.
+
+display_name: OData
+connection:
+  auth_methods:
+    - name: bearer
+      description: >
+        Bearer token in the Authorization header. Works for most modern OData
+        APIs (Microsoft Graph, Dynamics 365, SAP S/4HANA Cloud).
+      parameters:
+        - name: token
+          type: string
+          required: true
+          secret: true
+          description: Bearer access token.
+
+    - name: basic
+      description: >
+        HTTP Basic. Common for on-prem SAP NetWeaver / Gateway OData services.
+      parameters:
+        - name: username
+          type: string
+          required: true
+          description: Username.
+        - name: password
+          type: string
+          required: true
+          secret: true
+          description: Password.
+
+    - name: api_key
+      description: >
+        API key delivered in a custom header. Header name defaults to
+        ``x-api-key`` but can be overridden via ``api_key_header``.
+      parameters:
+        - name: api_key
+          type: string
+          required: true
+          secret: true
+          description: API key value.
+        - name: api_key_header
+          type: string
+          required: false
+          description: Header name to carry the API key. Default ``x-api-key``.
+
+    - name: oauth
+      description: >
+        OAuth 2.0 via a Unity Catalog COMMUNITY connection
+        (``community_oauth_flow=m2m``/``u2m``). The connection layer runs
+        the flow, refreshes tokens server-side, and injects a fresh
+        ``access_token`` at query time; the connector treats it as an
+        opaque bearer token and never reads these parameters itself.
+      parameters:
+        - name: client_id
+          type: string
+          required: true
+          secret: true
+          description: >
+            OAuth app client id used by the connection layer to run the
+            flow and refresh tokens server-side.
+        - name: client_secret
+          type: string
+          required: true
+          secret: true
+          description: >
+            OAuth app client secret issued alongside ``client_id``.
+        - name: token_endpoint
+          type: string
+          required: true
+          description: >
+            OAuth token endpoint URL. Per-connection because OData is
+            generic: every provider has its own endpoint (Azure AD tenant
+            URL, SAP XSUAA, a Databricks App's ``/oidc/v1/token``, ...).
+            For the ``u2m`` browser flow also supply
+            ``authorization_endpoint``.
+        - name: authorization_endpoint
+          type: string
+          required: false
+          description: >
+            OAuth authorization endpoint URL required for the ``u2m``
+            browser flow. Not needed for ``m2m`` client credentials.
+        - name: oauth_scope
+          type: string
+          required: false
+          description: >
+            Optional space-separated OAuth scopes requested by the
+            connection layer's flow.
+
+  # ---------------------------------------------------------------------------
+  # OAuth 2.0 — handled by the Unity Catalog COMMUNITY connection.
+  #
+  # The connection layer (UC, or the labs authenticate tool for local dev)
+  # runs the OAuth flow, refreshes tokens SERVER-SIDE, and injects a fresh
+  # ``access_token`` into the connector's options at query time; the
+  # connector treats it as an opaque bearer token (no minting, no refresh
+  # code in the connector). Do NOT list ``access_token``/``refresh_token``
+  # as parameters — they are runtime-injected.
+  #
+  # OData is a GENERIC connector, so no provider URLs are hard-coded here:
+  # each connection supplies its own ``token_endpoint`` (and, for the u2m
+  # browser flow, ``authorization_endpoint``) at connection-creation time,
+  # alongside the ``client_id`` / ``client_secret`` app identity.
+  # ``flow: m2m`` (client credentials) is the dominant OData
+  # server-to-server case; a user-delegated source can create the
+  # connection with ``community_oauth_flow=u2m`` instead.
+  oauth:
+    flow: m2m
+
+  parameters:
+    - name: service_url
+      type: string
+      required: true
+      description: >
+        OData v4 service root URL, e.g.
+        ``https://services.odata.org/V4/Northwind/Northwind.svc/``.
+
+    - name: auth_type
+      type: string
+      required: false
+      description: >
+        Authentication method used by the connector. Set to ``bearer``,
+        ``basic``, or ``api_key`` to match the selected authentication
+        method. Omit for Unity Catalog OAuth, which injects an
+        ``access_token`` at query time.
+
+    - name: timeout_seconds
+      type: string
+      required: false
+      description: >
+        HTTP timeout per request (seconds). Default 180 (3 min). Deep
+        ``expand_contained=true`` chains can take longer than the
+        previous 60s default to materialise server-side; the new
+        default fits typical 3-segment reads. Raise further for
+        4+-segment expansions or very large source tables.
+
+    - name: metadata_cache_ttl_seconds
+      type: string
+      required: false
+      description: >
+        TTL for the cached parsed ``$metadata`` document (seconds) —
+        governs both the in-process cache and the on-disk pickle that
+        forked PySpark Python Data Source workers share during pipeline
+        INITIALIZING. Default 60. Set to ``0`` to disable both layers
+        (every instance re-fetches); raise for stable schemas where you
+        want to skip even the first-fork fetch over a longer window.
+
+    - name: max_retries
+      type: string
+      required: false
+      description: >
+        Retry budget for transient failures — HTTP 408, 429, 500, 502,
+        503, 504 (honouring ``Retry-After`` where the server sends it,
+        with jittered exponential backoff otherwise) and
+        connection-level errors (TCP reset, timeout, chunked-encoding
+        failure). Default 5. Set to ``0`` to disable retries (any
+        transient failure surfaces immediately).
+
+    - name: retry_max_delay_seconds
+      type: string
+      required: false
+      description: >
+        Cap on a single retry sleep (seconds). Default 60. Honours
+        ``Retry-After`` from the server when present, falling back to
+        exponential backoff (1, 2, 4, 8, 16 …); either way never
+        sleeps longer than this — protects against misbehaving servers
+        emitting hour-long ``Retry-After`` values that would pin a
+        Spark task.
+
+    - name: extra_headers
+      type: string
+      required: false
+      description: >
+        Extra request headers as ``Key:Value,Key2:Value2``. Useful for tenant
+        IDs, CSRF tokens, etc.
+
+    - name: verbose_http_logging
+      type: string
+      required: false
+      description: >
+        When ``"true"``, emit one INFO log line per HTTP request (URL)
+        and one per response (status + first N chars of body) to the
+        ``databricks.labs.community_connector.sources.odata.odata``
+        Python logger. Used for triaging silent partial-data,
+        under-row-count, or "why am I missing rows" problems against
+        flaky sources. **Source data ends up in the log stream** when
+        enabled — turn it on only for diagnostics. Retries and JSON
+        decode failures always log at WARNING/ERROR regardless of this
+        flag. Default ``false``.
+
+    - name: verbose_http_log_body_chars
+      type: string
+      required: false
+      description: >
+        Cap on the response body snippet length included in each INFO
+        log line when ``verbose_http_logging`` is on. Default 500. Raise
+        for richer diagnostics or lower to cut log volume on
+        high-throughput pipelines.
+
+# Per-table options the pipeline may pass through.
+external_options_allowlist: "namespace,cursor_field,select,filter,filters_at,page_size,max_records_per_batch,cursor_nulls,delta_tracking,expand_contained,num_partitions,pagination,exclude_ancestor_columns,cursor_lookback_seconds,cursor_lookback_factor,cursor_lookback_max_seconds,cursor_lookback_dedup,cursor_probe,contained_fetch"
