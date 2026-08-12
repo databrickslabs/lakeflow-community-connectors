@@ -66,6 +66,14 @@ DEFAULT_LOOKBACK_SECONDS = 0
 # disable windowing entirely.
 DEFAULT_WINDOW_SECONDS = 7 * 24 * 60 * 60
 
+# When ``num_partitions`` is not set explicitly, the cursor range is split into
+# partitions of at most this many seconds each (30 days) so a wide backfill fans
+# out across more executor tasks instead of a few very large ones.
+AUTO_PARTITION_TARGET_SECONDS = 30 * 24 * 60 * 60
+# Ceiling on the auto-derived partition count so an extreme range (e.g. the
+# epoch default) can't explode into thousands of tasks.
+MAX_AUTO_PARTITIONS = 32
+
 
 class WordPressLakeflowConnect(LakeflowConnect, SupportsPartitionedStream):
     """Lakeflow connector for the WordPress REST API (``wp/v2``)."""
@@ -183,7 +191,14 @@ class WordPressLakeflowConnect(LakeflowConnect, SupportsPartitionedStream):
         start_offset: dict | None = None,
         end_offset: dict | None = None,
     ) -> list[dict]:
-        """Split the ``(start, end]`` cursor range into contiguous time windows."""
+        """Split the ``(start, end]`` cursor range into contiguous time windows.
+
+        The number of windows is ``num_partitions`` when set explicitly,
+        otherwise auto-scaled to the range width (see
+        ``_resolve_num_partitions``): a wide backfill fans out across more
+        executor tasks instead of a few very large ones.  All windows belong to
+        the same micro-batch, so this does not affect termination.
+        """
         self._validate_table(table_name)
 
         start_cursor = (start_offset or {}).get("cursor") if start_offset else None
@@ -208,10 +223,8 @@ class WordPressLakeflowConnect(LakeflowConnect, SupportsPartitionedStream):
         if start_dt is None or end_dt is None or start_dt >= end_dt:
             return []
 
-        num_partitions = max(
-            1, self._int_option(table_options, "num_partitions", DEFAULT_NUM_PARTITIONS)
-        )
         total_seconds = (end_dt - start_dt).total_seconds()
+        num_partitions = self._resolve_num_partitions(table_options, total_seconds)
         step = total_seconds / num_partitions
 
         partitions: list[dict] = []
@@ -302,6 +315,24 @@ class WordPressLakeflowConnect(LakeflowConnect, SupportsPartitionedStream):
     def _emit(records: Iterator[dict]) -> Iterator[dict]:
         """Pass records through unchanged (raw parsed JSON for the framework)."""
         yield from records
+
+    def _resolve_num_partitions(self, table_options: dict[str, str], total_seconds: float) -> int:
+        """Partition count for the current range.
+
+        An explicit ``num_partitions`` is honored as-is.  Otherwise the count is
+        auto-scaled so each partition spans at most
+        ``AUTO_PARTITION_TARGET_SECONDS``: a wide backfill fans out across more
+        executor tasks (bounded by ``MAX_AUTO_PARTITIONS``) instead of a few very
+        large ones, while a narrow incremental range stays at the
+        ``DEFAULT_NUM_PARTITIONS`` floor.  Pure function of its inputs, so
+        ``get_partitions`` stays deterministic across retries.
+        """
+        if table_options.get("num_partitions") is not None:
+            return max(1, self._int_option(table_options, "num_partitions", DEFAULT_NUM_PARTITIONS))
+        by_span = int(
+            (total_seconds + AUTO_PARTITION_TARGET_SECONDS - 1) // AUTO_PARTITION_TARGET_SECONDS
+        )
+        return max(DEFAULT_NUM_PARTITIONS, min(MAX_AUTO_PARTITIONS, by_span))
 
     def _resolve_start(self, table_options: dict[str, str]) -> str:
         """Starting cursor for the first micro-batch of a partitioned table."""
