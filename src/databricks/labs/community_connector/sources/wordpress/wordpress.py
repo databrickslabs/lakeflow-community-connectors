@@ -57,6 +57,15 @@ DEFAULT_START_TIMESTAMP = "1970-01-01T00:00:00Z"
 DEFAULT_NUM_PARTITIONS = 4
 DEFAULT_LOOKBACK_SECONDS = 0
 
+# Default sliding window applied per micro-batch (7 days — matches the repo's
+# incremental-connector convention).  Bounds batch size when the stream is far
+# behind (e.g. a long-paused pipeline resuming, or a user-supplied historical
+# ``start_timestamp``): the offset advances one window at a time instead of
+# jumping the whole span at once.  The initial backfill from the epoch default
+# is deliberately exempt (see ``latest_offset``).  Set ``window_seconds=0`` to
+# disable windowing entirely.
+DEFAULT_WINDOW_SECONDS = 7 * 24 * 60 * 60
+
 
 class WordPressLakeflowConnect(LakeflowConnect, SupportsPartitionedStream):
     """Lakeflow connector for the WordPress REST API (``wp/v2``)."""
@@ -144,18 +153,25 @@ class WordPressLakeflowConnect(LakeflowConnect, SupportsPartitionedStream):
     ) -> dict:
         """Return the high-water mark for the table, capped at init time.
 
-        Metadata-only: no records are read here.  When ``window_seconds`` is
-        set, the offset advances by one window per micro-batch (bounding batch
-        size); otherwise it jumps straight to the init-time cap.  In both cases
-        the value stabilises once the stream catches up, so the trigger
-        terminates.
+        Metadata-only: no records are read here.  With ``window_seconds > 0``
+        (default) the offset advances by one window per micro-batch, bounding
+        batch size when the stream is far behind; otherwise it jumps straight to
+        the init-time cap.  Either way the value stabilises once the stream
+        catches up, so ``Trigger.AvailableNow`` terminates.
+
+        The initial backfill from the epoch default (no prior offset **and** no
+        user ``start_timestamp``) is exempt from windowing: splitting decades of
+        empty pre-history into fixed windows would emit thousands of empty
+        micro-batches.  It advances straight to the cap instead — records still
+        stream lazily, split across ``num_partitions``.  Supply a
+        ``start_timestamp`` to bound the backfill into windows too.
         """
         self._validate_table(table_name)
-        window_seconds = self._int_option(table_options, "window_seconds", 0)
-        if window_seconds > 0:
-            current = (start_offset or {}).get("cursor")
-            if not current:
-                current = self._resolve_start(table_options)
+        window_seconds = self._int_option(table_options, "window_seconds", DEFAULT_WINDOW_SECONDS)
+        current = (start_offset or {}).get("cursor")
+        if not current:
+            current = self._resolve_start(table_options)
+        if window_seconds > 0 and current != DEFAULT_START_TIMESTAMP:
             next_end = wp.add_seconds(current, window_seconds)
             return {"cursor": min(next_end, self._init_time)}
         return {"cursor": self._init_time}
@@ -272,8 +288,7 @@ class WordPressLakeflowConnect(LakeflowConnect, SupportsPartitionedStream):
                     row.setdefault("slug", slug)
                     yield row
         elif isinstance(body, list):
-            for row in body:
-                yield row
+            yield from body
         else:
             raise wp.WordPressError(
                 f"Unexpected response shape for '{table_name}': {type(body).__name__}"
@@ -286,8 +301,7 @@ class WordPressLakeflowConnect(LakeflowConnect, SupportsPartitionedStream):
     @staticmethod
     def _emit(records: Iterator[dict]) -> Iterator[dict]:
         """Pass records through unchanged (raw parsed JSON for the framework)."""
-        for record in records:
-            yield record
+        yield from records
 
     def _resolve_start(self, table_options: dict[str, str]) -> str:
         """Starting cursor for the first micro-batch of a partitioned table."""
