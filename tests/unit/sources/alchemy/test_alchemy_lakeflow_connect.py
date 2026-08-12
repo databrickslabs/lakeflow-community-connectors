@@ -26,3 +26,14 @@ class TestAlchemyConnector(LakeflowConnectTests, SupportsPartitionedStreamTests)
         "api_key": "simulator-fake-key",
         "network": "eth-mainnet",
     }
+    # ``token_prices_historical`` is queried by EITHER ``symbol`` OR
+    # (``network``, ``address``) — mutually exclusive request modes. Simulate
+    # mode drives the ``symbol`` path, so ``network`` / ``address`` are
+    # legitimately null there (they are only populated on the address path).
+    # The column-coverage invariant honors this allow-list.
+    allow_null_columns = {
+        "token_prices_historical": {"network", "address"},
+        # ``error`` is a per-marketplace error field, populated only when a
+        # floor-price lookup fails; null on the happy-path corpus.
+        "nft_floor_prices": {"error"},
+    }

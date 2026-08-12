@@ -519,6 +519,79 @@ def register_lakeflow_source(spark):
 
 
     ########################################################
+    # src/databricks/labs/community_connector/interface/supports_namespaces.py
+    ########################################################
+
+    class SupportsNamespaces(ABC):
+        """Mixin for connectors whose tables live under hierarchical namespaces.
+
+        A namespace is a path of zero or more string segments (e.g. ``["org",
+        "repo"]`` for GitHub, ``["tenant", "project"]`` for Azure DevOps).
+        Connectors with a flat catalog do not need this mixin — the framework
+        falls back to :meth:`LakeflowConnect.list_tables` and reports each table
+        with an empty namespace.
+
+        Output ordering on the ``_community_namespaces`` and ``_community_tables``
+        Spark virtual tables is normalized by the framework via ``sorted(...)``,
+        so connector implementations of :meth:`list_namespaces` and
+        :meth:`list_tables_in_namespace` are free to return their results in
+        any order (including from a :class:`set` or generator).
+
+        Must be used together with :class:`LakeflowConnect`.
+
+        Usage::
+
+            class MyConnector(LakeflowConnect, SupportsNamespaces):
+                ...
+        """
+
+        @abstractmethod
+        def list_namespaces(
+            self,
+            prefix: list[str] | None = None,
+        ) -> list[list[str]]:
+            """Return the immediate child namespaces under ``prefix``.
+
+            This method returns one level of *namespace* children only — it
+            never returns tables. A namespace can hold tables and child
+            namespaces independently; callers must always call
+            :meth:`list_tables_in_namespace` for every namespace they care
+            about, regardless of whether :meth:`list_namespaces` returned
+            children for it. An empty return value just means there are no
+            further child namespaces under ``prefix``.
+
+            Walk the full tree by recursing on each returned child.
+
+            Args:
+                prefix: A namespace path under which to list children. ``None`` or
+                    an empty list lists the root-level namespaces.
+            Returns:
+                A list of full namespace paths (each path includes the prefix).
+            """
+
+        @abstractmethod
+        def list_tables_in_namespace(
+            self,
+            namespace: list[str],
+        ) -> list[str]:
+            """Return the table names that live directly under ``namespace``.
+
+            Callers that want every table across the whole catalog walk the
+            namespace tree via :meth:`list_namespaces` and call this method
+            once per leaf — there is no "list everything" shortcut.
+
+            Args:
+                namespace: The namespace path. An empty list ``[]`` selects
+                    root-level tables (those that live outside any namespace).
+            Returns:
+                A list of table names. The full ``(namespace, table_name)``
+                row exposed on ``_community_tables`` is reconstructed by the
+                framework from the namespace the caller already supplied, so
+                the connector does not need to echo it back.
+            """
+
+
+    ########################################################
     # src/databricks/labs/community_connector/sources/alchemy/alchemy_schemas.py
     ########################################################
 
@@ -1079,16 +1152,16 @@ def register_lakeflow_source(spark):
 
 
     def parse_networks(table_options: dict[str, str], default_network: str) -> list[str]:
-        """Parse the ``network`` table option into a list of network ids.
+        """Return the list of networks the connector will hit for one call.
 
-        Accepts either a single network id (``"eth-mainnet"``) or a
-        comma-separated list (``"eth-mainnet,base-mainnet"``).  Falls back
-        to the connector-level default when unset.
+        ``network`` is a connection-level parameter on this connector —
+        Databricks strips any table-level override before the framework
+        hands us ``table_options`` — so the list is always a single
+        element: the connection-level default. The ``table_options``
+        argument is accepted for call-site symmetry but ignored.
         """
-        raw = table_options.get("network", default_network)
-        if not raw:
-            return [default_network]
-        return [n.strip() for n in raw.split(",") if n.strip()]
+        del table_options
+        return [default_network]
 
 
     def parse_csv_option(table_options: dict[str, str], key: str) -> list[str]:
@@ -1225,14 +1298,13 @@ def register_lakeflow_source(spark):
 
         Connection options:
             api_key  (required, secret) — Alchemy API key.
-            network  (optional, default "eth-mainnet") — default network
-                     applied to tables that don't override it via
-                     ``table_options``.
+            network  (optional, default "eth-mainnet") — network applied
+                     to every table on this connection. Databricks does
+                     not permit table-level overrides of connection
+                     parameters, so use one UC connection per network.
 
         Per-table options (read from ``table_options`` per call):
             wallet_address    — required for the four wallet-scoped tables.
-            network           — per-table override; comma-separated for
-                                tables that accept multiple networks.
             contract_address  — required for nft_metadata,
                                 nft_contract_metadata, nft_floor_prices.
             token_id          — required for nft_metadata.
@@ -1738,17 +1810,19 @@ def register_lakeflow_source(spark):
                 "withMarketData": (table_options.get("with_market_data", "false").lower() == "true"),
             }
             symbol = table_options.get("symbol")
-            network = table_options.get("network")
-            address = table_options.get("contract_address") or table_options.get("address")
+            address = table_options.get("contract_address")
             if symbol:
                 body["symbol"] = symbol
-            elif network and address:
-                body["network"] = network
+            elif address:
+                # ``network`` is connection-level — Databricks strips
+                # table-level overrides — so the selector pair is the
+                # connection-level network plus a per-call contract_address.
+                body["network"] = self._default_network
                 body["address"] = address
             else:
                 raise ValueError(
                     "token_prices_historical requires either 'symbol' or "
-                    "('network' + 'contract_address') in table_options"
+                    "'contract_address' in table_options"
                 )
 
             url = self._prices_url("token_prices_historical")
@@ -1764,7 +1838,7 @@ def register_lakeflow_source(spark):
             for point in page.get("data", []) or []:
                 rec = {
                     "symbol": page.get("symbol") or symbol,
-                    "network": page.get("network") or network,
+                    "network": page.get("network") or body.get("network"),
                     "address": page.get("address") or address,
                     "currency": currency,
                     "value": point.get("value"),
@@ -1788,16 +1862,22 @@ def register_lakeflow_source(spark):
             return f"{_nft_v3_base_url(network)}{path}"
 
         def _resolve_nft_network(self, table_options: dict[str, str], table_name: str) -> str:
+            # ``network`` is a connection-level parameter — Databricks strips
+            # any table-level override before the framework hands us
+            # ``table_options`` — so the network for every table is always
+            # the connection-level default.
+            del table_options
             if table_name in ETH_MAINNET_ONLY_TABLES:
-                # Floor prices only exist on ETH mainnet; reject overrides
-                # rather than silently 404 against another network.
-                requested = table_options.get("network", "eth-mainnet")
-                if requested != "eth-mainnet":
+                # Floor prices only exist on ETH mainnet; fail fast if the
+                # connection-level network is anything else.
+                if self._default_network != "eth-mainnet":
                     raise ValueError(
-                        f"{table_name} only supports network 'eth-mainnet'; got {requested!r}"
+                        f"{table_name} only supports network 'eth-mainnet'; "
+                        f"connection-level network is {self._default_network!r} — "
+                        "create a separate UC connection with network='eth-mainnet'"
                     )
                 return "eth-mainnet"
-            return table_options.get("network") or self._default_network
+            return self._default_network
 
         def _read_nfts_by_wallet(self, table_options: dict[str, str]) -> tuple[Iterator[dict], dict]:
             wallet = require_option(table_options, "wallet_address", "nfts_by_wallet")
@@ -2009,11 +2089,58 @@ def register_lakeflow_source(spark):
 
     LakeflowConnectImpl = AlchemyLakeflowConnect
     # Constant option or column names
-    METADATA_TABLE = "_lakeflow_metadata"
+    METADATA_TABLE = "_community_table_metadata"
+    NAMESPACES_TABLE = "_community_namespaces"
+    TABLES_TABLE = "_community_tables"
+    VIRTUAL_TABLES = (METADATA_TABLE, NAMESPACES_TABLE, TABLES_TABLE)
     TABLE_NAME = "tableName"
     TABLE_NAME_LIST = "tableNameList"
     TABLE_CONFIGS = "tableConfigs"
     IS_DELETE_FLOW = "isDeleteFlow"
+    NAMESPACE_PREFIX = "namespacePrefix"
+    NAMESPACE = "namespace"
+
+
+    def _decode_list_of_str_option(option_name: str, value: str | None) -> list[str] | None:
+        """Decode and validate a JSON-encoded ``list[str]`` Spark option.
+
+        Returns ``None`` if the option is absent; otherwise the parsed list.
+        Raises ``ValueError`` with the offending value if the JSON is malformed
+        or the decoded value is not a list of strings.
+        """
+        if value is None:
+            return None
+        try:
+            decoded = json.loads(value)
+        except json.JSONDecodeError as e:
+            raise ValueError(
+                f"option '{option_name}' must be a JSON-encoded list[str]; "
+                f"got non-JSON value: {value!r}"
+            ) from e
+        if not isinstance(decoded, list) or not all(isinstance(s, str) for s in decoded):
+            raise ValueError(
+                f"option '{option_name}' must be a JSON-encoded list[str]; "
+                f"got: {decoded!r}"
+            )
+        return decoded
+
+
+    def _decode_dict_option(option_name: str, value: str | None) -> dict:
+        """Decode and validate a JSON-encoded ``dict`` Spark option."""
+        if value is None:
+            return {}
+        try:
+            decoded = json.loads(value)
+        except json.JSONDecodeError as e:
+            raise ValueError(
+                f"option '{option_name}' must be a JSON-encoded dict; "
+                f"got non-JSON value: {value!r}"
+            ) from e
+        if not isinstance(decoded, dict):
+            raise ValueError(
+                f"option '{option_name}' must be a JSON-encoded dict; got: {decoded!r}"
+            )
+        return decoded
 
 
     # PySpark's DataSource API requires camelCase method names and inherits
@@ -2145,7 +2272,7 @@ def register_lakeflow_source(spark):
             self._supports_partition = isinstance(lakeflow_connect, SupportsPartition)
 
         def partitions(self):
-            if self._supports_partition and self.table_name != METADATA_TABLE:
+            if self._supports_partition and self.table_name not in VIRTUAL_TABLES:
                 try:
                     partition_descs = self.lakeflow_connect.get_partitions(
                         self.table_name, self.options
@@ -2158,6 +2285,10 @@ def register_lakeflow_source(spark):
         def read(self, partition):
             if self.table_name == METADATA_TABLE:
                 records = self._read_table_metadata()
+            elif self.table_name == NAMESPACES_TABLE:
+                records = self._read_namespaces()
+            elif self.table_name == TABLES_TABLE:
+                records = self._read_tables()
             elif self._supports_partition and partition.value is not None:
                 partition_desc = json.loads(partition.value)
                 records = self.lakeflow_connect.read_partition(
@@ -2168,10 +2299,14 @@ def register_lakeflow_source(spark):
             return map(lambda x: parse_value(x, self.schema), records)
 
         def _read_table_metadata(self):
-            table_name_list = self.options.get(TABLE_NAME_LIST, "")
-            table_names = [o.strip() for o in table_name_list.split(",") if o.strip()]
+            table_names = _decode_list_of_str_option(
+                TABLE_NAME_LIST, self.options.get(TABLE_NAME_LIST)
+            ) or []
+            table_configs = _decode_dict_option(
+                TABLE_CONFIGS, self.options.get(TABLE_CONFIGS)
+            )
             all_records = []
-            table_configs = json.loads(self.options.get(TABLE_CONFIGS, "{}"))
+            # Preserve caller-supplied table order — caller controls it.
             for table in table_names:
                 metadata = self.lakeflow_connect.read_table_metadata(
                     table, table_configs.get(table, {})
@@ -2179,21 +2314,104 @@ def register_lakeflow_source(spark):
                 all_records.append({TABLE_NAME: table, **metadata})
             return all_records
 
+        def _read_namespaces(self):
+            # Connectors without SupportsNamespaces are flat — no rows.
+            if not isinstance(self.lakeflow_connect, SupportsNamespaces):
+                return []
+            prefix = _decode_list_of_str_option(
+                NAMESPACE_PREFIX, self.options.get(NAMESPACE_PREFIX)
+            )
+            namespaces = self.lakeflow_connect.list_namespaces(prefix)
+            # Sort framework-side for deterministic output regardless of
+            # connector iteration order.
+            return [{"namespace": ns} for ns in sorted(namespaces)]
+
+        def _read_tables(self):
+            namespace_supplied = NAMESPACE in self.options
+            if isinstance(self.lakeflow_connect, SupportsNamespaces):
+                if not namespace_supplied:
+                    raise ValueError(
+                        f"option '{NAMESPACE}' is required when reading "
+                        f"'{TABLES_TABLE}' against a connector that implements "
+                        f"SupportsNamespaces. Pass a JSON-encoded list[str] "
+                        f"(use '[]' for root-level tables; walk the tree via "
+                        f"'{NAMESPACES_TABLE}' to enumerate every namespace)."
+                    )
+                namespace = _decode_list_of_str_option(
+                    NAMESPACE, self.options[NAMESPACE]
+                )
+                tables = self.lakeflow_connect.list_tables_in_namespace(namespace)
+                return [
+                    {"namespace": namespace, TABLE_NAME: tn}
+                    for tn in sorted(tables)
+                ]
+            # Flat connector path. Reject a stray `namespace` option — the
+            # caller probably mistook this connector for namespace-aware and
+            # silently ignoring the option would mask the bug.
+            if namespace_supplied:
+                raise ValueError(
+                    f"option '{NAMESPACE}' was supplied but the connector does "
+                    f"not implement SupportsNamespaces. Either omit the option "
+                    f"or use a namespace-aware connector."
+                )
+            return [
+                {"namespace": [], TABLE_NAME: tn}
+                for tn in sorted(self.lakeflow_connect.list_tables())
+            ]
+
 
     class LakeflowSource(DataSource):
         """
-        PySpark DataSource implementation for Lakeflow Connect.
+        PySpark DataSource base for Lakeflow Connect.
+
+        Two ways the connector implementation is bound:
+
+        - Per-source subclass (wheel / multi-file deployment): subclass and set
+          ``_lakeflow_connect_cls``::
+
+              class GmailDataSource(LakeflowSource):
+                  _lakeflow_connect_cls = GmailLakeflowConnect
+
+              spark.dataSource.register(GmailDataSource)
+
+        - Merged single-file deployment (SDP): ``_lakeflow_connect_cls`` is left
+          ``None`` and the connector is taken from the module-level
+          ``LakeflowConnectImpl`` placeholder, which the merge script substitutes
+          with the actual implementation class.
         """
+
+        # Per-source subclasses set this. Left ``None`` on the base so the merged
+        # single-file path falls back to the ``LakeflowConnectImpl`` placeholder.
+        _lakeflow_connect_cls = None
+
+        # Spark format name. Defaults to "lakeflow_connect" because Unity Catalog
+        # connection-option injection looks for that exact string. A per-source
+        # subclass may override this with its source name once it no longer relies
+        # on UC injection (see the commented override in each source's __init__.py).
+        _format_name = "lakeflow_connect"
 
         def __init__(self, options):
             self.options = options
-            # TEMPORARY: LakeflowConnectImpl is replaced with the actual implementation
-            # class during merge. See the placeholder comment at the top of this file.
-            self.lakeflow_connect = LakeflowConnectImpl(options)  # pylint: disable=abstract-class-instantiated
+            table = options.get(TABLE_NAME)
+            # Catch typos against the framework's reserved virtual-table namespace
+            # early — falling through to the connector with an unknown
+            # `_community_*` name yields a confusing per-connector error.
+            if table and table.startswith("_community_") and table not in VIRTUAL_TABLES:
+                raise ValueError(
+                    f"unknown framework virtual table '{table}'. Valid framework "
+                    f"virtual tables are: {', '.join(VIRTUAL_TABLES)}. "
+                    f"For a regular source table, use a name that does not start "
+                    f"with '_community_'."
+                )
+            # Per-source subclasses bind the implementation via _lakeflow_connect_cls.
+            # The merged single-file path leaves it None and relies on the
+            # LakeflowConnectImpl placeholder (substituted by the merge script).
+            connect_cls = type(self)._lakeflow_connect_cls or LakeflowConnectImpl
+            self.lakeflow_connect = connect_cls(options)  # pylint: disable=abstract-class-instantiated
 
         @classmethod
         def name(cls):
-            return "lakeflow_connect"
+            return cls._format_name
 
         def schema(self):
             table = self.options[TABLE_NAME]
@@ -2206,8 +2424,20 @@ def register_lakeflow_source(spark):
                         StructField("ingestion_type", StringType(), True),
                     ]
                 )
-            else:
-                return self.lakeflow_connect.get_table_schema(table, self.options)
+            if table == NAMESPACES_TABLE:
+                return StructType(
+                    [
+                        StructField("namespace", ArrayType(StringType()), False),
+                    ]
+                )
+            if table == TABLES_TABLE:
+                return StructType(
+                    [
+                        StructField("namespace", ArrayType(StringType()), False),
+                        StructField(TABLE_NAME, StringType(), False),
+                    ]
+                )
+            return self.lakeflow_connect.get_table_schema(table, self.options)
 
         def reader(self, schema: StructType):
             return LakeflowBatchReader(self.options, schema, self.lakeflow_connect)
