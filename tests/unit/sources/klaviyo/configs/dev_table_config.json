@@ -1,0 +1,27 @@
+{
+  "events": {
+    "start_timestamp": "2026-01-01T00:00:00Z",
+    "window_seconds": "1209600",
+    "max_records_per_batch": "20",
+    "page_size": "5"
+  },
+  "profiles": {
+    "max_records_per_batch": "20"
+  },
+  "campaigns": {
+    "max_records_per_batch": "20"
+  },
+  "flows": {
+    "max_records_per_batch": "20"
+  },
+  "segments": {
+    "max_records_per_batch": "20"
+  },
+  "templates": {
+    "max_records_per_batch": "20"
+  },
+  "lists": {
+    "max_records_per_batch": "20"
+  },
+  "metrics": {}
+}

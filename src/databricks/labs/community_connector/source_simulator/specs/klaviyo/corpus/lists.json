@@ -1,0 +1,101 @@
+[
+  {
+    "type": "list",
+    "id": "XHmvHL",
+    "attributes": {
+      "name": "SMS List",
+      "created": "2025-12-28T21:51:50+00:00",
+      "updated": "2025-12-28T21:51:50+00:00",
+      "opt_in_process": "double_opt_in"
+    },
+    "relationships": {
+      "profiles": {
+        "links": {
+          "self": "https://a.klaviyo.com/api/lists/XHmvHL/relationships/profiles/",
+          "related": "https://a.klaviyo.com/api/lists/XHmvHL/profiles/"
+        }
+      },
+      "tags": {
+        "links": {
+          "self": "https://a.klaviyo.com/api/lists/XHmvHL/relationships/tags/",
+          "related": "https://a.klaviyo.com/api/lists/XHmvHL/tags/"
+        }
+      },
+      "flow-triggers": {
+        "links": {
+          "self": "https://a.klaviyo.com/api/lists/XHmvHL/relationships/flow-triggers/",
+          "related": "https://a.klaviyo.com/api/lists/XHmvHL/flow-triggers/"
+        }
+      }
+    },
+    "links": {
+      "self": "https://a.klaviyo.com/api/lists/XHmvHL/"
+    }
+  },
+  {
+    "type": "list",
+    "id": "R63KX5",
+    "attributes": {
+      "name": "Email List",
+      "created": "2025-12-28T21:51:50+00:00",
+      "updated": "2025-12-28T22:32:32+00:00",
+      "opt_in_process": "single_opt_in"
+    },
+    "relationships": {
+      "profiles": {
+        "links": {
+          "self": "https://a.klaviyo.com/api/lists/R63KX5/relationships/profiles/",
+          "related": "https://a.klaviyo.com/api/lists/R63KX5/profiles/"
+        }
+      },
+      "tags": {
+        "links": {
+          "self": "https://a.klaviyo.com/api/lists/R63KX5/relationships/tags/",
+          "related": "https://a.klaviyo.com/api/lists/R63KX5/tags/"
+        }
+      },
+      "flow-triggers": {
+        "links": {
+          "self": "https://a.klaviyo.com/api/lists/R63KX5/relationships/flow-triggers/",
+          "related": "https://a.klaviyo.com/api/lists/R63KX5/flow-triggers/"
+        }
+      }
+    },
+    "links": {
+      "self": "https://a.klaviyo.com/api/lists/R63KX5/"
+    }
+  },
+  {
+    "type": "list",
+    "id": "VQimRT",
+    "attributes": {
+      "name": "Preview List",
+      "created": "2025-12-28T21:51:50+00:00",
+      "updated": "2025-12-28T22:32:32+00:00",
+      "opt_in_process": "single_opt_in"
+    },
+    "relationships": {
+      "profiles": {
+        "links": {
+          "self": "https://a.klaviyo.com/api/lists/VQimRT/relationships/profiles/",
+          "related": "https://a.klaviyo.com/api/lists/VQimRT/profiles/"
+        }
+      },
+      "tags": {
+        "links": {
+          "self": "https://a.klaviyo.com/api/lists/VQimRT/relationships/tags/",
+          "related": "https://a.klaviyo.com/api/lists/VQimRT/tags/"
+        }
+      },
+      "flow-triggers": {
+        "links": {
+          "self": "https://a.klaviyo.com/api/lists/VQimRT/relationships/flow-triggers/",
+          "related": "https://a.klaviyo.com/api/lists/VQimRT/flow-triggers/"
+        }
+      }
+    },
+    "links": {
+      "self": "https://a.klaviyo.com/api/lists/VQimRT/"
+    }
+  }
+]
