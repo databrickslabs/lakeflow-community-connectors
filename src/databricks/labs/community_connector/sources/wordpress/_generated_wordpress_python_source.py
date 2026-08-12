@@ -1143,13 +1143,13 @@ def register_lakeflow_source(spark):
 
             self._username = username
             self._application_password = application_password
-            self._session = wp.build_session(username, application_password)
+            self._session = build_session(username, application_password)
 
             # Freeze the upper bound at init time so latest_offset returns a stable
             # value across every micro-batch in a single Trigger.AvailableNow run.
             # Data modified after this instant is picked up by the next trigger,
             # which constructs a fresh connector with a newer init time.
-            self._init_time = wp.now_utc_iso()
+            self._init_time = now_utc_iso()
 
         # ------------------------------------------------------------------ #
         # Interface: discovery / schema / metadata
@@ -1222,7 +1222,7 @@ def register_lakeflow_source(spark):
             if not current:
                 current = self._resolve_start(table_options)
             if window_seconds > 0 and current != DEFAULT_START_TIMESTAMP:
-                next_end = wp.add_seconds(current, window_seconds)
+                next_end = add_seconds(current, window_seconds)
                 return {"cursor": min(next_end, self._init_time)}
             return {"cursor": self._init_time}
 
@@ -1258,10 +1258,10 @@ def register_lakeflow_source(spark):
             # never widened by this.
             lookback = self._int_option(table_options, "lookback_seconds", DEFAULT_LOOKBACK_SECONDS)
             if lookback > 0 and start_cursor != DEFAULT_START_TIMESTAMP:
-                start_cursor = wp.add_seconds(start_cursor, -lookback)
+                start_cursor = add_seconds(start_cursor, -lookback)
 
-            start_dt = wp.parse_ts(start_cursor)
-            end_dt = wp.parse_ts(end_cursor)
+            start_dt = parse_ts(start_cursor)
+            end_dt = parse_ts(end_cursor)
             if start_dt is None or end_dt is None or start_dt >= end_dt:
                 return []
 
@@ -1271,12 +1271,12 @@ def register_lakeflow_source(spark):
 
             partitions: list[dict] = []
             for i in range(num_partitions):
-                since = wp.add_seconds(start_cursor, int(round(step * i)))
+                since = add_seconds(start_cursor, int(round(step * i)))
                 if i == num_partitions - 1:
                     until = end_cursor
                 else:
-                    until = wp.add_seconds(start_cursor, int(round(step * (i + 1))))
-                if wp.parse_ts(since) >= wp.parse_ts(until):
+                    until = add_seconds(start_cursor, int(round(step * (i + 1))))
+                if parse_ts(since) >= parse_ts(until):
                     continue
                 partitions.append({"since": since, "until": until})
             return partitions
@@ -1292,7 +1292,7 @@ def register_lakeflow_source(spark):
             self._validate_table(table_name)
             cfg = TABLE_CONFIG[table_name]
 
-            session = wp.build_session(self._username, self._application_password)
+            session = build_session(self._username, self._application_password)
             url = f"{self._api_base}/{cfg['endpoint']}"
 
             # Lower bound exclusive (``after``); upper bound made inclusive at
@@ -1303,12 +1303,12 @@ def register_lakeflow_source(spark):
                 "order": "asc",
             }
             params[cfg["after_param"]] = partition["since"]
-            params[cfg["before_param"]] = wp.add_seconds(partition["until"], 1)
+            params[cfg["before_param"]] = add_seconds(partition["until"], 1)
 
-            per_page = self._int_option(table_options, "per_page", wp.DEFAULT_PER_PAGE)
-            per_page = max(1, min(per_page, wp.MAX_PER_PAGE))
+            per_page = self._int_option(table_options, "per_page", DEFAULT_PER_PAGE)
+            per_page = max(1, min(per_page, MAX_PER_PAGE))
 
-            return self._emit(wp.paginate(session, url, params, per_page=per_page))
+            return self._emit(paginate(session, url, params, per_page=per_page))
 
         # ------------------------------------------------------------------ #
         # Snapshot readers
@@ -1318,9 +1318,9 @@ def register_lakeflow_source(spark):
             """Full page-through of a list endpoint (categories / tags / users)."""
             cfg = TABLE_CONFIG[table_name]
             url = f"{self._api_base}/{cfg['endpoint']}"
-            per_page = self._int_option(table_options, "per_page", wp.DEFAULT_PER_PAGE)
-            per_page = max(1, min(per_page, wp.MAX_PER_PAGE))
-            yield from self._emit(wp.paginate(self._session, url, {}, per_page=per_page))
+            per_page = self._int_option(table_options, "per_page", DEFAULT_PER_PAGE)
+            per_page = max(1, min(per_page, MAX_PER_PAGE))
+            yield from self._emit(paginate(self._session, url, {}, per_page=per_page))
 
         def _read_dict_shaped(self, table_name: str) -> Iterator[dict]:
             """Read a dict-keyed-by-slug metadata endpoint (``taxonomies``).
@@ -1332,9 +1332,9 @@ def register_lakeflow_source(spark):
             """
             cfg = TABLE_CONFIG[table_name]
             url = f"{self._api_base}/{cfg['endpoint']}"
-            response = wp.request_with_retry(self._session, url, params=None)
+            response = request_with_retry(self._session, url, params=None)
             if response.status_code != 200:
-                raise wp.WordPressError(f"Failed to read '{table_name}': HTTP {response.status_code}")
+                raise WordPressError(f"Failed to read '{table_name}': HTTP {response.status_code}")
             body = response.json()
             if isinstance(body, dict):
                 for slug, value in body.items():
@@ -1345,7 +1345,7 @@ def register_lakeflow_source(spark):
             elif isinstance(body, list):
                 yield from body
             else:
-                raise wp.WordPressError(
+                raise WordPressError(
                     f"Unexpected response shape for '{table_name}': {type(body).__name__}"
                 )
 
@@ -1379,7 +1379,7 @@ def register_lakeflow_source(spark):
         def _resolve_start(self, table_options: dict[str, str]) -> str:
             """Starting cursor for the first micro-batch of a partitioned table."""
             start = table_options.get("start_timestamp")
-            normalized = wp.normalize_ts(start) if start else None
+            normalized = normalize_ts(start) if start else None
             return normalized or DEFAULT_START_TIMESTAMP
 
         def _validate_table(self, table_name: str) -> None:
@@ -1395,9 +1395,6 @@ def register_lakeflow_source(spark):
                 return int(raw)
             except (TypeError, ValueError):
                 return default
-
-
-    wp = wordpress_utils
 
 
     ########################################################
