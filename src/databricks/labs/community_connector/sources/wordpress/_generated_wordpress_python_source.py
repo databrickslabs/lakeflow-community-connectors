@@ -1242,6 +1242,15 @@ def register_lakeflow_source(spark):
             the same micro-batch, so this does not affect termination.
             """
             self._validate_table(table_name)
+            if not self.is_partitioned(table_name):
+                # The Spark DataSource calls get_partitions for every table on a
+                # SupportsPartition connector. Snapshot tables (categories, tags,
+                # users, taxonomies) are read whole via read_table, so signal the
+                # framework to fall back to the batch read path.
+                raise ValueError(
+                    f"{table_name!r} is a snapshot table and is not partitioned; "
+                    "read it via read_table()."
+                )
 
             start_cursor = (start_offset or {}).get("cursor") if start_offset else None
             if not start_cursor:
