@@ -1,0 +1,94 @@
+# Linear Community Connector Spec
+# GraphQL-based ingestion for Linear issues and projects via CDC (upsert-only incremental).
+#
+# See linear_api_doc.md for complete API reference and field-level schema documentation.
+
+# ============================================================================
+# Connection Parameters
+# ============================================================================
+# Linear supports two authentication methods: Personal API Keys (preferred for
+# server-side connectors) and OAuth 2.0 (for multi-tenant / user-delegated access).
+#
+# - Personal API Key: sent raw in Authorization header (no Bearer prefix)
+# - OAuth 2.0: access tokens sent as "Bearer <token>"; refresh_token stored
+#
+# At least one of api_key or access_token must be provided at runtime.
+# ============================================================================
+
+connection:
+  auth_methods:
+    - name: personal_api_key
+      description: >
+        Authenticate using a Linear Personal API Key. This is the preferred method
+        for server-side connectors and data pipelines. The API key is passed verbatim
+        in the Authorization header without a Bearer prefix. Personal API keys inherit
+        the permissions of the user who created them; the connector can only read data
+        that the key owner can see in the Linear application.
+      parameters:
+        - name: api_key
+          type: string
+          required: true
+          description: >
+            Personal API key for Linear. Create one in Linear → Settings → Security & access
+            → Personal API keys. Copy immediately after creation — Linear shows the key only once.
+
+    - name: oauth
+      description: >
+        Authenticate using OAuth 2.0 Authorization Code Flow. Use this for multi-tenant
+        scenarios or when acting on behalf of end-users. The connector exchanges a
+        refresh_token for a short-lived access_token at runtime. Access tokens expire
+        in ~24 hours; refresh tokens are issued by default for OAuth apps created after
+        October 1, 2025.
+      parameters:
+        - name: client_id
+          type: string
+          required: true
+          description: >
+            OAuth 2.0 application client ID (obtained when registering an app at
+            https://linear.app/oauth/authorize).
+
+        - name: client_secret
+          type: string
+          required: true
+          description: >
+            OAuth 2.0 application client secret. Keep this secure — treat it like an API key.
+
+        - name: refresh_token
+          type: string
+          required: true
+          description: >
+            OAuth 2.0 refresh token. Obtained via the Authorization Code Flow callback
+            and persisted for token refresh. The authenticate tool exchanges this for
+            access_tokens automatically at runtime.
+
+  oauth:
+    authorization_url: "https://linear.app/oauth/authorize"
+    token_url: "https://api.linear.app/oauth/token"
+    scopes: "read"
+    extra_auth_params:
+      response_type: "code"
+
+# ============================================================================
+# External Options Allowlist
+# ============================================================================
+# Table-specific runtime options that can be passed via the UC connection.
+#
+# Supported options:
+#   - page_size: Relay pagination page size (1–250, default 50). Larger pages
+#     cost more complexity budget but reduce round-trips. Use 25–50 for nested
+#     queries; up to 250 for flat scalar queries.
+#   - max_records_per_batch: Maximum records to read per microbatch (default unlimited).
+#     Useful for capping memory during initial full syncs or for testing.
+#
+# Example UC connection definition:
+#   CREATE CONNECTION linear_prod
+#   USING linear
+#   WITH(
+#     api_key = 'lin_api_...',
+#     externalOptionsAllowList = 'page_size,max_records_per_batch'
+#   );
+#
+# Then in the pipeline:
+#   SELECT * FROM linear_prod.issues OPTIONS(page_size = '25', max_records_per_batch = '10000')
+# ============================================================================
+external_options_allowlist: "page_size,max_records_per_batch"
