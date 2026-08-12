@@ -505,6 +505,7 @@ def deduplicate_imports(
 
     # Categorize imports into standard library and third-party
     stdlib_modules = {
+        "__future__",
         "sys",
         "os",
         "re",

@@ -1258,19 +1258,18 @@ def register_lakeflow_source(spark):
             Expected options:
                 - organization: Azure DevOps organization name.
                 - project: Project name or ID (optional).
-                - personal_access_token: PAT for authentication.
+                - personal_access_token: PAT (the ``pat`` auth method).
+                - access_token: OAuth bearer token (the ``service_principal``
+                  auth method). For OAuth 2.0 m2m / client-credentials, this token
+                  is minted and injected by the Unity Catalog COMMUNITY connection
+                  at query time — the connector never runs the OAuth flow itself.
             """
             organization = options.get("organization")
             project = options.get("project")
-            personal_access_token = options.get("personal_access_token")
 
             if not organization:
                 raise ValueError(
                     "Azure DevOps connector requires 'organization'"
-                )
-            if not personal_access_token:
-                raise ValueError(
-                    "Azure DevOps connector requires 'personal_access_token'"
                 )
 
             self.organization = organization
@@ -1280,17 +1279,40 @@ def register_lakeflow_source(spark):
                 f"https://vssps.dev.azure.com/{organization}"
             )
 
-            auth_b64 = base64.b64encode(
-                f":{personal_access_token}".encode("ascii")
-            ).decode("ascii")
-
             self._session = requests.Session()
-            self._session.headers.update(
-                {
-                    "Authorization": f"Basic {auth_b64}",
-                    "Accept": "application/json",
-                }
-            )
+            self._session.headers.update({"Accept": "application/json"})
+            self._configure_auth(options)
+
+        def _configure_auth(self, options: dict[str, str]) -> None:
+            """Configure session authentication from the connection options.
+
+            Two auth methods are declared in ``connector_spec.yaml`` under
+            ``auth_methods``:
+
+            - ``service_principal`` — Microsoft Entra ID OAuth 2.0 client-
+              credentials (m2m). The UC COMMUNITY connection runs the flow and
+              injects a refreshed bearer token as ``access_token`` at query time,
+              so the connector simply sends ``Authorization: Bearer``. It never
+              holds the client secret or runs the token exchange itself.
+            - ``pat`` — HTTP Basic auth with a Personal Access Token.
+
+            ``access_token`` (OAuth) takes precedence when both are present.
+            """
+            access_token = options.get("access_token")
+            personal_access_token = options.get("personal_access_token")
+
+            if access_token:
+                self._session.headers["Authorization"] = f"Bearer {access_token}"
+            elif personal_access_token:
+                auth_b64 = base64.b64encode(
+                    f":{personal_access_token}".encode("ascii")
+                ).decode("ascii")
+                self._session.headers["Authorization"] = f"Basic {auth_b64}"
+            else:
+                raise ValueError(
+                    "Azure DevOps connector requires either 'access_token' "
+                    "(service_principal / OAuth) or 'personal_access_token' (pat)"
+                )
 
         # ------------------------------------------------------------------ #
         # Interface methods
@@ -2059,6 +2081,7 @@ def register_lakeflow_source(spark):
             start_offset = start_offset or {}
             watermarks: dict[str, str] = dict(start_offset.get("watermarks", {}))
             all_records: list[dict[str, Any]] = []
+            watermarks_advanced = False
 
             for project in projects:
                 if explicit_ids:
@@ -2086,10 +2109,16 @@ def register_lakeflow_source(spark):
                     or max_changed > watermarks[project]
                 ):
                     watermarks[project] = max_changed
+                    watermarks_advanced = True
 
             if explicit_ids:
                 # Explicit-IDs path is snapshot-like — stable offset terminates
                 return iter(all_records), start_offset
+            # If no watermarks advanced, no new changes — return empty to satisfy
+            # Spark's SimpleDataSourceStreamReader contract: a non-empty batch
+            # must always be paired with a strictly advancing end offset.
+            if not watermarks_advanced:
+                return iter([]), start_offset
             return iter(all_records), {"watermarks": watermarks}
 
         def _discover_workitem_ids(self, project: str) -> list[str]:
@@ -2588,8 +2617,33 @@ def register_lakeflow_source(spark):
 
     class LakeflowSource(DataSource):
         """
-        PySpark DataSource implementation for Lakeflow Connect.
+        PySpark DataSource base for Lakeflow Connect.
+
+        Two ways the connector implementation is bound:
+
+        - Per-source subclass (wheel / multi-file deployment): subclass and set
+          ``_lakeflow_connect_cls``::
+
+              class GmailDataSource(LakeflowSource):
+                  _lakeflow_connect_cls = GmailLakeflowConnect
+
+              spark.dataSource.register(GmailDataSource)
+
+        - Merged single-file deployment (SDP): ``_lakeflow_connect_cls`` is left
+          ``None`` and the connector is taken from the module-level
+          ``LakeflowConnectImpl`` placeholder, which the merge script substitutes
+          with the actual implementation class.
         """
+
+        # Per-source subclasses set this. Left ``None`` on the base so the merged
+        # single-file path falls back to the ``LakeflowConnectImpl`` placeholder.
+        _lakeflow_connect_cls = None
+
+        # Spark format name. Defaults to "lakeflow_connect" because Unity Catalog
+        # connection-option injection looks for that exact string. A per-source
+        # subclass may override this with its source name once it no longer relies
+        # on UC injection (see the commented override in each source's __init__.py).
+        _format_name = "lakeflow_connect"
 
         def __init__(self, options):
             self.options = options
@@ -2604,13 +2658,15 @@ def register_lakeflow_source(spark):
                     f"For a regular source table, use a name that does not start "
                     f"with '_community_'."
                 )
-            # TEMPORARY: LakeflowConnectImpl is replaced with the actual implementation
-            # class during merge. See the placeholder comment at the top of this file.
-            self.lakeflow_connect = LakeflowConnectImpl(options)  # pylint: disable=abstract-class-instantiated
+            # Per-source subclasses bind the implementation via _lakeflow_connect_cls.
+            # The merged single-file path leaves it None and relies on the
+            # LakeflowConnectImpl placeholder (substituted by the merge script).
+            connect_cls = type(self)._lakeflow_connect_cls or LakeflowConnectImpl
+            self.lakeflow_connect = connect_cls(options)  # pylint: disable=abstract-class-instantiated
 
         @classmethod
         def name(cls):
-            return "lakeflow_connect"
+            return cls._format_name
 
         def schema(self):
             table = self.options[TABLE_NAME]

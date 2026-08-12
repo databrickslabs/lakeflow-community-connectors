@@ -35,6 +35,15 @@ from databricks.labs.community_connector_cli.cli import (
     _merge_external_options_allowlist,
     _get_ingest_path_from_pipeline,
     _extract_source_name_from_ingest,
+    _parse_volume_path,
+    _ensure_volume_directory,
+    _validate_wheel_layout,
+    _validate_framework_wheel,
+    _find_repo_root,
+    _interpolate_oauth_placeholders,
+    _resolve_display_name,
+    _build_community_connector_manifest,
+    _write_community_connector_manifest,
 )
 from databricks.labs.community_connector_cli.connector_spec import (
     ParsedConnectorSpec,
@@ -197,7 +206,7 @@ class TestCreatePipelineCommand:
         with patch("databricks.labs.community_connector_cli.cli.WorkspaceClient"):
             result = runner.invoke(
                 main,
-                ['create_pipeline', 'github', 'my_pipeline'],
+                ['create_pipeline', 'github', 'my_pipeline', '--use-workspace-pipeline'],
             )
 
         assert result.exit_code != 0
@@ -235,7 +244,8 @@ class TestCreatePipelineCommand:
 
         result = runner.invoke(
             main,
-            ['create_pipeline', 'github', 'my_pipeline', '-n', 'my_conn'],
+            ['create_pipeline', 'github', 'my_pipeline', '-n', 'my_conn',
+             '--use-workspace-pipeline'],
         )
 
         # Should succeed (or at least pass the validation)
@@ -277,6 +287,7 @@ class TestCreatePipelineCommand:
                 [
                     'create_pipeline', 'github', 'my_pipeline',
                     '-n', 'my_conn', '--package', temp_pkg.name,
+                    '--use-workspace-pipeline',
                 ],
             )
 
@@ -332,7 +343,7 @@ class TestCreatePipelineCommand:
                 main,
                 [
                     'create_pipeline', 'github', 'my_pipeline', '-n', 'my_conn',
-                    '-p', pkg1.name, '-p', pkg2.name,
+                    '-p', pkg1.name, '-p', pkg2.name, '--use-workspace-pipeline',
                 ],
             )
 
@@ -374,7 +385,8 @@ class TestCreatePipelineCommand:
 
             result = runner.invoke(
                 main,
-                ['create_pipeline', 'github', 'my_pipeline', '-n', 'my_conn', '-p', temp_pkg.name],
+                ['create_pipeline', 'github', 'my_pipeline', '-n', 'my_conn', '-p', temp_pkg.name,
+                 '--use-workspace-pipeline'],
             )
 
             assert result.exit_code == 0, f"Exit code: {result.exit_code}\nOutput: {result.output}"
@@ -503,7 +515,8 @@ class TestCreatePipelineUseLocalSource:
 
         result = runner.invoke(
             main,
-            ['create_pipeline', 'github', 'my_pipeline', '-n', 'my_conn', '--use-local-source'],
+            ['create_pipeline', 'github', 'my_pipeline', '-n', 'my_conn', '--use-local-source',
+             '--use-workspace-pipeline'],
         )
 
         assert result.exit_code == 0, f"Exit code: {result.exit_code}\nOutput: {result.output}"
@@ -543,7 +556,8 @@ class TestCreatePipelineUseLocalSource:
 
         result = runner.invoke(
             main,
-            ['create_pipeline', 'github', 'my_pipeline', '-n', 'my_conn'],
+            ['create_pipeline', 'github', 'my_pipeline', '-n', 'my_conn',
+             '--use-workspace-pipeline'],
         )
 
         assert result.exit_code == 0, f"Exit code: {result.exit_code}\nOutput: {result.output}"
@@ -586,7 +600,7 @@ class TestCreatePipelineUseLocalSource:
                 main,
                 [
                     'create_pipeline', 'github', 'my_pipeline', '-n', 'my_conn',
-                    '-p', temp_pkg.name, '--use-local-source',
+                    '-p', temp_pkg.name, '--use-local-source', '--use-workspace-pipeline',
                 ],
             )
 
@@ -846,6 +860,791 @@ class TestCreateConnectionCommand:
         assert "tableNameList" in allowlist
         assert "tableConfigs" in allowlist
         assert "isDeleteFlow" in allowlist
+
+
+class TestCreateConnectionConnectionType:
+    """Tests for the COMMUNITY connection type and auth_type plumbing."""
+
+    @patch("databricks.labs.community_connector_cli.cli._load_connector_spec")
+    @patch("databricks.labs.community_connector_cli.cli.WorkspaceClient")
+    def test_create_connection_uses_community_type(self, mock_workspace_client, mock_load_spec):
+        """create_connection POSTs connection_type=COMMUNITY."""
+        runner = CliRunner()
+
+        mock_load_spec.return_value = {
+            "connection": {
+                "parameters": [{"name": "token", "type": "string", "required": True}],
+            },
+            "external_options_allowlist": "",
+        }
+        mock_ws = MagicMock()
+        mock_workspace_client.return_value = mock_ws
+        mock_ws.api_client.do.return_value = {"name": "test", "connection_id": "123"}
+
+        result = runner.invoke(
+            main,
+            ["create_connection", "github", "my_conn", "-o", '{"token": "ghp_xxx"}'],
+        )
+
+        assert result.exit_code == 0, result.output
+        body = mock_ws.api_client.do.call_args.kwargs["body"]
+        assert body["connection_type"] == "COMMUNITY"
+        # Static mode must NOT stamp community_oauth_flow on the options.
+        assert "community_oauth_flow" not in body["options"]
+
+    def test_create_connection_static_rejects_oauth_flow_in_options(self):
+        """Static mode rejects sneaking community_oauth_flow in via --options."""
+        runner = CliRunner()
+
+        result = runner.invoke(
+            main,
+            [
+                "create_connection",
+                "github",
+                "my_conn",
+                "-o",
+                '{"token": "ghp_xxx", "community_oauth_flow": "m2m"}',
+            ],
+        )
+
+        assert result.exit_code != 0
+        assert "community_oauth_flow" in result.output
+
+    @patch("databricks.labs.community_connector_cli.cli._load_connector_spec")
+    @patch("databricks.labs.community_connector_cli.cli.WorkspaceClient")
+    def test_create_connection_m2m_sets_oauth_flow(
+        self, mock_workspace_client, mock_load_spec
+    ):
+        """--auth-type=m2m stamps community_oauth_flow=m2m and exempts OAuth keys from spec."""
+        runner = CliRunner()
+
+        # Spec lists only connector-runtime params; OAuth keys must not trigger
+        # 'unknown parameter' errors.
+        mock_load_spec.return_value = {
+            "connection": {"parameters": []},
+            "external_options_allowlist": "",
+        }
+        mock_ws = MagicMock()
+        mock_workspace_client.return_value = mock_ws
+        mock_ws.api_client.do.return_value = {"name": "test", "connection_id": "123"}
+
+        result = runner.invoke(
+            main,
+            [
+                "create_connection",
+                "github",
+                "my_conn",
+                "--auth-type",
+                "m2m",
+                "-o",
+                json.dumps(
+                    {
+                        "client_id": "cid",
+                        "client_secret": "csecret",
+                        "token_endpoint": "https://example.com/token",
+                        "oauth_scope": "repo",
+                    }
+                ),
+            ],
+        )
+
+        assert result.exit_code == 0, result.output
+        body = mock_ws.api_client.do.call_args.kwargs["body"]
+        assert body["connection_type"] == "COMMUNITY"
+        opts = body["options"]
+        assert opts["community_oauth_flow"] == "m2m"
+        assert opts["client_id"] == "cid"
+        assert opts["token_endpoint"] == "https://example.com/token"
+
+    @patch("databricks.labs.community_connector_cli.cli._load_connector_spec")
+    def test_create_connection_m2m_requires_oauth_fields(self, mock_load_spec):
+        """--auth-type=m2m errors out when required OAuth options are missing."""
+        runner = CliRunner()
+        mock_load_spec.return_value = None
+
+        result = runner.invoke(
+            main,
+            [
+                "create_connection",
+                "github",
+                "my_conn",
+                "--auth-type",
+                "m2m",
+                "-o",
+                '{"client_id": "cid"}',
+            ],
+        )
+
+        assert result.exit_code != 0
+        assert "--auth-type=m2m" in result.output
+        assert "client_secret" in result.output
+        assert "token_endpoint" in result.output
+
+    @patch("databricks.labs.community_connector_cli.cli._load_connector_spec")
+    def test_create_connection_u2m_requires_oauth_fields(self, mock_load_spec):
+        """--auth-type=u2m must error on missing required OAuth options before
+        kicking off the loopback flow."""
+        runner = CliRunner()
+        mock_load_spec.return_value = None
+
+        result = runner.invoke(
+            main,
+            [
+                "create_connection",
+                "github",
+                "my_conn",
+                "--auth-type",
+                "u2m",
+                "-o",
+                '{"client_id": "cid"}',
+            ],
+        )
+
+        assert result.exit_code != 0
+        assert "--auth-type=u2m" in result.output
+        assert "client_secret" in result.output
+        assert "authorization_endpoint" in result.output
+        assert "token_endpoint" in result.output
+
+    @patch(
+        "databricks.labs.community_connector_cli.cli.run_u2m_authorization_code_flow"
+    )
+    @patch("databricks.labs.community_connector_cli.cli._load_connector_spec")
+    @patch("databricks.labs.community_connector_cli.cli.WorkspaceClient")
+    def test_create_connection_u2m_runs_oauth_flow(
+        self, mock_workspace_client, mock_load_spec, mock_oauth
+    ):
+        """--auth-type=u2m runs the loopback OAuth flow and injects code/verifier/redirect."""
+        runner = CliRunner()
+
+        mock_load_spec.return_value = None
+        mock_ws = MagicMock()
+        mock_workspace_client.return_value = mock_ws
+        mock_ws.api_client.do.return_value = {"name": "test", "connection_id": "123"}
+        mock_oauth.return_value = ("AUTHCODE", "VERIFIER", "http://localhost:54321/callback")
+
+        result = runner.invoke(
+            main,
+            [
+                "create_connection",
+                "github",
+                "my_conn",
+                "--auth-type",
+                "u2m",
+                "-o",
+                json.dumps(
+                    {
+                        "client_id": "cid",
+                        "client_secret": "csecret",
+                        "authorization_endpoint": "https://example.com/authorize",
+                        "token_endpoint": "https://example.com/token",
+                        "oauth_scope": "repo",
+                    }
+                ),
+            ],
+        )
+
+        assert result.exit_code == 0, result.output
+        mock_oauth.assert_called_once()
+        kwargs = mock_oauth.call_args.kwargs
+        assert kwargs["client_id"] == "cid"
+        assert kwargs["authorization_endpoint"] == "https://example.com/authorize"
+        assert kwargs["scope"] == "repo"
+
+        body = mock_ws.api_client.do.call_args.kwargs["body"]
+        opts = body["options"]
+        assert opts["community_oauth_flow"] == "u2m"
+        assert opts["authorization_code"] == "AUTHCODE"
+        assert opts["pkce_verifier"] == "VERIFIER"
+        assert opts["oauth_redirect_uri"] == "http://localhost:54321/callback"
+
+
+class TestUpdateConnectionCommand:
+    """update_connection must support the same auth modes as create_connection
+    so a U2M OAuth grant can be refreshed without recreating the connection."""
+
+    @patch(
+        "databricks.labs.community_connector_cli.cli.run_u2m_authorization_code_flow"
+    )
+    @patch("databricks.labs.community_connector_cli.cli._load_connector_spec")
+    @patch("databricks.labs.community_connector_cli.cli.WorkspaceClient")
+    def test_update_connection_u2m_refreshes_oauth_grant(
+        self, mock_workspace_client, mock_load_spec, mock_oauth
+    ):
+        """--auth-type=u2m re-runs the loopback flow and PATCHes a fresh
+        authorization code / verifier / redirect into the connection."""
+        runner = CliRunner()
+
+        mock_load_spec.return_value = None
+        mock_ws = MagicMock()
+        mock_workspace_client.return_value = mock_ws
+        mock_ws.api_client.do.return_value = {"name": "my_conn", "connection_id": "123"}
+        mock_oauth.return_value = (
+            "NEWCODE",
+            "NEWVERIFIER",
+            "http://localhost:54321/callback",
+        )
+
+        result = runner.invoke(
+            main,
+            [
+                "update_connection",
+                "github",
+                "my_conn",
+                "--auth-type",
+                "u2m",
+                "-o",
+                json.dumps(
+                    {
+                        "client_id": "cid",
+                        "client_secret": "csecret",
+                        "authorization_endpoint": "https://example.com/authorize",
+                        "token_endpoint": "https://example.com/token",
+                        "oauth_scope": "repo",
+                    }
+                ),
+            ],
+        )
+
+        assert result.exit_code == 0, result.output
+        mock_oauth.assert_called_once()
+
+        method, path = mock_ws.api_client.do.call_args.args[:2]
+        assert method == "PATCH"
+        assert path.endswith("/connections/my_conn")
+
+        opts = mock_ws.api_client.do.call_args.kwargs["body"]["options"]
+        assert opts["community_oauth_flow"] == "u2m"
+        assert opts["authorization_code"] == "NEWCODE"
+        assert opts["pkce_verifier"] == "NEWVERIFIER"
+        assert opts["oauth_redirect_uri"] == "http://localhost:54321/callback"
+
+    @patch("databricks.labs.community_connector_cli.cli._load_connector_spec")
+    @patch("databricks.labs.community_connector_cli.cli.WorkspaceClient")
+    def test_update_connection_defaults_to_static_no_oauth_flow(
+        self, mock_workspace_client, mock_load_spec
+    ):
+        """Without --auth-type the update stays static and runs no OAuth flow."""
+        runner = CliRunner()
+
+        mock_load_spec.return_value = None
+        mock_ws = MagicMock()
+        mock_workspace_client.return_value = mock_ws
+        mock_ws.api_client.do.return_value = {"name": "my_conn", "connection_id": "123"}
+
+        result = runner.invoke(
+            main,
+            [
+                "update_connection",
+                "github",
+                "my_conn",
+                "-o",
+                '{"token": "ghp_xxxx"}',
+            ],
+        )
+
+        assert result.exit_code == 0, result.output
+        opts = mock_ws.api_client.do.call_args.kwargs["body"]["options"]
+        assert "community_oauth_flow" not in opts
+
+
+class TestOAuthDefaultsAutoFill:
+    """Tests for auto-populating OAuth options from connector_spec.yaml."""
+
+    @patch("databricks.labs.community_connector_cli.cli._load_connector_spec")
+    @patch("databricks.labs.community_connector_cli.cli.WorkspaceClient")
+    def test_m2m_fills_endpoints_and_scope_from_spec(
+        self, mock_workspace_client, mock_load_spec
+    ):
+        """User only supplies client_id + client_secret; spec fills the rest."""
+        runner = CliRunner()
+        mock_load_spec.return_value = {
+            "connection": {
+                "parameters": [],
+                "oauth": {
+                    "authorization_endpoint": "https://idp/authorize",
+                    "token_endpoint": "https://idp/token",
+                    "oauth_scope": "read",
+                },
+            },
+            "external_options_allowlist": "",
+        }
+        mock_ws = MagicMock()
+        mock_workspace_client.return_value = mock_ws
+        mock_ws.api_client.do.return_value = {"name": "test", "connection_id": "123"}
+
+        result = runner.invoke(
+            main,
+            [
+                "create_connection",
+                "demo",
+                "my_conn",
+                "--auth-type",
+                "m2m",
+                "-o",
+                '{"client_id":"cid","client_secret":"csecret"}',
+            ],
+        )
+
+        assert result.exit_code == 0, result.output
+        body = mock_ws.api_client.do.call_args.kwargs["body"]
+        opts = body["options"]
+        assert opts["community_oauth_flow"] == "m2m"
+        assert opts["token_endpoint"] == "https://idp/token"
+        assert opts["authorization_endpoint"] == "https://idp/authorize"
+        assert opts["oauth_scope"] == "read"
+
+    @patch("databricks.labs.community_connector_cli.cli._load_connector_spec")
+    @patch("databricks.labs.community_connector_cli.cli.WorkspaceClient")
+    def test_user_options_override_spec_defaults(
+        self, mock_workspace_client, mock_load_spec
+    ):
+        """A value passed via --options overrides the spec default for that key."""
+        runner = CliRunner()
+        mock_load_spec.return_value = {
+            "connection": {
+                "parameters": [],
+                "oauth": {
+                    "authorization_endpoint": "https://idp/authorize",
+                    "token_endpoint": "https://idp/token",
+                    "oauth_scope": "read",
+                },
+            },
+            "external_options_allowlist": "",
+        }
+        mock_ws = MagicMock()
+        mock_workspace_client.return_value = mock_ws
+        mock_ws.api_client.do.return_value = {"name": "test", "connection_id": "123"}
+
+        result = runner.invoke(
+            main,
+            [
+                "create_connection",
+                "demo",
+                "my_conn",
+                "--auth-type",
+                "m2m",
+                "-o",
+                json.dumps(
+                    {
+                        "client_id": "cid",
+                        "client_secret": "csecret",
+                        "oauth_scope": "custom",
+                    }
+                ),
+            ],
+        )
+
+        assert result.exit_code == 0, result.output
+        opts = mock_ws.api_client.do.call_args.kwargs["body"]["options"]
+        assert opts["oauth_scope"] == "custom"
+
+    @patch("databricks.labs.community_connector_cli.cli._load_connector_spec")
+    @patch("databricks.labs.community_connector_cli.cli.WorkspaceClient")
+    def test_static_mode_ignores_oauth_defaults(
+        self, mock_workspace_client, mock_load_spec
+    ):
+        """OAuth defaults must not leak into static-credential connections."""
+        runner = CliRunner()
+        mock_load_spec.return_value = {
+            "connection": {
+                "parameters": [{"name": "token", "type": "string", "required": True}],
+                "oauth": {"token_endpoint": "https://idp/token"},
+            },
+            "external_options_allowlist": "",
+        }
+        mock_ws = MagicMock()
+        mock_workspace_client.return_value = mock_ws
+        mock_ws.api_client.do.return_value = {"name": "test", "connection_id": "123"}
+
+        result = runner.invoke(
+            main,
+            ["create_connection", "demo", "my_conn", "-o", '{"token":"abc"}'],
+        )
+
+        assert result.exit_code == 0, result.output
+        opts = mock_ws.api_client.do.call_args.kwargs["body"]["options"]
+        assert "token_endpoint" not in opts
+        assert "community_oauth_flow" not in opts
+
+
+class TestOAuthSpecBlockShape:
+    """With the connector spec declaring its OAuth flow (PR #218 shape), the
+    user no longer passes --auth-type: the CLI takes the auth type from
+    oauth.flow and resolves the spec's human-friendly oauth keys
+    (authorization_url / token_url / scopes / extra_auth_params) into the
+    option names the existing flow uses."""
+
+    _SPEC = {
+        "connection": {
+            "parameters": [
+                {"name": "client_id", "type": "string", "required": True},
+                {"name": "client_secret", "type": "string", "required": True},
+                {"name": "user_id", "type": "string", "required": False},
+            ],
+            "oauth": {
+                "flow": "u2m",
+                "pkce": False,
+                "scopes": "https://www.googleapis.com/auth/gmail.readonly",
+                "authorization_url": "https://accounts.google.com/o/oauth2/v2/auth",
+                "token_url": "https://oauth2.googleapis.com/token",
+                "extra_auth_params": {"access_type": "offline", "prompt": "consent"},
+            },
+        },
+        "external_options_allowlist": "",
+    }
+
+    @patch(
+        "databricks.labs.community_connector_cli.cli.run_u2m_authorization_code_flow"
+    )
+    @patch("databricks.labs.community_connector_cli.cli._load_connector_spec")
+    @patch("databricks.labs.community_connector_cli.cli.WorkspaceClient")
+    def test_auth_type_derived_from_spec_flow_no_flag_needed(
+        self, mock_workspace_client, mock_load_spec, mock_oauth
+    ):
+        """No --auth-type: the u2m flow runs (from oauth.flow), spec keys map to
+        the RFC names, extra_auth_params reach the flow, and flow-control keys
+        are not stored on the connection."""
+        runner = CliRunner()
+        mock_load_spec.return_value = self._SPEC
+        mock_ws = MagicMock()
+        mock_workspace_client.return_value = mock_ws
+        mock_ws.api_client.do.return_value = {"name": "test", "connection_id": "123"}
+        mock_oauth.return_value = ("CODE", "VERIFIER", "http://127.0.0.1:5/callback")
+
+        result = runner.invoke(
+            main,
+            [
+                "create_connection",
+                "gmail",
+                "my_conn",
+                "-o",
+                '{"client_id":"cid","client_secret":"csecret"}',
+            ],
+        )
+
+        assert result.exit_code == 0, result.output
+
+        # The u2m flow ran even though --auth-type was not passed.
+        mock_oauth.assert_called_once()
+        kwargs = mock_oauth.call_args.kwargs
+        assert kwargs["authorization_endpoint"] == (
+            "https://accounts.google.com/o/oauth2/v2/auth"
+        )
+        assert kwargs["scope"] == "https://www.googleapis.com/auth/gmail.readonly"
+        assert kwargs["extra_auth_params"] == {
+            "access_type": "offline",
+            "prompt": "consent",
+        }
+
+        opts = mock_ws.api_client.do.call_args.kwargs["body"]["options"]
+        assert opts["authorization_endpoint"] == (
+            "https://accounts.google.com/o/oauth2/v2/auth"
+        )
+        assert opts["token_endpoint"] == "https://oauth2.googleapis.com/token"
+        assert opts["oauth_scope"] == "https://www.googleapis.com/auth/gmail.readonly"
+        assert opts["community_oauth_flow"] == "u2m"
+        # Flow-control keys must never be stored on the connection.
+        for leaked in ("flow", "pkce", "extra_auth_params", "scopes",
+                       "authorization_url", "token_url"):
+            assert leaked not in opts
+
+    @patch(
+        "databricks.labs.community_connector_cli.cli.run_u2m_authorization_code_flow"
+    )
+    @patch("databricks.labs.community_connector_cli.cli._load_connector_spec")
+    @patch("databricks.labs.community_connector_cli.cli.WorkspaceClient")
+    def test_oauth_mode_enforces_connector_required_params(
+        self, mock_workspace_client, mock_load_spec, mock_oauth
+    ):
+        """A connector-specific required param missing errors out (like static
+        mode) before the browser flow runs — the OAuth fields are exempt, but
+        connector params are not."""
+        runner = CliRunner()
+        spec = {
+            "connection": {
+                "parameters": [
+                    {"name": "client_id", "type": "string", "required": True},
+                    {"name": "client_secret", "type": "string", "required": True},
+                    # A connector-specific required option, not an OAuth field.
+                    {"name": "region", "type": "string", "required": True},
+                ],
+                "oauth": {
+                    "flow": "u2m",
+                    "scopes": "read",
+                    "authorization_url": "https://idp/authorize",
+                    "token_url": "https://idp/token",
+                },
+            },
+            "external_options_allowlist": "",
+        }
+        mock_load_spec.return_value = spec
+        mock_ws = MagicMock()
+        mock_workspace_client.return_value = mock_ws
+
+        result = runner.invoke(
+            main,
+            [
+                "create_connection",
+                "demo",
+                "my_conn",
+                "-o",
+                '{"client_id":"cid","client_secret":"csecret"}',
+            ],
+        )
+
+        assert result.exit_code != 0
+        assert "region" in result.output
+        # The browser flow must not run when required options are missing.
+        mock_oauth.assert_not_called()
+        mock_ws.api_client.do.assert_not_called()
+
+    @patch("databricks.labs.community_connector_cli.cli._load_connector_spec")
+    @patch("databricks.labs.community_connector_cli.cli.WorkspaceClient")
+    def test_explicit_auth_type_overrides_spec_flow(
+        self, mock_workspace_client, mock_load_spec
+    ):
+        """An explicit --auth-type wins over the spec's oauth.flow."""
+        runner = CliRunner()
+        mock_load_spec.return_value = self._SPEC
+        mock_ws = MagicMock()
+        mock_workspace_client.return_value = mock_ws
+        mock_ws.api_client.do.return_value = {"name": "test", "connection_id": "123"}
+
+        result = runner.invoke(
+            main,
+            [
+                "create_connection",
+                "gmail",
+                "my_conn",
+                "--auth-type",
+                "static",
+                "-o",
+                '{"client_id":"cid","client_secret":"csecret"}',
+            ],
+        )
+
+        assert result.exit_code == 0, result.output
+        opts = mock_ws.api_client.do.call_args.kwargs["body"]["options"]
+        # static wins: no OAuth flow stamped, oauth defaults not applied.
+        assert "community_oauth_flow" not in opts
+        assert "authorization_endpoint" not in opts
+
+    @patch(
+        "databricks.labs.community_connector_cli.cli.run_u2m_authorization_code_flow"
+    )
+    @patch("databricks.labs.community_connector_cli.cli._load_connector_spec")
+    @patch("databricks.labs.community_connector_cli.cli.WorkspaceClient")
+    def test_oauth_mode_still_rejects_truly_unknown_key(
+        self, mock_workspace_client, mock_load_spec, mock_oauth
+    ):
+        """OAuth keys are exempt, but a genuinely unknown key is still rejected
+        (the exemption must not become a blanket pass-through)."""
+        runner = CliRunner()
+        mock_load_spec.return_value = self._SPEC
+        mock_ws = MagicMock()
+        mock_workspace_client.return_value = mock_ws
+
+        result = runner.invoke(
+            main,
+            [
+                "create_connection",
+                "gmail",
+                "my_conn",
+                "-o",
+                '{"client_id":"cid","client_secret":"csecret","bogus_param":"x"}',
+            ],
+        )
+
+        assert result.exit_code != 0
+        assert "bogus_param" in result.output
+        mock_oauth.assert_not_called()
+
+    @pytest.mark.parametrize("flow", ["m2m", "u2m_per_user"])
+    @patch(
+        "databricks.labs.community_connector_cli.cli.run_u2m_authorization_code_flow"
+    )
+    @patch("databricks.labs.community_connector_cli.cli._load_connector_spec")
+    @patch("databricks.labs.community_connector_cli.cli.WorkspaceClient")
+    def test_non_u2m_flows_derived_from_spec_no_browser(
+        self, mock_workspace_client, mock_load_spec, mock_oauth, flow
+    ):
+        """m2m / u2m_per_user are derived from oauth.flow and stamp
+        community_oauth_flow without opening a browser."""
+        runner = CliRunner()
+        mock_load_spec.return_value = {
+            "connection": {
+                "parameters": [
+                    {"name": "client_id", "type": "string", "required": True},
+                    {"name": "client_secret", "type": "string", "required": True},
+                ],
+                "oauth": {
+                    "flow": flow,
+                    "scopes": "read",
+                    "authorization_url": "https://idp/authorize",
+                    "token_url": "https://idp/token",
+                },
+            },
+            "external_options_allowlist": "",
+        }
+        mock_ws = MagicMock()
+        mock_workspace_client.return_value = mock_ws
+        mock_ws.api_client.do.return_value = {"name": "test", "connection_id": "123"}
+
+        result = runner.invoke(
+            main,
+            [
+                "create_connection",
+                "demo",
+                "my_conn",
+                "-o",
+                '{"client_id":"cid","client_secret":"csecret"}',
+            ],
+        )
+
+        assert result.exit_code == 0, result.output
+        opts = mock_ws.api_client.do.call_args.kwargs["body"]["options"]
+        assert opts["community_oauth_flow"] == flow
+        mock_oauth.assert_not_called()  # only u2m opens the browser
+
+    @patch("databricks.labs.community_connector_cli.cli._load_connector_spec")
+    @patch("databricks.labs.community_connector_cli.cli.WorkspaceClient")
+    def test_invalid_spec_flow_errors(self, mock_workspace_client, mock_load_spec):
+        """An unrecognized oauth.flow value is rejected with a clear error."""
+        runner = CliRunner()
+        mock_load_spec.return_value = {
+            "connection": {"parameters": [], "oauth": {"flow": "bogus"}},
+            "external_options_allowlist": "",
+        }
+        mock_ws = MagicMock()
+        mock_workspace_client.return_value = mock_ws
+
+        result = runner.invoke(
+            main, ["create_connection", "demo", "my_conn", "-o", "{}"]
+        )
+
+        assert result.exit_code != 0
+        assert "Unknown auth type" in result.output
+        assert "bogus" in result.output
+
+    @patch(
+        "databricks.labs.community_connector_cli.cli.run_u2m_authorization_code_flow"
+    )
+    @patch("databricks.labs.community_connector_cli.cli._load_connector_spec")
+    @patch("databricks.labs.community_connector_cli.cli.WorkspaceClient")
+    def test_pkce_false_skips_pkce(
+        self, mock_workspace_client, mock_load_spec, mock_oauth
+    ):
+        """oauth.pkce: false runs the flow with use_pkce=False and stores no
+        pkce_verifier."""
+        runner = CliRunner()
+        mock_load_spec.return_value = self._SPEC  # has pkce: False
+        mock_ws = MagicMock()
+        mock_workspace_client.return_value = mock_ws
+        mock_ws.api_client.do.return_value = {"name": "test", "connection_id": "123"}
+        # No-PKCE flow returns an empty verifier.
+        mock_oauth.return_value = ("CODE", "", "http://127.0.0.1:5/callback")
+
+        result = runner.invoke(
+            main,
+            [
+                "create_connection",
+                "gmail",
+                "my_conn",
+                "-o",
+                '{"client_id":"cid","client_secret":"csecret"}',
+            ],
+        )
+
+        assert result.exit_code == 0, result.output
+        assert mock_oauth.call_args.kwargs["use_pkce"] is False
+        opts = mock_ws.api_client.do.call_args.kwargs["body"]["options"]
+        assert "pkce_verifier" not in opts
+
+    @patch(
+        "databricks.labs.community_connector_cli.cli.run_u2m_authorization_code_flow"
+    )
+    @patch("databricks.labs.community_connector_cli.cli._load_connector_spec")
+    @patch("databricks.labs.community_connector_cli.cli.WorkspaceClient")
+    def test_pkce_defaults_on_when_absent(
+        self, mock_workspace_client, mock_load_spec, mock_oauth
+    ):
+        """No pkce key in the spec -> PKCE stays on (the secure default)."""
+        runner = CliRunner()
+        mock_load_spec.return_value = {
+            "connection": {
+                "parameters": [
+                    {"name": "client_id", "type": "string", "required": True},
+                    {"name": "client_secret", "type": "string", "required": True},
+                ],
+                "oauth": {
+                    "flow": "u2m",
+                    "scopes": "read",
+                    "authorization_url": "https://idp/authorize",
+                    "token_url": "https://idp/token",
+                },
+            },
+            "external_options_allowlist": "",
+        }
+        mock_ws = MagicMock()
+        mock_workspace_client.return_value = mock_ws
+        mock_ws.api_client.do.return_value = {"name": "test", "connection_id": "123"}
+        mock_oauth.return_value = ("CODE", "VER", "http://127.0.0.1:5/callback")
+
+        result = runner.invoke(
+            main,
+            [
+                "create_connection",
+                "demo",
+                "my_conn",
+                "-o",
+                '{"client_id":"cid","client_secret":"csecret"}',
+            ],
+        )
+
+        assert result.exit_code == 0, result.output
+        assert mock_oauth.call_args.kwargs["use_pkce"] is True
+        opts = mock_ws.api_client.do.call_args.kwargs["body"]["options"]
+        assert opts["pkce_verifier"] == "VER"
+
+
+class TestMakeWorkspaceClient:
+    """Tests for the WorkspaceClient profile-resolution helper."""
+
+    @patch("databricks.labs.community_connector_cli.cli.WorkspaceClient")
+    def test_env_var_defers_to_sdk(self, mock_workspace_client, monkeypatch):
+        """When DATABRICKS_CONFIG_PROFILE is set, the SDK reads it directly."""
+        monkeypatch.setenv("DATABRICKS_CONFIG_PROFILE", "my-profile")
+        from databricks.labs.community_connector_cli.cli import _make_workspace_client
+
+        _make_workspace_client()
+
+        mock_workspace_client.assert_called_once_with()
+
+    @patch("databricks.labs.community_connector_cli.cli.WorkspaceClient")
+    def test_falls_back_to_default_profile(self, mock_workspace_client, monkeypatch):
+        """Without the env var, force the DEFAULT profile to disambiguate."""
+        monkeypatch.delenv("DATABRICKS_CONFIG_PROFILE", raising=False)
+        monkeypatch.delenv("DATABRICKS_HOST", raising=False)
+        from databricks.labs.community_connector_cli.cli import _make_workspace_client
+
+        _make_workspace_client()
+
+        mock_workspace_client.assert_called_once_with(profile="DEFAULT")
+
+    @patch("databricks.labs.community_connector_cli.cli.WorkspaceClient")
+    def test_databricks_host_env_skips_default_profile(
+        self, mock_workspace_client, monkeypatch
+    ):
+        """DATABRICKS_HOST signals env-var auth — defer to the SDK so users whose
+        ~/.databrickscfg has no [DEFAULT] section don't break on file resolution."""
+        monkeypatch.delenv("DATABRICKS_CONFIG_PROFILE", raising=False)
+        monkeypatch.setenv("DATABRICKS_HOST", "https://example.cloud.databricks.com")
+        from databricks.labs.community_connector_cli.cli import _make_workspace_client
+
+        _make_workspace_client()
+
+        mock_workspace_client.assert_called_once_with()
 
 
 class TestHelpOptions:
@@ -1355,7 +2154,7 @@ class TestUpdatePipelineCommand:
         with patch("databricks.labs.community_connector_cli.cli.WorkspaceClient"):
             result = runner.invoke(
                 main,
-                ["update_pipeline", "my_pipeline"],
+                ["update_pipeline", "my_pipeline", "--use-workspace-pipeline"],
             )
 
         assert result.exit_code != 0
@@ -1432,6 +2231,7 @@ class TestUpdatePipelineCommand:
                 "my_pipeline",
                 "-ps",
                 '{"connection_name": "my_conn", "objects": [{"table": {"source_table": "users"}}]}',
+                "--use-workspace-pipeline",
             ],
         )
 
@@ -1494,7 +2294,8 @@ class TestUpdatePipelineCommand:
                     '{"connection_name": "my_conn", '
                     '"objects": [{"table": {"source_table": "users"}}]}',
                     "--package",
-                    temp_pkg.name
+                    temp_pkg.name,
+                    "--use-workspace-pipeline",
                 ],
             )
 
@@ -1535,7 +2336,8 @@ class TestUpdatePipelineCommand:
 
             result = runner.invoke(
                 main,
-                ["update_pipeline", "my_pipeline", "-p", temp_pkg.name],
+                ["update_pipeline", "my_pipeline", "-p", temp_pkg.name,
+                 "--use-workspace-pipeline"],
             )
 
         assert result.exit_code == 0, f"Exit code: {result.exit_code}\nOutput: {result.output}"
@@ -1578,7 +2380,8 @@ class TestUpdatePipelineCommand:
 
             result = runner.invoke(
                 main,
-                ["update_pipeline", "my_pipeline", "-p", pkg1.name, "-p", pkg2.name],
+                ["update_pipeline", "my_pipeline", "-p", pkg1.name, "-p", pkg2.name,
+                 "--use-workspace-pipeline"],
             )
 
         assert result.exit_code == 0, f"Exit code: {result.exit_code}\nOutput: {result.output}"
@@ -1612,7 +2415,8 @@ class TestUpdatePipelineCommand:
                 "update_pipeline",
                 "my_pipeline",
                 "-ps",
-                '{"connection_name": "conn", "objects": []}',
+                '{"connection_name": "conn", "objects": [{"table": {"source_table": "t"}}]}',
+                "--use-workspace-pipeline",
             ],
         )
 
@@ -1652,7 +2456,8 @@ class TestUpdatePipelineCommand:
                 "update_pipeline",
                 "my_pipeline",
                 "-ps",
-                '{"connection_name": "conn", "objects": []}',
+                '{"connection_name": "conn", "objects": [{"table": {"source_table": "t"}}]}',
+                "--use-workspace-pipeline",
             ],
         )
 
@@ -1690,3 +2495,1246 @@ objects:
                 assert "not found" in result.output
         finally:
             os.unlink(temp_path)
+
+
+class TestManagedCreatePipeline:
+    """Tests for the default (managed ingestion) create_pipeline mode."""
+
+    def _bare_spec(self):
+        return (
+            '{"connection_name": "my_conn", '
+            '"objects": [{"table": {"source_table": "commits"}}]}'
+        )
+
+    @patch("databricks.labs.community_connector_cli.cli._build_and_upload_managed_wheels")
+    @patch("databricks.labs.community_connector_cli.cli._resolve_managed_dest_dir")
+    @patch("databricks.labs.community_connector_cli.cli.WorkspaceClient")
+    def test_managed_create_bare_spec(
+        self, mock_ws_client, mock_dest_dir, mock_build_upload
+    ):
+        runner = CliRunner()
+        mock_ws = MagicMock()
+        mock_ws_client.return_value = mock_ws
+        mock_ws.config.host = "https://test.databricks.com"
+        mock_ws.api_client.do.return_value = {"pipeline_id": "pl-123"}
+        mock_dest_dir.return_value = "/Volumes/main/default/community_connector/packages"
+        mock_build_upload.return_value = [
+            "/Volumes/main/default/community_connector/packages/w.whl"]
+
+        result = runner.invoke(
+            main,
+            ["create_pipeline", "github", "my_pipeline", "-ps", self._bare_spec(),
+             "-c", "cat", "-t", "sch"],
+        )
+
+        assert result.exit_code == 0, f"Output: {result.output}"
+        assert "Pipeline created!" in result.output
+        # POST to the pipelines endpoint with a managed body.
+        args, kwargs = mock_ws.api_client.do.call_args
+        assert args[0] == "POST"
+        assert args[1] == "/api/2.0/pipelines"
+        body = kwargs["body"]
+        assert body["ingestion_definition"]["source_type"] == "COMMUNITY"
+        assert body["ingestion_definition"]["connection_name"] == "my_conn"
+        assert body["catalog"] == "cat"
+        assert body["configuration"][
+            "pipelines.managedIngestion.registerPythonDataSource"] == "true"
+        assert body["environment"]["dependencies"]
+
+    def test_managed_create_requires_spec_or_connection(self):
+        runner = CliRunner()
+        with patch("databricks.labs.community_connector_cli.cli.WorkspaceClient"):
+            result = runner.invoke(
+                main, ["create_pipeline", "github", "my_pipeline"]
+            )
+        assert result.exit_code != 0
+        assert "Either --pipeline-spec or --connection-name" in result.output
+
+    @patch("databricks.labs.community_connector_cli.cli._build_and_upload_managed_wheels")
+    @patch("databricks.labs.community_connector_cli.cli._resolve_managed_dest_dir")
+    @patch("databricks.labs.community_connector_cli.cli.WorkspaceClient")
+    def test_managed_create_empty_pipeline_from_connection(
+        self, mock_ws_client, mock_dest_dir, mock_build_upload
+    ):
+        """No --pipeline-spec: create an empty pipeline (no objects) from -n."""
+        runner = CliRunner()
+        mock_ws = MagicMock()
+        mock_ws_client.return_value = mock_ws
+        mock_ws.config.host = "https://test.databricks.com"
+        mock_ws.api_client.do.return_value = {"pipeline_id": "pl-empty"}
+        mock_dest_dir.return_value = "/Volumes/cat/sch/community_connector/packages"
+        mock_build_upload.return_value = ["/Volumes/cat/sch/community_connector/packages/w.whl"]
+
+        result = runner.invoke(
+            main,
+            ["create_pipeline", "github", "my_pipeline", "-n", "my_conn",
+             "-c", "cat", "-t", "sch"],
+        )
+
+        assert result.exit_code == 0, f"Output: {result.output}"
+        assert "empty pipeline" in result.output
+        body = mock_ws.api_client.do.call_args.kwargs["body"]
+        assert body["ingestion_definition"]["connection_name"] == "my_conn"
+        assert body["ingestion_definition"]["objects"] == []
+        assert body["ingestion_definition"]["source_type"] == "COMMUNITY"
+        assert body["catalog"] == "cat"
+
+    @patch("databricks.labs.community_connector_cli.cli._build_and_upload_managed_wheels")
+    @patch("databricks.labs.community_connector_cli.cli._resolve_managed_dest_dir")
+    @patch("databricks.labs.community_connector_cli.cli.WorkspaceClient")
+    def test_managed_create_full_spec_with_environment_skips_upload(
+        self, mock_ws_client, mock_dest_dir, mock_build_upload
+    ):
+        runner = CliRunner()
+        mock_ws = MagicMock()
+        mock_ws_client.return_value = mock_ws
+        mock_ws.config.host = "https://test.databricks.com"
+        mock_ws.api_client.do.return_value = {"pipeline_id": "pl-9"}
+
+        full_spec = (
+            '{"name": "p", "catalog": "cat", "schema": "sch", '
+            '"ingestion_definition": {"connection_name": "c", '
+            '"objects": [{"table": {"source_table": "t", '
+            '"destination_catalog": "cat", "destination_schema": "sch"}}]}, '
+            '"environment": {"dependencies": ["/Volumes/x/y/z/pre.whl"]}}'
+        )
+        result = runner.invoke(
+            main, ["create_pipeline", "github", "my_pipeline", "-ps", full_spec]
+        )
+
+        assert result.exit_code == 0, f"Output: {result.output}"
+        mock_build_upload.assert_not_called()
+        mock_dest_dir.assert_not_called()
+        body = mock_ws.api_client.do.call_args.kwargs["body"]
+        assert body["environment"]["dependencies"] == ["/Volumes/x/y/z/pre.whl"]
+
+    @patch("databricks.labs.community_connector_cli.cli._build_and_upload_managed_wheels")
+    @patch("databricks.labs.community_connector_cli.cli._resolve_managed_dest_dir")
+    @patch("databricks.labs.community_connector_cli.cli.WorkspaceClient")
+    def test_managed_create_full_spec_catalog_schema_from_spec(
+        self, mock_ws_client, mock_dest_dir, mock_build_upload
+    ):
+        """When --catalog/--schema are omitted, the volume uses the spec's values."""
+        runner = CliRunner()
+        mock_ws = MagicMock()
+        mock_ws_client.return_value = mock_ws
+        mock_ws.config.host = "https://test.databricks.com"
+        mock_ws.api_client.do.return_value = {"pipeline_id": "pl-1"}
+        mock_dest_dir.return_value = "/Volumes/spec_cat/spec_sch/community_connector/packages"
+        mock_build_upload.return_value = [
+            "/Volumes/spec_cat/spec_sch/community_connector/packages/w.whl"]
+
+        full_spec = (
+            '{"name": "p", "catalog": "spec_cat", "schema": "spec_sch", '
+            '"ingestion_definition": {"connection_name": "c", '
+            '"objects": [{"table": {"source_table": "t", '
+            '"destination_catalog": "spec_cat", "destination_schema": "spec_sch"}}]}}'
+        )
+        result = runner.invoke(
+            main, ["create_pipeline", "github", "my_pipeline", "-ps", full_spec]
+        )
+
+        assert result.exit_code == 0, f"Output: {result.output}"
+        # Volume resolution is called with the spec's catalog/schema, not main/default.
+        # Positional args: (ws, volume_path, catalog, schema, debug)
+        call = mock_dest_dir.call_args
+        assert call.args[2] == "spec_cat"
+        assert call.args[3] == "spec_sch"
+
+    @staticmethod
+    def _mock_get_with_spec(mock_ws, spec_dict):
+        """Wire pipelines.get(...) to return a spec whose as_dict() == spec_dict."""
+        mock_info = MagicMock()
+        mock_info.spec.as_dict.return_value = spec_dict
+        mock_ws.pipelines.get.return_value = mock_info
+
+    @patch("databricks.labs.community_connector_cli.cli._build_and_upload_managed_wheels")
+    @patch("databricks.labs.community_connector_cli.cli._resolve_managed_dest_dir")
+    @patch("databricks.labs.community_connector_cli.cli.WorkspaceClient")
+    def test_managed_update_uses_put(
+        self, mock_ws_client, mock_dest_dir, mock_build_upload
+    ):
+        runner = CliRunner()
+        mock_ws = MagicMock()
+        mock_ws_client.return_value = mock_ws
+        mock_ws.config.host = "https://test.databricks.com"
+        mock_pipeline_obj = MagicMock()
+        mock_pipeline_obj.pipeline_id = "pl-77"
+        mock_ws.pipelines.list_pipelines.return_value = [mock_pipeline_obj]
+        self._mock_get_with_spec(mock_ws, {"name": "my_pipeline", "catalog": "cat"})
+        mock_dest_dir.return_value = "/Volumes/cat/sch/community_connector/packages"
+        mock_build_upload.return_value = ["/Volumes/cat/sch/community_connector/packages/w.whl"]
+
+        result = runner.invoke(
+            main,
+            ["update_pipeline", "my_pipeline", "-ps", self._bare_spec(),
+             "-s", "github", "-c", "cat", "-t", "sch"],
+        )
+
+        assert result.exit_code == 0, f"Output: {result.output}"
+        args, kwargs = mock_ws.api_client.do.call_args
+        assert args[0] == "PUT"
+        assert args[1] == "/api/2.0/pipelines/pl-77"
+        assert kwargs["body"]["id"] == "pl-77"
+
+    @patch("databricks.labs.community_connector_cli.cli._build_and_upload_managed_wheels")
+    @patch("databricks.labs.community_connector_cli.cli._resolve_managed_dest_dir")
+    @patch("databricks.labs.community_connector_cli.cli.WorkspaceClient")
+    def test_managed_update_no_source_reuses_existing_deps(
+        self, mock_ws_client, mock_dest_dir, mock_build_upload
+    ):
+        """Update without -s/--package must not rebuild; it reuses existing deps."""
+        runner = CliRunner()
+        mock_ws = MagicMock()
+        mock_ws_client.return_value = mock_ws
+        mock_ws.config.host = "https://test.databricks.com"
+        mock_pipeline_obj = MagicMock()
+        mock_pipeline_obj.pipeline_id = "pl-88"
+        mock_ws.pipelines.list_pipelines.return_value = [mock_pipeline_obj]
+
+        # Existing pipeline already points at wheels on a volume.
+        existing = ["/Volumes/cat/sch/community_connector/packages/existing.whl"]
+        self._mock_get_with_spec(mock_ws, {
+            "catalog": "cat", "schema": "sch",
+            "environment": {"dependencies": existing},
+        })
+
+        result = runner.invoke(
+            main,
+            ["update_pipeline", "my_pipeline", "-ps", self._bare_spec()],
+        )
+
+        assert result.exit_code == 0, f"Output: {result.output}"
+        # No build/upload and no volume resolution.
+        mock_build_upload.assert_not_called()
+        mock_dest_dir.assert_not_called()
+        # Existing dependencies are carried into the new body.
+        body = mock_ws.api_client.do.call_args.kwargs["body"]
+        assert body["environment"]["dependencies"] == existing
+
+    @patch("databricks.labs.community_connector_cli.cli._build_and_upload_managed_wheels")
+    @patch("databricks.labs.community_connector_cli.cli._resolve_managed_dest_dir")
+    @patch("databricks.labs.community_connector_cli.cli.WorkspaceClient")
+    def test_managed_update_bare_spec_preserves_existing_settings(
+        self, mock_ws_client, mock_dest_dir, mock_build_upload
+    ):
+        """A bare-spec update must merge onto the existing spec (full-replace PUT).
+
+        Unmanaged fields (tags, notifications, channel, serverless) and
+        catalog/schema must survive even when the CLI options omit them.
+        """
+        runner = CliRunner()
+        mock_ws = MagicMock()
+        mock_ws_client.return_value = mock_ws
+        mock_ws.config.host = "https://test.databricks.com"
+        mock_pipeline_obj = MagicMock()
+        mock_pipeline_obj.pipeline_id = "pl-99"
+        mock_ws.pipelines.list_pipelines.return_value = [mock_pipeline_obj]
+        mock_dest_dir.return_value = "/Volumes/livecat/livesch/community_connector/packages"
+        mock_build_upload.return_value = [
+            "/Volumes/livecat/livesch/community_connector/packages/w.whl"]
+
+        # Live pipeline has settings the CLI does not manage plus CURRENT channel.
+        self._mock_get_with_spec(mock_ws, {
+            "name": "my_pipeline",
+            "catalog": "livecat",
+            "schema": "livesch",
+            "channel": "CURRENT",
+            "serverless": False,
+            "tags": {"team": "data"},
+            "notifications": [{"email_recipients": ["a@b.com"]}],
+            "budget_policy_id": "bp-1",
+            "environment": {"dependencies": ["/Volumes/old/old/old/old.whl"]},
+        })
+
+        # Rebuild wheels (-s) but omit -c/-t, channel, serverless.
+        result = runner.invoke(
+            main,
+            ["update_pipeline", "my_pipeline", "-ps", self._bare_spec(), "-s", "github"],
+        )
+
+        assert result.exit_code == 0, f"Output: {result.output}"
+        body = mock_ws.api_client.do.call_args.kwargs["body"]
+        # Unmanaged fields preserved.
+        assert body["tags"] == {"team": "data"}
+        assert body["notifications"] == [{"email_recipients": ["a@b.com"]}]
+        assert body["budget_policy_id"] == "bp-1"
+        # Existing channel/serverless not overridden by managed defaults.
+        assert body["channel"] == "CURRENT"
+        assert body["serverless"] is False
+        # catalog/schema fall back to the live pipeline's values.
+        assert body["catalog"] == "livecat"
+        assert body["schema"] == "livesch"
+        # Managed additions still applied.
+        assert body["configuration"][
+            "pipelines.managedIngestion.registerPythonDataSource"] == "true"
+        assert body["ingestion_definition"]["source_type"] == "COMMUNITY"
+        # Rebuilt wheels replace the old dependencies.
+        assert body["environment"]["dependencies"] == [
+            "/Volumes/livecat/livesch/community_connector/packages/w.whl"]
+        # Per-table destinations backfilled from the live catalog/schema.
+        table = body["ingestion_definition"]["objects"][0]["table"]
+        assert table["destination_catalog"] == "livecat"
+        assert table["destination_schema"] == "livesch"
+
+
+def _make_fake_wheel(path: Path, source_name: str) -> Path:
+    """Build a minimal in-process zip that looks like a connector wheel.
+
+    Only used by the wheel-layout and upload-command tests — we never invoke
+    the real ``python -m build`` from unit tests.
+    """
+    import zipfile  # local to keep top-of-file imports unchanged
+    wheel = path / f"lakeflow_community_connectors_{source_name}-0.1.0-py3-none-any.whl"
+    namespace = f"databricks/labs/community_connector/sources/{source_name}"
+    with zipfile.ZipFile(wheel, "w") as zf:
+        zf.writestr(f"{namespace}/__init__.py", "")
+        zf.writestr(f"{namespace}/{source_name}.py", "# connector code")
+        zf.writestr(
+            f"lakeflow_community_connectors_{source_name}-0.1.0.dist-info/METADATA",
+            "Metadata-Version: 2.1\nName: lakeflow-community-connectors-"
+            f"{source_name}\nVersion: 0.1.0\n",
+        )
+    return wheel
+
+
+def _make_fake_framework_wheel(path: Path) -> Path:
+    """Build a minimal in-process zip that looks like the framework wheel."""
+    import zipfile
+    wheel = path / "lakeflow_community_connectors-0.1.0-py3-none-any.whl"
+    namespace = "databricks/labs/community_connector/interface"
+    with zipfile.ZipFile(wheel, "w") as zf:
+        zf.writestr(f"{namespace}/__init__.py", "")
+        zf.writestr(f"{namespace}/lakeflow_connect.py", "# framework code")
+        zf.writestr(
+            "lakeflow_community_connectors-0.1.0.dist-info/METADATA",
+            "Metadata-Version: 2.1\nName: lakeflow-community-connectors\nVersion: 0.1.0\n",
+        )
+    return wheel
+
+
+def _make_fake_repo_root(tmp_path: Path, source_name: str = "example") -> tuple:
+    """Lay out a tmp directory that looks like the connectors repo.
+
+    Returns (repo_root, source_dir). Both have ``pyproject.toml`` files: the
+    root's marks itself as ``name = "lakeflow-community-connectors"`` so
+    ``_find_repo_root`` can identify it.
+    """
+    repo_root = tmp_path / "repo"
+    source_dir = (
+        repo_root / "src" / "databricks" / "labs"
+        / "community_connector" / "sources" / source_name
+    )
+    source_dir.mkdir(parents=True)
+    (repo_root / "pyproject.toml").write_text(
+        '[project]\nname = "lakeflow-community-connectors"\nversion = "0.1.0"\n'
+    )
+    (source_dir / "pyproject.toml").write_text(
+        f'[project]\nname = "lakeflow-community-connectors-{source_name}"\n'
+        'version = "0.1.0"\n'
+    )
+    return repo_root, source_dir
+
+
+class TestParseVolumePath:
+    """Tests for _parse_volume_path."""
+
+    def test_volume_root(self):
+        assert _parse_volume_path("/Volumes/main/default/cc") == (
+            "main", "default", "cc", "",
+        )
+
+    def test_with_subpath(self):
+        assert _parse_volume_path("/Volumes/main/default/cc/packages") == (
+            "main", "default", "cc", "packages",
+        )
+
+    def test_trailing_slash_normalized(self):
+        assert _parse_volume_path("/Volumes/main/default/cc/packages/") == (
+            "main", "default", "cc", "packages",
+        )
+
+    def test_nested_subpath(self):
+        assert _parse_volume_path("/Volumes/c/s/v/a/b/c") == ("c", "s", "v", "a/b/c")
+
+    def test_invalid_raises(self):
+        with pytest.raises(click.ClickException, match="Invalid volume path"):
+            _parse_volume_path("/Workspace/Users/me/wheels")
+
+    def test_missing_volume_part_raises(self):
+        with pytest.raises(click.ClickException, match="Invalid volume path"):
+            _parse_volume_path("/Volumes/main/default")
+
+
+class TestEnsureVolumeDirectory:
+    """Tests for _ensure_volume_directory — volume + subdir auto-create."""
+
+    def test_volume_exists_no_subpath(self):
+        ws = MagicMock()
+        ws.volumes.read.return_value = MagicMock()  # volume exists
+        result = _ensure_volume_directory(ws, "/Volumes/c/s/v", debug=False)
+        assert result == "/Volumes/c/s/v"
+        ws.volumes.create.assert_not_called()
+        ws.files.create_directory.assert_not_called()
+
+    def test_volume_created_when_missing(self):
+        ws = MagicMock()
+        ws.volumes.read.side_effect = Exception("NOT_FOUND")
+        result = _ensure_volume_directory(ws, "/Volumes/c/s/v", debug=False)
+        assert result == "/Volumes/c/s/v"
+        ws.volumes.create.assert_called_once()
+        kwargs = ws.volumes.create.call_args.kwargs
+        assert kwargs["catalog_name"] == "c"
+        assert kwargs["schema_name"] == "s"
+        assert kwargs["name"] == "v"
+
+    def test_subdir_created(self):
+        ws = MagicMock()
+        ws.volumes.read.return_value = MagicMock()
+        result = _ensure_volume_directory(ws, "/Volumes/c/s/v/pkg", debug=False)
+        assert result == "/Volumes/c/s/v/pkg"
+        ws.files.create_directory.assert_called_once_with("/Volumes/c/s/v/pkg")
+
+    def test_subdir_already_exists_is_swallowed(self):
+        ws = MagicMock()
+        ws.volumes.read.return_value = MagicMock()
+        ws.files.create_directory.side_effect = Exception("RESOURCE_ALREADY_EXISTS")
+        result = _ensure_volume_directory(ws, "/Volumes/c/s/v/pkg", debug=False)
+        assert result == "/Volumes/c/s/v/pkg"
+
+    def test_volume_create_already_exists_swallowed(self):
+        """Race condition: read fails but create reports ALREADY_EXISTS."""
+        ws = MagicMock()
+        ws.volumes.read.side_effect = Exception("NOT_FOUND")
+        ws.volumes.create.side_effect = Exception("ALREADY_EXISTS")
+        result = _ensure_volume_directory(ws, "/Volumes/c/s/v", debug=False)
+        assert result == "/Volumes/c/s/v"
+
+    def test_volume_create_other_error_raises(self):
+        ws = MagicMock()
+        ws.volumes.read.side_effect = Exception("NOT_FOUND")
+        ws.volumes.create.side_effect = Exception("PERMISSION_DENIED")
+        with pytest.raises(click.ClickException, match="Failed to create volume"):
+            _ensure_volume_directory(ws, "/Volumes/c/s/v", debug=False)
+
+    def test_subdir_unexpected_error_raises(self):
+        ws = MagicMock()
+        ws.volumes.read.return_value = MagicMock()
+        ws.files.create_directory.side_effect = Exception("PERMISSION_DENIED")
+        with pytest.raises(click.ClickException, match="Failed to create directory"):
+            _ensure_volume_directory(ws, "/Volumes/c/s/v/pkg", debug=False)
+
+
+class TestValidateWheelLayout:
+    """Tests for _validate_wheel_layout."""
+
+    def test_valid_layout(self, tmp_path):
+        wheel = _make_fake_wheel(tmp_path, "example")
+        _validate_wheel_layout(wheel, "example")  # no exception
+
+    def test_wrong_source_name_raises(self, tmp_path):
+        wheel = _make_fake_wheel(tmp_path, "example")
+        with pytest.raises(click.ClickException, match="does not contain"):
+            _validate_wheel_layout(wheel, "different_source")
+
+    def test_corrupt_wheel_raises(self, tmp_path):
+        bad = tmp_path / "bogus.whl"
+        bad.write_bytes(b"not a zip")
+        with pytest.raises(click.ClickException, match="not a valid wheel"):
+            _validate_wheel_layout(bad, "example")
+
+
+class TestValidateFrameworkWheel:
+    """Tests for _validate_framework_wheel."""
+
+    def test_valid_framework_wheel(self, tmp_path):
+        wheel = _make_fake_framework_wheel(tmp_path)
+        _validate_framework_wheel(wheel)  # no exception
+
+    def test_connector_wheel_rejected_as_framework(self, tmp_path):
+        """A connector wheel does not contain the interface/ namespace."""
+        wheel = _make_fake_wheel(tmp_path, "example")
+        with pytest.raises(click.ClickException, match="does not contain"):
+            _validate_framework_wheel(wheel)
+
+    def test_corrupt_framework_wheel_raises(self, tmp_path):
+        bad = tmp_path / "bogus.whl"
+        bad.write_bytes(b"not a zip")
+        with pytest.raises(click.ClickException, match="not a valid wheel"):
+            _validate_framework_wheel(bad)
+
+
+class TestFindRepoRoot:
+    """Tests for _find_repo_root."""
+
+    def test_walks_up_from_source_dir(self, tmp_path):
+        repo_root, source_dir = _make_fake_repo_root(tmp_path)
+        assert _find_repo_root(source_dir) == repo_root.resolve()
+
+    def test_returns_none_when_no_framework_root(self, tmp_path):
+        """No pyproject anywhere in the parent chain → None."""
+        nested = tmp_path / "a" / "b" / "c"
+        nested.mkdir(parents=True)
+        assert _find_repo_root(nested) is None
+
+    def test_skips_connector_pyproject(self, tmp_path):
+        """A connector pyproject (different name) must not be mistaken for root."""
+        _, source_dir = _make_fake_repo_root(tmp_path, "example")
+        # The source_dir itself has a pyproject named
+        # `lakeflow-community-connectors-example` — it should be skipped, and
+        # the walk should continue until it finds the framework root above.
+        result = _find_repo_root(source_dir)
+        assert result is not None
+        assert (result / "pyproject.toml").is_file()
+        # Sanity: it's not the connector's pyproject.
+        assert "sources" not in str(result)
+
+
+class TestUploadCommand:
+    """Tests for the `upload` Click command (two-wheel flow)."""
+
+    def test_upload_default_builds_both_wheels(self, tmp_path):
+        """Default path: framework + connector wheels are both built and uploaded."""
+        repo_root, source_dir = _make_fake_repo_root(tmp_path, "example")
+
+        def fake_build(src, outdir, debug):
+            # Distinguish the two builds by the source path we receive.
+            if Path(src).resolve() == source_dir.resolve():
+                return _make_fake_wheel(outdir, "example")
+            return _make_fake_framework_wheel(outdir)
+
+        runner = CliRunner()
+        with patch(
+            "databricks.labs.community_connector_cli.cli._make_workspace_client"
+        ) as mock_ws_factory, patch(
+            "databricks.labs.community_connector_cli.cli._build_connector_wheel",
+            side_effect=fake_build,
+        ) as mock_build:
+            mock_ws = MagicMock()
+            mock_ws.volumes.read.return_value = MagicMock()
+            mock_ws_factory.return_value = mock_ws
+
+            result = runner.invoke(
+                main,
+                [
+                    "upload",
+                    "example",
+                    "--volume-path",
+                    "/Volumes/main/default/cc/packages",
+                    "--source-dir",
+                    str(source_dir),
+                ],
+            )
+
+            assert result.exit_code == 0, result.output
+            # Two builds (framework + connector), two uploads.
+            assert mock_build.call_count == 2
+            assert mock_ws.files.upload.call_count == 2
+
+            # Framework must be uploaded first so that, if the cluster's pip
+            # processes the deps array in order, the connector's
+            # lakeflow-community-connectors dep resolves locally.
+            first_dest = mock_ws.files.upload.call_args_list[0].args[0]
+            second_dest = mock_ws.files.upload.call_args_list[1].args[0]
+            assert "lakeflow_community_connectors-" in first_dest
+            assert "lakeflow_community_connectors_example-" in second_dest
+
+    def test_upload_skip_framework(self, tmp_path):
+        """--skip-framework uploads only the connector wheel."""
+        repo_root, source_dir = _make_fake_repo_root(tmp_path, "example")
+
+        def fake_build(src, outdir, debug):
+            return _make_fake_wheel(outdir, "example")
+
+        runner = CliRunner()
+        with patch(
+            "databricks.labs.community_connector_cli.cli._make_workspace_client"
+        ) as mock_ws_factory, patch(
+            "databricks.labs.community_connector_cli.cli._build_connector_wheel",
+            side_effect=fake_build,
+        ) as mock_build:
+            mock_ws = MagicMock()
+            mock_ws.volumes.read.return_value = MagicMock()
+            mock_ws_factory.return_value = mock_ws
+
+            result = runner.invoke(
+                main,
+                [
+                    "upload",
+                    "example",
+                    "--volume-path",
+                    "/Volumes/main/default/cc/packages",
+                    "--source-dir",
+                    str(source_dir),
+                    "--skip-framework",
+                ],
+            )
+
+            assert result.exit_code == 0, result.output
+            mock_build.assert_called_once()  # only the connector
+            mock_ws.files.upload.assert_called_once()
+
+    def test_upload_with_prebuilt_connector_wheel(self, tmp_path):
+        """--wheel skips the connector build but still builds the framework."""
+        repo_root, source_dir = _make_fake_repo_root(tmp_path, "example")
+        prebuilt = _make_fake_wheel(tmp_path, "example")
+
+        def fake_build(src, outdir, debug):
+            return _make_fake_framework_wheel(outdir)
+
+        runner = CliRunner()
+        with patch(
+            "databricks.labs.community_connector_cli.cli._make_workspace_client"
+        ) as mock_ws_factory, patch(
+            "databricks.labs.community_connector_cli.cli._build_connector_wheel",
+            side_effect=fake_build,
+        ) as mock_build:
+            mock_ws = MagicMock()
+            mock_ws.volumes.read.return_value = MagicMock()
+            mock_ws_factory.return_value = mock_ws
+
+            result = runner.invoke(
+                main,
+                [
+                    "upload",
+                    "example",
+                    "--volume-path",
+                    "/Volumes/main/default/cc/packages",
+                    "--source-dir",
+                    str(source_dir),
+                    "--wheel",
+                    str(prebuilt),
+                ],
+            )
+
+            assert result.exit_code == 0, result.output
+            mock_build.assert_called_once()  # only the framework
+            assert mock_ws.files.upload.call_count == 2
+
+    def test_upload_with_prebuilt_framework_wheel(self, tmp_path):
+        """--framework-wheel skips the framework build but still builds the connector."""
+        repo_root, source_dir = _make_fake_repo_root(tmp_path, "example")
+        fw_prebuilt = _make_fake_framework_wheel(tmp_path)
+
+        def fake_build(src, outdir, debug):
+            return _make_fake_wheel(outdir, "example")
+
+        runner = CliRunner()
+        with patch(
+            "databricks.labs.community_connector_cli.cli._make_workspace_client"
+        ) as mock_ws_factory, patch(
+            "databricks.labs.community_connector_cli.cli._build_connector_wheel",
+            side_effect=fake_build,
+        ) as mock_build:
+            mock_ws = MagicMock()
+            mock_ws.volumes.read.return_value = MagicMock()
+            mock_ws_factory.return_value = mock_ws
+
+            result = runner.invoke(
+                main,
+                [
+                    "upload",
+                    "example",
+                    "--volume-path",
+                    "/Volumes/main/default/cc/packages",
+                    "--source-dir",
+                    str(source_dir),
+                    "--framework-wheel",
+                    str(fw_prebuilt),
+                ],
+            )
+
+            assert result.exit_code == 0, result.output
+            mock_build.assert_called_once()  # only the connector
+            assert mock_ws.files.upload.call_count == 2
+
+    def test_upload_with_both_prebuilt_wheels(self, tmp_path):
+        """Pre-built connector + pre-built framework → no build at all."""
+        repo_root, source_dir = _make_fake_repo_root(tmp_path, "example")
+        conn_prebuilt = _make_fake_wheel(tmp_path, "example")
+        fw_prebuilt = _make_fake_framework_wheel(tmp_path)
+
+        runner = CliRunner()
+        with patch(
+            "databricks.labs.community_connector_cli.cli._make_workspace_client"
+        ) as mock_ws_factory, patch(
+            "databricks.labs.community_connector_cli.cli._build_connector_wheel"
+        ) as mock_build:
+            mock_ws = MagicMock()
+            mock_ws.volumes.read.return_value = MagicMock()
+            mock_ws_factory.return_value = mock_ws
+
+            result = runner.invoke(
+                main,
+                [
+                    "upload",
+                    "example",
+                    "--volume-path",
+                    "/Volumes/main/default/cc/packages",
+                    "--source-dir",
+                    str(source_dir),
+                    "--wheel",
+                    str(conn_prebuilt),
+                    "--framework-wheel",
+                    str(fw_prebuilt),
+                ],
+            )
+
+            assert result.exit_code == 0, result.output
+            mock_build.assert_not_called()
+            assert mock_ws.files.upload.call_count == 2
+
+    def test_upload_skip_framework_and_framework_wheel_mutually_exclusive(self, tmp_path):
+        """--skip-framework + --framework-wheel is contradictory and must error."""
+        repo_root, source_dir = _make_fake_repo_root(tmp_path, "example")
+        fw_prebuilt = _make_fake_framework_wheel(tmp_path)
+
+        runner = CliRunner()
+        with patch(
+            "databricks.labs.community_connector_cli.cli._make_workspace_client"
+        ) as mock_ws_factory:
+            mock_ws_factory.return_value = MagicMock()
+            result = runner.invoke(
+                main,
+                [
+                    "upload",
+                    "example",
+                    "--volume-path",
+                    "/Volumes/main/default/cc/packages",
+                    "--source-dir",
+                    str(source_dir),
+                    "--skip-framework",
+                    "--framework-wheel",
+                    str(fw_prebuilt),
+                ],
+            )
+
+            assert result.exit_code != 0
+            assert "mutually exclusive" in result.output
+
+    def test_upload_raises_when_repo_root_not_found(self, tmp_path):
+        """No framework root in the source's parent chain → ClickException."""
+        # Build a source dir that has no root pyproject anywhere above it.
+        bare_source = tmp_path / "isolated_source"
+        bare_source.mkdir()
+        (bare_source / "pyproject.toml").write_text(
+            '[project]\nname = "lakeflow-community-connectors-example"\n'
+        )
+
+        runner = CliRunner()
+        with patch(
+            "databricks.labs.community_connector_cli.cli._make_workspace_client"
+        ) as mock_ws_factory:
+            mock_ws = MagicMock()
+            mock_ws.volumes.read.return_value = MagicMock()
+            mock_ws_factory.return_value = mock_ws
+
+            result = runner.invoke(
+                main,
+                [
+                    "upload",
+                    "example",
+                    "--volume-path",
+                    "/Volumes/main/default/cc/packages",
+                    "--source-dir",
+                    str(bare_source),
+                ],
+            )
+
+            assert result.exit_code != 0
+            assert "Could not find the framework repo root" in result.output
+
+    def test_upload_raises_when_source_not_found(self):
+        """No --source-dir and the locator can't find anything → ClickException."""
+        runner = CliRunner()
+        with patch(
+            "databricks.labs.community_connector_cli.cli._make_workspace_client"
+        ) as mock_ws_factory, patch(
+            "databricks.labs.community_connector_cli.cli._find_local_source_path",
+            return_value=None,
+        ):
+            mock_ws = MagicMock()
+            mock_ws.volumes.read.return_value = MagicMock()
+            mock_ws_factory.return_value = mock_ws
+
+            result = runner.invoke(
+                main,
+                [
+                    "upload",
+                    "ghost_source",
+                    "--volume-path",
+                    "/Volumes/main/default/cc/packages",
+                ],
+            )
+
+            assert result.exit_code != 0
+            assert "Could not find source directory" in result.output
+
+    def test_upload_invalid_volume_path(self, tmp_path):
+        """Malformed --volume-path raises before any network call."""
+        repo_root, source_dir = _make_fake_repo_root(tmp_path, "example")
+        wheel = _make_fake_wheel(tmp_path, "example")
+        runner = CliRunner()
+        with patch(
+            "databricks.labs.community_connector_cli.cli._make_workspace_client"
+        ) as mock_ws_factory:
+            mock_ws_factory.return_value = MagicMock()
+            result = runner.invoke(
+                main,
+                [
+                    "upload",
+                    "example",
+                    "--volume-path",
+                    "/Workspace/Users/me/wheels",
+                    "--source-dir",
+                    str(source_dir),
+                    "--wheel",
+                    str(wheel),
+                    "--skip-framework",
+                ],
+            )
+            assert result.exit_code != 0
+            assert "Invalid volume path" in result.output
+
+    def test_upload_keep_wheel_copies_only_built_artifacts(self, tmp_path):
+        """--keep-wheel copies wheels we built in this run, not user-supplied ones."""
+        repo_root, source_dir = _make_fake_repo_root(tmp_path, "example")
+        # User supplies framework wheel; CLI builds the connector wheel.
+        user_supplied_dir = tmp_path / "user_supplied"
+        user_supplied_dir.mkdir()
+        fw_prebuilt = _make_fake_framework_wheel(user_supplied_dir)
+
+        def fake_build(src, outdir, debug):
+            return _make_fake_wheel(outdir, "example")
+
+        keep_dir = tmp_path / "kept"
+
+        runner = CliRunner()
+        with patch(
+            "databricks.labs.community_connector_cli.cli._make_workspace_client"
+        ) as mock_ws_factory, patch(
+            "databricks.labs.community_connector_cli.cli._build_connector_wheel",
+            side_effect=fake_build,
+        ):
+            mock_ws = MagicMock()
+            mock_ws.volumes.read.return_value = MagicMock()
+            mock_ws_factory.return_value = mock_ws
+
+            result = runner.invoke(
+                main,
+                [
+                    "upload",
+                    "example",
+                    "--volume-path",
+                    "/Volumes/main/default/cc/packages",
+                    "--source-dir",
+                    str(source_dir),
+                    "--framework-wheel",
+                    str(fw_prebuilt),
+                    "--keep-wheel",
+                    str(keep_dir),
+                ],
+            )
+
+            assert result.exit_code == 0, result.output
+            kept_files = list(keep_dir.glob("*.whl"))
+            # Only the connector wheel (which we built) should be copied —
+            # not the user-supplied framework wheel.
+            assert len(kept_files) == 1
+            assert "example" in kept_files[0].name
+
+
+class TestInterpolateOauthPlaceholders:
+    """`{param}` interpolation in resolved OAuth connection options
+    (parameter-in-a-parameter, e.g. a per-tenant token endpoint)."""
+
+    def test_interpolates_tenant_id_into_token_endpoint(self):
+        conn = {
+            "token_endpoint": (
+                "https://login.microsoftonline.com/{tenant_id}/oauth2/v2.0/token"
+            ),
+            "oauth_scope": "499b84ac/.default",
+        }
+        out = _interpolate_oauth_placeholders(conn, {"tenant_id": "T-123"})
+        assert out["token_endpoint"] == (
+            "https://login.microsoftonline.com/T-123/oauth2/v2.0/token"
+        )
+        # values without placeholders are untouched
+        assert out["oauth_scope"] == "499b84ac/.default"
+
+    def test_missing_referenced_param_raises(self):
+        import click
+
+        conn = {
+            "token_endpoint": (
+                "https://login.microsoftonline.com/{tenant_id}/oauth2/v2.0/token"
+            )
+        }
+        with pytest.raises(click.ClickException, match="tenant_id"):
+            _interpolate_oauth_placeholders(conn, {})
+
+    def test_no_placeholders_is_noop(self):
+        conn = {"token_endpoint": "https://example.com/token"}
+        assert _interpolate_oauth_placeholders(conn, {}) == conn
+
+
+class TestResolveDisplayName:
+    """Tests for _resolve_display_name."""
+
+    def test_explicit_wins(self):
+        assert _resolve_display_name("My Name", {"display_name": "GitHub"}, "github") == "My Name"
+
+    def test_falls_back_to_spec_display_name(self):
+        assert _resolve_display_name(None, {"display_name": "GitHub"}, "github") == "GitHub"
+
+    def test_falls_back_to_source_name(self):
+        assert _resolve_display_name(None, {}, "github") == "github"
+        assert _resolve_display_name(None, None, "github") == "github"
+
+    def test_rejects_unsafe_filename(self):
+        with pytest.raises(click.ClickException, match="not a valid filename"):
+            _resolve_display_name("../evil", None, "github")
+        with pytest.raises(click.ClickException, match="not a valid filename"):
+            _resolve_display_name(None, {"display_name": "a/b"}, "github")
+
+
+class TestBuildCommunityConnectorManifest:
+    """Tests for _build_community_connector_manifest."""
+
+    def test_field_derivation_and_null_logo(self):
+        spec = {"connection": {"parameters": []}}
+        manifest = _build_community_connector_manifest(
+            "azure-devops", "Azure DevOps", spec, None
+        )
+        assert manifest["id"] == "AZURE_DEVOPS"
+        assert manifest["sourceName"] == "azure-devops"
+        assert manifest["displayName"] == "Azure DevOps"
+        assert manifest["logo"] is None
+        assert manifest["repositoryPath"] == ""
+        assert manifest["readmeUrl"] == ""
+        assert manifest["connectionSpec"] == spec
+        # No dependencies key when none supplied.
+        assert "dependencies" not in manifest
+
+    def test_includes_dependencies_when_present(self):
+        manifest = _build_community_connector_manifest(
+            "github", "GitHub", None, ["/Volumes/main/default/community_connector/x.whl"]
+        )
+        assert manifest["connectionSpec"] is None
+        assert manifest["dependencies"] == [
+            "/Volumes/main/default/community_connector/x.whl"
+        ]
+
+
+class TestWriteCommunityConnectorManifest:
+    """Tests for _write_community_connector_manifest."""
+
+    def test_mkdirs_and_import_called(self):
+        mock_ws = MagicMock()
+        _write_community_connector_manifest(
+            mock_ws,
+            "/Users/me/.community-connectors",
+            "/Users/me/.community-connectors/GitHub.connector.json",
+            {"id": "GITHUB"},
+            overwrite=True,
+        )
+        mock_ws.workspace.mkdirs.assert_called_once_with(
+            "/Users/me/.community-connectors"
+        )
+        assert mock_ws.workspace.import_.call_count == 1
+        _, kwargs = mock_ws.workspace.import_.call_args
+        assert kwargs["path"] == "/Users/me/.community-connectors/GitHub.connector.json"
+        assert kwargs["overwrite"] is True
+        # Content is base64 of the JSON manifest.
+        decoded = base64.b64decode(kwargs["content"]).decode("utf-8")
+        assert json.loads(decoded) == {"id": "GITHUB"}
+
+    def test_existing_dir_is_tolerated(self):
+        mock_ws = MagicMock()
+        mock_ws.workspace.mkdirs.side_effect = Exception("RESOURCE_ALREADY_EXISTS")
+        _write_community_connector_manifest(
+            mock_ws, "/Users/me/.community-connectors",
+            "/Users/me/.community-connectors/x.connector.json", {"id": "X"},
+            overwrite=True,
+        )
+        assert mock_ws.workspace.import_.call_count == 1
+
+    def test_existing_file_without_overwrite_raises_hint(self):
+        mock_ws = MagicMock()
+        mock_ws.workspace.import_.side_effect = Exception("RESOURCE_ALREADY_EXISTS")
+        with pytest.raises(click.ClickException, match="--overwrite"):
+            _write_community_connector_manifest(
+                mock_ws, "/Users/me/.community-connectors",
+                "/Users/me/.community-connectors/x.connector.json", {"id": "X"},
+                overwrite=False,
+            )
+
+    def test_mkdirs_error_other_than_already_exists_raises(self):
+        mock_ws = MagicMock()
+        mock_ws.workspace.mkdirs.side_effect = Exception("PERMISSION_DENIED")
+        with pytest.raises(click.ClickException, match="Failed to create workspace directory"):
+            _write_community_connector_manifest(
+                mock_ws, "/Users/me/.community-connectors",
+                "/Users/me/.community-connectors/x.connector.json", {"id": "X"},
+                overwrite=True,
+            )
+        assert mock_ws.workspace.import_.call_count == 0
+
+
+class TestPublishCommand:
+    """Tests for the `publish` command."""
+
+    @patch("databricks.labs.community_connector_cli.cli.WorkspaceClient")
+    @patch("databricks.labs.community_connector_cli.cli._build_and_upload_managed_wheels")
+    @patch("databricks.labs.community_connector_cli.cli._resolve_managed_dest_dir")
+    @patch("databricks.labs.community_connector_cli.cli._load_connector_spec")
+    def test_publish_builds_wheels_and_writes_manifest(
+        self, mock_load_spec, mock_dest_dir, mock_build_wheels, mock_ws_cls
+    ):
+        runner = CliRunner()
+        mock_load_spec.return_value = {"display_name": "GitHub", "connection": {}}
+        mock_dest_dir.return_value = "/Volumes/main/default/community_connector/packages"
+        mock_build_wheels.return_value = [
+            "/Volumes/main/default/community_connector/packages/fw.whl",
+            "/Volumes/main/default/community_connector/packages/conn.whl",
+        ]
+        mock_ws = MagicMock()
+        mock_ws_cls.return_value = mock_ws
+        mock_ws.current_user.me.return_value.user_name = "me@example.com"
+
+        result = runner.invoke(main, ["publish", "github"])
+
+        assert result.exit_code == 0, result.output
+        mock_build_wheels.assert_called_once()
+        # Wrote the manifest to the user's .community-connectors dir.
+        _, kwargs = mock_ws.workspace.import_.call_args
+        assert kwargs["path"] == (
+            "/Users/me@example.com/.community-connectors/GitHub.connector.json"
+        )
+        decoded = base64.b64decode(kwargs["content"]).decode("utf-8")
+        manifest = json.loads(decoded)
+        assert manifest["id"] == "GITHUB"
+        assert manifest["displayName"] == "GitHub"
+        assert manifest["logo"] is None
+        assert manifest["dependencies"] == mock_build_wheels.return_value
+
+    @patch("databricks.labs.community_connector_cli.cli.WorkspaceClient")
+    @patch("databricks.labs.community_connector_cli.cli._build_and_upload_managed_wheels")
+    @patch("databricks.labs.community_connector_cli.cli._resolve_managed_dest_dir")
+    @patch("databricks.labs.community_connector_cli.cli._load_connector_spec")
+    def test_publish_uses_custom_display_name_in_path(
+        self, mock_load_spec, mock_dest_dir, mock_build_wheels, mock_ws_cls
+    ):
+        runner = CliRunner()
+        mock_load_spec.return_value = {"connection": {}}
+        mock_dest_dir.return_value = "/Volumes/main/default/community_connector/packages"
+        mock_build_wheels.return_value = []
+        mock_ws = MagicMock()
+        mock_ws_cls.return_value = mock_ws
+        mock_ws.current_user.me.return_value.user_name = "me@example.com"
+
+        result = runner.invoke(main, ["publish", "github", "-d", "My GitHub"])
+
+        assert result.exit_code == 0, result.output
+        _, kwargs = mock_ws.workspace.import_.call_args
+        assert kwargs["path"] == (
+            "/Users/me@example.com/.community-connectors/My GitHub.connector.json"
+        )
+
+    @patch("databricks.labs.community_connector_cli.cli.WorkspaceClient")
+    @patch("databricks.labs.community_connector_cli.cli._build_and_upload_managed_wheels")
+    @patch("databricks.labs.community_connector_cli.cli._resolve_managed_dest_dir")
+    @patch("databricks.labs.community_connector_cli.cli._load_connector_spec")
+    def test_publish_with_package_bypasses_build(
+        self, mock_load_spec, mock_dest_dir, mock_build_wheels, mock_ws_cls, tmp_path
+    ):
+        runner = CliRunner()
+        mock_load_spec.return_value = {"connection": {}}
+        mock_dest_dir.return_value = "/Volumes/main/default/community_connector/packages"
+        wheel = tmp_path / "conn.whl"
+        wheel.write_text("x")
+        mock_build_wheels.return_value = [
+            "/Volumes/main/default/community_connector/packages/conn.whl"
+        ]
+        mock_ws = MagicMock()
+        mock_ws_cls.return_value = mock_ws
+        mock_ws.current_user.me.return_value.user_name = "me@example.com"
+
+        result = runner.invoke(
+            main, ["publish", "github", "-p", str(wheel)]
+        )
+
+        assert result.exit_code == 0, result.output
+        # Pre-built package path is forwarded to the upload helper as a tuple.
+        _, kwargs = mock_build_wheels.call_args
+        passed_packages = mock_build_wheels.call_args[0][3]
+        assert passed_packages == (str(wheel),)
+
+    @patch("databricks.labs.community_connector_cli.cli.WorkspaceClient")
+    @patch("databricks.labs.community_connector_cli.cli._upload_wheel")
+    @patch("databricks.labs.community_connector_cli.cli._resolve_managed_dest_dir")
+    @patch("databricks.labs.community_connector_cli.cli._load_connector_spec")
+    def test_publish_package_bypass_uploads_without_building(
+        self, mock_load_spec, mock_dest_dir, mock_upload_wheel, mock_ws_cls, tmp_path
+    ):
+        """--package uploads pre-built wheels as-is, exercising the real bypass
+        branch of _build_and_upload_managed_wheels (no build step)."""
+        runner = CliRunner()
+        mock_load_spec.return_value = {"connection": {}}
+        dest = "/Volumes/main/default/community_connector/packages"
+        mock_dest_dir.return_value = dest
+        mock_upload_wheel.side_effect = (
+            lambda _ws, wheel_path, _dest: f"{dest}/{Path(wheel_path).name}"
+        )
+        wheel = tmp_path / "conn.whl"
+        wheel.write_text("x")
+        mock_ws = MagicMock()
+        mock_ws_cls.return_value = mock_ws
+        mock_ws.current_user.me.return_value.user_name = "me@example.com"
+
+        result = runner.invoke(main, ["publish", "github", "-p", str(wheel)])
+
+        assert result.exit_code == 0, result.output
+        mock_upload_wheel.assert_called_once()
+        manifest = json.loads(
+            base64.b64decode(mock_ws.workspace.import_.call_args.kwargs["content"]).decode("utf-8")
+        )
+        assert manifest["dependencies"] == [f"{dest}/conn.whl"]
+
+    @patch("databricks.labs.community_connector_cli.cli.WorkspaceClient")
+    @patch("databricks.labs.community_connector_cli.cli._build_and_upload_managed_wheels")
+    @patch("databricks.labs.community_connector_cli.cli._resolve_managed_dest_dir")
+    @patch("databricks.labs.community_connector_cli.cli._load_connector_spec")
+    def test_publish_null_spec_writes_null_connection_spec_with_warning(
+        self, mock_load_spec, mock_dest_dir, mock_build_wheels, mock_ws_cls
+    ):
+        runner = CliRunner()
+        mock_load_spec.return_value = None
+        mock_dest_dir.return_value = "/Volumes/main/default/community_connector/packages"
+        mock_build_wheels.return_value = []
+        mock_ws = MagicMock()
+        mock_ws_cls.return_value = mock_ws
+        mock_ws.current_user.me.return_value.user_name = "me@example.com"
+
+        result = runner.invoke(main, ["publish", "github"])
+
+        assert result.exit_code == 0, result.output
+        assert "null connectionSpec" in result.output
+        manifest = json.loads(
+            base64.b64decode(mock_ws.workspace.import_.call_args.kwargs["content"]).decode("utf-8")
+        )
+        assert manifest["connectionSpec"] is None
+
+    @patch("databricks.labs.community_connector_cli.cli.WorkspaceClient")
+    @patch("databricks.labs.community_connector_cli.cli._build_and_upload_managed_wheels")
+    @patch("databricks.labs.community_connector_cli.cli._resolve_managed_dest_dir")
+    @patch("databricks.labs.community_connector_cli.cli._load_connector_spec")
+    def test_publish_forwards_overwrite_flag(
+        self, mock_load_spec, mock_dest_dir, mock_build_wheels, mock_ws_cls
+    ):
+        runner = CliRunner()
+        mock_load_spec.return_value = {"connection": {}}
+        mock_dest_dir.return_value = "/Volumes/main/default/community_connector/packages"
+        mock_build_wheels.return_value = []
+        mock_ws = MagicMock()
+        mock_ws_cls.return_value = mock_ws
+        mock_ws.current_user.me.return_value.user_name = "me@example.com"
+
+        result = runner.invoke(main, ["publish", "github", "--overwrite"])
+
+        assert result.exit_code == 0, result.output
+        assert mock_ws.workspace.import_.call_args.kwargs["overwrite"] is True
+
+
+class TestUnpublishCommand:
+    """Tests for the `unpublish` command."""
+
+    @staticmethod
+    def _existing_ws(user="me@example.com"):
+        """A WorkspaceClient mock whose get_status succeeds (object exists)."""
+        mock_ws = MagicMock()
+        mock_ws.current_user.me.return_value.user_name = user
+        return mock_ws
+
+    @staticmethod
+    def _missing_ws(user="me@example.com"):
+        """A WorkspaceClient mock whose get_status raises RESOURCE_DOES_NOT_EXIST."""
+        mock_ws = MagicMock()
+        mock_ws.current_user.me.return_value.user_name = user
+        mock_ws.workspace.get_status.side_effect = Exception("RESOURCE_DOES_NOT_EXIST")
+        return mock_ws
+
+    @patch("databricks.labs.community_connector_cli.cli.WorkspaceClient")
+    @patch("databricks.labs.community_connector_cli.cli._load_connector_spec")
+    def test_unpublish_deletes_after_confirmation(self, mock_load_spec, mock_ws_cls):
+        runner = CliRunner()
+        mock_load_spec.return_value = {"display_name": "GitHub", "connection": {}}
+        mock_ws = self._existing_ws()
+        mock_ws_cls.return_value = mock_ws
+
+        # Confirm the prompt with "y".
+        result = runner.invoke(main, ["unpublish", "github"], input="y\n")
+
+        assert result.exit_code == 0, result.output
+        mock_ws.workspace.delete.assert_called_once_with(
+            path="/Users/me@example.com/.community-connectors/GitHub.connector.json"
+        )
+
+    @patch("databricks.labs.community_connector_cli.cli.WorkspaceClient")
+    @patch("databricks.labs.community_connector_cli.cli._load_connector_spec")
+    def test_unpublish_yes_skips_prompt(self, mock_load_spec, mock_ws_cls):
+        runner = CliRunner()
+        mock_load_spec.return_value = {"connection": {}}
+        mock_ws = self._existing_ws()
+        mock_ws_cls.return_value = mock_ws
+
+        result = runner.invoke(main, ["unpublish", "github", "--yes"])
+
+        assert result.exit_code == 0, result.output
+        mock_ws.workspace.delete.assert_called_once_with(
+            path="/Users/me@example.com/.community-connectors/github.connector.json"
+        )
+
+    @patch("databricks.labs.community_connector_cli.cli.WorkspaceClient")
+    @patch("databricks.labs.community_connector_cli.cli._load_connector_spec")
+    def test_unpublish_uses_display_name_without_loading_spec(self, mock_load_spec, mock_ws_cls):
+        runner = CliRunner()
+        mock_ws = self._existing_ws()
+        mock_ws_cls.return_value = mock_ws
+
+        result = runner.invoke(main, ["unpublish", "github", "-d", "My GitHub", "--yes"])
+
+        assert result.exit_code == 0, result.output
+        # --display-name provided → the spec is not loaded at all.
+        mock_load_spec.assert_not_called()
+        mock_ws.workspace.delete.assert_called_once_with(
+            path="/Users/me@example.com/.community-connectors/My GitHub.connector.json"
+        )
+
+    @patch("databricks.labs.community_connector_cli.cli.WorkspaceClient")
+    @patch("databricks.labs.community_connector_cli.cli._load_connector_spec")
+    def test_unpublish_errors_when_not_found(self, mock_load_spec, mock_ws_cls):
+        runner = CliRunner()
+        mock_load_spec.return_value = {"connection": {}}
+        mock_ws = self._missing_ws()
+        mock_ws_cls.return_value = mock_ws
+
+        result = runner.invoke(main, ["unpublish", "github", "--yes"])
+
+        assert result.exit_code != 0
+        assert "No published connector found" in result.output
+        mock_ws.workspace.delete.assert_not_called()
+
+    @patch("databricks.labs.community_connector_cli.cli.WorkspaceClient")
+    @patch("databricks.labs.community_connector_cli.cli._load_connector_spec")
+    def test_unpublish_aborts_when_declined(self, mock_load_spec, mock_ws_cls):
+        runner = CliRunner()
+        mock_load_spec.return_value = {"connection": {}}
+        mock_ws = self._existing_ws()
+        mock_ws_cls.return_value = mock_ws
+
+        # Decline the confirmation prompt with "n".
+        result = runner.invoke(main, ["unpublish", "github"], input="n\n")
+
+        assert result.exit_code != 0
+        mock_ws.workspace.delete.assert_not_called()

@@ -1,7 +1,7 @@
 # pylint: disable=no-member
 import json
-from dataclasses import dataclass
-from typing import List
+from dataclasses import dataclass, field
+from typing import List, Optional
 from pyspark import pipelines as sdp
 from pyspark.sql.functions import col, expr
 from databricks.labs.community_connector.libs.spec_parser import SpecParser
@@ -19,6 +19,15 @@ class SdpTableConfig:  # pylint: disable=too-many-instance-attributes
     sequence_by: str
     scd_type: str
     with_deletes: bool = False
+    cluster_by: Optional[List[str]] = field(default=None)
+
+
+def _create_streaming_table(config: SdpTableConfig) -> None:
+    """Create the destination streaming table, forwarding cluster_by when set."""
+    kwargs: dict = {"name": config.destination_table}
+    if config.cluster_by:
+        kwargs["cluster_by"] = config.cluster_by
+    sdp.create_streaming_table(**kwargs)
 
 
 def _build_view_name(source_table: str, flow_type: str) -> str:
@@ -41,7 +50,7 @@ def _create_cdc_table(
             .load()
         )
 
-    sdp.create_streaming_table(name=config.destination_table)
+    _create_streaming_table(config)
     sdp.apply_changes(
         target=config.destination_table,
         source=config.view_name,
@@ -88,7 +97,7 @@ def _create_snapshot_table(spark, connection_name: str, config: SdpTableConfig) 
             .load()
         )
 
-    sdp.create_streaming_table(name=config.destination_table)
+    _create_streaming_table(config)
     sdp.apply_changes_from_snapshot(
         target=config.destination_table,
         source=config.view_name,
@@ -110,7 +119,7 @@ def _create_append_table(spark, connection_name: str, config: SdpTableConfig) ->
             .load()
         )
 
-    sdp.create_streaming_table(name=config.destination_table)
+    _create_streaming_table(config)
 
     @sdp.append_flow(name=config.view_name + "_flow", target=config.destination_table)
     def af():
@@ -166,6 +175,7 @@ def ingest(spark, pipeline_spec: dict) -> None:
         # Override parameters with spec values if available
         primary_keys = spec.get_primary_keys(table) or primary_keys
         sequence_by = spec.get_sequence_by(table) or cursor_field
+        cluster_by = spec.get_cluster_by(table)
         scd_type_raw = spec.get_scd_type(table)
         if scd_type_raw == "APPEND_ONLY":
             ingestion_type = "append"
@@ -188,6 +198,7 @@ def ingest(spark, pipeline_spec: dict) -> None:
             sequence_by=sequence_by,
             scd_type=scd_type,
             with_deletes=(ingestion_type == "cdc_with_deletes"),
+            cluster_by=cluster_by,
         )
 
         if ingestion_type in ("cdc", "cdc_with_deletes"):

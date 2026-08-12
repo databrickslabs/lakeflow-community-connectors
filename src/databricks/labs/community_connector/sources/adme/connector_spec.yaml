@@ -1,0 +1,146 @@
+# ADME Community Connector Spec
+# This file defines the specification for the connector including
+# connection parameters and allowlist options.
+
+display_name: Azure Data Manager for Energy (ADME OSDU)
+
+# ============================================================================
+# Connection Parameters
+# These are provided when creating the Unity Catalog connection.
+# ============================================================================
+connection:
+  parameters:
+    # ── Core ────────────────────────────────────────────────────────────────
+    - name: base_url
+      type: string
+      required: true
+      description: >
+        ADME instance base URL. Format: https://<instance-name>.energy.azure.com.
+        Example: https://admetest.energy.azure.com. This URL serves all OSDU
+        services under the same host with service-specific path prefixes
+        (e.g., /api/search/v2/ for the Search Service).
+        Alias: instance_url (kept for backwards compatibility).
+
+    - name: data_partition_id
+      type: string
+      required: true
+      description: >
+        OSDU data partition ID within the ADME instance. Format: alphanumeric
+        with hyphens. Examples: opendes, dp1, <inst>-opendes. Found in the
+        ADME instance overview on the Azure portal under "Data Partitions".
+        Every API call to the search, storage, and schema services must include
+        this value in the data-partition-id header.
+
+    - name: adme_api_client_id
+      type: string
+      required: false
+      description: >
+        Application (client) ID of the ADME API app registration in Azure AD.
+        Used as the audience for the OAuth2 token scope (api://<id>/.default).
+        If omitted, defaults to ``client_id`` (legacy behaviour where the SP
+        is registered under the ADME API app registration).
+
+    # ── Auth mode selection ─────────────────────────────────────────────────
+    - name: auth_mode
+      type: string
+      required: false
+      description: >
+        Authentication mode. One of: service_principal (default),
+        managed_identity, federated_identity, static_token.
+        ``service_principal`` keeps backwards compatibility with the original
+        client-credentials flow against login.microsoftonline.com.
+
+    # ── Service Principal (default) ─────────────────────────────────────────
+    - name: tenant_id
+      type: string
+      required: false
+      description: >
+        Azure AD tenant ID (Directory ID). Required for ``service_principal``
+        and ``federated_identity`` auth modes.
+
+    - name: client_id
+      type: string
+      required: false
+      description: >
+        Azure AD app (service principal) client ID. Required for
+        ``service_principal`` and ``federated_identity`` auth modes. The
+        service principal must be granted the
+        users.datalake.viewers@<data-partition-id>.dataservices.energy role
+        in the ADME Entitlements service to read data records.
+
+    - name: client_secret
+      type: string
+      required: false
+      secret: true
+      description: >
+        Azure AD app (service principal) client secret. Required for
+        ``service_principal`` auth mode only. Authenticates via OAuth2
+        client-credentials flow against
+        https://login.microsoftonline.com/{tenant_id}/oauth2/token.
+
+    # ── Managed Identity ────────────────────────────────────────────────────
+    - name: managed_identity_client_id
+      type: string
+      required: false
+      description: >
+        Client ID of a user-assigned Managed Identity. Omit for system-assigned
+        MI. Only used when ``auth_mode=managed_identity``. Requires the
+        azure-identity package on the cluster.
+
+    # ── Federated Identity (Workload Identity / OIDC) ───────────────────────
+    - name: federated_token_file
+      type: string
+      required: false
+      description: >
+        Path to a file containing a federated assertion token (OIDC).
+        Used when ``auth_mode=federated_identity``. Requires the
+        azure-identity package on the cluster.
+
+    - name: federated_token
+      type: string
+      required: false
+      secret: true
+      description: >
+        Inline federated assertion token (alternative to
+        ``federated_token_file``). Used when
+        ``auth_mode=federated_identity``.
+
+    # ── Static token (CI / testing) ─────────────────────────────────────────
+    - name: access_token
+      type: string
+      required: false
+      secret: true
+      description: >
+        Pre-issued bearer token. Use only for testing or CI pipelines.
+        Required when ``auth_mode=static_token``.
+
+    # ── Connector tuning ────────────────────────────────────────────────────
+    - name: page_size
+      type: string
+      required: false
+      description: >
+        Search page size for OSDU Search Service query_with_cursor pagination.
+        Integer between 1 and 1000. Defaults to 1000 (the maximum). The Search
+        Service caps the page size at 1000 records per request. Lowering this
+        value may be useful for tuning memory usage on executors, but increases
+        the number of API calls required for a full table scan.
+
+    # ── Legacy alias ────────────────────────────────────────────────────────
+    - name: instance_url
+      type: string
+      required: false
+      description: >
+        Deprecated alias for ``base_url``. Accepted for backwards compatibility
+        with existing UC connections.
+
+# ============================================================================
+# External Options Allowlist
+# These table-specific options must be included in the externalOptionsAllowList
+# parameter of the UC connection to allow them to be passed through.
+# Use a comma-separated string of option names.
+#
+# kind_query_<table> — Override the OSDU kind query for a specific table.
+#   Example: kind_query_rock_and_fluid=osdu:wks:work-product-component--RockSampleAnalysis:*
+#   Useful when an ADME instance uses a non-standard kind for a table.
+# ============================================================================
+external_options_allowlist: "window_days,lookback_minutes,kind_query_wellbore,kind_query_reservoir,kind_query_rock_and_fluid"

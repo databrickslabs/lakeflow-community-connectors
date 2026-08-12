@@ -1,13 +1,66 @@
 # azure_devops Community Connector Spec
 # This file defines the specification for the connector including
 # connection parameters and allowlist options.
+#
+# The Azure DevOps connector supports two authentication methods:
+# 1. pat               - Personal Access Token (HTTP Basic).
+# 2. service_principal - Microsoft Entra ID OAuth 2.0 client-credentials
+#                        (m2m). The UC COMMUNITY connection runs the flow and
+#                        injects the bearer token at query time; the connector
+#                        never holds the client secret or runs the exchange.
 
-# ============================================================================
-# Connection Parameters
-# These are provided when creating the Unity Catalog connection.
-# ============================================================================
 display_name: Azure DevOps
 connection:
+  # ---------------------------------------------------------------------------
+  # Authentication Methods
+  # Choose ONE of the following authentication approaches.
+  # ---------------------------------------------------------------------------
+  auth_methods:
+    - name: pat
+      description: >
+        Authenticate with a Personal Access Token via HTTP Basic auth.
+        Simplest for a single user / quick setup.
+      parameters:
+        - name: personal_access_token
+          type: string
+          required: true
+          secret: true
+          description: >
+            Personal Access Token for the Azure DevOps Services REST API.
+            Required scopes: Code (read), Graph (read), Project and Team
+            (read), Work Items (read).
+
+    - name: service_principal
+      description: >
+        Authenticate as a Microsoft Entra ID service principal using the
+        OAuth 2.0 client-credentials (m2m) flow — no interactive user. The
+        service principal must be added to the Azure DevOps organization with
+        the required read access. The token is minted and refreshed by the
+        Unity Catalog connection; the connector receives it as access_token.
+      parameters:
+        - name: tenant_id
+          type: string
+          required: true
+          description: >
+            Microsoft Entra ID tenant (directory) ID. Selects the per-tenant
+            token endpoint used for the client-credentials exchange.
+
+        - name: client_id
+          type: string
+          required: true
+          description: >
+            Entra ID service principal (application) client ID.
+
+        - name: client_secret
+          type: string
+          required: true
+          secret: true
+          description: >
+            Client secret for the Entra ID service principal.
+
+  # ---------------------------------------------------------------------------
+  # Common Parameters (shared across all authentication methods)
+  # ---------------------------------------------------------------------------
   parameters:
     - name: organization
       type: string
@@ -24,14 +77,21 @@ connection:
         operations to this project. If omitted, tables can fetch from
         all projects in the organization.
 
-    - name: personal_access_token
-      type: string
-      required: true
-      secret: true
-      description: >
-        Personal Access Token (PAT) for authentication with the Azure
-        DevOps Services REST API. Required scopes: Code (read),
-        Graph (read), Project and Team (read), Work Items (read).
+  # ---------------------------------------------------------------------------
+  # OAuth 2.0 flow definition (used by the service_principal auth method).
+  #   flow           — m2m: client-credentials, non-interactive. Maps to UC's
+  #                    community_oauth_flow=m2m; UC runs the exchange + refresh
+  #                    server-side and injects `access_token` at query time.
+  #   token_url      — per-tenant token endpoint. `{tenant_id}` is interpolated
+  #                    from the user-supplied tenant_id option by the CLI
+  #                    (see the connector-spec parameter-templating support).
+  #   scopes         — the Azure DevOps resource `.default` scope; the fixed
+  #                    GUID is the first-party Azure DevOps application ID.
+  # ---------------------------------------------------------------------------
+  oauth:
+    flow: m2m
+    token_url: https://login.microsoftonline.com/{tenant_id}/oauth2/v2.0/token
+    scopes: 499b84ac-1321-427f-aa17-267ca6975798/.default
 
 # ============================================================================
 # External Options Allowlist

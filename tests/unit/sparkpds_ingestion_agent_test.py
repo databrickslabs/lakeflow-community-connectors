@@ -44,13 +44,12 @@ from databricks.labs.community_connector.sources.example.example import (
     ExampleLakeflowConnect,
 )
 from databricks.labs.community_connector.sparkpds.ingestion_agent_datasource import (
-    DEFAULT_PREVIEW_LIMIT,
     IngestionAgentDispatcher,
     ListObjectsOp,
     OP_GET_OBJECT_METADATA,
     OP_LIST_OBJECTS,
     OP_LIST_OPERATIONS,
-    OP_PREVIEW_TABLE,
+    OP_READ_TABLE,
     OP_VALIDATE_CONNECTION,
 )
 
@@ -112,8 +111,8 @@ def test_list_objects_search_filters_by_regex():
     assert [r["name"] for r in rows] == ["orders"]
 
 
-def test_list_objects_returns_empty_when_parent_unknown():
-    rows = _collect(_dispatcher(OP_LIST_OBJECTS, parent="some/path"))
+def test_list_objects_returns_empty_when_path_unknown():
+    rows = _collect(_dispatcher(OP_LIST_OBJECTS, path="some/path"))
     assert rows == []
 
 
@@ -137,15 +136,20 @@ def test_get_object_metadata_filters_by_key():
     assert rows[0]["key"] == "ingestion_type"
 
 
-def test_get_object_metadata_unknown_key_returns_warning_row():
+def test_get_object_metadata_filter_is_case_insensitive():
+    rows = _collect(
+        _dispatcher(OP_GET_OBJECT_METADATA, name="orders", metadataKey="INGESTION_TYPE")
+    )
+    assert len(rows) == 1
+    assert rows[0]["key"] == "ingestion_type"
+
+
+def test_get_object_metadata_unknown_key_returns_empty():
+    """Framework filters silently; an unknown key just yields no rows."""
     rows = _collect(
         _dispatcher(OP_GET_OBJECT_METADATA, name="orders", metadataKey="does_not_exist")
     )
-    assert len(rows) == 1
-    assert rows[0]["key"] == "does_not_exist"
-    assert rows[0]["value"] is None
-    assert rows[0]["_meta"]["status"] == "warning"
-    assert rows[0]["_meta"]["code"] == "metadata_key_not_found"
+    assert rows == []
 
 
 def test_get_object_metadata_missing_name_returns_error_row():
@@ -156,27 +160,22 @@ def test_get_object_metadata_missing_name_returns_error_row():
 
 
 # ---------------------------------------------------------------------------
-# Built-in: preview_table (data-kind)
+# Built-in: read_table (data-kind)
 # ---------------------------------------------------------------------------
 
-def test_preview_table_returns_rows_capped_by_limit():
-    dispatcher = _dispatcher(OP_PREVIEW_TABLE, tableName="orders", limit="2")
+def test_read_table_returns_rows_with_natural_schema():
+    dispatcher = _dispatcher(OP_READ_TABLE, tableName="orders")
     schema = dispatcher.schema()
     # Data-kind: source's natural schema, no _meta column.
     assert "_meta" not in [f.name for f in schema.fields]
     rows = _collect(dispatcher)
-    assert 0 < len(rows) <= 2
+    assert len(rows) > 0
 
 
-def test_preview_table_default_limit():
-    rows = _collect(_dispatcher(OP_PREVIEW_TABLE, tableName="products"))
-    assert len(rows) <= DEFAULT_PREVIEW_LIMIT
-
-
-def test_preview_table_missing_table_name_raises():
+def test_read_table_missing_table_name_raises():
     from databricks.labs.community_connector.interface import AgentError
 
-    dispatcher = _dispatcher(OP_PREVIEW_TABLE)
+    dispatcher = _dispatcher(OP_READ_TABLE)
     with pytest.raises(AgentError, match="tableName") as exc_info:
         dispatcher.schema()
     assert exc_info.value.code == "bad_request"
@@ -212,7 +211,7 @@ def test_list_operations_returns_builtin_catalog():
     names = {r["name"] for r in rows}
     assert {
         OP_LIST_OBJECTS,
-        OP_PREVIEW_TABLE,
+        OP_READ_TABLE,
         OP_GET_OBJECT_METADATA,
         OP_VALIDATE_CONNECTION,
         OP_LIST_OPERATIONS,
@@ -243,21 +242,22 @@ def test_list_operations_rows_carry_planning_metadata():
     # Schema is exposed as JSON; round-trippable.
     schema_json = json.loads(list_objects["result_schema_json"])
     assert any(f["name"] == "name" for f in schema_json["fields"])
-    # Parameters declare parent and search.
+    # Parameters declare path and search.
     params = json.loads(list_objects["parameters_json"])
     param_names = {p["name"] for p in params}
-    assert {"parent", "search"} == param_names
+    assert {"path", "search"} == param_names
 
-    preview = by_name[OP_PREVIEW_TABLE]
-    # preview_table is data-kind; its schema is dynamic, so result_schema_json is null.
-    assert preview["kind"] == "data"
-    assert preview["result_schema_json"] is None
-    preview_params = json.loads(preview["parameters_json"])
-    table_name_param = next(p for p in preview_params if p["name"] == "tableName")
+    read_table = by_name[OP_READ_TABLE]
+    # read_table is data-kind; its schema is dynamic, so result_schema_json is null.
+    assert read_table["kind"] == "data"
+    assert read_table["result_schema_json"] is None
+    read_table_params = json.loads(read_table["parameters_json"])
+    table_name_param = next(
+        p for p in read_table_params if p["name"] == "tableName"
+    )
     assert table_name_param["required"] is True
-    limit_param = next(p for p in preview_params if p["name"] == "limit")
-    assert limit_param["type"] == "integer"
-    assert limit_param["default"] == DEFAULT_PREVIEW_LIMIT
+    # No `limit` option on the shared interface — Spark's .limit() pushes down.
+    assert "limit" not in {p["name"] for p in read_table_params}
 
 
 # ---------------------------------------------------------------------------
@@ -338,13 +338,25 @@ def test_data_op_raises_when_connector_failed():
     """Data-kind ops → exception propagates."""
     init_error = RuntimeError("bad creds")
     dispatcher = _dispatcher(
-        OP_PREVIEW_TABLE,
+        OP_READ_TABLE,
         tableName="orders",
         connector=None,
         init_error=init_error,
     )
     with pytest.raises(RuntimeError, match="bad creds"):
         dispatcher.schema()
+
+
+def test_validate_connection_init_failure_uses_connection_failed_code():
+    """Init failure on validate_connection → connection_failed (not internal_error)."""
+    dispatcher = _dispatcher(
+        OP_VALIDATE_CONNECTION,
+        connector=None,
+        init_error=RuntimeError("bad creds"),
+    )
+    rows = _collect(dispatcher)
+    assert len(rows) == 1
+    assert rows[0]["_meta"]["code"] == ErrorCode.CONNECTION_FAILED
 
 
 # ---------------------------------------------------------------------------
@@ -354,11 +366,11 @@ def test_data_op_raises_when_connector_failed():
 class _NamespacedListObjectsOp(ListObjectsOp):
     """Subclass that returns a fake catalog/schema/table hierarchy."""
 
-    def produce(self, connector, *, parent, search):
+    def produce(self, connector, *, path, search):
         del connector, search
-        if parent is None:
+        if path is None:
             return [{"name": "public", "type": "schema", "full_path": "public"}]
-        if parent == "public":
+        if path == "public":
             return [{"name": "orders", "type": "table", "full_path": "public.orders"}]
         return []
 
@@ -383,15 +395,15 @@ def test_builtin_subclass_replaces_default_at_root():
     assert rows[0]["_meta"]["status"] == "ok"
 
 
-def test_builtin_subclass_handles_parent_drill_down():
-    rows = _collect(_namespaced_dispatcher(OP_LIST_OBJECTS, parent="public"))
+def test_builtin_subclass_handles_path_drill_down():
+    rows = _collect(_namespaced_dispatcher(OP_LIST_OBJECTS, path="public"))
     assert len(rows) == 1
     assert rows[0]["name"] == "orders"
     assert rows[0]["full_path"] == "public.orders"
 
 
-def test_builtin_subclass_returns_empty_for_unknown_parent():
-    rows = _collect(_namespaced_dispatcher(OP_LIST_OBJECTS, parent="other"))
+def test_builtin_subclass_returns_empty_for_unknown_path():
+    rows = _collect(_namespaced_dispatcher(OP_LIST_OBJECTS, path="other"))
     assert rows == []
 
 
@@ -493,7 +505,7 @@ def test_list_operations_includes_source_plug_ins():
     names = {r["name"] for r in rows}
     assert {
         "list_objects",
-        "preview_table",
+        "read_table",
         "get_object_metadata",
         "validate_connection",
         "list_operations",

@@ -10,6 +10,7 @@ read path.
 
 from databricks.labs.community_connector.sparkpds.registry import (
     register,
+    find_data_source,
 )
 from databricks.labs.community_connector.sparkpds.lakeflow_datasource import (
     LakeflowSource,
@@ -22,13 +23,14 @@ from databricks.labs.community_connector.sparkpds.ingestion_agent_datasource imp
     IngestionAgentReader,
     ListObjectsOp,
     ListOperationsOp,
-    PreviewTableOp,
+    ReadTableOp,
     ValidateConnectionOp,
 )
 
 __all__ = [
     # Registry
     "register",
+    "find_data_source",
     # Core classes
     "LakeflowSource",
     "LakeflowStreamReader",
@@ -36,7 +38,7 @@ __all__ = [
     # Built-in ingestion-agent operations — subclass these to customise
     # behaviour while keeping the framework's schema / dispatch contract.
     "ListObjectsOp",
-    "PreviewTableOp",
+    "ReadTableOp",
     "GetObjectMetadataOp",
     "ValidateConnectionOp",
     "ListOperationsOp",

@@ -1,1 +1,1 @@
-{"id": "INBOX", "name": "INBOX", "type": "system", "messagesTotal": 0, "messagesUnread": 0, "threadsTotal": 0, "threadsUnread": 0}
+{"id": "INBOX", "name": "INBOX", "type": "system", "messageListVisibility": "show", "labelListVisibility": "labelShow", "color": {"textColor": "#222222", "backgroundColor": "#cccccc"}, "messagesTotal": 0, "messagesUnread": 0, "threadsTotal": 0, "threadsUnread": 0}

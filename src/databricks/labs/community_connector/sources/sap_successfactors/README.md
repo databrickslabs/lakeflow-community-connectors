@@ -106,7 +106,7 @@ The connection can also be created using the Databricks CLI:
 databricks connections create \
   --json '{
     "name": "sap_successfactors_connection",
-    "connection_type": "GENERIC_LAKEFLOW_CONNECT",
+    "connection_type": "COMMUNITY",
     "options": {
       "sourceName": "sap_successfactors",
       "endpoint_url": "https://api.successfactors.com/",
@@ -440,7 +440,7 @@ ingest(spark, pipeline_spec)
 > databricks connections create \
 >   --json '{
 >     "name": "sap_successfactors_connection_dynamic",
->     "connection_type": "GENERIC_LAKEFLOW_CONNECT",
+>     "connection_type": "COMMUNITY",
 >     "options": {
 >       "sourceName": "sap_successfactors",
 >       "endpoint_url": "https://api.successfactors.com/",
