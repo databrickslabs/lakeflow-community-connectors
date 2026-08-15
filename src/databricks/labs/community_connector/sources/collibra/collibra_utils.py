@@ -109,6 +109,39 @@ def cursor_paginate(
         page_params["cursor"] = next_cursor
 
 
+def cursor_paginate_pages(
+    session: requests.Session,
+    url: str,
+    params: dict[str, str],
+    label: str,
+    records_key: str = "results",
+    *,
+    start_cursor: str = "",
+    timeout: int = DEFAULT_TIMEOUT,
+) -> Iterator[tuple[list[dict[str, Any]], str | None]]:
+    """Like ``cursor_paginate`` but yields whole pages with their resume token.
+
+    Yields ``(batch, next_cursor)`` per page, where ``next_cursor`` is the
+    opaque ``nextCursor`` to resume *after* this page (``None`` on the last
+    page). Lets a caller stop at a page boundary and persist ``next_cursor`` as
+    a durable resume point — the basis for resumable ``/assets`` ingest (the
+    cursor is an ID-keyset token, so resuming from it is exact). ``start_cursor``
+    begins pagination partway through (``""`` = first page).
+    """
+    page_params = dict(params)
+    page_params["cursor"] = start_cursor
+    while True:
+        body = api_get(session, url, page_params, label, timeout=timeout)
+        batch = body.get(records_key, []) or []
+        next_cursor = body.get("nextCursor")
+        # Normalize the "no more pages" signal to None.
+        if not next_cursor or not batch:
+            yield batch, None
+            break
+        yield batch, next_cursor
+        page_params["cursor"] = next_cursor
+
+
 def offset_paginate(
     session: requests.Session,
     url: str,
