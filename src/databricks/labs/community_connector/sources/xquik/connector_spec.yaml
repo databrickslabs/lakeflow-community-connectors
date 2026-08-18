@@ -1,0 +1,10 @@
+display_name: Xquik
+connection:
+  parameters:
+    - name: api_key
+      type: string
+      required: true
+      secret: true
+      description: Xquik API key sent only in the x-api-key request header.
+
+external_options_allowlist: "count,include_replies,limit,max_pages,page_size,q,query_type,since_date,since_time,until_date,until_time,usernames,woeids"

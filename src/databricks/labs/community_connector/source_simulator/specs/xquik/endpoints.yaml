@@ -1,0 +1,22 @@
+# Xquik REST API endpoints exercised by the connector.
+
+endpoints:
+  - path: /api/v1/x/tweets/search
+    method: GET
+    corpus: tweets_search
+    response: {single_entity: true, pagination_style: none}
+
+  - path: "/api/v1/x/users/{username}"
+    method: GET
+    corpus: user_profile
+    response: {single_entity: true, pagination_style: none}
+
+  - path: "/api/v1/x/users/{username}/tweets"
+    method: GET
+    corpus: user_tweets
+    response: {single_entity: true, pagination_style: none}
+
+  - path: /api/v1/x/trends
+    method: GET
+    corpus: trends
+    response: {single_entity: true, pagination_style: none}

@@ -1,0 +1,62 @@
+{
+  "version": 1,
+  "endpoints": [
+    {
+      "method": "GET",
+      "url": "https://xquik.com/api/v1/x/trends",
+      "count": 1,
+      "param_shapes": [
+        [
+          "count",
+          "woeid"
+        ]
+      ]
+    },
+    {
+      "method": "GET",
+      "url": "https://xquik.com/api/v1/x/tweets/search",
+      "count": 2,
+      "param_shapes": [
+        [
+          "limit",
+          "q",
+          "queryType",
+          "sinceTime",
+          "untilTime"
+        ],
+        [
+          "cursor",
+          "limit",
+          "q",
+          "queryType",
+          "sinceTime",
+          "untilTime"
+        ]
+      ]
+    },
+    {
+      "method": "GET",
+      "url": "https://xquik.com/api/v1/x/users/databricks",
+      "count": 1,
+      "param_shapes": [
+        []
+      ]
+    },
+    {
+      "method": "GET",
+      "url": "https://xquik.com/api/v1/x/users/databricks/tweets",
+      "count": 2,
+      "param_shapes": [
+        [
+          "includeReplies",
+          "pageSize"
+        ],
+        [
+          "cursor",
+          "includeReplies",
+          "pageSize"
+        ]
+      ]
+    }
+  ]
+}
