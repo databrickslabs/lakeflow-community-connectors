@@ -1,0 +1,77 @@
+[
+  {
+    "object": "comment",
+    "id": "comment-001",
+    "parent": {
+      "type": "page_id",
+      "page_id": "page-123-abc-def"
+    },
+    "discussion_id": "discussion-001",
+    "created_by": {
+      "object": "user",
+      "id": "user-001"
+    },
+    "created_time": "2024-01-20T15:00:00.000Z",
+    "last_edited_time": "2024-01-20T15:00:00.000Z",
+    "rich_text": [
+      {
+        "type": "text",
+        "text": {
+          "content": "This looks great! Can we add more details to the second section?",
+          "link": null
+        },
+        "plain_text": "This looks great! Can we add more details to the second section?"
+      }
+    ]
+  },
+  {
+    "object": "comment",
+    "id": "comment-002",
+    "parent": {
+      "type": "page_id",
+      "page_id": "page-123-abc-def"
+    },
+    "discussion_id": "discussion-001",
+    "created_by": {
+      "object": "user",
+      "id": "user-002"
+    },
+    "created_time": "2024-01-20T15:30:00.000Z",
+    "last_edited_time": "2024-01-20T15:30:00.000Z",
+    "rich_text": [
+      {
+        "type": "text",
+        "text": {
+          "content": "Good point! I'll update it shortly.",
+          "link": null
+        },
+        "plain_text": "Good point! I'll update it shortly."
+      }
+    ]
+  },
+  {
+    "object": "comment",
+    "id": "comment-003",
+    "parent": {
+      "type": "block_id",
+      "block_id": "block-001"
+    },
+    "discussion_id": "discussion-002",
+    "created_by": {
+      "object": "user",
+      "id": "user-003"
+    },
+    "created_time": "2024-01-21T09:00:00.000Z",
+    "last_edited_time": "2024-01-21T09:00:00.000Z",
+    "rich_text": [
+      {
+        "type": "text",
+        "text": {
+          "content": "Should we consider adding a diagram here?",
+          "link": null
+        },
+        "plain_text": "Should we consider adding a diagram here?"
+      }
+    ]
+  }
+]
