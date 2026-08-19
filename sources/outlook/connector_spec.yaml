@@ -1,0 +1,60 @@
+# Outlook Community Connector Spec
+# This file defines the specification for the connector including
+# connection parameters and allowlist options.
+
+# ============================================================================
+# Connection Parameters
+# These are provided when creating the Unity Catalog connection.
+# ============================================================================
+connection:
+  parameters:
+    - name: client_id
+      type: string
+      required: true
+      description: >
+        Application (client) ID from your Azure AD app registration.
+        This is a GUID obtained when registering an application in the
+        Azure Portal under Azure Active Directory → App registrations.
+
+    - name: client_secret
+      type: string
+      required: true
+      description: >
+        Client secret generated for your Azure AD application.
+        Create this from Certificates & secrets in your app registration.
+        Store securely and never commit to version control.
+
+    - name: refresh_token
+      type: string
+      required: true
+      description: >
+        OAuth 2.0 refresh token obtained through initial user authorization.
+        This long-lived token allows the connector to obtain access tokens
+        without requiring repeated user login. Obtain via OAuth 2.0 flow
+        with scope 'Mail.Read offline_access'.
+
+    - name: tenant
+      type: string
+      required: false
+      description: >
+        Tenant ID or 'common' for multi-tenant authentication.
+        Defaults to 'common' if not specified. Use your organization's
+        tenant ID (GUID) or domain (e.g., 'contoso.onmicrosoft.com')
+        for single-tenant apps.
+
+    - name: base_url
+      type: string
+      required: false
+      description: >
+        Base URL for Microsoft Graph API. Override only for specialized
+        deployments or testing. Defaults to https://graph.microsoft.com/v1.0
+        if not specified.
+
+# ============================================================================
+# External Options Allowlist
+# These table-specific options must be included in the externalOptionsAllowList
+# parameter of the UC connection to allow them to be passed through.
+# Use a comma-separated string of option names.
+# If no table-specific options are needed, set to empty string or omit.
+# ============================================================================
+external_options_allowlist: "folder_id,folder_name,top,start_date,lookback_seconds,max_pages_per_batch,include_drafts"
