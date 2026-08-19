@@ -1,0 +1,56 @@
+{
+  "version": 1,
+  "generated_at": "2026-08-18T06:20:18.759502Z",
+  "endpoints": [
+    {
+      "method": "GET",
+      "spec_path": "/api/v1/x/trends",
+      "sample_url": "https://xquik.com/api/v1/x/trends?woeid=1&count=2",
+      "status": "validated",
+      "calls": 1,
+      "matched": 1,
+      "mismatched": 0,
+      "no_spec": 0,
+      "issues": []
+    },
+    {
+      "method": "GET",
+      "spec_path": "/api/v1/x/tweets/search",
+      "sample_url": "https://xquik.com/api/v1/x/tweets/search?q=%22open+source%22+lang%3Aen&queryType=Latest&limit=2&sinceTime=2026-01-01T00%3A00%3A00Z&untilTime=2026-08-01T00%3A00%3A00Z",
+      "status": "validated",
+      "calls": 2,
+      "matched": 2,
+      "mismatched": 0,
+      "no_spec": 0,
+      "issues": []
+    },
+    {
+      "method": "GET",
+      "spec_path": "/api/v1/x/users/{username}",
+      "sample_url": "https://xquik.com/api/v1/x/users/databricks",
+      "status": "validated",
+      "calls": 1,
+      "matched": 1,
+      "mismatched": 0,
+      "no_spec": 0,
+      "issues": []
+    },
+    {
+      "method": "GET",
+      "spec_path": "/api/v1/x/users/{username}/tweets",
+      "sample_url": "https://xquik.com/api/v1/x/users/databricks/tweets?pageSize=2&includeReplies=false",
+      "status": "validated",
+      "calls": 2,
+      "matched": 2,
+      "mismatched": 0,
+      "no_spec": 0,
+      "issues": []
+    }
+  ],
+  "summary": {
+    "endpoints_total": 4,
+    "endpoints_validated": 4,
+    "endpoints_mismatched": 0,
+    "endpoints_missing_spec": 0
+  }
+}

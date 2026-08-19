@@ -1,0 +1,26 @@
+{
+  "tweets": [
+    {
+      "id": "2012345678901234567",
+      "text": "Open source data pipelines should preserve lineage.",
+      "createdAt": "2026-07-31T12:00:00Z",
+      "url": "https://x.com/example/status/2012345678901234567",
+      "lang": "en",
+      "retweetCount": 8,
+      "replyCount": 3,
+      "likeCount": 42,
+      "quoteCount": 2,
+      "viewCount": 1200,
+      "bookmarkCount": 5,
+      "isReply": false,
+      "isQuoteStatus": false,
+      "conversationId": "2012345678901234567",
+      "author": {"id": "12345", "username": "example", "name": "Example"},
+      "media": [
+        {"type": "photo", "mediaUrl": "https://pbs.twimg.com/media/example.jpg", "width": 1200, "height": 675}
+      ]
+    }
+  ],
+  "has_next_page": false,
+  "next_cursor": ""
+}

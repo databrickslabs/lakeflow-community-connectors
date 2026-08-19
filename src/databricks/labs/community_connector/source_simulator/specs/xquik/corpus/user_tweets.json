@@ -1,0 +1,26 @@
+{
+  "tweets": [
+    {
+      "id": "2012345678901234568",
+      "text": "A Lakeflow connector test record.",
+      "createdAt": "2026-07-31T13:00:00Z",
+      "url": "https://x.com/databricks/status/2012345678901234568",
+      "lang": "en",
+      "retweetCount": 5,
+      "replyCount": 2,
+      "likeCount": 30,
+      "quoteCount": 1,
+      "viewCount": 900,
+      "bookmarkCount": 4,
+      "isReply": false,
+      "isQuoteStatus": false,
+      "conversationId": "2012345678901234568",
+      "author": {"id": "12345", "username": "databricks", "name": "Databricks"},
+      "media": [
+        {"type": "photo", "mediaUrl": "https://pbs.twimg.com/media/lakeflow.jpg", "width": 1200, "height": 675}
+      ]
+    }
+  ],
+  "has_next_page": false,
+  "next_cursor": ""
+}
