@@ -1,0 +1,94 @@
+[
+  {
+    "workspace_id": "whiskey-380",
+    "dataset_id": "quebec-5-pk0",
+    "name": "india-73-pk0",
+    "isHidden": true,
+    "description": "romeo-764",
+    "source": [
+      {
+        "expression": "delta-578"
+      },
+      {
+        "expression": "uniform-690"
+      }
+    ]
+  },
+  {
+    "workspace_id": "golf-406",
+    "dataset_id": "alpha-21-pk1",
+    "name": "xray-586-pk1",
+    "isHidden": false,
+    "description": "victor-438",
+    "source": [
+      {
+        "expression": "tango-920"
+      },
+      {
+        "expression": "tango-361"
+      }
+    ]
+  },
+  {
+    "workspace_id": "delta-421",
+    "dataset_id": "zulu-635-pk2",
+    "name": "mike-760-pk2",
+    "isHidden": false,
+    "description": "xray-476",
+    "source": []
+  },
+  {
+    "workspace_id": "india-241",
+    "dataset_id": "zulu-891-pk3",
+    "name": "juliet-9-pk3",
+    "isHidden": false,
+    "description": "tango-877",
+    "source": [
+      {
+        "expression": "xray-542"
+      },
+      {
+        "expression": "foxtrot-120"
+      }
+    ]
+  },
+  {
+    "workspace_id": "oscar-366",
+    "dataset_id": "alpha-17-pk4",
+    "name": "sierra-6-pk4",
+    "isHidden": false,
+    "description": "echo-452",
+    "source": []
+  },
+  {
+    "workspace_id": "mike-177",
+    "dataset_id": "yankee-1-pk5",
+    "name": "xray-878-pk5",
+    "isHidden": false,
+    "description": "foxtrot-209",
+    "source": []
+  },
+  {
+    "workspace_id": "delta-997",
+    "dataset_id": "kilo-566-pk6",
+    "name": "hotel-98-pk6",
+    "isHidden": true,
+    "description": "kilo-149",
+    "source": [
+      {
+        "expression": "lima-966"
+      },
+      {
+        "expression": "sierra-257"
+      }
+    ]
+  },
+  {
+    "workspace_id": "sierra-263",
+    "dataset_id": "victor-9-pk7",
+    "name": "papa-600-pk7",
+    "isHidden": false,
+    "description": "lima-884",
+    "source": []
+  }
+]
