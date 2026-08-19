@@ -9,7 +9,6 @@ parsed tree into the next.
 """
 
 import pytest
-
 from databricks.labs.community_connector.sources.odata.odata import (
     _clear_capability_cache,
     _clear_metadata_cache,
