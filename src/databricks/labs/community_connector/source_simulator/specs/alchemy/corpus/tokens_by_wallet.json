@@ -1,0 +1,117 @@
+[
+  {
+    "address": "hotel-30-pk0",
+    "network": "alpha-46-pk0",
+    "tokenAddress": "quebec-5-pk0",
+    "tokenBalance": "juliet-467",
+    "tokenMetadata": {
+      "decimals": 45467,
+      "logo": "hotel-935",
+      "name": "oscar-805",
+      "symbol": "uniform-226"
+    },
+    "tokenPrices": [
+      {
+        "currency": "echo-443",
+        "value": "hotel-247",
+        "lastUpdatedAt": "golf-274"
+      }
+    ],
+    "error": "golf-638"
+  },
+  {
+    "address": "foxtrot--pk1",
+    "network": "india-27-pk1",
+    "tokenAddress": "mike-956-pk1",
+    "tokenBalance": "tango-901",
+    "tokenMetadata": {
+      "decimals": 25082,
+      "logo": "juliet-628",
+      "name": "uniform-696",
+      "symbol": "yankee-294"
+    },
+    "tokenPrices": [
+      {
+        "currency": "kilo-733",
+        "value": "oscar-661",
+        "lastUpdatedAt": "november-131"
+      },
+      {
+        "currency": "lima-325",
+        "value": "charlie-542",
+        "lastUpdatedAt": "whiskey-138"
+      }
+    ],
+    "error": "oscar-572"
+  },
+  {
+    "address": "echo-404-pk2",
+    "network": "victor-5-pk2",
+    "tokenAddress": "golf-375-pk2",
+    "tokenBalance": "mike-811",
+    "tokenMetadata": {
+      "decimals": 30205,
+      "logo": "whiskey-764",
+      "name": "hotel-521",
+      "symbol": "echo-467"
+    },
+    "tokenPrices": [
+      {
+        "currency": "whiskey-556",
+        "value": "echo-755",
+        "lastUpdatedAt": "tango-898"
+      },
+      {
+        "currency": "sierra-416",
+        "value": "echo-802",
+        "lastUpdatedAt": "charlie-742"
+      }
+    ],
+    "error": "charlie-281"
+  },
+  {
+    "address": "uniform--pk3",
+    "network": "foxtrot--pk3",
+    "tokenAddress": "tango-79-pk3",
+    "tokenBalance": "foxtrot-208",
+    "tokenMetadata": {
+      "decimals": 94926,
+      "logo": "hotel-279",
+      "name": "whiskey-630",
+      "symbol": "zulu-628"
+    },
+    "tokenPrices": [
+      {
+        "currency": "whiskey-738",
+        "value": "romeo-419",
+        "lastUpdatedAt": "mike-181"
+      }
+    ],
+    "error": "charlie-584"
+  },
+  {
+    "address": "victor-7-pk4",
+    "network": "mike-749-pk4",
+    "tokenAddress": "bravo-85-pk4",
+    "tokenBalance": "bravo-660",
+    "tokenMetadata": {
+      "decimals": 55514,
+      "logo": "tango-491",
+      "name": "echo-684",
+      "symbol": "xray-567"
+    },
+    "tokenPrices": [
+      {
+        "currency": "victor-623",
+        "value": "lima-113",
+        "lastUpdatedAt": "golf-206"
+      },
+      {
+        "currency": "whiskey-198",
+        "value": "whiskey-301",
+        "lastUpdatedAt": "foxtrot-761"
+      }
+    ],
+    "error": "xray-650"
+  }
+]
