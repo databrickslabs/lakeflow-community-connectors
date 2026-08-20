@@ -1,0 +1,103 @@
+# microsoft_purview Community Connector Spec
+# This file defines the specification for the connector including
+# connection parameters and allowlist options.
+#
+# The Microsoft Purview connector supports two authentication methods:
+# 1. token             - Personal/API bearer token (Bearer auth).
+# 2. service_principal - Azure Entra (AAD) OAuth 2.0 client-credentials (m2m).
+#                        The UC COMMUNITY connection runs the flow and injects
+#                        the bearer token at query time; the connector never
+#                        holds the client secret or runs the exchange.
+
+display_name: Microsoft Purview
+connection:
+  # ---------------------------------------------------------------------------
+  # Authentication Methods
+  # Choose ONE of the following authentication approaches.
+  # ---------------------------------------------------------------------------
+  auth_methods:
+    - name: token
+      description: >
+        Authenticate with a personal or API bearer token. Simplest for a
+        single user / quick setup. Passed as "Authorization: Bearer {token}".
+      parameters:
+        - name: token
+          type: string
+          required: true
+          secret: true
+          description: >
+            Bearer token for the Purview Unified Catalog data-plane API.
+            Passed as "Authorization: Bearer {token}" on all requests.
+
+    - name: service_principal
+      description: >
+        Authenticate as an Azure Entra (AAD) service principal using the
+        OAuth 2.0 client-credentials (m2m) flow — no interactive user. The
+        service principal must be assigned a Purview Unified Catalog data-plane
+        role (e.g. Data Catalog Reader). The token is minted and refreshed by
+        the Unity Catalog connection; the connector receives it as access_token.
+      parameters:
+        - name: client_id
+          type: string
+          required: true
+          description: >
+            Application (client) ID of the registered Entra app.
+
+        - name: client_secret
+          type: string
+          required: true
+          secret: true
+          description: >
+            Client secret value for the registered Entra app.
+
+  # ---------------------------------------------------------------------------
+  # Common Parameters (shared across all authentication methods)
+  # ---------------------------------------------------------------------------
+  parameters:
+    - name: tenant_id
+      type: string
+      required: true
+      description: >
+        Azure Entra (AAD) tenant ID (GUID). Used to construct the token
+        endpoint (server-side, by the UC connection) and to stamp each row for
+        multi-tenant disambiguation.
+
+    - name: endpoint
+      type: string
+      required: false
+      description: >
+        Unified Catalog data-plane base URL. Defaults to the shared endpoint
+        https://api.purview-service.microsoft.com. Override only for sovereign
+        or non-public clouds.
+
+    - name: page_size
+      type: string
+      required: false
+      description: >
+        Page size (top) for skip/top-paginated endpoints (dataProducts, terms).
+        Valid range: 1-1000. Default: 100.
+
+  # ---------------------------------------------------------------------------
+  # OAuth 2.0 flow definition (used by the service_principal auth method).
+  #   flow      - m2m: client-credentials, non-interactive. Maps to UC's
+  #               community_oauth_flow=m2m; UC runs the exchange + refresh
+  #               server-side and injects `access_token` at query time.
+  #   token_url - Azure Entra token endpoint. `{tenant_id}` is interpolated
+  #               from the user-supplied tenant_id option by the CLI (same
+  #               templating as the Azure DevOps connector's `{tenant_id}`).
+  #   scopes    - Purview data plane resource scope. Entra v2 endpoint uses the
+  #               `.default` scope for client-credentials.
+  # ---------------------------------------------------------------------------
+  oauth:
+    flow: m2m
+    token_url: https://login.microsoftonline.com/{tenant_id}/oauth2/v2.0/token
+    scopes: https://purview.azure.net/.default
+
+# ============================================================================
+# External Options Allowlist
+# These table-specific options must be included in the externalOptionsAllowList
+# parameter of the UC connection to allow them to be passed through.
+# Use a comma-separated string of option names.
+# ============================================================================
+external_options_allowlist: "domain_id,parent_id,keyword,order_by,write_only,page_size,max_records_per_batch"
+
