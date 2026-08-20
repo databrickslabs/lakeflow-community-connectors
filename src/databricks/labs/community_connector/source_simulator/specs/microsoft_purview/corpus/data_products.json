@@ -1,0 +1,410 @@
+[
+  {
+    "id": "alpha-30-pk0",
+    "name": "juliet-155",
+    "domain": "romeo-610",
+    "type": "papa-623",
+    "description": "whiskey-233",
+    "businessUse": "quebec-268",
+    "status": "november-989",
+    "endorsed": true,
+    "updateFrequency": "oscar-178",
+    "sensitivityLabel": "charlie-170",
+    "audience": [
+      "lima-335"
+    ],
+    "dataQualityScore": 655.5,
+    "activeSubscriberCount": 80893,
+    "contacts": {
+      "owner": [],
+      "expert": [
+        {
+          "id": "yankee-211",
+          "description": "victor-496"
+        },
+        {
+          "id": "delta-197",
+          "description": "alpha-279"
+        }
+      ],
+      "databaseAdmin": [
+        {
+          "id": "mike-329",
+          "description": "uniform-702"
+        },
+        {
+          "id": "yankee-735",
+          "description": "kilo-424"
+        }
+      ]
+    },
+    "termsOfUse": [
+      {
+        "url": "delta-395",
+        "name": "sierra-509",
+        "dataAssetId": "papa-751"
+      }
+    ],
+    "documentation": [
+      {
+        "url": "whiskey-258",
+        "name": "echo-927",
+        "dataAssetId": "hotel-152"
+      },
+      {
+        "url": "lima-258",
+        "name": "lima-928",
+        "dataAssetId": "lima-182"
+      }
+    ],
+    "managedAttributes": [
+      {
+        "name": "juliet-139",
+        "value": "hotel-261",
+        "isRequired": true
+      },
+      {
+        "name": "quebec-738",
+        "value": "hotel-454",
+        "isRequired": true
+      }
+    ],
+    "additionalProperties": {
+      "assetCount": 77097
+    },
+    "systemData": {
+      "createdAt": "delta-181",
+      "createdBy": "november-133",
+      "lastModifiedAt": "2024-01-01T00:00:00Z",
+      "lastModifiedBy": "oscar-383",
+      "expiredAt": "foxtrot-912",
+      "expiredBy": "papa-357",
+      "provisioningState": "charlie-476"
+    },
+    "purview_tenant_id": "india-996"
+  },
+  {
+    "id": "yankee-1-pk1",
+    "name": "oscar-728",
+    "domain": "juliet-957",
+    "type": "sierra-854",
+    "description": "charlie-592",
+    "businessUse": "yankee-822",
+    "status": "oscar-614",
+    "endorsed": true,
+    "updateFrequency": "echo-983",
+    "sensitivityLabel": "xray-193",
+    "audience": [
+      "bravo-613",
+      "kilo-478"
+    ],
+    "dataQualityScore": 698.39,
+    "activeSubscriberCount": 64722,
+    "contacts": {
+      "owner": [
+        {
+          "id": "kilo-769",
+          "description": "quebec-887"
+        }
+      ],
+      "expert": [],
+      "databaseAdmin": [
+        {
+          "id": "echo-612",
+          "description": "kilo-400"
+        }
+      ]
+    },
+    "termsOfUse": [
+      {
+        "url": "romeo-631",
+        "name": "mike-505",
+        "dataAssetId": "charlie-380"
+      },
+      {
+        "url": "whiskey-692",
+        "name": "mike-436",
+        "dataAssetId": "hotel-581"
+      }
+    ],
+    "documentation": [],
+    "managedAttributes": [
+      {
+        "name": "mike-676",
+        "value": "lima-604",
+        "isRequired": false
+      }
+    ],
+    "additionalProperties": {
+      "assetCount": 82264
+    },
+    "systemData": {
+      "createdAt": "victor-732",
+      "createdBy": "papa-393",
+      "lastModifiedAt": "2024-01-01T01:00:00Z",
+      "lastModifiedBy": "india-984",
+      "expiredAt": "india-841",
+      "expiredBy": "bravo-828",
+      "provisioningState": "kilo-604"
+    },
+    "purview_tenant_id": "india-183"
+  },
+  {
+    "id": "uniform--pk2",
+    "name": "echo-708",
+    "domain": "romeo-843",
+    "type": "india-787",
+    "description": "hotel-459",
+    "businessUse": "tango-842",
+    "status": "quebec-632",
+    "endorsed": false,
+    "updateFrequency": "lima-986",
+    "sensitivityLabel": "india-828",
+    "audience": [
+      "uniform-254"
+    ],
+    "dataQualityScore": 36.77,
+    "activeSubscriberCount": 20795,
+    "contacts": {
+      "owner": [],
+      "expert": [],
+      "databaseAdmin": [
+        {
+          "id": "november-817",
+          "description": "kilo-935"
+        },
+        {
+          "id": "hotel-804",
+          "description": "mike-318"
+        }
+      ]
+    },
+    "termsOfUse": [
+      {
+        "url": "india-416",
+        "name": "oscar-810",
+        "dataAssetId": "uniform-984"
+      },
+      {
+        "url": "whiskey-852",
+        "name": "tango-319",
+        "dataAssetId": "romeo-738"
+      }
+    ],
+    "documentation": [],
+    "managedAttributes": [
+      {
+        "name": "yankee-979",
+        "value": "lima-404",
+        "isRequired": true
+      }
+    ],
+    "additionalProperties": {
+      "assetCount": 4236
+    },
+    "systemData": {
+      "createdAt": "victor-206",
+      "createdBy": "mike-130",
+      "lastModifiedAt": "2024-01-01T02:00:00Z",
+      "lastModifiedBy": "echo-818",
+      "expiredAt": "echo-411",
+      "expiredBy": "quebec-364",
+      "provisioningState": "xray-856"
+    },
+    "purview_tenant_id": "quebec-862"
+  },
+  {
+    "id": "juliet-8-pk3",
+    "name": "tango-857",
+    "domain": "mike-518",
+    "type": "oscar-540",
+    "description": "juliet-815",
+    "businessUse": "lima-780",
+    "status": "delta-654",
+    "endorsed": true,
+    "updateFrequency": "quebec-675",
+    "sensitivityLabel": "charlie-197",
+    "audience": [
+      "bravo-237",
+      "alpha-901"
+    ],
+    "dataQualityScore": 537.91,
+    "activeSubscriberCount": 27376,
+    "contacts": {
+      "owner": [
+        {
+          "id": "victor-590",
+          "description": "xray-559"
+        },
+        {
+          "id": "mike-234",
+          "description": "mike-556"
+        }
+      ],
+      "expert": [],
+      "databaseAdmin": []
+    },
+    "termsOfUse": [],
+    "documentation": [
+      {
+        "url": "victor-612",
+        "name": "foxtrot-279",
+        "dataAssetId": "romeo-177"
+      }
+    ],
+    "managedAttributes": [],
+    "additionalProperties": {
+      "assetCount": 54297
+    },
+    "systemData": {
+      "createdAt": "uniform-638",
+      "createdBy": "foxtrot-306",
+      "lastModifiedAt": "2024-01-01T03:00:00Z",
+      "lastModifiedBy": "alpha-962",
+      "expiredAt": "lima-811",
+      "expiredBy": "kilo-635",
+      "provisioningState": "alpha-787"
+    },
+    "purview_tenant_id": "alpha-284"
+  },
+  {
+    "id": "victor-3-pk4",
+    "name": "romeo-306",
+    "domain": "zulu-765",
+    "type": "tango-790",
+    "description": "sierra-415",
+    "businessUse": "juliet-916",
+    "status": "delta-635",
+    "endorsed": true,
+    "updateFrequency": "whiskey-226",
+    "sensitivityLabel": "foxtrot-534",
+    "audience": [
+      "alpha-445",
+      "zulu-877"
+    ],
+    "dataQualityScore": 217.35,
+    "activeSubscriberCount": 89954,
+    "contacts": {
+      "owner": [
+        {
+          "id": "papa-606",
+          "description": "delta-751"
+        }
+      ],
+      "expert": [
+        {
+          "id": "bravo-622",
+          "description": "alpha-711"
+        },
+        {
+          "id": "lima-337",
+          "description": "whiskey-952"
+        }
+      ],
+      "databaseAdmin": []
+    },
+    "termsOfUse": [
+      {
+        "url": "november-488",
+        "name": "xray-547",
+        "dataAssetId": "papa-760"
+      },
+      {
+        "url": "victor-411",
+        "name": "golf-261",
+        "dataAssetId": "india-669"
+      }
+    ],
+    "documentation": [
+      {
+        "url": "oscar-134",
+        "name": "india-986",
+        "dataAssetId": "lima-559"
+      }
+    ],
+    "managedAttributes": [],
+    "additionalProperties": {
+      "assetCount": 50244
+    },
+    "systemData": {
+      "createdAt": "juliet-171",
+      "createdBy": "golf-782",
+      "lastModifiedAt": "2024-01-01T04:00:00Z",
+      "lastModifiedBy": "papa-930",
+      "expiredAt": "hotel-244",
+      "expiredBy": "quebec-629",
+      "provisioningState": "alpha-258"
+    },
+    "purview_tenant_id": "bravo-810"
+  },
+  {
+    "id": "golf-809-pk5",
+    "name": "delta-143",
+    "domain": "echo-822",
+    "type": "bravo-359",
+    "description": "uniform-813",
+    "businessUse": "yankee-246",
+    "status": "india-227",
+    "endorsed": false,
+    "updateFrequency": "juliet-781",
+    "sensitivityLabel": "uniform-479",
+    "audience": [
+      "xray-102"
+    ],
+    "dataQualityScore": 54.6,
+    "activeSubscriberCount": 39284,
+    "contacts": {
+      "owner": [],
+      "expert": [
+        {
+          "id": "alpha-562",
+          "description": "whiskey-125"
+        },
+        {
+          "id": "oscar-505",
+          "description": "alpha-936"
+        }
+      ],
+      "databaseAdmin": [
+        {
+          "id": "charlie-895",
+          "description": "delta-996"
+        }
+      ]
+    },
+    "termsOfUse": [
+      {
+        "url": "foxtrot-552",
+        "name": "zulu-105",
+        "dataAssetId": "november-177"
+      }
+    ],
+    "documentation": [
+      {
+        "url": "delta-629",
+        "name": "lima-241",
+        "dataAssetId": "hotel-900"
+      }
+    ],
+    "managedAttributes": [
+      {
+        "name": "oscar-837",
+        "value": "sierra-980",
+        "isRequired": true
+      }
+    ],
+    "additionalProperties": {
+      "assetCount": 38814
+    },
+    "systemData": {
+      "createdAt": "zulu-928",
+      "createdBy": "alpha-495",
+      "lastModifiedAt": "2024-01-01T05:00:00Z",
+      "lastModifiedBy": "zulu-847",
+      "expiredAt": "tango-132",
+      "expiredBy": "victor-247",
+      "provisioningState": "juliet-818"
+    },
+    "purview_tenant_id": "quebec-824"
+  }
+]
