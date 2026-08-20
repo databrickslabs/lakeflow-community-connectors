@@ -98,7 +98,7 @@ All tables work with no options. Optional table-specific options narrow the extr
 | `data_products` | None | `domain_id`, `order_by` | `domain_id` scopes to a single governance domain (server-side `domainId` filter). |
 | `terms` | None | `domain_id`, `parent_id`, `keyword`, `order_by` | `domain_id` / `parent_id` scope to a domain or parent term; `keyword` is a server-side search filter. |
 
-To use any of these table options, include them in the connection's `externalOptionsAllowList` so they are passed through. The allowlist declared in `connector_spec.yaml` covers: `domain_id, parent_id, keyword, order_by, write_only, page_size, max_records_per_batch`.
+To use any of these table options, include them in the connection's `externalOptionsAllowList` so they are passed through. The allowlist declared in `connector_spec.yaml` covers: `domain_id, parent_id, keyword, order_by, write_only, page_size`. (`max_records_per_batch` is intentionally **not** in the allowlist — it is not honored yet on the cdc tables; see the incremental-sync notes below.)
 
 ### Schema highlights
 

@@ -99,5 +99,5 @@ connection:
 # parameter of the UC connection to allow them to be passed through.
 # Use a comma-separated string of option names.
 # ============================================================================
-external_options_allowlist: "domain_id,parent_id,keyword,order_by,write_only,page_size,max_records_per_batch"
+external_options_allowlist: "domain_id,parent_id,keyword,order_by,write_only,page_size"
 
