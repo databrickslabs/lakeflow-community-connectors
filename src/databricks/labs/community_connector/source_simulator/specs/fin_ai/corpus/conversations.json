@@ -1,0 +1,633 @@
+[
+  {
+    "id": "india-83-pk0",
+    "type": "lima-455",
+    "title": "zulu-925",
+    "created_at": 73972,
+    "updated_at": 1704067200,
+    "waiting_since": 46851,
+    "snoozed_until": 61991,
+    "open": true,
+    "state": "romeo-585",
+    "read": false,
+    "priority": "tango-319",
+    "admin_assignee_id": 66142,
+    "team_assignee_id": 57058,
+    "source": {
+      "type": "alpha-174",
+      "id": "yankee-427",
+      "delivered_as": "golf-252",
+      "subject": "bravo-105",
+      "body": "bravo-902",
+      "author": {
+        "type": "kilo-821",
+        "id": "zulu-559",
+        "name": "november-613",
+        "email": "bravo-354"
+      },
+      "attachments": [],
+      "url": "tango-350",
+      "redacted": true
+    },
+    "contacts": {
+      "type": "november-975",
+      "contacts": [
+        {
+          "type": "golf-870",
+          "id": "yankee-761",
+          "external_id": "alpha-665"
+        }
+      ]
+    },
+    "teammates": {},
+    "tags": {
+      "type": "india-348",
+      "tags": [
+        {
+          "type": "lima-249",
+          "id": "delta-524",
+          "name": "quebec-684",
+          "applied_at": 42786,
+          "applied_by": {}
+        },
+        {
+          "type": "xray-841",
+          "id": "echo-236",
+          "name": "india-835",
+          "applied_at": 16490,
+          "applied_by": {}
+        }
+      ]
+    },
+    "conversation_rating": {
+      "rating": 23663,
+      "remark": "foxtrot-638",
+      "created_at": 38305,
+      "updated_at": 33591,
+      "contact": {
+        "type": "romeo-912",
+        "id": "lima-974",
+        "external_id": "juliet-379"
+      },
+      "teammate": {
+        "type": "victor-970",
+        "id": "quebec-494",
+        "name": "foxtrot-930",
+        "email": "golf-807"
+      }
+    },
+    "statistics": {
+      "type": "victor-251",
+      "time_to_assignment": 24194,
+      "time_to_admin_reply": 27955,
+      "time_to_first_close": 14442,
+      "time_to_last_close": 22378,
+      "median_time_to_reply": 68924,
+      "first_contact_reply_at": 79069,
+      "first_assignment_at": 1638,
+      "first_admin_reply_at": 60301,
+      "first_close_at": 28445,
+      "last_assignment_at": 41102,
+      "last_assignment_admin_reply_at": 67554,
+      "last_contact_reply_at": 14490,
+      "last_admin_reply_at": 51796,
+      "last_close_at": 49784,
+      "last_closed_by_id": "india-590",
+      "count_reopens": 8929,
+      "count_assignments": 71759,
+      "count_conversation_parts": 49586,
+      "handling_time": 76049,
+      "adjusted_handling_time": 62777
+    },
+    "custom_attributes": {
+      "key_0": "foxtrot-955"
+    },
+    "topics": {},
+    "ticket": {
+      "type": "india-101",
+      "id": "lima-713"
+    },
+    "linked_objects": {
+      "type": "tango-704",
+      "data": [
+        {
+          "key_0": "whiskey-475",
+          "key_1": "quebec-208"
+        },
+        {}
+      ],
+      "total_count": 25217,
+      "has_more": true
+    },
+    "ai_agent_participated": false,
+    "ai_agent": {
+      "source_type": "papa-612",
+      "source_title": "zulu-866",
+      "last_answer_type": "victor-482",
+      "resolution_state": "november-705",
+      "rating": 56472,
+      "rating_remark": "zulu-611",
+      "created_at": 7705,
+      "updated_at": 73920,
+      "content_sources": {}
+    }
+  },
+  {
+    "id": "lima-567-pk1",
+    "type": "lima-997",
+    "title": "quebec-348",
+    "created_at": 30771,
+    "updated_at": 1704070800,
+    "waiting_since": 26275,
+    "snoozed_until": 42014,
+    "open": true,
+    "state": "oscar-801",
+    "read": true,
+    "priority": "charlie-740",
+    "admin_assignee_id": 40737,
+    "team_assignee_id": 2524,
+    "source": {
+      "type": "hotel-100",
+      "id": "kilo-685",
+      "delivered_as": "echo-297",
+      "subject": "lima-552",
+      "body": "lima-781",
+      "author": {
+        "type": "sierra-462",
+        "id": "romeo-875",
+        "name": "mike-176",
+        "email": "mike-324"
+      },
+      "attachments": [
+        {}
+      ],
+      "url": "bravo-702",
+      "redacted": true
+    },
+    "contacts": {
+      "type": "tango-721",
+      "contacts": []
+    },
+    "teammates": {
+      "key_0": "golf-791",
+      "key_1": "alpha-804"
+    },
+    "tags": {
+      "type": "lima-861",
+      "tags": [
+        {
+          "type": "whiskey-589",
+          "id": "echo-642",
+          "name": "india-572",
+          "applied_at": 79700,
+          "applied_by": {
+            "key_0": "xray-299"
+          }
+        }
+      ]
+    },
+    "conversation_rating": {
+      "rating": 34543,
+      "remark": "november-493",
+      "created_at": 7428,
+      "updated_at": 15389,
+      "contact": {
+        "type": "sierra-696",
+        "id": "xray-451",
+        "external_id": "mike-778"
+      },
+      "teammate": {
+        "type": "papa-225",
+        "id": "quebec-772",
+        "name": "foxtrot-781",
+        "email": "november-741"
+      }
+    },
+    "statistics": {
+      "type": "papa-179",
+      "time_to_assignment": 83958,
+      "time_to_admin_reply": 78758,
+      "time_to_first_close": 35644,
+      "time_to_last_close": 60435,
+      "median_time_to_reply": 70704,
+      "first_contact_reply_at": 71352,
+      "first_assignment_at": 40598,
+      "first_admin_reply_at": 52814,
+      "first_close_at": 39225,
+      "last_assignment_at": 65409,
+      "last_assignment_admin_reply_at": 8634,
+      "last_contact_reply_at": 63637,
+      "last_admin_reply_at": 14578,
+      "last_close_at": 6183,
+      "last_closed_by_id": "golf-134",
+      "count_reopens": 18909,
+      "count_assignments": 36691,
+      "count_conversation_parts": 29502,
+      "handling_time": 74727,
+      "adjusted_handling_time": 3095
+    },
+    "custom_attributes": {
+      "key_0": "november-594"
+    },
+    "topics": {},
+    "ticket": {
+      "type": "delta-489",
+      "id": "xray-229"
+    },
+    "linked_objects": {
+      "type": "kilo-939",
+      "data": [
+        {
+          "key_0": "india-975"
+        }
+      ],
+      "total_count": 96979,
+      "has_more": true
+    },
+    "ai_agent_participated": false,
+    "ai_agent": {
+      "source_type": "tango-232",
+      "source_title": "oscar-846",
+      "last_answer_type": "quebec-882",
+      "resolution_state": "mike-296",
+      "rating": 69144,
+      "rating_remark": "xray-677",
+      "created_at": 96303,
+      "updated_at": 46454,
+      "content_sources": {}
+    }
+  },
+  {
+    "id": "charlie--pk2",
+    "type": "oscar-869",
+    "title": "papa-518",
+    "created_at": 68545,
+    "updated_at": 1704074400,
+    "waiting_since": 76033,
+    "snoozed_until": 40978,
+    "open": false,
+    "state": "india-953",
+    "read": false,
+    "priority": "delta-717",
+    "admin_assignee_id": 96623,
+    "team_assignee_id": 34839,
+    "source": {
+      "type": "juliet-190",
+      "id": "romeo-250",
+      "delivered_as": "victor-606",
+      "subject": "lima-669",
+      "body": "india-467",
+      "author": {
+        "type": "foxtrot-676",
+        "id": "echo-631",
+        "name": "uniform-668",
+        "email": "delta-719"
+      },
+      "attachments": [
+        {
+          "key_0": "oscar-862"
+        }
+      ],
+      "url": "romeo-782",
+      "redacted": true
+    },
+    "contacts": {
+      "type": "bravo-208",
+      "contacts": [
+        {
+          "type": "alpha-138",
+          "id": "oscar-282",
+          "external_id": "lima-549"
+        }
+      ]
+    },
+    "teammates": {
+      "key_0": "kilo-955"
+    },
+    "tags": {
+      "type": "sierra-821",
+      "tags": []
+    },
+    "conversation_rating": {
+      "rating": 74995,
+      "remark": "echo-699",
+      "created_at": 48245,
+      "updated_at": 92343,
+      "contact": {
+        "type": "quebec-545",
+        "id": "oscar-811",
+        "external_id": "yankee-311"
+      },
+      "teammate": {
+        "type": "romeo-124",
+        "id": "xray-498",
+        "name": "india-559",
+        "email": "india-679"
+      }
+    },
+    "statistics": {
+      "type": "india-301",
+      "time_to_assignment": 86727,
+      "time_to_admin_reply": 55416,
+      "time_to_first_close": 98437,
+      "time_to_last_close": 60461,
+      "median_time_to_reply": 40064,
+      "first_contact_reply_at": 85671,
+      "first_assignment_at": 70826,
+      "first_admin_reply_at": 91647,
+      "first_close_at": 90673,
+      "last_assignment_at": 51109,
+      "last_assignment_admin_reply_at": 87185,
+      "last_contact_reply_at": 84621,
+      "last_admin_reply_at": 17978,
+      "last_close_at": 51989,
+      "last_closed_by_id": "victor-318",
+      "count_reopens": 9051,
+      "count_assignments": 89122,
+      "count_conversation_parts": 96708,
+      "handling_time": 94406,
+      "adjusted_handling_time": 40056
+    },
+    "custom_attributes": {
+      "key_0": "zulu-593"
+    },
+    "topics": {},
+    "ticket": {
+      "type": "delta-626",
+      "id": "oscar-313"
+    },
+    "linked_objects": {
+      "type": "xray-369",
+      "data": [],
+      "total_count": 58300,
+      "has_more": true
+    },
+    "ai_agent_participated": true,
+    "ai_agent": {
+      "source_type": "charlie-710",
+      "source_title": "juliet-986",
+      "last_answer_type": "uniform-232",
+      "resolution_state": "quebec-631",
+      "rating": 91235,
+      "rating_remark": "whiskey-799",
+      "created_at": 31675,
+      "updated_at": 34678,
+      "content_sources": {}
+    }
+  },
+  {
+    "id": "echo-827-pk3",
+    "type": "lima-910",
+    "title": "oscar-525",
+    "created_at": 23242,
+    "updated_at": 1704078000,
+    "waiting_since": 88311,
+    "snoozed_until": 49224,
+    "open": false,
+    "state": "bravo-764",
+    "read": false,
+    "priority": "quebec-267",
+    "admin_assignee_id": 59837,
+    "team_assignee_id": 18312,
+    "source": {
+      "type": "quebec-258",
+      "id": "oscar-515",
+      "delivered_as": "mike-691",
+      "subject": "hotel-633",
+      "body": "november-713",
+      "author": {
+        "type": "romeo-420",
+        "id": "zulu-944",
+        "name": "tango-698",
+        "email": "bravo-999"
+      },
+      "attachments": [
+        {
+          "key_0": "delta-915",
+          "key_1": "echo-203"
+        }
+      ],
+      "url": "zulu-627",
+      "redacted": true
+    },
+    "contacts": {
+      "type": "india-124",
+      "contacts": []
+    },
+    "teammates": {},
+    "tags": {
+      "type": "whiskey-304",
+      "tags": []
+    },
+    "conversation_rating": {
+      "rating": 29502,
+      "remark": "kilo-400",
+      "created_at": 52929,
+      "updated_at": 13713,
+      "contact": {
+        "type": "tango-278",
+        "id": "oscar-839",
+        "external_id": "uniform-921"
+      },
+      "teammate": {
+        "type": "sierra-671",
+        "id": "kilo-752",
+        "name": "golf-427",
+        "email": "oscar-321"
+      }
+    },
+    "statistics": {
+      "type": "charlie-122",
+      "time_to_assignment": 11014,
+      "time_to_admin_reply": 52703,
+      "time_to_first_close": 1864,
+      "time_to_last_close": 97345,
+      "median_time_to_reply": 22866,
+      "first_contact_reply_at": 28098,
+      "first_assignment_at": 88886,
+      "first_admin_reply_at": 82581,
+      "first_close_at": 81923,
+      "last_assignment_at": 17550,
+      "last_assignment_admin_reply_at": 7390,
+      "last_contact_reply_at": 45901,
+      "last_admin_reply_at": 73218,
+      "last_close_at": 1043,
+      "last_closed_by_id": "romeo-879",
+      "count_reopens": 55078,
+      "count_assignments": 81457,
+      "count_conversation_parts": 47919,
+      "handling_time": 6326,
+      "adjusted_handling_time": 85325
+    },
+    "custom_attributes": {
+      "key_0": "xray-809"
+    },
+    "topics": {
+      "key_0": "india-911",
+      "key_1": "charlie-565"
+    },
+    "ticket": {
+      "type": "echo-169",
+      "id": "india-843"
+    },
+    "linked_objects": {
+      "type": "uniform-140",
+      "data": [
+        {},
+        {
+          "key_0": "delta-603",
+          "key_1": "hotel-679"
+        }
+      ],
+      "total_count": 28039,
+      "has_more": true
+    },
+    "ai_agent_participated": true,
+    "ai_agent": {
+      "source_type": "sierra-865",
+      "source_title": "zulu-699",
+      "last_answer_type": "victor-670",
+      "resolution_state": "lima-310",
+      "rating": 64562,
+      "rating_remark": "tango-468",
+      "created_at": 17878,
+      "updated_at": 95337,
+      "content_sources": {
+        "key_0": "alpha-647",
+        "key_1": "quebec-586"
+      }
+    }
+  },
+  {
+    "id": "juliet-6-pk4",
+    "type": "lima-300",
+    "title": "yankee-611",
+    "created_at": 23071,
+    "updated_at": 1704081600,
+    "waiting_since": 8058,
+    "snoozed_until": 14611,
+    "open": true,
+    "state": "papa-189",
+    "read": false,
+    "priority": "echo-877",
+    "admin_assignee_id": 15602,
+    "team_assignee_id": 92472,
+    "source": {
+      "type": "mike-162",
+      "id": "alpha-857",
+      "delivered_as": "yankee-346",
+      "subject": "foxtrot-379",
+      "body": "papa-705",
+      "author": {
+        "type": "oscar-285",
+        "id": "whiskey-985",
+        "name": "kilo-369",
+        "email": "xray-766"
+      },
+      "attachments": [],
+      "url": "charlie-639",
+      "redacted": true
+    },
+    "contacts": {
+      "type": "uniform-784",
+      "contacts": [
+        {
+          "type": "yankee-289",
+          "id": "india-201",
+          "external_id": "bravo-976"
+        }
+      ]
+    },
+    "teammates": {
+      "key_0": "whiskey-898",
+      "key_1": "papa-612"
+    },
+    "tags": {
+      "type": "echo-721",
+      "tags": [
+        {
+          "type": "uniform-741",
+          "id": "kilo-622",
+          "name": "papa-806",
+          "applied_at": 10122,
+          "applied_by": {
+            "key_0": "uniform-840"
+          }
+        }
+      ]
+    },
+    "conversation_rating": {
+      "rating": 87490,
+      "remark": "tango-961",
+      "created_at": 24662,
+      "updated_at": 53295,
+      "contact": {
+        "type": "lima-284",
+        "id": "alpha-318",
+        "external_id": "lima-343"
+      },
+      "teammate": {
+        "type": "bravo-228",
+        "id": "tango-294",
+        "name": "uniform-252",
+        "email": "quebec-758"
+      }
+    },
+    "statistics": {
+      "type": "papa-954",
+      "time_to_assignment": 9745,
+      "time_to_admin_reply": 16768,
+      "time_to_first_close": 24967,
+      "time_to_last_close": 81503,
+      "median_time_to_reply": 63033,
+      "first_contact_reply_at": 74692,
+      "first_assignment_at": 34894,
+      "first_admin_reply_at": 28141,
+      "first_close_at": 91659,
+      "last_assignment_at": 66384,
+      "last_assignment_admin_reply_at": 28552,
+      "last_contact_reply_at": 26117,
+      "last_admin_reply_at": 32567,
+      "last_close_at": 84010,
+      "last_closed_by_id": "uniform-217",
+      "count_reopens": 49297,
+      "count_assignments": 85544,
+      "count_conversation_parts": 20455,
+      "handling_time": 93680,
+      "adjusted_handling_time": 31567
+    },
+    "custom_attributes": {
+      "key_0": "yankee-824"
+    },
+    "topics": {
+      "key_0": "echo-133"
+    },
+    "ticket": {
+      "type": "whiskey-447",
+      "id": "mike-458"
+    },
+    "linked_objects": {
+      "type": "tango-119",
+      "data": [
+        {},
+        {
+          "key_0": "romeo-363"
+        }
+      ],
+      "total_count": 65402,
+      "has_more": true
+    },
+    "ai_agent_participated": false,
+    "ai_agent": {
+      "source_type": "mike-974",
+      "source_title": "foxtrot-540",
+      "last_answer_type": "echo-163",
+      "resolution_state": "foxtrot-298",
+      "rating": 50269,
+      "rating_remark": "juliet-151",
+      "created_at": 9857,
+      "updated_at": 5731,
+      "content_sources": {}
+    }
+  }
+]

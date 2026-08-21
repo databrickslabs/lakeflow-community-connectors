@@ -1,0 +1,95 @@
+# Fin.ai (Intercom) Community Connector Spec
+# This file defines the specification for the connector including
+# connection parameters and allowlist options.
+
+# ============================================================================
+# Connection Parameters
+# These are provided when creating the Unity Catalog connection.
+#
+# The Fin.ai connector reads customer-service data (conversations,
+# contacts, companies, tickets, admins, tags, segments, custom attributes,
+# and teams) from the Intercom REST API. Fin AI Agent resolution data,
+# CSAT ratings, and outcome metadata are embedded on the conversations
+# resource via the ai_agent and ai_agent_participated fields.
+# ============================================================================
+display_name: Fin.ai (Intercom)
+connection:
+  parameters:
+    - name: access_token
+      type: string
+      required: true
+      secret: true
+      description: >
+        Intercom private app Access Token used for API authentication.
+        Generate this from the Intercom Developer Hub by creating a private
+        app scoped to your workspace, then navigating to Configure →
+        Authentication. Grant the token read permissions for conversations,
+        contacts, companies, tickets, admins, tags, segments, and custom
+        attributes. The token is shown once and should be treated like a
+        password.
+
+    - name: region
+      type: string
+      required: false
+      description: >
+        Intercom workspace region for API endpoints: 'us' (default) for US data
+        center, 'eu' for EU-hosted workspace, or 'au' for Australia-hosted
+        workspace. Pinning the correct regional base URL (api.intercom.io,
+        api.eu.intercom.io, or api.au.intercom.io) avoids redirect latency.
+        Defaults to 'us'.
+
+    - name: start_date
+      type: string
+      required: false
+      description: >
+        ISO-8601 date or timestamp for the lower bound of historical backfill
+        on incremental (cdc) tables: conversations, contacts, and tickets
+        (e.g., '2024-01-01' or '2024-01-01T00:00:00Z'). Snapshot tables
+        (companies, admins, tags, segments, data_attributes, teams) are
+        always read in full regardless of this parameter. If not specified,
+        incremental tables default to starting from the connector's init time
+        (first trigger).
+
+    - name: lookback_window
+      type: string
+      required: false
+      description: >
+        Number of days to re-read at the end of each incremental sync window
+        on the Search API tables (conversations, contacts, tickets) to catch
+        late updated_at mutations. For example, '2' means the last 2 days of
+        each window are re-queried to detect records modified after the prior
+        sync. Defaults to '0' (no lookback). This mirrors Airbyte's
+        lookback_window configuration and helps absorb eventual-consistency
+        delays in the Intercom API.
+
+    - name: api_rate_limit
+      type: string
+      required: false
+      description: >
+        Self-throttle budget in API calls per minute. Intercom's private-app
+        limit is 10,000 requests/minute per app and 25,000 requests/minute
+        per workspace. The connector defaults to budgeting 9,500 req/min (95%
+        of the per-app limit) to leave headroom. On a 429 Too Many Requests
+        response, the connector honors Retry-After and X-RateLimit-Reset
+        headers. Defaults to '9500'.
+
+# ============================================================================
+# External Options Allowlist
+# These table-specific options must be included in the externalOptionsAllowList
+# parameter of the UC connection to allow them to be passed through.
+# Use a comma-separated string of option names.
+#
+# These options tune per-table behavior such as window size, page size,
+# and optional fields:
+#
+# - window_days: partition window size in days for partitioned (cdc) tables
+#   (conversations, contacts, tickets). Defaults to 7 days.
+# - per_page: page size for Search API endpoints. Max 150. Defaults to 150.
+# - include_archived: include archived custom attributes in data_attributes
+#   table output. Accepts 'true' or 'false'. Defaults to 'false'.
+# - include_count: include member count in segments table output.
+#   Accepts 'true' or 'false'. Defaults to 'false'.
+# - display_avatar: include admin avatar URL in admins table output.
+#   Accepts 'true' or 'false'. Defaults to 'false'.
+# ============================================================================
+external_options_allowlist: "window_days,per_page,include_archived,include_count,display_avatar"

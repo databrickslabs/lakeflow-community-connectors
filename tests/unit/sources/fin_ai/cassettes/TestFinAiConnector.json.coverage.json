@@ -1,0 +1,84 @@
+{
+  "version": 1,
+  "endpoints": [
+    {
+      "method": "GET",
+      "url": "https://api.intercom.io/admins",
+      "count": 2,
+      "param_shapes": [
+        [
+          "display_avatar"
+        ]
+      ]
+    },
+    {
+      "method": "GET",
+      "url": "https://api.intercom.io/companies/scroll",
+      "count": 4,
+      "param_shapes": [
+        [],
+        [
+          "scroll_param"
+        ]
+      ]
+    },
+    {
+      "method": "POST",
+      "url": "https://api.intercom.io/contacts/search",
+      "count": 4,
+      "param_shapes": [
+        []
+      ]
+    },
+    {
+      "method": "POST",
+      "url": "https://api.intercom.io/conversations/search",
+      "count": 4,
+      "param_shapes": [
+        []
+      ]
+    },
+    {
+      "method": "GET",
+      "url": "https://api.intercom.io/data_attributes",
+      "count": 2,
+      "param_shapes": [
+        [
+          "include_archived"
+        ]
+      ]
+    },
+    {
+      "method": "GET",
+      "url": "https://api.intercom.io/segments",
+      "count": 2,
+      "param_shapes": [
+        []
+      ]
+    },
+    {
+      "method": "GET",
+      "url": "https://api.intercom.io/tags",
+      "count": 2,
+      "param_shapes": [
+        []
+      ]
+    },
+    {
+      "method": "GET",
+      "url": "https://api.intercom.io/teams",
+      "count": 2,
+      "param_shapes": [
+        []
+      ]
+    },
+    {
+      "method": "POST",
+      "url": "https://api.intercom.io/tickets/search",
+      "count": 2,
+      "param_shapes": [
+        []
+      ]
+    }
+  ]
+}
