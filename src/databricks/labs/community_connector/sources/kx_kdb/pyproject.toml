@@ -1,0 +1,30 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "lakeflow-community-connectors-kx-kdb"
+version = "0.1.0"
+description = "KX KDB HDB connector for Lakeflow Community Connectors"
+requires-python = ">=3.10"
+dependencies = [
+  "pandas>=2.0.0,<3.0",
+  "pykx==4.0.0b5",
+  "lakeflow-community-connectors>=0.1.0,<1.0",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pyspark>=4.1.0,<5.0",
+  "pytest>=7.0.0,<10.0",
+  "pytest-cov>=4.0.0,<8.0",
+]
+
+[tool.setuptools]
+packages = ["databricks.labs.community_connector.sources.kx_kdb"]
+
+[tool.setuptools.package-dir]
+"databricks.labs.community_connector.sources.kx_kdb" = "."
+
+[tool.setuptools.package-data]
+"*" = ["*.md", "*.png", "*.svg", "*.yaml"]

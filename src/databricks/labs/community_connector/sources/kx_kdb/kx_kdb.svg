@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-labelledby="title">
+  <title id="title">KX KDB HDB connector</title>
+  <defs>
+    <linearGradient id="lake" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#00a972"/>
+      <stop offset="1" stop-color="#007a5a"/>
+    </linearGradient>
+  </defs>
+  <rect width="128" height="128" rx="24" fill="#f4fbf8"/>
+  <ellipse cx="64" cy="34" rx="39" ry="15" fill="url(#lake)"/>
+  <path d="M25 34v24c0 8 17 15 39 15s39-7 39-15V34c0 8-17 15-39 15s-39-7-39-15Z" fill="#00a972"/>
+  <path d="M25 58v24c0 8 17 15 39 15s39-7 39-15V58c0 8-17 15-39 15s-39-7-39-15Z" fill="#008965"/>
+  <path d="M25 82v12c0 8 17 15 39 15s39-7 39-15V82c0 8-17 15-39 15s-39-7-39-15Z" fill="#007a5a"/>
+  <text x="64" y="70" text-anchor="middle" font-family="Arial, sans-serif" font-size="22" font-weight="700" fill="#fff">KDB</text>
+</svg>

@@ -1,0 +1,104 @@
+# KX KDB HDB Lakeflow community connector specification.
+
+display_name: KX KDB HDB
+connection:
+  parameters:
+    - name: hdb_root_path
+      type: string
+      required: true
+      description: >
+        FUSE-mounted root path of the KDB HDB dataset, such as
+        /Volumes/<catalog>/<schema>/<volume>/kdb_hdb. The root must contain
+        the HDB sym file and date partition directories.
+
+    - name: license_volume_path
+      type: string
+      required: true
+      description: >
+        Directory path used for `QLIC` and working-directory setup before importing
+        PyKX. This must be the containing directory (for example
+        /Volumes/<catalog>/<schema>/<volume>/keys/), not the direct kc.lic file path.
+
+    - name: kdbx_secret_scope
+      type: string
+      required: false
+      description: >
+        Databricks secret scope containing the KDB-X installer bearer token and
+        base64 license. When this is supplied, also provide both secret key
+        options below so the connector can bootstrap KDB-X non-interactively on
+        serverless compute before importing PyKX.
+
+    - name: kdbx_install_bearer_secret_key
+      type: string
+      required: false
+      description: >
+        Secret key name inside `kdbx_secret_scope` that stores the OAuth bearer
+        token used to download `install_kdb.sh`.
+
+    - name: kdbx_license_b64_secret_key
+      type: string
+      required: false
+      description: >
+        Secret key name inside `kdbx_secret_scope` that stores the base64
+        license string passed to `install_kdb.sh --b64lic`.
+
+    - name: kdbx_install_bearer_token
+      type: string
+      required: false
+      secret: true
+      description: >
+        Preferred Lakeflow option for the KDB-X installer bearer token. Define
+        it in SQL with `secret('<scope>', '<key>')` so the connector receives the
+        resolved value directly from the Unity Catalog connection options.
+
+    - name: kdbx_license_b64
+      type: string
+      required: false
+      secret: true
+      description: >
+        Preferred Lakeflow option for the base64 `kc.lic` value. Define it in
+        SQL with `secret('<scope>', '<key>')` so the connector receives the
+        resolved value directly from the Unity Catalog connection options.
+
+    - name: kdbx_license_file_path
+      type: string
+      required: false
+      description: >
+        Optional FUSE path to a KX license file or license directory. When set,
+        the connector reads the license at runtime and uses it for KDB-X
+        bootstrap without storing the base64 license in the pipeline spec.
+
+    - name: kdbx_offline_bundle_path
+      type: string
+      required: false
+      description: >
+        Optional UC volume path to a pre-built KDB-X air-gapped bundle. Use
+        l64arm-bundle.zip for ARM64 runtimes (including current Lakeflow
+        serverless) and l64-bundle.zip for x86_64. When set or when a matching
+        bundle is found near <license_volume_path>, the connector installs
+        KDB-X via `install_kdb.sh --offline` and skips the bearer-token
+        download entirely.
+
+    - name: kdbx_install_mode
+      type: string
+      required: false
+      description: >
+        KDB-X bootstrap mode: `auto` (default), `offline`, or `online`. Use
+        `online` to force downloading `install_kdb.sh` with the bearer token even
+        when an offline bundle is configured.
+
+    - name: discovery_sample_dates
+      type: integer
+      required: false
+      description: >
+        Optional limit for table discovery. Set to 0 or omit to scan all date
+        partitions when listing tables.
+
+    - name: pykx_install_spec
+      type: string
+      required: false
+      description: >
+        Optional PyKX package spec or wheel path used only when PyKX is not
+        already available in the Lakeflow pipeline environment.
+
+external_options_allowlist: "start_date,end_date,ingestion_mode,partition_strategy,partition_conversion_mode,sym_column"

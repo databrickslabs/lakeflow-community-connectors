@@ -1,0 +1,74 @@
+[
+  {
+    "table": "TRADES",
+    "date": "2024.01.01",
+    "sym": "AAPL",
+    "time": "09:30:00.000",
+    "price": 185.25,
+    "size": 100
+  },
+  {
+    "table": "TRADES",
+    "date": "2024.01.01",
+    "sym": "MSFT",
+    "time": "09:30:01.000",
+    "price": 375.5,
+    "size": 200
+  },
+  {
+    "table": "TRADES",
+    "date": "2024.01.02",
+    "sym": "AAPL",
+    "time": "09:31:00.000",
+    "price": 186.0,
+    "size": 150
+  },
+  {
+    "table": "TRADES",
+    "date": "2024.01.02",
+    "sym": "MSFT",
+    "time": "09:31:01.000",
+    "price": 377.0,
+    "size": 250
+  },
+  {
+    "table": "QUOTES",
+    "date": "2024.01.01",
+    "sym": "AAPL",
+    "time": "09:30:00.500",
+    "bid": 185.2,
+    "ask": 185.3,
+    "bsize": 300,
+    "asize": 400
+  },
+  {
+    "table": "QUOTES",
+    "date": "2024.01.01",
+    "sym": "MSFT",
+    "time": "09:30:01.500",
+    "bid": 375.4,
+    "ask": 375.6,
+    "bsize": 500,
+    "asize": 600
+  },
+  {
+    "table": "QUOTES",
+    "date": "2024.01.02",
+    "sym": "AAPL",
+    "time": "09:31:00.500",
+    "bid": 185.9,
+    "ask": 186.1,
+    "bsize": 350,
+    "asize": 450
+  },
+  {
+    "table": "QUOTES",
+    "date": "2024.01.02",
+    "sym": "MSFT",
+    "time": "09:31:01.500",
+    "bid": 376.9,
+    "ask": 377.1,
+    "bsize": 550,
+    "asize": 650
+  }
+]
