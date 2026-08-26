@@ -1,0 +1,59 @@
+{
+  "id": "12345",
+  "username": "databricks",
+  "name": "Databricks",
+  "description": "Data and AI company",
+  "businessAccountAffiliatesCount": 1,
+  "creatorSubscriptionsCount": 2,
+  "favouritesCount": 4500,
+  "followers": 250000,
+  "following": 400,
+  "verified": true,
+  "isVerified": true,
+  "isBlueVerified": true,
+  "hasGraduatedAccess": true,
+  "hasHiddenSubscriptionsOnProfile": false,
+  "highlightsInfo": {
+    "canHighlightTweets": true,
+    "highlightedTweets": "1234567890"
+  },
+  "identityVerification": {
+    "isIdentityVerified": true,
+    "verifiedSinceMsec": "1704067200000"
+  },
+  "isProfileTranslatable": true,
+  "profilePicture": "https://pbs.twimg.com/profile_images/example.jpg",
+  "coverPicture": "https://pbs.twimg.com/profile_banners/example.jpg",
+  "profileBannerUrl": "https://pbs.twimg.com/profile_banners/example.jpg",
+  "profileDescriptionLanguage": "en",
+  "profileImageShape": "Circle",
+  "profileInterstitialType": "",
+  "profileSortEnabled": true,
+  "profileTranslatorType": "None",
+  "profile_bio": {
+    "description": "Data and AI company",
+    "entities": {
+      "description": {"urls": []},
+      "url": {
+        "urls": [
+          {
+            "display_url": "databricks.com",
+            "expanded_url": "https://www.databricks.com",
+            "indices": [0, 23],
+            "url": "https://t.co/example"
+          }
+        ]
+      }
+    }
+  },
+  "location": "San Francisco, CA",
+  "createdAt": "2013-03-01T00:00:00Z",
+  "mediaCount": 3200,
+  "parodyCommentaryFanLabel": "None",
+  "possiblySensitive": false,
+  "statusesCount": 12000,
+  "protected": false,
+  "superFollowEligible": false,
+  "url": "https://www.databricks.com",
+  "verifiedType": "Business"
+}
