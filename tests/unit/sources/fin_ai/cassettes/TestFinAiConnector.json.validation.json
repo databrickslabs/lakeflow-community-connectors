@@ -1,0 +1,111 @@
+{
+  "version": 1,
+  "generated_at": "2026-07-21T21:36:13.103139Z",
+  "endpoints": [
+    {
+      "method": "GET",
+      "spec_path": "/admins",
+      "sample_url": "https://api.intercom.io/admins?display_avatar=false",
+      "status": "validated",
+      "calls": 2,
+      "matched": 2,
+      "mismatched": 0,
+      "no_spec": 0,
+      "issues": []
+    },
+    {
+      "method": "GET",
+      "spec_path": "/companies/scroll",
+      "sample_url": "https://api.intercom.io/companies/scroll",
+      "status": "validated",
+      "calls": 4,
+      "matched": 4,
+      "mismatched": 0,
+      "no_spec": 0,
+      "issues": []
+    },
+    {
+      "method": "POST",
+      "spec_path": "/contacts/search",
+      "sample_url": "https://api.intercom.io/contacts/search",
+      "status": "validated",
+      "calls": 4,
+      "matched": 4,
+      "mismatched": 0,
+      "no_spec": 0,
+      "issues": []
+    },
+    {
+      "method": "POST",
+      "spec_path": "/conversations/search",
+      "sample_url": "https://api.intercom.io/conversations/search",
+      "status": "validated",
+      "calls": 4,
+      "matched": 4,
+      "mismatched": 0,
+      "no_spec": 0,
+      "issues": []
+    },
+    {
+      "method": "GET",
+      "spec_path": "/data_attributes",
+      "sample_url": "https://api.intercom.io/data_attributes?include_archived=false",
+      "status": "validated",
+      "calls": 2,
+      "matched": 2,
+      "mismatched": 0,
+      "no_spec": 0,
+      "issues": []
+    },
+    {
+      "method": "GET",
+      "spec_path": "/segments",
+      "sample_url": "https://api.intercom.io/segments",
+      "status": "validated",
+      "calls": 2,
+      "matched": 2,
+      "mismatched": 0,
+      "no_spec": 0,
+      "issues": []
+    },
+    {
+      "method": "GET",
+      "spec_path": "/tags",
+      "sample_url": "https://api.intercom.io/tags",
+      "status": "validated",
+      "calls": 2,
+      "matched": 2,
+      "mismatched": 0,
+      "no_spec": 0,
+      "issues": []
+    },
+    {
+      "method": "GET",
+      "spec_path": "/teams",
+      "sample_url": "https://api.intercom.io/teams",
+      "status": "validated",
+      "calls": 2,
+      "matched": 2,
+      "mismatched": 0,
+      "no_spec": 0,
+      "issues": []
+    },
+    {
+      "method": "POST",
+      "spec_path": "/tickets/search",
+      "sample_url": "https://api.intercom.io/tickets/search",
+      "status": "validated",
+      "calls": 2,
+      "matched": 2,
+      "mismatched": 0,
+      "no_spec": 0,
+      "issues": []
+    }
+  ],
+  "summary": {
+    "endpoints_total": 9,
+    "endpoints_validated": 9,
+    "endpoints_mismatched": 0,
+    "endpoints_missing_spec": 0
+  }
+}

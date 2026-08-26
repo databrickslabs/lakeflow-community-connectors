@@ -1,0 +1,81 @@
+[
+  {
+    "id": "alpha-65-pk0",
+    "type": "lima-131",
+    "name": "juliet-190",
+    "admin_ids": [],
+    "admin_priority_level": {
+      "primary_admin_ids": [
+        66355
+      ],
+      "secondary_admin_ids": []
+    },
+    "assignment_limit": 11713,
+    "distribution_method": "papa-352"
+  },
+  {
+    "id": "tango-64-pk1",
+    "type": "echo-231",
+    "name": "whiskey-957",
+    "admin_ids": [
+      33229,
+      30511
+    ],
+    "admin_priority_level": {
+      "primary_admin_ids": [],
+      "secondary_admin_ids": [
+        33548
+      ]
+    },
+    "assignment_limit": 9435,
+    "distribution_method": "victor-793"
+  },
+  {
+    "id": "golf-685-pk2",
+    "type": "india-902",
+    "name": "uniform-544",
+    "admin_ids": [],
+    "admin_priority_level": {
+      "primary_admin_ids": [
+        54579
+      ],
+      "secondary_admin_ids": []
+    },
+    "assignment_limit": 85999,
+    "distribution_method": "zulu-220"
+  },
+  {
+    "id": "echo-740-pk3",
+    "type": "quebec-970",
+    "name": "whiskey-392",
+    "admin_ids": [
+      66906
+    ],
+    "admin_priority_level": {
+      "primary_admin_ids": [
+        19830,
+        34133
+      ],
+      "secondary_admin_ids": []
+    },
+    "assignment_limit": 64806,
+    "distribution_method": "tango-277"
+  },
+  {
+    "id": "kilo-808-pk4",
+    "type": "hotel-426",
+    "name": "lima-369",
+    "admin_ids": [
+      17523,
+      15182
+    ],
+    "admin_priority_level": {
+      "primary_admin_ids": [],
+      "secondary_admin_ids": [
+        18681
+      ]
+    },
+    "assignment_limit": 81378,
+    "distribution_method": "quebec-180"
+  }
+]
