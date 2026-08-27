@@ -1,0 +1,247 @@
+"""Generate multiple pipeline `ingest_*.py` entrypoints from a connector table CSV.
+
+This is meant for load balancing across multiple Lakeflow pipelines by splitting
+connector tables into categories (or any grouping key).
+
+CSV format (header required):
+  source_table,category,table_configuration_json
+
+Example (OSIPI):
+  tools/notebook_based_deployment/examples/osipi/osipi_tables_load_balancing.csv
+"""
+
+from __future__ import annotations
+
+import argparse
+import csv
+import json
+import re
+from pathlib import Path
+from typing import Dict, List, Tuple
+
+
+def _slug(s: str) -> str:
+    s = s.strip().lower()
+    s = re.sub(r"[^a-z0-9]+", "_", s)
+    s = re.sub(r"_+", "_", s).strip("_")
+    return s or "group"
+
+
+def _read_csv(path: Path) -> Dict[str, List[Tuple[str, Dict[str, str]]]]:
+    if not path.exists():
+        raise FileNotFoundError(str(path))
+
+    out: Dict[str, List[Tuple[str, Dict[str, str]]]] = {}
+    with path.open(newline="", encoding="utf-8") as f:
+        reader = csv.DictReader(f)
+        required = {"source_table"}
+        missing = required - set(reader.fieldnames or [])
+        if missing:
+            raise ValueError(f"CSV missing required columns: {sorted(missing)}")
+
+        for row in reader:
+            source_table = (row.get("source_table") or "").strip()
+            # Try pipeline_group first, fallback to category, then default
+            category = (row.get("pipeline_group") or row.get("category") or "").strip() or "default"
+            # Try both table_options_json and table_configuration_json for backwards compatibility
+            cfg_raw = (row.get("table_options_json") or row.get("table_configuration_json") or "").strip() or "{}"
+
+            if not source_table:
+                continue
+
+            try:
+                cfg_obj = json.loads(cfg_raw)
+            except Exception as e:
+                raise ValueError(
+                    f"Invalid JSON in table_configuration_json for {source_table}: {cfg_raw}"
+                ) from e
+
+            if not isinstance(cfg_obj, dict):
+                raise ValueError(
+                    f"table_configuration_json must decode to an object/dict for {source_table}"
+                )
+
+            # Normalize to string->string for pipeline spec
+            cfg: Dict[str, str] = {str(k): str(v) for k, v in cfg_obj.items()}
+            out.setdefault(category, []).append((source_table, cfg))
+
+    # Stable output order
+    for k in list(out.keys()):
+        out[k] = sorted(out[k], key=lambda x: x[0])
+    return dict(sorted(out.items(), key=lambda kv: kv[0]))
+
+
+def _emit_ingest_py(
+    *,
+    source_name: str,
+    connection_name: str,
+    catalog: str,
+    schema: str,
+    common_table_config: Dict[str, str],
+    tables: List[Tuple[str, Dict[str, str]]],
+    group_name: str,
+) -> str:
+    # Build objects list with proper formatting
+    objects_list = []
+    for source_table, table_cfg in tables:
+        merged_cfg = {**common_table_config, **table_cfg}
+        obj = {
+            "table": {
+                "source_table": source_table,
+                "destination_catalog": catalog,
+                "destination_schema": schema,
+            }
+        }
+        if merged_cfg:
+            obj["table"]["table_configuration"] = merged_cfg
+        objects_list.append(obj)
+
+    # Format objects for readability with inline comments
+    objects_str = "[\n        # " + "=" * 70 + "\n"
+    objects_str += f"        # Tables in this pipeline group: {group_name}\n"
+    objects_str += "        # " + "=" * 70 + "\n"
+
+    for obj in objects_list:
+        objects_str += f"\n        # {obj['table']['source_table']}\n"
+        objects_str += "        {\n"
+        objects_str += "            \"table\": {\n"
+        objects_str += f"                \"source_table\": \"{obj['table']['source_table']}\",\n"
+        objects_str += f"                \"destination_catalog\": \"{obj['table']['destination_catalog']}\",\n"
+        objects_str += f"                \"destination_schema\": \"{obj['table']['destination_schema']}\",\n"
+        if "table_configuration" in obj["table"]:
+            objects_str += f"                \"table_configuration\": {obj['table']['table_configuration']!r},\n"
+        objects_str += "            }\n"
+        objects_str += "        },\n"
+    objects_str += "    ]"
+
+    # Create table list for documentation
+    table_names = [t[0] for t in tables]
+    table_list_str = "\n".join([f"  - {name}" for name in table_names])
+
+    return f'''# Databricks notebook source
+"""
+{source_name.upper()} Load-Balanced Ingestion Pipeline
+
+Pipeline Group: {group_name}
+Tables: {len(tables)}
+
+This pipeline ingests the following tables:
+{table_list_str}
+
+Prerequisites:
+- Unity Catalog connection created: {connection_name}
+- Destination catalog exists: {catalog}
+- Destination schema will be created if not exists: {schema}
+
+Generated by: Load-Balanced Deployment Tool
+"""
+
+from pipeline.ingestion_pipeline import ingest
+from libs.source_loader import get_register_function
+
+# ==============================================================================
+# CONFIGURATION
+# ==============================================================================
+
+# Connector Configuration
+SOURCE_NAME = "{source_name}"
+CONNECTION_NAME = "{connection_name}"
+
+# Destination Configuration
+DESTINATION_CATALOG = "{catalog}"
+DESTINATION_SCHEMA = "{schema}"
+
+# ==============================================================================
+# PIPELINE SPECIFICATION
+# ==============================================================================
+
+pipeline_spec = {{
+    "connection_name": CONNECTION_NAME,
+    "objects": {objects_str},
+}}
+
+# ==============================================================================
+# SETUP AND EXECUTION
+# ==============================================================================
+
+print("=" * 80)
+print(f"{{SOURCE_NAME.upper()}} Ingestion Pipeline - {{'{group_name}'.replace('_', ' ').title()}}")
+print("=" * 80)
+print(f"\\nPipeline Group: {group_name}")
+print(f"Tables to ingest: {len(tables)}")
+print(f"\\nDestination:")
+print(f"  Catalog: {{DESTINATION_CATALOG}}")
+print(f"  Schema:  {{DESTINATION_SCHEMA}}")
+print(f"\\nTables:")
+{chr(10).join([f'print(f"  • {{DESTINATION_CATALOG}}.{{DESTINATION_SCHEMA}}.{t[0]}")' for t in tables])}
+print(f"\\nStarting ingestion...")
+print("=" * 80)
+print()
+
+# Dynamically import and register the LakeFlow source
+register_lakeflow_source = get_register_function(SOURCE_NAME)
+register_lakeflow_source(spark)
+
+# Execute ingestion
+ingest(spark, pipeline_spec)
+
+print()
+print("=" * 80)
+print("Ingestion Complete")
+print("=" * 80)
+print(f"\\nTables created in {{DESTINATION_CATALOG}}.{{DESTINATION_SCHEMA}}:")
+{chr(10).join([f'print(f"  ✓ {t[0]}")' for t in tables])}
+print(f"\\nSample query:")
+print(f"  SELECT * FROM {{DESTINATION_CATALOG}}.{{DESTINATION_SCHEMA}}.{tables[0][0]} LIMIT 10")
+print("=" * 80)
+'''
+
+
+def main() -> None:
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--csv", required=True, help="Path to tables CSV")
+    ap.add_argument("--output-dir", required=True, help="Directory to write ingest_*.py files")
+    ap.add_argument("--source-name", required=True, help="Connector source name (e.g. osipi, hubspot, zendesk)")
+    ap.add_argument("--connection-name", required=True, help="UC connection name used by the pipeline")
+    ap.add_argument("--catalog", required=True, help="Destination catalog")
+    ap.add_argument("--schema", required=True, help="Destination schema")
+    ap.add_argument(
+        "--common-table-config-json",
+        required=True,
+        help="JSON object (string->string) merged into each table_configuration",
+    )
+    args = ap.parse_args()
+
+    csv_path = Path(args.csv)
+    out_dir = Path(args.output_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    grouped = _read_csv(csv_path)
+    if not grouped:
+        raise SystemExit("No tables found in CSV")
+
+    common_cfg = json.loads(args.common_table_config_json)
+    if not isinstance(common_cfg, dict):
+        raise SystemExit("--common-table-config-json must be a JSON object")
+    common_cfg = {str(k): str(v) for k, v in common_cfg.items()}
+
+    for category, tables in grouped.items():
+        fname = out_dir / f"ingest_{_slug(category)}.py"
+        fname.write_text(
+            _emit_ingest_py(
+                source_name=args.source_name,
+                connection_name=args.connection_name,
+                catalog=args.catalog,
+                schema=args.schema,
+                common_table_config=common_cfg,
+                tables=tables,
+                group_name=category,
+            ),
+            encoding="utf-8",
+        )
+
+    print(f"Wrote {len(grouped)} ingest files to {out_dir}")
+
+
+if __name__ == "__main__":
+    main()
