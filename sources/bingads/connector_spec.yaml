@@ -1,0 +1,68 @@
+# Bing Ads (Microsoft Advertising) Community Connector Spec
+# This file defines the specification for the connector including
+# connection parameters and allowlist options.
+
+# ============================================================================
+# Connection Parameters
+# These are provided when creating the Unity Catalog connection.
+# ============================================================================
+connection:
+  parameters:
+    - name: client_id
+      type: string
+      required: true
+      description: >
+        Application (client) ID from Azure Portal App registrations.
+        This identifies your application to Microsoft identity platform.
+
+    - name: client_secret
+      type: string
+      required: false
+      description: >
+        Client secret from Azure Portal App registrations. Required for
+        web applications using OAuthWebAuthCodeGrant. Optional for native/desktop
+        applications using OAuthDesktopMobileAuthCodeGrant.
+
+    - name: refresh_token
+      type: string
+      required: true
+      description: >
+        Long-lived OAuth 2.0 refresh token obtained through the OAuth consent
+        flow. Used to obtain access tokens at runtime.
+
+    - name: developer_token
+      type: string
+      required: true
+      description: >
+        Developer token that identifies your application to the Microsoft
+        Advertising API. Obtain from Microsoft Advertising web UI under
+        Tools > Developer Token.
+
+    - name: customer_id
+      type: string
+      required: false
+      description: >
+        Target customer ID for API operations. Can be provided here or
+        overridden per-table via table options.
+
+    - name: account_id
+      type: string
+      required: false
+      description: >
+        Target account ID for API operations. Can be provided here or
+        overridden per-table via table options.
+
+    - name: env
+      type: string
+      required: false
+      description: >
+        API environment to use. Valid values are "production" or "sandbox".
+        Defaults to "production".
+
+# ============================================================================
+# External Options Allowlist
+# These table-specific options must be included in the externalOptionsAllowList
+# parameter of the UC connection to allow them to be passed through.
+# Use a comma-separated string of option names.
+# ============================================================================
+external_options_allowlist: "account_id,campaign_id,ad_group_id,start_date,end_date,lookback_days"
