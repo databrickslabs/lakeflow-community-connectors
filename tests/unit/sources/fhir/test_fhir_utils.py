@@ -2,14 +2,19 @@ import json
 from pathlib import Path
 
 from databricks.labs.community_connector.sources.fhir.fhir_utils import (
-    SmartAuthClient, FhirHttpClient, iter_bundle_pages, extract_record,
+    SmartAuthClient,
+    FhirHttpClient,
+    iter_bundle_pages,
+    extract_record,
 )
 
 CONFIG_PATH = Path(__file__).parent / "configs" / "dev_config.json"
 
+
 def load_config():
     with open(CONFIG_PATH) as f:
         return json.load(f)
+
 
 def make_client():
     config = load_config()
@@ -28,13 +33,16 @@ def make_client():
 
 # --- Pure unit tests (no network) ---
 
+
 def test_auth_none_returns_empty_token():
     auth = SmartAuthClient("", "", "none", "", "", "")
     assert auth.get_token() == ""
 
+
 def test_extract_record_common_fields():
     resource = {
-        "resourceType": "Patient", "id": "p1",
+        "resourceType": "Patient",
+        "id": "p1",
         "meta": {"lastUpdated": "2024-01-15T10:30:00+00:00"},
     }
     record = extract_record(resource, "Patient")
@@ -43,15 +51,20 @@ def test_extract_record_common_fields():
     assert record["lastUpdated"] == "2024-01-15T10:30:00+00:00"
     assert json.loads(record["raw_json"]) == resource
 
+
 def test_extract_record_missing_meta_returns_none_for_last_updated():
     record = extract_record({"resourceType": "Patient", "id": "p2"}, "Patient")
     assert record["lastUpdated"] is None
 
+
 def test_extract_record_patient_typed_fields():
     resource = {
-        "resourceType": "Patient", "id": "p3",
+        "resourceType": "Patient",
+        "id": "p3",
         "meta": {"lastUpdated": "2024-01-01T00:00:00+00:00"},
-        "gender": "female", "birthDate": "1985-03-12", "active": True,
+        "gender": "female",
+        "birthDate": "1985-03-12",
+        "active": True,
         "name": [{"text": "Jane Doe", "family": "Doe", "given": ["Jane"]}],
     }
     record = extract_record(resource, "Patient")
@@ -63,12 +76,17 @@ def test_extract_record_patient_typed_fields():
     assert record["name"][0]["text"] == "Jane Doe"
     assert record["name"][0]["given"] == ["Jane"]
 
+
 def test_extract_record_observation_typed_fields():
     resource = {
-        "resourceType": "Observation", "id": "obs1",
+        "resourceType": "Observation",
+        "id": "obs1",
         "meta": {"lastUpdated": "2024-01-01T00:00:00+00:00"},
         "status": "final",
-        "code": {"coding": [{"system": "http://loinc.org", "code": "29463-7"}], "text": "Body weight"},
+        "code": {
+            "coding": [{"system": "http://loinc.org", "code": "29463-7"}],
+            "text": "Body weight",
+        },
         "subject": {"reference": "Patient/p1"},
         "valueQuantity": {"value": 70.5, "unit": "kg"},
     }
@@ -83,13 +101,39 @@ def test_extract_record_observation_typed_fields():
     assert record["value_quantity"]["value"] == 70.5
     assert record["value_quantity"]["unit"] == "kg"
 
+
 def test_extract_record_unknown_resource_returns_common_only():
-    resource = {"resourceType": "UnknownXYZ", "id": "u1", "meta": {"lastUpdated": "2024-01-01T00:00:00Z"}}
+    resource = {
+        "resourceType": "UnknownXYZ",
+        "id": "u1",
+        "meta": {"lastUpdated": "2024-01-01T00:00:00Z"},
+    }
     record = extract_record(resource, "UnknownXYZ")
     assert set(record.keys()) == {"id", "resourceType", "lastUpdated", "raw_json", "extension"}
 
 
+def test_extract_record_absent_extension_is_none_not_json_null():
+    """Absent extension must be SQL NULL, not the JSON string "null".
+
+    json.dumps(None) yields the string "null", which parse_json() turns into a
+    VARIANT null *value* rather than a NULL column — silently unqueryable.
+    """
+    record = extract_record({"resourceType": "Patient", "id": "p1"}, "Patient")
+    assert record["extension"] is None
+
+
+def test_extract_record_present_extension_is_json_string():
+    resource = {
+        "resourceType": "Patient",
+        "id": "p1",
+        "extension": [{"url": "http://example.org/ext", "valueString": "x"}],
+    }
+    record = extract_record(resource, "Patient")
+    assert json.loads(record["extension"])[0]["url"] == "http://example.org/ext"
+
+
 # --- Integration tests (hit live HAPI FHIR server) ---
+
 
 def test_fhir_client_get_patient_bundle():
     client = make_client()
@@ -99,6 +143,7 @@ def test_fhir_client_get_patient_bundle():
     assert body["resourceType"] == "Bundle"
     assert body["type"] == "searchset"
 
+
 def test_iter_bundle_pages_yields_patient_resources():
     client = make_client()
     resources = list(iter_bundle_pages(client, "Patient", {"_count": "5"}, max_records=5))
@@ -106,6 +151,7 @@ def test_iter_bundle_pages_yields_patient_resources():
     for r in resources:
         assert r["resourceType"] == "Patient"
         assert "id" in r
+
 
 def test_iter_bundle_pages_respects_max_records():
     client = make_client()
@@ -116,6 +162,7 @@ def test_iter_bundle_pages_respects_max_records():
 def test_jwt_assertion_includes_kid_header():
     """kid header is required by SMART on FHIR Backend Services spec."""
     from unittest.mock import patch
+
     auth = SmartAuthClient(
         token_url="https://auth.example.com/token",
         client_id="my-client",
@@ -128,8 +175,9 @@ def test_jwt_assertion_includes_kid_header():
 
     call_kwargs = mock_jwt.encode.call_args
     headers_passed = call_kwargs.kwargs.get("headers") or {}
-    assert headers_passed.get("kid") == "key-2024-01", \
+    assert headers_passed.get("kid") == "key-2024-01", (
         "kid header must be present in JWT assertion per SMART spec"
+    )
     assert data["client_assertion"] == "header.payload.sig"
 
 
@@ -139,6 +187,7 @@ def test_jwt_assertion_includes_nbf_claim():
     Ref: https://fhir.epic.com/Documentation?docId=oauth2 — JWT claims table.
     """
     from unittest.mock import patch
+
     auth = SmartAuthClient(
         token_url="https://auth.example.com/token",
         client_id="my-client",
@@ -156,6 +205,7 @@ def test_jwt_assertion_includes_nbf_claim():
 def test_jwt_assertion_raises_if_kid_missing():
     """kid is required for jwt_assertion per SMART spec — must raise if omitted."""
     from unittest.mock import patch
+
     auth = SmartAuthClient(
         token_url="https://auth.example.com/token",
         client_id="my-client",
@@ -172,6 +222,7 @@ def test_jwt_assertion_raises_if_kid_missing():
 def test_jwt_assertion_defaults_to_rs384():
     """Default algorithm must be RS384 per SMART spec SHOULD guidance."""
     from unittest.mock import patch
+
     auth = SmartAuthClient(
         token_url="https://auth.example.com/token",
         client_id="my-client",
@@ -182,13 +233,16 @@ def test_jwt_assertion_defaults_to_rs384():
         mock_jwt.encode.return_value = "h.p.s"
         auth._jwt_assertion_data()
     call_args = mock_jwt.encode.call_args
-    algorithm_used = call_args.kwargs.get("algorithm") or (call_args.args[2] if len(call_args.args) > 2 else None)
+    algorithm_used = call_args.kwargs.get("algorithm") or (
+        call_args.args[2] if len(call_args.args) > 2 else None
+    )
     assert algorithm_used == "RS384", f"Expected RS384, got {algorithm_used}"
 
 
 def test_jwt_assertion_uses_configured_algorithm():
     """Algorithm must be configurable to ES384 per SMART spec SHALL support requirement."""
     from unittest.mock import patch
+
     auth = SmartAuthClient(
         token_url="https://auth.example.com/token",
         client_id="my-client",
@@ -200,7 +254,9 @@ def test_jwt_assertion_uses_configured_algorithm():
         mock_jwt.encode.return_value = "h.p.s"
         auth._jwt_assertion_data()
     call_args = mock_jwt.encode.call_args
-    algorithm_used = call_args.kwargs.get("algorithm") or (call_args.args[2] if len(call_args.args) > 2 else None)
+    algorithm_used = call_args.kwargs.get("algorithm") or (
+        call_args.args[2] if len(call_args.args) > 2 else None
+    )
     assert algorithm_used == "ES384", f"Expected ES384, got {algorithm_used}"
 
 
@@ -226,6 +282,7 @@ def test_client_secret_uses_http_basic_auth():
     client_id and client_secret must NOT appear in the POST body.
     """
     from unittest.mock import patch, MagicMock
+
     auth = SmartAuthClient(
         token_url="https://auth.example.com/token",
         client_id="my-app",
@@ -237,14 +294,17 @@ def test_client_secret_uses_http_basic_auth():
     mock_response.status_code = 200
     mock_response.json.return_value = {"access_token": "tok", "expires_in": 300}
 
-    with patch("databricks.labs.community_connector.sources.fhir.fhir_utils.requests.post",
-               return_value=mock_response) as mock_post:
+    with patch(
+        "databricks.labs.community_connector.sources.fhir.fhir_utils.requests.post",
+        return_value=mock_response,
+    ) as mock_post:
         auth._refresh_token()
 
     call_kwargs = mock_post.call_args.kwargs
     assert "auth" in call_kwargs, "requests.post must use auth= kwarg for HTTP Basic"
-    assert call_kwargs["auth"] == ("my-app", "my-secret"), \
+    assert call_kwargs["auth"] == ("my-app", "my-secret"), (
         "auth tuple must be (client_id, client_secret)"
+    )
     post_data = call_kwargs.get("data", {})
     assert "client_id" not in post_data, "client_id must not be in POST body"
     assert "client_secret" not in post_data, "client_secret must not be in POST body"
@@ -253,6 +313,7 @@ def test_client_secret_uses_http_basic_auth():
 def test_jwt_assertion_does_not_use_http_basic_auth():
     """jwt_assertion authenticates via client_assertion body param, not HTTP Basic."""
     from unittest.mock import patch, MagicMock
+
     auth = SmartAuthClient(
         token_url="https://auth.example.com/token",
         client_id="my-client",
@@ -265,15 +326,20 @@ def test_jwt_assertion_does_not_use_http_basic_auth():
     mock_response.status_code = 200
     mock_response.json.return_value = {"access_token": "tok", "expires_in": 300}
 
-    with patch("databricks.labs.community_connector.sources.fhir.fhir_utils.jwt") as mock_jwt, \
-         patch("databricks.labs.community_connector.sources.fhir.fhir_utils.requests.post",
-               return_value=mock_response) as mock_post:
+    with (
+        patch("databricks.labs.community_connector.sources.fhir.fhir_utils.jwt") as mock_jwt,
+        patch(
+            "databricks.labs.community_connector.sources.fhir.fhir_utils.requests.post",
+            return_value=mock_response,
+        ) as mock_post,
+    ):
         mock_jwt.encode.return_value = "h.p.s"
         auth._refresh_token()
 
     call_kwargs = mock_post.call_args.kwargs
-    assert "auth" not in call_kwargs, \
+    assert "auth" not in call_kwargs, (
         "jwt_assertion must not use HTTP Basic auth — credentials are in client_assertion body"
+    )
 
 
 def test_discover_token_url_returns_token_endpoint():
@@ -288,8 +354,10 @@ def test_discover_token_url_returns_token_endpoint():
         "token_endpoint": "https://auth.example.com/oauth/token",
         "authorization_endpoint": "https://auth.example.com/oauth/authorize",
     }
-    with patch("databricks.labs.community_connector.sources.fhir.fhir_utils.requests.get",
-               return_value=mock_resp) as mock_get:
+    with patch(
+        "databricks.labs.community_connector.sources.fhir.fhir_utils.requests.get",
+        return_value=mock_resp,
+    ) as mock_get:
         result = discover_token_url("https://fhir.example.com/R4")
 
     mock_get.assert_called_once_with(
@@ -307,8 +375,10 @@ def test_discover_token_url_raises_on_http_error():
     mock_resp = MagicMock()
     mock_resp.status_code = 404
     mock_resp.text = "Not Found"
-    with patch("databricks.labs.community_connector.sources.fhir.fhir_utils.requests.get",
-               return_value=mock_resp):
+    with patch(
+        "databricks.labs.community_connector.sources.fhir.fhir_utils.requests.get",
+        return_value=mock_resp,
+    ):
         try:
             discover_token_url("https://fhir.example.com/R4")
             assert False, "Should have raised RuntimeError"
@@ -323,8 +393,10 @@ def test_discover_token_url_raises_if_token_endpoint_missing():
     mock_resp = MagicMock()
     mock_resp.status_code = 200
     mock_resp.json.return_value = {"authorization_endpoint": "https://auth.example.com/authorize"}
-    with patch("databricks.labs.community_connector.sources.fhir.fhir_utils.requests.get",
-               return_value=mock_resp):
+    with patch(
+        "databricks.labs.community_connector.sources.fhir.fhir_utils.requests.get",
+        return_value=mock_resp,
+    ):
         try:
             discover_token_url("https://fhir.example.com/R4")
             assert False, "Should have raised RuntimeError"
@@ -337,15 +409,27 @@ def test_fhir_connector_auto_discovers_token_url_when_omitted():
     from unittest.mock import patch
     from databricks.labs.community_connector.sources.fhir.fhir import FhirLakeflowConnect
 
-    with patch("databricks.labs.community_connector.sources.fhir.fhir.discover_token_url",
-               return_value="https://auth.example.com/token") as mock_discover:
-        connector = FhirLakeflowConnect({
-            "base_url": "https://fhir.example.com/R4",
-            "auth_type": "client_secret",
-            "client_id": "cid",
-            "client_secret": "sec",
-            # token_url intentionally omitted
-        })
+    with patch(
+        "databricks.labs.community_connector.sources.fhir.fhir.discover_token_url",
+        return_value="https://auth.example.com/token",
+    ) as mock_discover:
+        connector = FhirLakeflowConnect(
+            {
+                "base_url": "https://fhir.example.com/R4",
+                "auth_type": "client_secret",
+                "client_id": "cid",
+                "client_secret": "sec",
+                # token_url intentionally omitted
+            }
+        )
 
     mock_discover.assert_called_once_with("https://fhir.example.com/R4")
     assert connector._client._auth_client._token_url == "https://auth.example.com/token"
+
+
+def test_extract_record_explicit_null_extension_is_none():
+    """An explicit JSON null must become SQL NULL, not the string "null"."""
+    record = extract_record(
+        {"resourceType": "Patient", "id": "p1", "extension": None}, "Patient"
+    )
+    assert record["extension"] is None

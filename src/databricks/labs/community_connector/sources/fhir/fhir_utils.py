@@ -10,6 +10,8 @@ Key design decisions (from fhir_api_doc.md):
 """
 
 import json
+import logging
+import math
 import time
 import uuid
 from datetime import datetime, timedelta, timezone
@@ -23,14 +25,51 @@ from databricks.labs.community_connector.sources.fhir.fhir_constants import (
     HTTP_TIMEOUT,
     INITIAL_BACKOFF,
     MAX_RETRIES,
+    MAX_RETRY_AFTER,
     PAGE_DELAY,
     RETRIABLE_STATUS_CODES,
     TOKEN_TIMEOUT,
 )
 from databricks.labs.community_connector.sources.fhir.fhir_profile_registry import extract
 
+logger = logging.getLogger(__name__)
 
 _SUPPORTED_ALGORITHMS = {"RS384", "ES384"}
+
+
+def retry_after(resp: requests.Response, default: float, ceiling: Optional[float] = None) -> float:
+    """Extract Retry-After (seconds) from a response, clamped to a safe range.
+
+    Shared by the REST and bulk paths. A server may send a value that is
+    negative (time.sleep raises), non-finite (also raises, or hangs), or an
+    HTTP-date rather than a number; none of those may take the connector down.
+
+    `ceiling` bounds the wait for callers that have their own deadline to
+    respect. It defaults to None — honouring the server's request in full —
+    because sleeping *less* than a 429 asked for is what provokes a request
+    storm. Waits beyond MAX_RETRY_AFTER are logged so a stalled run is
+    diagnosable from the driver log.
+    """
+    seconds = default
+    header = resp.headers.get("Retry-After")
+    if header:
+        try:
+            parsed = float(header)
+        except (TypeError, ValueError):
+            parsed = None  # HTTP-date form; fall back to the caller's backoff
+        if parsed is not None and math.isfinite(parsed):
+            seconds = parsed
+    if ceiling is not None:
+        seconds = min(seconds, ceiling)
+    seconds = max(0.0, seconds)
+    if seconds > MAX_RETRY_AFTER:
+        logger.warning(
+            "Server asked to retry after %.0fs (>%ds); honouring it, so this "
+            "request will block until then.",
+            seconds,
+            MAX_RETRY_AFTER,
+        )
+    return seconds
 
 
 class SmartAuthClient:  # pylint: disable=too-few-public-methods,too-many-instance-attributes
@@ -218,15 +257,7 @@ class FhirHttpClient:
             if resp.status_code not in RETRIABLE_STATUS_CODES:
                 return resp
             if attempt < MAX_RETRIES - 1:
-                retry_after = resp.headers.get("Retry-After")
-                if retry_after:
-                    try:
-                        sleep_seconds = float(retry_after)
-                    except ValueError:
-                        sleep_seconds = backoff  # Retry-After is an HTTP-date; fall back to backoff
-                else:
-                    sleep_seconds = backoff
-                time.sleep(sleep_seconds)
+                time.sleep(retry_after(resp, backoff))
                 backoff *= 2
         return resp
 
@@ -306,7 +337,12 @@ def extract_record(resource: dict, resource_type: str, profile: str = "uk_core")
         # raw_json and extension are VariantType — return JSON strings here;
         # the framework's parse_value() converts them via VariantVal.parseJson().
         "raw_json": json.dumps(resource),
-        "extension": json.dumps(resource["extension"]) if "extension" in resource else None,
+        # `is not None` rather than a key check: json.dumps(None) yields the
+        # string "null", which parse_json turns into a VARIANT null *value* in a
+        # non-NULL column instead of a SQL NULL.
+        "extension": (
+            json.dumps(resource["extension"]) if resource.get("extension") is not None else None
+        ),
     }
     record.update(extract(resource, resource_type, profile))
     return record

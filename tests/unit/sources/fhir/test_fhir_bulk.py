@@ -1,6 +1,7 @@
 """Unit tests for BulkExportClient — all HTTP calls are mocked."""
 
 import json
+from datetime import datetime, timezone
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -111,6 +112,10 @@ def test_kick_off_typefilter_mode_builds_filter():
     assert "_since" not in params
     assert "Patient?_lastUpdated=gt2024-01-01T00:00:00Z" in params["_typeFilter"]
     assert "Observation?_lastUpdated=gt2024-01-01T00:00:00Z" in params["_typeFilter"]
+    # _type must accompany _typeFilter: the IG has the server return ALL
+    # supported types when _type is omitted, and _typeFilter only constrains
+    # the types it names — so omitting it silently exports everything else.
+    assert params["_type"] == "Patient,Observation"
 
 
 def test_kick_off_full_mode_no_since():
@@ -368,3 +373,268 @@ def test_cleanup_does_not_raise_on_error():
     c._session = MagicMock()
     c._session.delete.side_effect = ConnectionError("network error")
     c._cleanup("https://fhir.example.com/status/1")
+
+
+# ── Regression tests: redirect handling (F6/F7/F8) ────────────────────────────
+
+
+def _redirect_resp(status, location=None):
+    r = MagicMock()
+    r.status_code = status
+    r.headers = {"Location": location} if location else {}
+    return r
+
+
+def _ok_ndjson(payload='{"resourceType":"Patient","id":"p1"}'):
+    r = MagicMock()
+    r.status_code = 200
+    r.headers = {}
+    r.iter_lines.return_value = iter([payload])
+    return r
+
+
+def test_download_ndjson_resolves_relative_redirect():
+    """A relative Location must be resolved, not passed to requests verbatim."""
+    c = _make_client()
+    c._session = MagicMock()
+    c._session.get.side_effect = [
+        _redirect_resp(302, "/bulk/files/abc.ndjson"),
+        _ok_ndjson(),
+    ]
+    records = list(c._download_ndjson("https://fhir.example.com/r4/file/1", True))
+    assert len(records) == 1
+    second_url = c._session.get.call_args_list[1][0][0]
+    assert second_url == "https://fhir.example.com/bulk/files/abc.ndjson"
+
+
+def test_download_ndjson_keeps_auth_on_same_host_redirect():
+    c = _make_client("system")
+    c._auth_client = MagicMock()
+    c._auth_client.get_token.return_value = "tok123"
+    c._session = MagicMock()
+    c._session.get.side_effect = [
+        _redirect_resp(302, "https://fhir.example.com/r4/file/2"),
+        _ok_ndjson(),
+    ]
+    list(c._download_ndjson("https://fhir.example.com/r4/file/1", True))
+    second_headers = c._session.get.call_args_list[1].kwargs["headers"]
+    assert second_headers.get("Authorization") == "Bearer tok123"
+
+
+def test_download_ndjson_drops_auth_off_origin():
+    c = _make_client("system")
+    c._auth_client = MagicMock()
+    c._auth_client.get_token.return_value = "tok123"
+    c._session = MagicMock()
+    c._session.get.side_effect = [
+        _redirect_resp(307, "https://s3.amazonaws.com/presigned/abc.ndjson"),
+        _ok_ndjson(),
+    ]
+    list(c._download_ndjson("https://fhir.example.com/r4/file/1", True))
+    second_headers = c._session.get.call_args_list[1].kwargs["headers"]
+    assert "Authorization" not in second_headers
+
+
+def test_download_ndjson_never_reattaches_auth_after_leaving_origin():
+    """A chain that returns to the origin must not resurrect the token."""
+    c = _make_client("system")
+    c._auth_client = MagicMock()
+    c._auth_client.get_token.return_value = "tok123"
+    c._session = MagicMock()
+    c._session.get.side_effect = [
+        _redirect_resp(302, "https://evil.example.net/hop"),
+        _redirect_resp(302, "https://fhir.example.com/r4/file/final"),
+        _ok_ndjson(),
+    ]
+    list(c._download_ndjson("https://fhir.example.com/r4/file/1", True))
+    final_headers = c._session.get.call_args_list[2].kwargs["headers"]
+    assert "Authorization" not in final_headers
+
+
+def test_download_ndjson_raises_on_redirect_loop():
+    c = _make_client()
+    c._session = MagicMock()
+    c._session.get.side_effect = [
+        _redirect_resp(302, f"https://fhir.example.com/hop/{i}") for i in range(10)
+    ]
+    with pytest.raises(RuntimeError, match="exceeded 5 redirects"):
+        list(c._download_ndjson("https://fhir.example.com/r4/file/1", True))
+
+
+def test_download_ndjson_raises_when_location_missing():
+    c = _make_client()
+    c._session = MagicMock()
+    c._session.get.return_value = _redirect_resp(302, None)
+    with pytest.raises(RuntimeError, match="no Location header"):
+        list(c._download_ndjson("https://fhir.example.com/r4/file/1", True))
+
+
+# ── Regression tests: manifest nulls (F9) ─────────────────────────────────────
+
+
+def test_download_and_parse_handles_explicit_json_nulls():
+    """`{"output": null}` must not raise — get(k, []) returns the stored None."""
+    c = _make_client()
+    c._session = MagicMock()
+    assert c._download_and_parse({"output": None, "error": None}) == {}
+
+
+# ── Regression tests: Retry-After clamping (F10) ──────────────────────────────
+
+
+def test_retry_after_rejects_negative():
+    from databricks.labs.community_connector.sources.fhir.fhir_bulk import _retry_after
+
+    resp = MagicMock()
+    resp.headers = {"Retry-After": "-1"}
+    assert _retry_after(resp, 5.0) == 0.0
+
+
+def test_retry_after_clamped_to_ceiling():
+    from databricks.labs.community_connector.sources.fhir.fhir_bulk import _retry_after
+
+    resp = MagicMock()
+    resp.headers = {"Retry-After": "86400"}
+    assert _retry_after(resp, 5.0, ceiling=60.0) == 60.0
+
+
+def test_retry_after_rejects_non_finite_and_garbage():
+    from databricks.labs.community_connector.sources.fhir.fhir_bulk import _retry_after
+
+    for value in ("nan", "inf", "abc"):
+        resp = MagicMock()
+        resp.headers = {"Retry-After": value}
+        assert _retry_after(resp, 7.0) == 7.0
+
+
+# ── Regression tests: auth refresh across kick-off retries (F11) ──────────────
+
+
+@patch("time.sleep")
+def test_kick_off_refetches_token_each_retry(mock_sleep):
+    c = _make_client()
+    c._auth_client = MagicMock()
+    c._auth_client.get_token.side_effect = ["t1", "t2"]
+    throttled = MagicMock()
+    throttled.status_code = 429
+    throttled.headers = {}
+    throttled.text = "slow down"
+    accepted = MagicMock()
+    accepted.status_code = 202
+    accepted.headers = {"Content-Location": "https://fhir.example.com/status/1"}
+    c._session = MagicMock()
+    c._session.get.side_effect = [throttled, accepted]
+
+    c._kick_off(["Patient"], None, "since")
+    assert c._auth_client.get_token.call_count == 2
+    first = c._session.get.call_args_list[0].kwargs["headers"]["Authorization"]
+    second = c._session.get.call_args_list[1].kwargs["headers"]["Authorization"]
+    assert (first, second) == ("Bearer t1", "Bearer t2")
+
+
+# ── Regression tests: cursor fallback captured pre-kick-off (F5) ──────────────
+
+
+def test_export_fallback_cursor_precedes_export_completion():
+    """Missing transactionTime must fall back to a pre-kick-off clock."""
+    c = _make_client()
+    before = datetime.now(timezone.utc)
+    c._kick_off = MagicMock(return_value="https://fhir.example.com/status/1")
+    c._poll_until_complete = MagicMock(return_value={"output": []})
+    c._download_and_parse = MagicMock(return_value={"Patient": [{"id": "p1"}]})
+    c._cleanup = MagicMock()
+
+    tx_time, _ = c.export(["Patient"], since=None, incremental_mode="since")
+    assert before <= datetime.fromisoformat(tx_time) <= datetime.now(timezone.utc)
+
+
+def test_download_ndjson_drops_auth_on_scheme_downgrade():
+    """https -> http on the same host must not replay the token in plaintext."""
+    c = _make_client("system")
+    c._auth_client = MagicMock()
+    c._auth_client.get_token.return_value = "tok123"
+    c._session = MagicMock()
+    c._session.get.side_effect = [
+        _redirect_resp(302, "http://fhir.example.com/r4/file/2"),
+        _ok_ndjson(),
+    ]
+    list(c._download_ndjson("https://fhir.example.com/r4/file/1", True))
+    second_headers = c._session.get.call_args_list[1].kwargs["headers"]
+    assert "Authorization" not in second_headers
+
+
+@patch("time.sleep")
+def test_poll_does_not_busy_spin_at_deadline(mock_sleep):
+    """When the budget is exhausted the loop must exit, not hammer the server."""
+    c = _make_client(poll_interval=1, timeout=0.001)
+    resp = MagicMock()
+    resp.status_code = 202
+    resp.headers = {}
+    c._session = MagicMock()
+    c._session.get.return_value = resp
+
+    with pytest.raises(RuntimeError, match="timed out"):
+        c._poll_until_complete("https://fhir.example.com/status/1")
+    assert c._session.get.call_count <= 2
+
+
+@patch("databricks.labs.community_connector.sources.fhir.fhir_bulk.time.sleep")
+def test_poll_honours_short_retry_after_without_aborting(mock_sleep):
+    """`Retry-After: 0` with hours of budget left must keep polling, not time out.
+
+    Guards the inverse of the busy-spin fix: the budget check must key off the
+    remaining deadline, never off the server's requested wait.
+    """
+    c = _make_client(poll_interval=30, timeout=14400)
+    resp_202 = MagicMock()
+    resp_202.status_code = 202
+    resp_202.headers = {"Retry-After": "0"}
+    manifest = {"transactionTime": "2024-01-15T00:00:00Z", "output": [], "error": []}
+    resp_200 = MagicMock()
+    resp_200.status_code = 200
+    resp_200.json.return_value = manifest
+    c._session = MagicMock()
+    c._session.get.side_effect = [resp_202, resp_202, resp_200]
+
+    assert c._poll_until_complete("https://fhir.example.com/status/1") == manifest
+    assert c._session.get.call_count == 3
+    # Floored, never zero, so the loop cannot hammer the endpoint.
+    assert all(call.args[0] > 0 for call in mock_sleep.call_args_list)
+
+
+def test_download_and_parse_keeps_auth_when_requires_token_is_null():
+    """An explicit `"requiresAccessToken": null` must not drop the bearer token."""
+    c = _make_client()
+    c._auth_client = MagicMock()
+    c._auth_client.get_token.return_value = "tok123"
+    c._session = MagicMock()
+    c._session.get.return_value = _ok_ndjson()
+
+    c._download_and_parse(
+        {"requiresAccessToken": None, "output": [{"type": "Patient", "url": "https://f/x.ndjson"}]}
+    )
+    headers = c._session.get.call_args.kwargs["headers"]
+    assert headers.get("Authorization") == "Bearer tok123"
+
+
+def test_retry_after_honours_large_value_when_no_ceiling():
+    """The REST path must not sleep LESS than a 429 asked for.
+
+    Capping the wait is what provokes a request storm, so the shared helper
+    defaults to no ceiling; callers with their own deadline pass one explicitly.
+    """
+    from databricks.labs.community_connector.sources.fhir.fhir_utils import retry_after
+
+    resp = MagicMock()
+    resp.headers = {"Retry-After": "600"}
+    assert retry_after(resp, 5.0) == 600.0
+
+
+def test_retry_after_respects_explicit_ceiling():
+    """Bulk kick-off caps the wait so a hostile value cannot stall the run."""
+    from databricks.labs.community_connector.sources.fhir.fhir_constants import MAX_RETRY_AFTER
+    from databricks.labs.community_connector.sources.fhir.fhir_utils import retry_after
+
+    resp = MagicMock()
+    resp.headers = {"Retry-After": "86400"}
+    assert retry_after(resp, 5.0, ceiling=MAX_RETRY_AFTER) == MAX_RETRY_AFTER

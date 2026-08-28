@@ -8,6 +8,7 @@ Ingests clinical data from any FHIR R4-compliant server into Databricks Delta ta
 
 - [Overview](#overview)
 - [Prerequisites](#prerequisites)
+- [Runtime Requirements](#runtime-requirements)
 - [Authentication Setup](#authentication-setup)
   - [JWT Assertion — SMART Backend Services](#1-jwt-assertion--smart-backend-services)
   - [Client Secret — OAuth2 Client Credentials](#2-client-secret--oauth2-client-credentials)
@@ -20,6 +21,7 @@ Ingests clinical data from any FHIR R4-compliant server into Databricks Delta ta
   - [Step 5 — Run the pipeline](#step-5--run-the-pipeline)
 - [Connection Parameters Reference](#connection-parameters-reference)
 - [Table Configuration Reference](#table-configuration-reference)
+- [Bulk Data Export](#bulk-data-export)
 - [Supported Resource Types](#supported-resource-types)
 - [Schema Design](#schema-design)
   - [Common Columns](#common-columns)
@@ -58,6 +60,7 @@ Ingests clinical data from any FHIR R4-compliant server into Databricks Delta ta
 ## Prerequisites
 
 - A Databricks workspace with Unity Catalog enabled.
+- A supported runtime — see [Runtime Requirements](#runtime-requirements).
 - Network connectivity from the workspace to your FHIR server's base URL.
 - Credentials appropriate for your FHIR server's auth method (see [Authentication Setup](#authentication-setup)).
 - The FHIR server must support:
@@ -65,6 +68,95 @@ Ingests clinical data from any FHIR R4-compliant server into Databricks Delta ta
   - `_lastUpdated` search parameter (required for incremental sync)
   - `_count` pagination parameter
   - Bundle searchset responses with `next` pagination links
+
+---
+
+## Runtime Requirements
+
+The connector schema declares `raw_json` and `extension` as native [VARIANT](https://docs.databricks.com/aws/en/sql/language-manual/data-types/variant-type) so downstream queries can use the `:` path syntax (e.g. `raw_json:name[0].family::STRING`). Native `VariantType` in the Spark Python Data Source API was added in Spark 4.0 / PySpark 4.0 ([SPARK-54337](https://issues.apache.org/jira/browse/SPARK-54337)).
+
+> ⚠️ **As of 2026-05-04, VariantType in a streaming Python DataSource is not functional on any verified Databricks runtime.** Spark and PySpark 4.0 / 4.1 expose the type and the `VariantVal.parseJson()` API, but the streaming-write JVM path raises `Not implemented. VariantType SQLSTATE: XXKST` before the first row lands. This blocks the connector's primary deployment target (Serverless SDP / DLT). **The supported deployment today is the [StringType fallback](#stringtype-fallback-currently-recommended).** This section documents the empirical state so you can re-evaluate as Databricks ships fixes.
+
+### Compatibility matrix (empirical, e2-demo-field-eng, 2026-05-04)
+
+| Runtime | Status | Failure mode (verbatim) |
+|---|---|---|
+| Serverless SDP / DLT, default env (v3, PySpark 3.5) | ❌ Broken | `[STREAM_FAILED] ... Not implemented. VariantType SQLSTATE: XXKST` on the first microbatch |
+| Serverless SDP, `environment.environment_version: "4"` | ❌ Broken | (a) `ModuleNotFoundError: No module named 'databricks.labs'` because env v4 doesn't auto-add SDP `root_path` to `sys.path`; (b) workarounds lead back to the same JVM `Not implemented. VariantType` |
+| Classic DLT pipeline, `channel: PREVIEW` | ❌ Blocked (framework, not VariantType) | `ModuleNotFoundError: No module named 'databricks.labs'` — the community-connector framework auto-installs on Serverless DLT only |
+| Classic interactive cluster, DBR 17.3.10 LTS (Spark 4.0.0) | ❌ Broken | `[STREAM_FAILED] ... Not implemented. VariantType SQLSTATE: XXKST` on `Trigger.AvailableNow` even with tuple rows + `VariantVal.parseJson()` |
+| Classic interactive cluster, DBR 18.1.2 (Spark 4.1.0) | ❌ Broken | Same `Not implemented. VariantType` as 17.3 + dict-row form rejected with `DATA_SOURCE_INVALID_RETURN_TYPE` |
+| Serverless Job, `tasks[0].environment.client: "2"` | ❌ Broken | `AttributeError: type object 'VariantVal' has no attribute 'parseJson'` (PySpark 3.5.0) |
+| Serverless Job, `tasks[0].environment.client: "3"` (batch read of an existing VARIANT table only) | ⚠️ Partial | Batch reads of VARIANT columns work via Spark Connect (PySpark 3.5.2 client + Spark 4.1.0 server). Streaming write into a VARIANT-typed table has not been verified end-to-end and likely hits the same JVM gap. |
+| Classic DBR ≤ 17.1 | ❌ Broken | `java.lang.RuntimeException: Not implemented. VariantType` (pre-Spark-4.0 JVM has no Variant) |
+| DLT image `dlt:16.4.x` | ❌ Broken | `MALFORMED_VARIANT` in `convert_variant` — use current `PREVIEW` channel |
+
+Diagnostic recipe (copy into a notebook on the cluster you want to evaluate):
+
+```python
+import pyspark, json
+from pyspark.sql.types import StructType, StructField, StringType, VariantType, VariantVal
+from pyspark.sql.datasource import DataSource, SimpleDataSourceStreamReader
+print("pyspark:", pyspark.__version__)
+print("dbr:", spark.conf.get("spark.databricks.clusterUsageTags.sparkVersion", "n/a"))
+print("parseJson:", hasattr(VariantVal, "parseJson"))
+
+class S(DataSource):
+    @classmethod
+    def name(cls): return "v_probe"
+    def schema(self): return StructType([StructField("id", StringType(), False), StructField("v", VariantType(), True)])
+    def simpleStreamReader(self, schema): return R()
+
+class R(SimpleDataSourceStreamReader):
+    def initialOffset(self): return {"o": 0}
+    def read(self, start):
+        if start.get("o", 0) > 0: return ([], start)
+        return ([("a", VariantVal.parseJson(json.dumps({"hello": "world"})))], {"o": 1})
+    def commit(self, end): pass
+
+spark.sql("DROP TABLE IF EXISTS main.default.v_probe")
+spark.dataSource.register(S)
+q = (spark.readStream.format("v_probe").load()
+     .writeStream.format("delta")
+     .option("checkpointLocation", "/tmp/v_probe_ckpt")
+     .trigger(availableNow=True)
+     .toTable("main.default.v_probe"))
+q.awaitTermination()
+print("VARIANT streaming write:", "OK" if q.exception() is None else f"BROKEN: {q.exception()}")
+```
+
+If this probe still raises `Not implemented. VariantType` on the runtime you've chosen, your best option is the StringType fallback below.
+
+### StringType fallback (currently recommended)
+
+Until the streaming-Variant gap is closed, deploy the connector with `raw_json` and `extension` as `StringType`. The connector already returns `json.dumps(...)` strings from its extractors — the only change needed is the schema. Edit `src/databricks/labs/community_connector/sources/fhir/fhir_profile_registry.py`:
+
+```python
+# Before — VariantType (preferred long-term, blocked today by Databricks runtime)
+StructField("raw_json", VariantType(), nullable=True),
+StructField("extension", VariantType(), nullable=True),
+
+# After — StringType (works on every supported runtime)
+StructField("raw_json", StringType(), nullable=True),
+StructField("extension", StringType(), nullable=True),
+```
+
+Re-run the merge script (`python tools/scripts/merge_python_source.py fhir`) and redeploy. Downstream queries cast at read time:
+
+```sql
+SELECT
+    parse_json(raw_json):name[0].family::STRING AS family_name,
+    variant_get(parse_json(extension), '$[0].url', 'STRING') AS ext_url
+FROM main.<schema>.patient
+```
+
+This forfeits native VARIANT shredding (no on-disk Variant binary, no Variant-specific stats) but unblocks every runtime listed above and matches what the connector shipped with prior to the VariantType experiment (commit `b0f2d41`).
+
+### Caveat — CLI rendering of `pipeline_spec.json`
+
+`pipeline_spec.json` accepts **only** `connection_name` and `objects` — the framework's `PipelineSpec` model is declared `extra="forbid"`, so any other key fails at pipeline init with `Extra inputs are not permitted`. Pipeline-level settings (`channel`, `serverless`, `continuous`, `development`, `environment`, …) belong in the CLI's `--config` file, not the spec. Boolean keys are doubly unsafe in the spec: the CLI renders it into `ingest.py` via `json.dumps()`, so `true`/`false` also become invalid Python identifiers (`NameError: name 'true' is not defined`).
+
+See [Troubleshooting → `no such data type exists` / VariantType errors](#no-such-data-type-exists--varianttype-errors) for diagnostics.
 
 ---
 
@@ -310,6 +402,10 @@ Create a `pipeline_spec.json` file:
 }
 ```
 
+> ⚠️ **Before deploying, decide which schema mode you need** — see [Runtime Requirements](#runtime-requirements). VariantType for `raw_json` / `extension` is currently blocked by a streaming-Variant gap in the Databricks runtime; if you hit `Not implemented. VariantType SQLSTATE: XXKST` at pipeline run time, switch to the [StringType fallback](#stringtype-fallback-currently-recommended).
+>
+> Do **not** add boolean keys like `"serverless": true` to this JSON — the CLI embeds the spec verbatim into a Python file and JSON booleans render as Python `NameError`. Set those via the CLI `--config` file or rely on bundled defaults. See [Runtime Requirements → CLI rendering caveat](#caveat--cli-rendering-of-pipeline_spec).
+
 Then pass it to the command:
 
 ```bash
@@ -385,6 +481,62 @@ These are set per-table inside `table_configuration` in the pipeline spec.
 | `profile` | `uk_core` | Schema profile to use for this table. One of: `uk_core` (default), `base_r4`. See [Profile System](#profile-system). |
 
 > **`max_records_per_batch` and data completeness:** If multiple records share the same `lastUpdated` timestamp and `max_records_per_batch` cuts mid-batch, records sharing the exact cursor value may be skipped on subsequent runs. Set `max_records_per_batch` generously (≥1000) for bulk-imported datasets.
+
+---
+
+## Bulk Data Export
+
+By default the connector reads resources through paginated REST searches. Setting `bulk_export_enabled=true` switches it to the [HL7 Bulk Data Access](https://hl7.org/fhir/uv/bulkdata/) `$export` workflow instead: kick off an asynchronous server-side job, poll until it completes, then download the resulting NDJSON files.
+
+Bulk export is much more efficient for large initial loads, and it is the access path Epic and Cerner prefer. It is opt-in and off by default.
+
+### Options
+
+| Option | Default | Description |
+|---|---|---|
+| `bulk_export_enabled` | `false` | `true` switches from REST pagination to `$export`. |
+| `bulk_export_scope` | `system` | `system` (server-wide), `patient` (Patient compartment), or `group` (requires `bulk_export_group_id`). |
+| `bulk_export_group_id` | — | FHIR `Group` resource ID. Required when scope is `group`. |
+| `bulk_incremental_mode` | `since` | How the cursor is applied — see below. |
+| `bulk_export_poll_interval` | `30` | Seconds between status polls. The server's `Retry-After` takes precedence. |
+| `bulk_export_timeout` | `14400` | Max seconds to wait for a job (4 hours). |
+| `bulk_overlap_seconds` | `0` | Rewind the cursor by this many seconds after each export. See [transactionTime semantics](#transactiontime-semantics). |
+
+Every option above must also appear in the connection's `externalOptionsAllowList`, which the shipped `connector_spec.yaml` already handles.
+
+### Incremental modes
+
+| Mode | Parameters sent | Use when |
+|---|---|---|
+| `since` | `_type` + `_since` | Default. Works on most servers. |
+| `typefilter` | `_type` + `_typeFilter=<Type>?_lastUpdated=gt<cursor>` | The server does not support `_since` — notably **Epic**. |
+| `full` | `_type` only | You want a complete re-export every trigger. |
+
+`_type` is always sent. Per the Bulk Data IG a server *"SHALL return all supported resources"* when `_type` is omitted, and `_typeFilter` only constrains *"resource types referenced in the `_typeFilter` expression"* — so sending `_typeFilter` alone makes the server export every other resource type unfiltered. A server that rejects the two parameters together will fail at kick-off with a clear error rather than silently over-exporting.
+
+> ⚠️ **`full` mode re-exports everything on every trigger.** Each trigger runs a complete server-side export and re-writes all rows (deduplicated downstream by the upsert on `id`). Bulk exports are expensive and some servers rate-limit them hard — Epic enforces a **24-hour cooldown** between exports of the same group. Schedule `full` pipelines accordingly; prefer `since` or `typefilter` for routine incremental sync.
+
+### One export job per resource type
+
+The framework runs each table as its own streaming query, so a pipeline covering N resource types kicks off **N independent export jobs per trigger**. Each job is scoped server-side with `_type`, so no data is downloaded twice — but on servers where a job takes hours, N jobs take N× as long. For many resource types, either narrow `resource_types` or use a low trigger frequency.
+
+### transactionTime semantics
+
+The cursor advances to the manifest's `transactionTime`. The spec permits servers to report this as either the export's *start* or *completion* instant, and the connector cannot tell which. On a completion-time server, resources written while the export ran can be missed.
+
+If you suspect that, set `bulk_overlap_seconds` to comfortably exceed a typical export duration. The cursor is then rewound by that amount, re-reading a safe window; duplicates are absorbed by the upsert on `id`. The cursor is never moved earlier than the previous cursor, so this cannot cause a re-read loop.
+
+If a manifest omits `transactionTime` entirely, the connector falls back to a clock reading captured **before** kick-off, which risks duplicates rather than data loss.
+
+### Per-server notes
+
+| Server | Notes |
+|---|---|
+| **Epic** | No `_since` — use `bulk_incremental_mode=typefilter`. Does not populate `meta.lastUpdated`. 24-hour cooldown per group export. |
+| **Cerner / Oracle Health** | Redirects file downloads to presigned S3; the connector drops the `Authorization` header when leaving the original host. Max 20k patients per group. |
+| **HAPI** | Files are served as `Binary` resources; the connector sends `Accept: application/fhir+ndjson`. Verified against the public server: `transactionTime` comes back with a **non-UTC offset** (`-04:00`), and the manifest sets `requiresAccessToken: true` even though the files download without a token. Status polls answer `Retry-After: 120`, which the connector honours — so an export takes ~2 minutes regardless of `bulk_export_poll_interval`. Cleanup `DELETE` answers `202` for a job still queued but `404` once it has completed — the connector deletes after completion, so it sees the `404`. Cleanup is best-effort and ignores both. |
+| **Azure Health Data Services** | Output URLs point at Blob Storage and need Azure credentials, not a FHIR token. Not supported by this connector yet. |
+| **Google Cloud Healthcare** | Writes to `gs://` paths with no HL7-standard manifest. Not supported yet. |
 
 ---
 
@@ -644,6 +796,30 @@ Resources not overridden in `au_core.py` will automatically fall back to `uk_cor
 ---
 
 ## Troubleshooting
+
+### `no such data type exists` / VariantType errors
+
+If your pipeline run fails with one of:
+
+- `AttributeError: type object 'VariantVal' has no attribute 'parseJson'`
+- `java.lang.RuntimeException: Not implemented. VariantType`
+- `MALFORMED_VARIANT` in `convert_variant`
+- `DATA_SOURCE_INVALID_RETURN_TYPE` referencing the `raw_json` or `extension` column
+- A schema-time error mentioning "no such data type exists" / variant
+
+…you are running on a runtime that predates PySpark 4.0 / VARIANT-in-DataSource support. Confirm with a one-cell notebook on the same compute:
+
+```python
+import pyspark
+from pyspark.sql.types import VariantVal
+print("pyspark:", pyspark.__version__)            # need 4.0+
+print("dbr:", spark.conf.get("spark.databricks.clusterUsageTags.sparkVersion", "n/a"))
+print("parseJson:", hasattr(VariantVal, "parseJson"))  # must be True
+```
+
+As of 2026-05-04 there is **no Databricks runtime configuration on which `VariantType` in this connector's streaming pipeline writes successfully** — every option fails with the same JVM-side `Not implemented. VariantType SQLSTATE: XXKST` (or, on environments that lack PySpark 4.0, the earlier `AttributeError` for `parseJson`). See [Runtime Requirements → Compatibility matrix](#compatibility-matrix-empirical-e2-demo-field-eng-2026-05-04) for the per-runtime evidence.
+
+Recommended action today: switch the schema to `StringType` per [StringType fallback](#stringtype-fallback-currently-recommended). Re-evaluate VariantType after Databricks ships a streaming-Variant fix in the Python DataSource path.
 
 ### `invalid_grant` from token endpoint
 

@@ -18,6 +18,7 @@ from typing import (
 )
 import argparse
 import json
+import re
 import sys
 import time
 
@@ -48,10 +49,11 @@ from pyspark.sql.types import (
     VariantType,
     VariantVal,
 )
-from urllib.parse import quote, urljoin
+from urllib.parse import quote, urljoin, urlparse
 import base64
 import jwt  # pylint: disable=import-error
 import logging
+import math
 import requests
 import uuid
 
@@ -529,10 +531,20 @@ def register_lakeflow_source(spark):
     ########################################################
 
     DEFAULT_RESOURCES = [
-        "Patient", "Observation", "Condition", "Encounter",
-        "Procedure", "MedicationRequest", "DiagnosticReport",
-        "AllergyIntolerance", "Immunization", "Coverage",
-        "CarePlan", "Goal", "Device", "DocumentReference",
+        "Patient",
+        "Observation",
+        "Condition",
+        "Encounter",
+        "Procedure",
+        "MedicationRequest",
+        "DiagnosticReport",
+        "AllergyIntolerance",
+        "Immunization",
+        "Coverage",
+        "CarePlan",
+        "Goal",
+        "Device",
+        "DocumentReference",
     ]
 
     CURSOR_FIELD = "lastUpdated"
@@ -540,19 +552,23 @@ def register_lakeflow_source(spark):
     RETRIABLE_STATUS_CODES = {429, 500, 502, 503}  # 502: Azure/AWS
     MAX_RETRIES = 5
     INITIAL_BACKOFF = 5.0  # seconds; doubled after each retry (5→10→20→40→80)
-    PAGE_DELAY = 0.0       # seconds to sleep between paginated requests; set to 1.0 for public servers
-    HTTP_TIMEOUT = 60   # seconds; timeout for FHIR API requests
+    PAGE_DELAY = 0.0  # seconds to sleep between paginated requests; set to 1.0 for public servers
+    HTTP_TIMEOUT = 60  # seconds; timeout for FHIR API requests
     TOKEN_TIMEOUT = 30  # seconds; timeout for OAuth2 token requests
+    MAX_RETRY_AFTER = 300  # seconds; ceiling on a server-supplied Retry-After value
 
-    DEFAULT_PAGE_SIZE = 100   # _count parameter sent to FHIR server
+    DEFAULT_PAGE_SIZE = 100  # _count parameter sent to FHIR server
     DEFAULT_MAX_RECORDS = 1000  # max records per read_table() call
 
     # Bulk export constants (HL7 Bulk Data Access IG)
-    BULK_POLL_INTERVAL = 30        # seconds between status poll requests
-    BULK_EXPORT_TIMEOUT = 14400    # seconds (4 hours) max wait for export completion
-    BULK_NDJSON_TIMEOUT = 300      # seconds; NDJSON file download timeout (files can be GBs)
+    BULK_POLL_INTERVAL = 30  # seconds between status poll requests
+    BULK_EXPORT_TIMEOUT = 14400  # seconds (4 hours) max wait for export completion
+    BULK_NDJSON_TIMEOUT = 300  # seconds; NDJSON file download timeout (files can be GBs)
     BULK_VALID_SCOPES = {"system", "patient", "group"}
     BULK_VALID_INCREMENTAL_MODES = {"since", "typefilter", "full"}
+    BULK_MAX_REDIRECTS = 5  # max hops when following NDJSON download redirects
+    UNTYPED_BUCKET = "Unknown"  # key for manifest output entries that omit "type"
+    BULK_MIN_POLL_SLEEP = 0.5  # seconds; below this the remaining budget is spent, so stop polling
 
 
     ########################################################
@@ -1912,7 +1928,44 @@ def register_lakeflow_source(spark):
     # src/databricks/labs/community_connector/sources/fhir/fhir_utils.py
     ########################################################
 
+    logger = logging.getLogger(__name__)
+
     _SUPPORTED_ALGORITHMS = {"RS384", "ES384"}
+
+
+    def retry_after(resp: requests.Response, default: float, ceiling: Optional[float] = None) -> float:
+        """Extract Retry-After (seconds) from a response, clamped to a safe range.
+
+        Shared by the REST and bulk paths. A server may send a value that is
+        negative (time.sleep raises), non-finite (also raises, or hangs), or an
+        HTTP-date rather than a number; none of those may take the connector down.
+
+        `ceiling` bounds the wait for callers that have their own deadline to
+        respect. It defaults to None — honouring the server's request in full —
+        because sleeping *less* than a 429 asked for is what provokes a request
+        storm. Waits beyond MAX_RETRY_AFTER are logged so a stalled run is
+        diagnosable from the driver log.
+        """
+        seconds = default
+        header = resp.headers.get("Retry-After")
+        if header:
+            try:
+                parsed = float(header)
+            except (TypeError, ValueError):
+                parsed = None  # HTTP-date form; fall back to the caller's backoff
+            if parsed is not None and math.isfinite(parsed):
+                seconds = parsed
+        if ceiling is not None:
+            seconds = min(seconds, ceiling)
+        seconds = max(0.0, seconds)
+        if seconds > MAX_RETRY_AFTER:
+            logger.warning(
+                "Server asked to retry after %.0fs (>%ds); honouring it, so this "
+                "request will block until then.",
+                seconds,
+                MAX_RETRY_AFTER,
+            )
+        return seconds
 
 
     class SmartAuthClient:  # pylint: disable=too-few-public-methods,too-many-instance-attributes
@@ -2100,15 +2153,7 @@ def register_lakeflow_source(spark):
                 if resp.status_code not in RETRIABLE_STATUS_CODES:
                     return resp
                 if attempt < MAX_RETRIES - 1:
-                    retry_after = resp.headers.get("Retry-After")
-                    if retry_after:
-                        try:
-                            sleep_seconds = float(retry_after)
-                        except ValueError:
-                            sleep_seconds = backoff  # Retry-After is an HTTP-date; fall back to backoff
-                    else:
-                        sleep_seconds = backoff
-                    time.sleep(sleep_seconds)
+                    time.sleep(retry_after(resp, backoff))
                     backoff *= 2
             return resp
 
@@ -2188,7 +2233,12 @@ def register_lakeflow_source(spark):
             # raw_json and extension are VariantType — return JSON strings here;
             # the framework's parse_value() converts them via VariantVal.parseJson().
             "raw_json": json.dumps(resource),
-            "extension": json.dumps(resource["extension"]) if "extension" in resource else None,
+            # `is not None` rather than a key check: json.dumps(None) yields the
+            # string "null", which parse_json turns into a VARIANT null *value* in a
+            # non-NULL column instead of a SQL NULL.
+            "extension": (
+                json.dumps(resource["extension"]) if resource.get("extension") is not None else None
+            ),
         }
         record.update(extract(resource, resource_type, profile))
         return record
@@ -2268,21 +2318,26 @@ def register_lakeflow_source(spark):
                     f"Use one of: {sorted(BULK_VALID_INCREMENTAL_MODES)}."
                 )
 
+            # Captured before kick-off so it is never later than the export's own
+            # snapshot point. Using the post-download clock would skip everything
+            # written while the export ran.
+            fallback_cursor = datetime.now(timezone.utc).isoformat()
+
             status_url = self._kick_off(resource_types, since, incremental_mode)
             try:
                 manifest = self._poll_until_complete(status_url)
                 resources = self._download_and_parse(manifest)
                 if incremental_mode == "full":
-                    # Full mode re-exports all data every run — don't advance cursor.
+                    # Full mode re-exports all data every run — no server cursor.
                     return None, resources
                 transaction_time = manifest.get("transactionTime")
                 if not transaction_time:
                     logger.warning(
-                        "Bulk export manifest missing transactionTime. "
-                        "Falling back to current UTC time as cursor — this may "
-                        "cause duplicate records on the next incremental run."
+                        "Bulk export manifest missing transactionTime. Falling back "
+                        "to the pre-kick-off UTC time as cursor — this may cause "
+                        "duplicate records on the next incremental run."
                     )
-                    transaction_time = datetime.now(timezone.utc).isoformat()
+                    transaction_time = fallback_cursor
                 return transaction_time, resources
             finally:
                 self._cleanup(status_url)
@@ -2297,22 +2352,28 @@ def register_lakeflow_source(spark):
             url = self._export_url()
             params = {}
 
+            if resource_types:
+                # _type must always be sent. Per the Bulk Data IG, a Data Provider
+                # "SHALL return all supported resources" when _type is omitted, and
+                # _typeFilter only filters "resource types referenced in the
+                # _typeFilter expression" -- so omitting _type makes the server
+                # export every other type unfiltered.
+                params["_type"] = ",".join(resource_types)
+
             if incremental_mode == "typefilter" and since and resource_types:
-                # Per HL7 spec, _typeFilter encodes the resource type in each filter
-                # string, so _type is redundant and some servers reject the combination.
+                # Epic does not support _since; express the date bound per type
+                # instead. Sent alongside _type, matching the IG's own example.
                 filters = [f"{rt}?_lastUpdated=gt{since}" for rt in resource_types]
                 params["_typeFilter"] = ",".join(filters)
-            else:
-                if resource_types:
-                    params["_type"] = ",".join(resource_types)
-                if since and incremental_mode == "since":
-                    params["_since"] = since
-
-            headers = self._auth_headers()
-            headers["Prefer"] = "respond-async"
+            elif since and incremental_mode == "since":
+                params["_since"] = since
 
             backoff = INITIAL_BACKOFF
             for attempt in range(MAX_RETRIES):
+                # Re-fetch the token each attempt: the retry ladder spans up to
+                # ~155s, which can outlive a cached token's remaining lifetime.
+                headers = self._auth_headers()
+                headers["Prefer"] = "respond-async"
                 resp = self._session.get(
                     url,
                     params=params,
@@ -2333,7 +2394,7 @@ def register_lakeflow_source(spark):
                         f"Bulk export kick-off failed (HTTP {resp.status_code}): {resp.text[:500]}"
                     )
                 if attempt < MAX_RETRIES - 1:
-                    sleep_seconds = _retry_after(resp, backoff)
+                    sleep_seconds = _retry_after(resp, backoff, ceiling=MAX_RETRY_AFTER)
                     logger.warning(
                         "Bulk export kick-off got %d, retrying in %.0fs (attempt %d/%d)",
                         resp.status_code,
@@ -2348,6 +2409,21 @@ def register_lakeflow_source(spark):
                 f"Bulk export kick-off failed after {MAX_RETRIES} retries "
                 f"(last HTTP {resp.status_code}): {resp.text[:500]}"
             )
+
+        @staticmethod
+        def _poll_sleep(resp: requests.Response, default: float, deadline: float) -> Optional[float]:
+            """How long to wait before the next poll, or None if the budget is spent.
+
+            The budget check keys off the remaining time, never off the requested
+            sleep: a server may legitimately send `Retry-After: 0`, and treating
+            that as "out of time" would abort an export that still has hours left.
+            A short request is honoured but floored so the loop cannot busy-spin.
+            """
+            remaining = deadline - time.time()
+            if remaining < BULK_MIN_POLL_SLEEP:
+                return None
+            requested = _retry_after(resp, default, ceiling=remaining)
+            return max(requested, BULK_MIN_POLL_SLEEP)
 
         def _poll_until_complete(self, status_url: str) -> dict:
             """Poll the status URL until the export completes or times out.
@@ -2369,13 +2445,17 @@ def register_lakeflow_source(spark):
                     progress = resp.headers.get("X-Progress", "")
                     if progress:
                         logger.info("Bulk export progress: %s", progress)
-                    sleep_seconds = _retry_after(resp, self._poll_interval)
+                    sleep_seconds = self._poll_sleep(resp, self._poll_interval, deadline)
+                    if sleep_seconds is None:
+                        break  # budget spent
                     transient_backoff = INITIAL_BACKOFF  # reset on successful poll
                     time.sleep(sleep_seconds)
                     continue
 
                 if resp.status_code in RETRIABLE_STATUS_CODES:
-                    sleep_seconds = _retry_after(resp, transient_backoff)
+                    sleep_seconds = self._poll_sleep(resp, transient_backoff, deadline)
+                    if sleep_seconds is None:
+                        break
                     logger.warning(
                         "Bulk export poll got %d, retrying in %.0fs",
                         resp.status_code,
@@ -2395,11 +2475,15 @@ def register_lakeflow_source(spark):
 
         def _download_and_parse(self, manifest: dict) -> dict:
             """Download NDJSON files from the manifest and group records by type."""
-            requires_token = manifest.get("requiresAccessToken", True)
+            # `is not False` rather than a get() default: an explicit JSON null must
+            # keep auth on, not silently drop the bearer token from every download.
+            requires_token = manifest.get("requiresAccessToken") is not False
             resources: dict = {}
 
-            for entry in manifest.get("output", []):
-                rtype = entry.get("type", "Unknown")
+            # `or []` rather than a get() default: a server may send an explicit
+            # JSON null for these keys, and get(k, []) returns the stored None.
+            for entry in manifest.get("output") or []:
+                rtype = entry.get("type") or UNTYPED_BUCKET
                 url = entry.get("url")
                 if not url:
                     continue
@@ -2412,7 +2496,7 @@ def register_lakeflow_source(spark):
                     url,
                 )
 
-            for entry in manifest.get("error", []):
+            for entry in manifest.get("error") or []:
                 url = entry.get("url")
                 if url:
                     try:
@@ -2430,33 +2514,46 @@ def register_lakeflow_source(spark):
             Handles three download patterns:
             1. Direct HTTP + bearer token (Epic, HAPI, InterSystems, etc.)
             2. No auth / presigned URL (IBM, SMART test server)
-            3. 307 redirect to presigned S3 (Cerner) — strips auth on redirect
-            """
-            headers = (
-                self._ndjson_auth_headers()
-                if requires_access_token
-                else {"Accept": "application/fhir+ndjson"}
-            )
-            resp = self._session.get(
-                url,
-                headers=headers,
-                stream=True,
-                allow_redirects=False,
-                timeout=BULK_NDJSON_TIMEOUT,
-            )
+            3. Redirect to presigned cloud storage (Cerner) — drops auth off-origin
 
-            if resp.status_code in (301, 302, 303, 307, 308):
-                redirect_url = resp.headers.get("Location")
-                if not redirect_url:
-                    resp.close()
-                    raise RuntimeError(f"NDJSON download got {resp.status_code} but no Location header")
-                resp.close()
+            Redirects are followed manually so the Authorization header can be
+            dropped when leaving the original host: presigned storage URLs carry
+            their own credentials and reject (or, worse, log) a bearer token.
+            Once dropped, auth is never re-attached, so a redirect chain that
+            returns to the origin cannot be used to harvest the token.
+            """
+            # Scheme is part of the origin: an https -> http redirect on the same
+            # host must not replay the bearer token over plaintext.
+            _parsed = urlparse(url)
+            origin = (_parsed.scheme.lower(), _parsed.netloc.lower())
+            current = url
+            send_auth = requires_access_token
+
+            for _ in range(BULK_MAX_REDIRECTS + 1):
+                headers = (
+                    self._ndjson_auth_headers() if send_auth else {"Accept": "application/fhir+ndjson"}
+                )
                 resp = self._session.get(
-                    redirect_url,
-                    headers={"Accept": "application/fhir+ndjson"},
+                    current,
+                    headers=headers,
                     stream=True,
+                    allow_redirects=False,
                     timeout=BULK_NDJSON_TIMEOUT,
                 )
+                if resp.status_code not in (301, 302, 303, 307, 308):
+                    break
+
+                redirect_url = resp.headers.get("Location")
+                resp.close()
+                if not redirect_url:
+                    raise RuntimeError(f"NDJSON download got {resp.status_code} but no Location header")
+                # Location may be relative (RFC 7231); resolve against the current URL.
+                current = urljoin(current, redirect_url)
+                nxt = urlparse(current)
+                if (nxt.scheme.lower(), nxt.netloc.lower()) != origin:
+                    send_auth = False
+            else:
+                raise RuntimeError(f"NDJSON download exceeded {BULK_MAX_REDIRECTS} redirects for {url}")
 
             try:
                 if resp.status_code != 200:
@@ -2479,17 +2576,6 @@ def register_lakeflow_source(spark):
                 )
             except Exception as exc:
                 logger.warning("Bulk export cleanup failed for %s: %s", status_url, exc)
-
-
-    def _retry_after(resp: requests.Response, default: float) -> float:
-        """Extract Retry-After header value in seconds, or return default."""
-        retry_after = resp.headers.get("Retry-After")
-        if retry_after:
-            try:
-                return float(retry_after)
-            except ValueError:
-                pass
-        return default
 
 
     ########################################################
@@ -2706,9 +2792,91 @@ def register_lakeflow_source(spark):
     # src/databricks/labs/community_connector/sources/fhir/fhir.py
     ########################################################
 
+    logger = logging.getLogger(__name__)
+
+
+    _TS_RE = re.compile(
+        r"^(?P<base>\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(?::\d{2})?)"
+        r"(?:\.(?P<frac>\d+))?"
+        r"(?P<tz>[Zz]|[+-]\d{2}:?\d{2})?$"
+    )
+
+
     def _parse_ts(ts: str) -> datetime:
-        """Parse a FHIR instant (ISO 8601 with timezone) to a datetime."""
-        return datetime.fromisoformat(ts)
+        """Parse a FHIR instant to a timezone-aware datetime.
+
+        datetime.fromisoformat() alone is too strict for real FHIR servers on the
+        Python versions this connector supports (3.10+). It rejects a trailing "Z"
+        before 3.11, fractional seconds that aren't exactly 3 or 6 digits, and
+        compact "+0000" offsets; and it yields naive values for instants with no
+        offset, which then cannot be compared against aware ones. Normalise all of
+        that so cursor comparisons never crash mid-microbatch.
+        """
+        raw = ts.strip()
+        match = _TS_RE.match(raw)
+        if not match:
+            # Let fromisoformat produce the error for anything we don't recognise.
+            parsed = datetime.fromisoformat(raw)
+            return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+
+        base, frac, tz = match.group("base"), match.group("frac"), match.group("tz")
+        # Python accepts only 3- or 6-digit fractions; pad/truncate to microseconds.
+        normalised = f"{base}.{frac[:6].ljust(6, '0')}" if frac else base
+        if tz and tz not in ("Z", "z"):
+            offset = tz if ":" in tz else f"{tz[:3]}:{tz[3:]}"
+            normalised += offset
+        parsed = datetime.fromisoformat(normalised)
+        return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+
+
+    def _canonical_ts(ts: str) -> str:
+        """Render an instant as a UTC "Z" string.
+
+        Two reasons every stored/sent cursor goes through this. A "+00:00" offset is
+        percent-encoded as "%2B" and, inside the nested `_typeFilter` query, decoded
+        back to a space — corrupting the date bound. And a server that re-spells the
+        same instant between polls ("...12:00:00Z" vs "...12:00:00.000+00:00") would
+        defeat any equality check done on the raw text.
+        """
+        return _parse_ts(ts).astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+    def _int_option(options: dict, key: str, default: int, minimum: int = 1) -> int:
+        """Read an integer option, failing with an actionable message.
+
+        A bare int() here surfaces as an opaque pipeline-init error, so validate at
+        construction time the same way the bulk scope/mode options do.
+        """
+        raw = options.get(key)
+        if raw is None or str(raw).strip() == "":
+            return default
+        try:
+            value = int(raw)
+        except (TypeError, ValueError):
+            raise ValueError(f"Option '{key}' must be an integer (got {raw!r}).") from None
+        if value < minimum:
+            raise ValueError(f"Option '{key}' must be >= {minimum} (got {value}).")
+        return value
+
+
+    def _float_option(options: dict, key: str, default: float, minimum: float = 0.0) -> float:
+        """Read a float option, failing with an actionable message.
+
+        Rejects nan/inf explicitly: both slip past a `< minimum` check, and an
+        infinite page_delay would sleep the executor until the pipeline is killed.
+        """
+        raw = options.get(key)
+        if raw is None or str(raw).strip() == "":
+            return default
+        try:
+            value = float(raw)
+        except (TypeError, ValueError):
+            raise ValueError(f"Option '{key}' must be a number (got {raw!r}).") from None
+        if not math.isfinite(value):
+            raise ValueError(f"Option '{key}' must be a finite number (got {raw!r}).")
+        if value < minimum:
+            raise ValueError(f"Option '{key}' must be >= {minimum} (got {value}).")
+        return value
 
 
     class FhirLakeflowConnect(LakeflowConnect):
@@ -2745,17 +2913,29 @@ def register_lakeflow_source(spark):
                 else list(DEFAULT_RESOURCES)
             )
 
-            # Bulk export (opt-in via bulk_export_enabled=true)
+            # Bulk export (opt-in via bulk_export_enabled=true). The mode and overlap
+            # are assigned unconditionally so the cursor helpers work on any instance;
+            # `_bulk_client` exists only when bulk mode is on, and `_read_table_bulk`
+            # is reachable only through the `_bulk_enabled` guard in read_table.
             self._bulk_enabled = options.get("bulk_export_enabled", "false").lower() == "true"
+            self._bulk_incremental_mode = options.get("bulk_incremental_mode", "since")
+            # Servers differ on whether manifest transactionTime marks the start
+            # or the completion of an export. A non-zero overlap re-reads a safe
+            # window; duplicates are absorbed by the upsert on `id`.
+            self._bulk_overlap_seconds = _int_option(options, "bulk_overlap_seconds", 0, minimum=0)
             if self._bulk_enabled:
-                self._bulk_incremental_mode = options.get("bulk_incremental_mode", "since")
+                if self._bulk_incremental_mode not in BULK_VALID_INCREMENTAL_MODES:
+                    raise ValueError(
+                        f"Invalid bulk_incremental_mode {self._bulk_incremental_mode!r}. "
+                        f"Use one of: {sorted(BULK_VALID_INCREMENTAL_MODES)}."
+                    )
                 self._bulk_client = BulkExportClient(
                     base_url=options["base_url"],
                     auth_client=auth_client,
                     scope=options.get("bulk_export_scope", "system"),
                     group_id=options.get("bulk_export_group_id") or None,
-                    poll_interval=int(options.get("bulk_export_poll_interval", "30")),
-                    timeout=int(options.get("bulk_export_timeout", "14400")),
+                    poll_interval=_int_option(options, "bulk_export_poll_interval", BULK_POLL_INTERVAL),
+                    timeout=_int_option(options, "bulk_export_timeout", BULK_EXPORT_TIMEOUT),
                 )
 
         def list_tables(self) -> list[str]:
@@ -2792,9 +2972,9 @@ def register_lakeflow_source(spark):
             if since and _parse_ts(since) >= _parse_ts(self._init_ts):
                 return iter([]), start_offset
 
-            page_size = int(table_options.get("page_size", str(DEFAULT_PAGE_SIZE)))
-            max_records = int(table_options.get("max_records_per_batch", str(DEFAULT_MAX_RECORDS)))
-            page_delay = float(table_options.get("page_delay", str(PAGE_DELAY)))
+            page_size = _int_option(table_options, "page_size", DEFAULT_PAGE_SIZE)
+            max_records = _int_option(table_options, "max_records_per_batch", DEFAULT_MAX_RECORDS)
+            page_delay = _float_option(table_options, "page_delay", PAGE_DELAY)
             profile = table_options.get("profile", "uk_core")
 
             params: dict[str, str] = {"_count": str(page_size), "_sort": "_lastUpdated"}
@@ -2852,37 +3032,140 @@ def register_lakeflow_source(spark):
         ) -> tuple[Iterator[dict], dict]:
             """Bulk export path. Uses server transactionTime as the CDC cursor.
 
-            For incremental_mode="full", the cursor is not advanced — every run
-            re-exports all data.
+            In "full" mode there is no server cursor, so the offset carries this
+            trigger's frozen `_init_ts` instead. That advances once per trigger —
+            enough for the rows to be written — and short-circuits on the second
+            call so Trigger.AvailableNow terminates. The next trigger is a new
+            process with a new `_init_ts`, so the export runs again. It advances
+            even when the export came back empty: leaving the offset alone there
+            makes the framework call again and run a second $export for the same
+            trigger (measured against HAPI).
+
+            No instance "already exported" flag is used: on a cache miss the
+            framework replays a batch via readBetweenOffsets -> read_table, and a
+            sticky flag would make that replay return nothing.
+
+            Note there is deliberately no per-batch record cap here. The bulk cursor
+            is the server's export snapshot instant, which already covers every
+            resource in the manifest, so truncating the batch while advancing the
+            cursor would drop the remainder permanently. A cap would have to
+            paginate within the manifest; until then the whole export is emitted.
             """
-            since = start_offset.get("cursor") if start_offset else None
-            if since and _parse_ts(since) >= _parse_ts(self._init_ts):
+            profile = table_options.get("profile", "uk_core")
+            full_mode = self._bulk_incremental_mode == "full"
+
+            # One export per trigger, in every mode. A bulk $export is a whole
+            # server-side job (hours on real EHRs, and Epic enforces a 24h cooldown
+            # per group), so the trigger must never run a second one just to discover
+            # there is nothing new. `run_ts` is this process's frozen `_init_ts`, so
+            # it matches only on a later call within the same trigger.
+            if start_offset and start_offset.get("run_ts") == self._init_ts:
                 return iter([]), start_offset
 
-            profile = table_options.get("profile", "uk_core")
+            if full_mode:
+                cursor = since = None
+            else:
+                cursor = start_offset.get("cursor") if start_offset else None
+                if cursor and _parse_ts(cursor) >= _parse_ts(self._init_ts):
+                    return iter([]), start_offset
+                # The overlap widens the query window only; the stored cursor tracks
+                # transactionTime so it always moves forward.
+                since = self._widen_since(cursor)
+
             transaction_time, resource_map = self._bulk_client.export(
                 resource_types=[table_name],
                 since=since,
                 incremental_mode=self._bulk_incremental_mode,
             )
 
-            raw_resources = resource_map.get(table_name, [])
-            if not raw_resources:
-                return iter([]), start_offset or {}
+            raw_resources = list(resource_map.get(table_name) or [])
+            # `_download_and_parse` buckets manifest entries with no "type" key under
+            # UNTYPED_BUCKET. The export was scoped to this one type via `_type`, so
+            # those rows are this table's data; merge them in rather than dropping a
+            # completed export. Only that bucket is adopted — a differently-typed
+            # bucket (e.g. OperationOutcome) must not be relabelled as this table.
+            untyped = resource_map.get(UNTYPED_BUCKET)
+            if untyped:
+                logger.warning(
+                    "Bulk manifest for '%s' has %d entries with no resource type; "
+                    "treating them as '%s'.",
+                    table_name,
+                    len(untyped),
+                    table_name,
+                )
+                # De-duplicate on id: a server that reports the same file both with
+                # and without a "type" would otherwise emit each resource twice.
+                seen = {r.get("id") for r in raw_resources if r.get("id")}
+                raw_resources.extend(r for r in untyped if not r.get("id") or r["id"] not in seen)
+
+            for bucket, rows in resource_map.items():
+                if bucket not in (table_name, UNTYPED_BUCKET) and rows:
+                    logger.warning(
+                        "Bulk manifest for '%s' also returned %d %r resources; ignoring them.",
+                        table_name,
+                        len(rows),
+                        bucket,
+                    )
 
             records = [extract_record(r, table_name, profile=profile) for r in raw_resources]
 
-            # In "full" mode, transaction_time is None — don't advance the cursor
-            # so the next run re-exports everything.
-            if transaction_time is None:
-                return iter(records), start_offset or {}
+            if full_mode:
+                # `run_ts` is stamped even for an empty export. Returning
+                # `start_offset or {}` here would leave the offset unchanged, so the
+                # framework calls read_table again and the `run_ts` guard above --
+                # which is what limits a trigger to one export -- has nothing to
+                # match on, kicking off a second $export for the same trigger.
+                # Measured against HAPI: 2 jobs per trigger for a resource type with
+                # no instances. Advancing on empty costs nothing (no rows to write)
+                # and makes the second call short-circuit like the non-empty case.
+                return iter(records), {"run_ts": self._init_ts}
 
-            end_offset = {"cursor": transaction_time}
+            # Advance the cursor to the newest instant we can justify, never
+            # backwards: start-time servers report a transactionTime that precedes
+            # the stored cursor once a widened window is in play, and regressing
+            # would re-read the same span every trigger.
+            cursor_value = _canonical_ts(transaction_time) if transaction_time else cursor
+            if cursor_value and cursor and _parse_ts(cursor_value) < _parse_ts(cursor):
+                logger.warning(
+                    "Bulk export for '%s' reported transactionTime %s, which precedes "
+                    "the stored cursor %s; keeping the stored cursor.",
+                    table_name,
+                    transaction_time,
+                    cursor,
+                )
+                cursor_value = cursor
 
-            if start_offset and start_offset == end_offset:
-                return iter([]), start_offset
-
+            # `run_ts` carries this trigger's frozen `_init_ts`, so the offset always
+            # differs from the one we were handed and the batch is never discarded —
+            # even when the cursor itself could not move. It is also what terminates
+            # the trigger: the second call short-circuits above. Termination must not
+            # depend on the cursor changing, because an export whose transactionTime
+            # is stable (or textually re-spelled) would otherwise loop.
+            end_offset = {"run_ts": self._init_ts}
+            if cursor_value:
+                end_offset["cursor"] = cursor_value
             return iter(records), end_offset
+
+        def _widen_since(self, cursor: Optional[str]) -> Optional[str]:
+            """Rewind the `_since` sent to the server by bulk_overlap_seconds.
+
+            Servers differ on whether transactionTime marks the start or the end of
+            an export, so a cursor taken from it can sit after resources that were
+            written while the export ran. Widening only the query re-reads that
+            window; duplicates are absorbed by the upsert on `id`.
+            """
+            if not cursor:
+                return None
+            if not self._bulk_overlap_seconds:
+                # Canonicalise even with no overlap: a stored "+00:00" cursor would
+                # otherwise reach _typeFilter verbatim and be corrupted there.
+                return _canonical_ts(cursor)
+            shifted = _parse_ts(cursor) - timedelta(seconds=self._bulk_overlap_seconds)
+            # Always emit a UTC "Z" instant. Converting first matters: a cursor with
+            # a non-UTC offset would otherwise keep it, and in typefilter mode this
+            # value is embedded in a nested _typeFilter query where a URL-encoded
+            # "+" decodes back to a space and corrupts the date bound.
+            return shifted.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
 
         def _validate_table(self, table_name: str) -> None:
             if table_name not in self._resources:
@@ -2891,6 +3174,7 @@ def register_lakeflow_source(spark):
                 )
 
 
+    _retry_after = retry_after
     _base_patient = _patient
 
 

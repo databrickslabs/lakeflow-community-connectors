@@ -16,12 +16,14 @@ import logging
 import time
 from datetime import datetime, timezone
 from typing import Optional
-from urllib.parse import quote
+from urllib.parse import quote, urljoin, urlparse
 
 import requests
 
 from databricks.labs.community_connector.sources.fhir.fhir_constants import (
     BULK_EXPORT_TIMEOUT,
+    BULK_MAX_REDIRECTS,
+    BULK_MIN_POLL_SLEEP,
     BULK_NDJSON_TIMEOUT,
     BULK_POLL_INTERVAL,
     BULK_VALID_INCREMENTAL_MODES,
@@ -29,9 +31,14 @@ from databricks.labs.community_connector.sources.fhir.fhir_constants import (
     HTTP_TIMEOUT,
     INITIAL_BACKOFF,
     MAX_RETRIES,
+    MAX_RETRY_AFTER,
     RETRIABLE_STATUS_CODES,
+    UNTYPED_BUCKET,
 )
-from databricks.labs.community_connector.sources.fhir.fhir_utils import SmartAuthClient
+from databricks.labs.community_connector.sources.fhir.fhir_utils import (
+    SmartAuthClient,
+    retry_after as _retry_after,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -103,21 +110,26 @@ class BulkExportClient:
                 f"Use one of: {sorted(BULK_VALID_INCREMENTAL_MODES)}."
             )
 
+        # Captured before kick-off so it is never later than the export's own
+        # snapshot point. Using the post-download clock would skip everything
+        # written while the export ran.
+        fallback_cursor = datetime.now(timezone.utc).isoformat()
+
         status_url = self._kick_off(resource_types, since, incremental_mode)
         try:
             manifest = self._poll_until_complete(status_url)
             resources = self._download_and_parse(manifest)
             if incremental_mode == "full":
-                # Full mode re-exports all data every run — don't advance cursor.
+                # Full mode re-exports all data every run — no server cursor.
                 return None, resources
             transaction_time = manifest.get("transactionTime")
             if not transaction_time:
                 logger.warning(
-                    "Bulk export manifest missing transactionTime. "
-                    "Falling back to current UTC time as cursor — this may "
-                    "cause duplicate records on the next incremental run."
+                    "Bulk export manifest missing transactionTime. Falling back "
+                    "to the pre-kick-off UTC time as cursor — this may cause "
+                    "duplicate records on the next incremental run."
                 )
-                transaction_time = datetime.now(timezone.utc).isoformat()
+                transaction_time = fallback_cursor
             return transaction_time, resources
         finally:
             self._cleanup(status_url)
@@ -132,22 +144,28 @@ class BulkExportClient:
         url = self._export_url()
         params = {}
 
+        if resource_types:
+            # _type must always be sent. Per the Bulk Data IG, a Data Provider
+            # "SHALL return all supported resources" when _type is omitted, and
+            # _typeFilter only filters "resource types referenced in the
+            # _typeFilter expression" -- so omitting _type makes the server
+            # export every other type unfiltered.
+            params["_type"] = ",".join(resource_types)
+
         if incremental_mode == "typefilter" and since and resource_types:
-            # Per HL7 spec, _typeFilter encodes the resource type in each filter
-            # string, so _type is redundant and some servers reject the combination.
+            # Epic does not support _since; express the date bound per type
+            # instead. Sent alongside _type, matching the IG's own example.
             filters = [f"{rt}?_lastUpdated=gt{since}" for rt in resource_types]
             params["_typeFilter"] = ",".join(filters)
-        else:
-            if resource_types:
-                params["_type"] = ",".join(resource_types)
-            if since and incremental_mode == "since":
-                params["_since"] = since
-
-        headers = self._auth_headers()
-        headers["Prefer"] = "respond-async"
+        elif since and incremental_mode == "since":
+            params["_since"] = since
 
         backoff = INITIAL_BACKOFF
         for attempt in range(MAX_RETRIES):
+            # Re-fetch the token each attempt: the retry ladder spans up to
+            # ~155s, which can outlive a cached token's remaining lifetime.
+            headers = self._auth_headers()
+            headers["Prefer"] = "respond-async"
             resp = self._session.get(
                 url,
                 params=params,
@@ -168,7 +186,7 @@ class BulkExportClient:
                     f"Bulk export kick-off failed (HTTP {resp.status_code}): {resp.text[:500]}"
                 )
             if attempt < MAX_RETRIES - 1:
-                sleep_seconds = _retry_after(resp, backoff)
+                sleep_seconds = _retry_after(resp, backoff, ceiling=MAX_RETRY_AFTER)
                 logger.warning(
                     "Bulk export kick-off got %d, retrying in %.0fs (attempt %d/%d)",
                     resp.status_code,
@@ -183,6 +201,21 @@ class BulkExportClient:
             f"Bulk export kick-off failed after {MAX_RETRIES} retries "
             f"(last HTTP {resp.status_code}): {resp.text[:500]}"
         )
+
+    @staticmethod
+    def _poll_sleep(resp: requests.Response, default: float, deadline: float) -> Optional[float]:
+        """How long to wait before the next poll, or None if the budget is spent.
+
+        The budget check keys off the remaining time, never off the requested
+        sleep: a server may legitimately send `Retry-After: 0`, and treating
+        that as "out of time" would abort an export that still has hours left.
+        A short request is honoured but floored so the loop cannot busy-spin.
+        """
+        remaining = deadline - time.time()
+        if remaining < BULK_MIN_POLL_SLEEP:
+            return None
+        requested = _retry_after(resp, default, ceiling=remaining)
+        return max(requested, BULK_MIN_POLL_SLEEP)
 
     def _poll_until_complete(self, status_url: str) -> dict:
         """Poll the status URL until the export completes or times out.
@@ -204,13 +237,17 @@ class BulkExportClient:
                 progress = resp.headers.get("X-Progress", "")
                 if progress:
                     logger.info("Bulk export progress: %s", progress)
-                sleep_seconds = _retry_after(resp, self._poll_interval)
+                sleep_seconds = self._poll_sleep(resp, self._poll_interval, deadline)
+                if sleep_seconds is None:
+                    break  # budget spent
                 transient_backoff = INITIAL_BACKOFF  # reset on successful poll
                 time.sleep(sleep_seconds)
                 continue
 
             if resp.status_code in RETRIABLE_STATUS_CODES:
-                sleep_seconds = _retry_after(resp, transient_backoff)
+                sleep_seconds = self._poll_sleep(resp, transient_backoff, deadline)
+                if sleep_seconds is None:
+                    break
                 logger.warning(
                     "Bulk export poll got %d, retrying in %.0fs",
                     resp.status_code,
@@ -230,11 +267,15 @@ class BulkExportClient:
 
     def _download_and_parse(self, manifest: dict) -> dict:
         """Download NDJSON files from the manifest and group records by type."""
-        requires_token = manifest.get("requiresAccessToken", True)
+        # `is not False` rather than a get() default: an explicit JSON null must
+        # keep auth on, not silently drop the bearer token from every download.
+        requires_token = manifest.get("requiresAccessToken") is not False
         resources: dict = {}
 
-        for entry in manifest.get("output", []):
-            rtype = entry.get("type", "Unknown")
+        # `or []` rather than a get() default: a server may send an explicit
+        # JSON null for these keys, and get(k, []) returns the stored None.
+        for entry in manifest.get("output") or []:
+            rtype = entry.get("type") or UNTYPED_BUCKET
             url = entry.get("url")
             if not url:
                 continue
@@ -247,7 +288,7 @@ class BulkExportClient:
                 url,
             )
 
-        for entry in manifest.get("error", []):
+        for entry in manifest.get("error") or []:
             url = entry.get("url")
             if url:
                 try:
@@ -265,33 +306,46 @@ class BulkExportClient:
         Handles three download patterns:
         1. Direct HTTP + bearer token (Epic, HAPI, InterSystems, etc.)
         2. No auth / presigned URL (IBM, SMART test server)
-        3. 307 redirect to presigned S3 (Cerner) — strips auth on redirect
-        """
-        headers = (
-            self._ndjson_auth_headers()
-            if requires_access_token
-            else {"Accept": "application/fhir+ndjson"}
-        )
-        resp = self._session.get(
-            url,
-            headers=headers,
-            stream=True,
-            allow_redirects=False,
-            timeout=BULK_NDJSON_TIMEOUT,
-        )
+        3. Redirect to presigned cloud storage (Cerner) — drops auth off-origin
 
-        if resp.status_code in (301, 302, 303, 307, 308):
-            redirect_url = resp.headers.get("Location")
-            if not redirect_url:
-                resp.close()
-                raise RuntimeError(f"NDJSON download got {resp.status_code} but no Location header")
-            resp.close()
+        Redirects are followed manually so the Authorization header can be
+        dropped when leaving the original host: presigned storage URLs carry
+        their own credentials and reject (or, worse, log) a bearer token.
+        Once dropped, auth is never re-attached, so a redirect chain that
+        returns to the origin cannot be used to harvest the token.
+        """
+        # Scheme is part of the origin: an https -> http redirect on the same
+        # host must not replay the bearer token over plaintext.
+        _parsed = urlparse(url)
+        origin = (_parsed.scheme.lower(), _parsed.netloc.lower())
+        current = url
+        send_auth = requires_access_token
+
+        for _ in range(BULK_MAX_REDIRECTS + 1):
+            headers = (
+                self._ndjson_auth_headers() if send_auth else {"Accept": "application/fhir+ndjson"}
+            )
             resp = self._session.get(
-                redirect_url,
-                headers={"Accept": "application/fhir+ndjson"},
+                current,
+                headers=headers,
                 stream=True,
+                allow_redirects=False,
                 timeout=BULK_NDJSON_TIMEOUT,
             )
+            if resp.status_code not in (301, 302, 303, 307, 308):
+                break
+
+            redirect_url = resp.headers.get("Location")
+            resp.close()
+            if not redirect_url:
+                raise RuntimeError(f"NDJSON download got {resp.status_code} but no Location header")
+            # Location may be relative (RFC 7231); resolve against the current URL.
+            current = urljoin(current, redirect_url)
+            nxt = urlparse(current)
+            if (nxt.scheme.lower(), nxt.netloc.lower()) != origin:
+                send_auth = False
+        else:
+            raise RuntimeError(f"NDJSON download exceeded {BULK_MAX_REDIRECTS} redirects for {url}")
 
         try:
             if resp.status_code != 200:
@@ -314,14 +368,3 @@ class BulkExportClient:
             )
         except Exception as exc:
             logger.warning("Bulk export cleanup failed for %s: %s", status_url, exc)
-
-
-def _retry_after(resp: requests.Response, default: float) -> float:
-    """Extract Retry-After header value in seconds, or return default."""
-    retry_after = resp.headers.get("Retry-After")
-    if retry_after:
-        try:
-            return float(retry_after)
-        except ValueError:
-            pass
-    return default
