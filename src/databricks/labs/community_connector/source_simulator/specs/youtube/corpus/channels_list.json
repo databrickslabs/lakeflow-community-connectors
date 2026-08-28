@@ -1,0 +1,30 @@
+{
+  "kind": "youtube#channelListResponse",
+  "etag": "sim-channels-etag",
+  "items": [
+    {
+      "kind": "youtube#channel",
+      "etag": "sim-channel-etag",
+      "id": "UC_test_channel_001",
+      "snippet": {
+        "title": "Simulator Channel",
+        "description": "Test channel for offline tests",
+        "publishedAt": "2020-01-01T00:00:00Z",
+        "thumbnails": {
+          "default": {"url": "https://example.com/channel-thumb.jpg"}
+        },
+        "defaultLanguage": "en"
+      },
+      "statistics": {
+        "viewCount": "1000",
+        "subscriberCount": "100",
+        "videoCount": "10"
+      },
+      "contentDetails": {
+        "relatedPlaylists": {"uploads": "UU_test_uploads_001"}
+      }
+    }
+  ],
+  "nextPageToken": null,
+  "pageInfo": {"totalResults": 1, "resultsPerPage": 50}
+}

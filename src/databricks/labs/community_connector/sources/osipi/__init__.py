@@ -17,6 +17,18 @@ from databricks.labs.community_connector.sources.osipi.osipi_schemas import (
     TABLE_SCHEMAS,
 )
 
+
+from databricks.labs.community_connector.sparkpds import LakeflowSource
+
+
+class OsipiDataSource(LakeflowSource):
+    _lakeflow_connect_cls = OsipiLakeflowConnect
+    # Override the Spark format name with the source name once this no
+    # longer relies on UC connection-option injection. Kept as the default
+    # "lakeflow_connect" for now so existing pipelines keep working.
+    # _format_name = "osipi"
+
+
 __all__ = [
     "OsipiLakeflowConnect",
     "SUPPORTED_TABLES",
@@ -27,4 +39,5 @@ __all__ = [
     "TABLES_GOVERNANCE_DIAGNOSTICS",
     "TABLE_SCHEMAS",
     "TABLE_METADATA",
+    "OsipiDataSource",
 ]

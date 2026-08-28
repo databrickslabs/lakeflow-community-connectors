@@ -5,7 +5,8 @@
     },
     "series": {
         "starting_date": "20090101",
-        "window_days": "2000"
+        "window_days": "2000",
+        "series_qido_filters": "{\"Modality\": \"RTDOSE\"}"
     },
     "instances": {
         "starting_date": "20090101",
@@ -13,7 +14,8 @@
         "num_partitions": "2",
         "fetch_dicom_files": "true",
         "fetch_metadata": "true",
-        "wado_mode": "auto"
+        "wado_mode": "auto",
+        "series_qido_filters": "{\"Modality\": \"RTDOSE\"}"
     },
     "diagnostics": {}
 }

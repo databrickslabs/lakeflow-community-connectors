@@ -146,6 +146,14 @@ The Zendesk connector maps source data types to Databricks data types as follows
 | Object/JSON | STRING | Complex nested objects are stored as JSON strings |
 
 
+## Upgrade Notes
+
+### Paginated tables: checkpoint format change
+
+For paginated (snapshot-style) tables — `articles`, `groups`, `brands`, `topics` — the offset format changed from `{"page": N}` to a sentinel `{"done": true}`. The new format lets each AvailableNow trigger drain all pages once and then return a stable offset so the trigger terminates.
+
+**Impact on existing pipelines:** the first run after upgrade will not match the legacy `{"page": N}` checkpoint and will redrain the full snapshot from page 1. Subsequent runs converge on `{"done": true}` and behave normally. This is a one-time cost; no manual migration is required.
+
 ## How to Run
 
 ### Step 1: Clone/Copy the Source Connector Code

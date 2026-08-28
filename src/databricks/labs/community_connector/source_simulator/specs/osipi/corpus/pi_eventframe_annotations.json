@@ -1,0 +1,34 @@
+[
+  {
+    "event_frame_webid": "hotel-894",
+    "annotation_id": "xray-675",
+    "annotation_timestamp": "2024-01-07T16:40:39Z",
+    "annotation_user": "kilo-869",
+    "text": "oscar-689",
+    "ingestion_timestamp": "2024-01-02T09:34:56Z"
+  },
+  {
+    "event_frame_webid": "echo-279",
+    "annotation_id": "papa-414",
+    "annotation_timestamp": "2024-01-14T11:55:22Z",
+    "annotation_user": "november-776",
+    "text": "tango-845",
+    "ingestion_timestamp": "2024-01-14T19:28:32Z"
+  },
+  {
+    "event_frame_webid": "hotel-719",
+    "annotation_id": "delta-505",
+    "annotation_timestamp": "2024-01-07T20:57:40Z",
+    "annotation_user": "kilo-554",
+    "text": "romeo-176",
+    "ingestion_timestamp": "2024-01-19T07:40:12Z"
+  },
+  {
+    "event_frame_webid": "oscar-239",
+    "annotation_id": "victor-266",
+    "annotation_timestamp": "2024-01-13T00:49:07Z",
+    "annotation_user": "romeo-460",
+    "text": "romeo-637",
+    "ingestion_timestamp": "2024-01-20T02:25:24Z"
+  }
+]

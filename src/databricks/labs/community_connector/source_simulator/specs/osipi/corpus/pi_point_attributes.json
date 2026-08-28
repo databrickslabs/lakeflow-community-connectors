@@ -1,0 +1,30 @@
+[
+  {
+    "point_webid": "india-821",
+    "name": "papa-878",
+    "value": "oscar-187",
+    "type": "delta-850",
+    "ingestion_timestamp": "2024-01-15T09:01:53Z"
+  },
+  {
+    "point_webid": "lima-650",
+    "name": "victor-637",
+    "value": "kilo-257",
+    "type": "uniform-981",
+    "ingestion_timestamp": "2024-01-16T02:55:58Z"
+  },
+  {
+    "point_webid": "papa-636",
+    "name": "papa-380",
+    "value": "foxtrot-384",
+    "type": "zulu-378",
+    "ingestion_timestamp": "2024-01-15T20:03:06Z"
+  },
+  {
+    "point_webid": "yankee-507",
+    "name": "echo-267",
+    "value": "november-797",
+    "type": "charlie-850",
+    "ingestion_timestamp": "2024-01-25T02:43:45Z"
+  }
+]

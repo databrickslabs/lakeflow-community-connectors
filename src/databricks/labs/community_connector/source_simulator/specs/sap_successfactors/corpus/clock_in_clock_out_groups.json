@@ -1,0 +1,76 @@
+[
+  {
+    "code": "oscar-956",
+    "createdAt": "juliet-671",
+    "createdBy": "golf-717",
+    "lastChangedAt": "romeo-219",
+    "lastChangedBy": "yankee-334",
+    "name": "golf-157",
+    "timeEventTypeNav": [
+      {
+        "code": "lima-957",
+        "active": false,
+        "event": "charlie-466",
+        "name": "victor-852",
+        "description": "whiskey-529"
+      },
+      {
+        "code": "mike-207",
+        "active": false,
+        "event": "uniform-350",
+        "name": "romeo-571",
+        "description": "delta-518"
+      }
+    ]
+  },
+  {
+    "code": "lima-729",
+    "createdAt": "quebec-297",
+    "createdBy": "romeo-294",
+    "lastChangedAt": "november-248",
+    "lastChangedBy": "quebec-229",
+    "name": "zulu-862",
+    "timeEventTypeNav": []
+  },
+  {
+    "code": "alpha-702",
+    "createdAt": "yankee-904",
+    "createdBy": "lima-565",
+    "lastChangedAt": "tango-793",
+    "lastChangedBy": "november-246",
+    "name": "hotel-187",
+    "timeEventTypeNav": [
+      {
+        "code": "lima-884",
+        "active": false,
+        "event": "kilo-428",
+        "name": "delta-974",
+        "description": "sierra-162"
+      }
+    ]
+  },
+  {
+    "code": "mike-670",
+    "createdAt": "alpha-256",
+    "createdBy": "hotel-302",
+    "lastChangedAt": "bravo-690",
+    "lastChangedBy": "delta-313",
+    "name": "kilo-913",
+    "timeEventTypeNav": [
+      {
+        "code": "november-882",
+        "active": true,
+        "event": "juliet-924",
+        "name": "juliet-558",
+        "description": "echo-927"
+      },
+      {
+        "code": "alpha-153",
+        "active": false,
+        "event": "xray-376",
+        "name": "lima-109",
+        "description": "november-868"
+      }
+    ]
+  }
+]

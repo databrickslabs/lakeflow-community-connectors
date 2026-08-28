@@ -1,0 +1,7 @@
+MSH|^~\&|IMM_SYS|GENERAL_HOSPITAL|IIS|STATE_IIS|20240201100000||VXU^V04^VXU_V04|MSGVXU001|P|2.5.1
+PID|1||MRN70001^^^HOSP^MR||Davis^Emily^Rose||20200515|F||2106-3^White^HL70005|555 Cedar Ln^^Portland^OR^97201^US
+NK1|1|Davis^Michael^Alan|FTH^Father^HL70063|555 Cedar Ln^^Portland^OR^97201^US|(503)555-0177
+PV1|1|R|PED^100^A^HOSP||||PED001^Chen^Lisa^^^Dr^MD
+RXA|1|1|20240201100000|20240201100500|141^Influenza, seasonal, injectable^CVX|0.5|mL^Milliliters^UCUM||00^New Record^NIP001|NRS001^Adams^Betty|||0.5|mL^Milliliters^UCUM|LT12345||MFR001^Sanofi Pasteur^MVX|||CP||20240201100500
+OBX|1|CE|64994-7^Vaccine funding source^LN||VXC50^Public^CDCPHINVS||||||F
+OBX|2|CE|30956-7^Vaccine Type^LN||141^Influenza, seasonal, injectable^CVX||||||F

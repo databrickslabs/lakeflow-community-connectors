@@ -1,0 +1,38 @@
+[
+  {
+    "id": "mike-481-pk0",
+    "name": "zulu-666",
+    "owner_id": "charlie-216",
+    "is_active": false,
+    "creation_date": "juliet-330",
+    "last_modified": "echo-268",
+    "lastModified": "2024-01-01T00:00:00Z"
+  },
+  {
+    "id": "lima-633-pk1",
+    "name": "juliet-730",
+    "owner_id": "sierra-264",
+    "is_active": false,
+    "creation_date": "charlie-581",
+    "last_modified": "delta-796",
+    "lastModified": "2024-01-01T01:00:00Z"
+  },
+  {
+    "id": "foxtrot--pk2",
+    "name": "foxtrot-758",
+    "owner_id": "juliet-935",
+    "is_active": true,
+    "creation_date": "sierra-620",
+    "last_modified": "uniform-207",
+    "lastModified": "2024-01-01T02:00:00Z"
+  },
+  {
+    "id": "sierra-1-pk3",
+    "name": "echo-656",
+    "owner_id": "quebec-943",
+    "is_active": false,
+    "creation_date": "oscar-588",
+    "last_modified": "echo-663",
+    "lastModified": "2024-01-01T03:00:00Z"
+  }
+]

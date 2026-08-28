@@ -1,10 +1,19 @@
-import requests
 import json
-from pyspark.sql.types import *
-from datetime import datetime
 import time
-import random
-from typing import Dict, List, Tuple, Iterator, Any
+from datetime import datetime, timezone
+from typing import Dict, Iterator, List, Tuple
+
+import requests
+from pyspark.sql.types import (
+    ArrayType,
+    BooleanType,
+    DataType,
+    LongType,
+    StringType,
+    StructField,
+    StructType,
+)
+
 from databricks.labs.community_connector.interface import LakeflowConnect
 
 
@@ -20,6 +29,17 @@ class HubspotLakeflowConnect(LakeflowConnect):
         self._schema_cache = {}
         # Cache for table metadata
         self._metadata_cache = {}
+
+        # Freeze the upper cursor bound at init time so read_table returns a
+        # stable cursor across microbatches in a single Trigger.AvailableNow
+        # trigger.  Without this, the connector would chase continuously
+        # arriving updatedAt timestamps indefinitely.  HubSpot timestamps are
+        # ISO 8601 with milliseconds (e.g. "2026-04-23T12:34:56.789Z").
+        self._init_ts = (
+            datetime.now(timezone.utc)
+            .strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3]
+            + "Z"
+        )
 
         # Centralized object metadata configuration
         # supports_deletes: HubSpot only supports archived/deleted queries for core CRM objects
@@ -87,13 +107,6 @@ class HubspotLakeflowConnect(LakeflowConnect):
                 "associations": ["contacts", "companies", "deals", "tickets"],
                 "supports_deletes": True,
             },
-            "deal_split": {
-                "primary_keys": ["id"],
-                "cursor_field": "updatedAt",
-                "cursor_property_field": "hs_lastmodifieddate",
-                "associations": [],
-                "supports_deletes": False,
-            },
         }
 
         # Default config for custom objects
@@ -137,7 +150,7 @@ class HubspotLakeflowConnect(LakeflowConnect):
         """
         try:
             url = f"{self.base_url}/crm/v3/schemas"
-            resp = requests.get(url, headers=self.auth_header)
+            resp = requests.get(url, headers=self.auth_header, timeout=60)
 
             if resp.status_code != 200:
                 return []
@@ -177,8 +190,11 @@ class HubspotLakeflowConnect(LakeflowConnect):
         """
         supported_tables = self.list_tables()
         if table_name not in supported_tables:
-            raise ValueError(f"Unsupported table: {table_name}. Supported tables are: {supported_tables}")
-        
+            raise ValueError(
+                f"Unsupported table: {table_name}. "
+                f"Supported tables are: {supported_tables}"
+            )
+
         # Check cache first
         if table_name in self._schema_cache:
             return self._schema_cache[table_name]
@@ -190,6 +206,21 @@ class HubspotLakeflowConnect(LakeflowConnect):
         self._schema_cache[table_name] = schema
 
         return schema
+
+    @staticmethod
+    def _parse_max_records(table_options: Dict[str, str] | None) -> int | None:
+        """Read max_records_per_batch from table options. None means no cap
+        (opt-in admission control)."""
+        if not table_options:
+            return None
+        raw = table_options.get("max_records_per_batch")
+        if raw is None:
+            return None
+        try:
+            value = int(raw)
+        except (TypeError, ValueError):
+            return None
+        return value if value > 0 else None
 
     def read_table_metadata(
         self, table_name: str, table_options: Dict[str, str]
@@ -211,8 +242,11 @@ class HubspotLakeflowConnect(LakeflowConnect):
         """
         supported_tables = self.list_tables()
         if table_name not in supported_tables:
-            raise ValueError(f"Unsupported table: {table_name}. Supported tables are: {supported_tables}")
-        
+            raise ValueError(
+                f"Unsupported table: {table_name}. "
+                f"Supported tables are: {supported_tables}"
+            )
+
         # Check cache first
         if table_name in self._metadata_cache:
             return self._metadata_cache[table_name]
@@ -316,13 +350,21 @@ class HubspotLakeflowConnect(LakeflowConnect):
         url = f"{self.base_url}/properties/v2/{object_type}/properties"
 
         try:
-            resp = requests.get(url, headers=self.auth_header)
+            resp = requests.get(url, headers=self.auth_header, timeout=60)
             if resp.status_code != 200:
-                raise Exception("API error: {resp.status_code} {resp.text}")
+                raise RuntimeError(
+                    f"HubSpot Properties API error for {object_type}: "
+                    f"{resp.status_code} {resp.text}"
+                )
 
             return resp.json()
         except Exception as e:
-            return {"error": f"Failed to get object properties: {str(e)}"}
+            # Re-raise (don't return an error dict): callers iterate this as a
+            # list of property dicts, so a dict here turns a real API error into
+            # an unrelated TypeError far downstream.
+            raise RuntimeError(
+                f"Failed to get object properties for {object_type}: {e}"
+            ) from e
 
     def _map_hubspot_type_to_spark(self, hubspot_type: str) -> DataType:
         """
@@ -360,14 +402,22 @@ class HubspotLakeflowConnect(LakeflowConnect):
         """
         supported_tables = self.list_tables()
         if table_name not in supported_tables:
-            raise ValueError(f"Unsupported table: {table_name}. Supported tables are: {supported_tables}")
+            raise ValueError(
+                f"Unsupported table: {table_name}. "
+                f"Supported tables are: {supported_tables}"
+            )
 
         # Determine if this is an incremental read
         is_incremental = (
             start_offset is not None and start_offset.get("updatedAt") is not None
         )
 
-        return self._read_data(table_name, start_offset, incremental=is_incremental, table_options=table_options)
+        return self._read_data(
+            table_name,
+            start_offset,
+            incremental=is_incremental,
+            table_options=table_options,
+        )
 
     def read_table_deletes(
         self, table_name: str, start_offset: dict, table_options: Dict[str, str]
@@ -377,7 +427,7 @@ class HubspotLakeflowConnect(LakeflowConnect):
 
         HubSpot uses "archived" status to represent deleted records. This method
         fetches all archived records and filters them client-side for incremental reads.
-        
+
         Internally uses archivedAt for filtering, but copies it to updatedAt in the
         output records and offset for consistency with the normal read flow cursor.
 
@@ -392,11 +442,24 @@ class HubspotLakeflowConnect(LakeflowConnect):
         """
         supported_tables = self.list_tables()
         if table_name not in supported_tables:
-            raise ValueError(f"Unsupported table: {table_name}. Supported tables are: {supported_tables}")
+            raise ValueError(
+                f"Unsupported table: {table_name}. "
+                f"Supported tables are: {supported_tables}"
+            )
+
+        # Short-circuit once the cursor has caught up to the init-time cap,
+        # so Trigger.AvailableNow can terminate.
+        if (
+            start_offset
+            and start_offset.get("updatedAt", "") >= self._init_ts
+        ):
+            return [], start_offset
 
         # Get discovered properties (no associations needed for deletes)
         metadata = self.read_table_metadata(table_name, table_options)
         property_names = metadata.get("property_names", [])
+
+        max_records = self._parse_max_records(table_options)
 
         all_records = []
         after = None
@@ -433,8 +496,18 @@ class HubspotLakeflowConnect(LakeflowConnect):
             if not after:
                 break
 
+            # Stop if we've hit the per-microbatch record cap. The next
+            # microbatch resumes from latest_archived via the cursor filter.
+            if max_records is not None and len(all_records) >= max_records:
+                break
+
             # Rate limiting
             time.sleep(0.1)
+
+        # Cap the returned cursor at the init-time bound so the next call
+        # eventually short-circuits.
+        if latest_archived and latest_archived > self._init_ts:
+            latest_archived = self._init_ts
 
         # Return offset with updatedAt key for consistency with normal flow
         offset = {"updatedAt": latest_archived} if latest_archived else {}
@@ -446,11 +519,24 @@ class HubspotLakeflowConnect(LakeflowConnect):
     ):
         """Read active (non-archived) data from HubSpot API"""
 
+        # Short-circuit once the cursor has caught up to the init-time cap,
+        # so Trigger.AvailableNow can terminate.
+        if (
+            incremental
+            and start_offset
+            and start_offset.get("updatedAt", "") >= self._init_ts
+        ):
+            return [], start_offset
+
         # Get discovered properties and object configuration
         metadata = self.read_table_metadata(table_name, table_options)
         property_names = metadata.get("property_names", [])
         cursor_property_field = metadata.get("cursor_property_field")
         associations = metadata.get("associations", [])
+
+        # Only cap on the incremental path — full-refresh snapshots need
+        # to drain everything in a single call to keep the snapshot atomic.
+        max_records = self._parse_max_records(table_options) if incremental else None
 
         all_records = []
         after = None
@@ -493,8 +579,18 @@ class HubspotLakeflowConnect(LakeflowConnect):
             if not after:
                 break
 
+            # Stop if we've hit the per-microbatch record cap. The next
+            # microbatch resumes from latest_updated via the cursor filter.
+            if max_records is not None and len(all_records) >= max_records:
+                break
+
             # Rate limiting
             time.sleep(0.1)
+
+        # Cap the returned cursor at the init-time bound so the next call
+        # eventually short-circuits.
+        if incremental and latest_updated and latest_updated > self._init_ts:
+            latest_updated = self._init_ts
 
         offset = {"updatedAt": latest_updated} if latest_updated else {}
         return all_records, offset
@@ -518,7 +614,7 @@ class HubspotLakeflowConnect(LakeflowConnect):
         if associations:
             url += f"&associations={','.join(associations)}"
 
-        resp = requests.get(url, headers=self.auth_header)
+        resp = requests.get(url, headers=self.auth_header, timeout=60)
         if resp.status_code != 200:
             raise Exception(
                 f"HubSpot API error for {table_name}: {resp.status_code} {resp.text}"
@@ -573,7 +669,7 @@ class HubspotLakeflowConnect(LakeflowConnect):
             search_body["after"] = after
 
         url = f"{self.base_url}/crm/v3/objects/{table_name}/search"
-        resp = requests.post(url, headers=self.auth_header, json=search_body)
+        resp = requests.post(url, headers=self.auth_header, json=search_body, timeout=60)
 
         if resp.status_code != 200:
             raise Exception(
@@ -618,7 +714,7 @@ class HubspotLakeflowConnect(LakeflowConnect):
 
     def _sanitize_properties(self, properties: Dict) -> Dict:
         """Convert empty strings to None in properties dict.
-        
+
         HubSpot API returns empty strings "" instead of null for many fields,
         which causes issues when parsing to typed schemas (e.g., LongType).
         """
@@ -655,7 +751,7 @@ class HubspotLakeflowConnect(LakeflowConnect):
         """Test the connection to HubSpot API"""
         try:
             url = f"{self.base_url}/crm/v3/objects/contacts?limit=1"
-            resp = requests.get(url, headers=self.auth_header)
+            resp = requests.get(url, headers=self.auth_header, timeout=60)
 
             if resp.status_code == 200:
                 return {"status": "success", "message": "Connection successful"}

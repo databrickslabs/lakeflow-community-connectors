@@ -1,0 +1,58 @@
+[
+  {
+    "PickListV2_effectiveStartDate": "foxtrot-584",
+    "PickListV2_id": "zulu-244",
+    "externalCode": "tango-662",
+    "createdBy": "mike-731",
+    "createdDateTime": "xray-532",
+    "label_defaultValue": "papa-522",
+    "label_en_US": "sierra-305",
+    "label_localized": "golf-498",
+    "lastModifiedBy": "foxtrot-442",
+    "lastModifiedDateTime": "whiskey-872",
+    "mdfSystemRecordStatus": "oscar-804",
+    "status": "hotel-824"
+  },
+  {
+    "PickListV2_effectiveStartDate": "charlie-413",
+    "PickListV2_id": "uniform-223",
+    "externalCode": "quebec-163",
+    "createdBy": "india-673",
+    "createdDateTime": "yankee-620",
+    "label_defaultValue": "victor-438",
+    "label_en_US": "lima-487",
+    "label_localized": "alpha-893",
+    "lastModifiedBy": "alpha-305",
+    "lastModifiedDateTime": "bravo-967",
+    "mdfSystemRecordStatus": "india-247",
+    "status": "lima-206"
+  },
+  {
+    "PickListV2_effectiveStartDate": "quebec-603",
+    "PickListV2_id": "bravo-361",
+    "externalCode": "tango-737",
+    "createdBy": "kilo-191",
+    "createdDateTime": "victor-963",
+    "label_defaultValue": "oscar-727",
+    "label_en_US": "november-265",
+    "label_localized": "foxtrot-195",
+    "lastModifiedBy": "echo-299",
+    "lastModifiedDateTime": "november-609",
+    "mdfSystemRecordStatus": "hotel-267",
+    "status": "oscar-712"
+  },
+  {
+    "PickListV2_effectiveStartDate": "delta-100",
+    "PickListV2_id": "kilo-375",
+    "externalCode": "xray-881",
+    "createdBy": "india-989",
+    "createdDateTime": "tango-560",
+    "label_defaultValue": "golf-791",
+    "label_en_US": "foxtrot-442",
+    "label_localized": "foxtrot-962",
+    "lastModifiedBy": "xray-530",
+    "lastModifiedDateTime": "yankee-282",
+    "mdfSystemRecordStatus": "kilo-410",
+    "status": "foxtrot-851"
+  }
+]

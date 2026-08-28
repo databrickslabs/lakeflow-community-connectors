@@ -1,0 +1,34 @@
+{
+  "kind": "youtube#videoListResponse",
+  "etag": "sim-videos-etag",
+  "items": [
+    {
+      "kind": "youtube#video",
+      "etag": "sim-video-etag",
+      "id": "vid_test_001",
+      "snippet": {
+        "publishedAt": "2020-04-01T00:00:00Z",
+        "channelId": "UC_test_channel_001",
+        "title": "Simulator Video",
+        "description": "Test video",
+        "thumbnails": {
+          "default": {"url": "https://example.com/video-thumb.jpg"}
+        },
+        "channelTitle": "Simulator Channel",
+        "categoryId": "22",
+        "liveBroadcastContent": "none"
+      },
+      "statistics": {
+        "viewCount": "500",
+        "likeCount": "10",
+        "commentCount": "2"
+      },
+      "contentDetails": {
+        "duration": "PT5M30S",
+        "definition": "hd"
+      }
+    }
+  ],
+  "nextPageToken": null,
+  "pageInfo": {"totalResults": 1, "resultsPerPage": 50}
+}

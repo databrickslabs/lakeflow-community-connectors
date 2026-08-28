@@ -1,0 +1,41 @@
+# OData v4 connector — simulated service.
+#
+# The connector is generic across OData v4 services, so the simulator
+# stands up a small Northwind-shaped service: a fixed ``$metadata``
+# document declaring two entity sets (Customers, Orders) and the
+# corresponding entity-set endpoints.
+#
+# Custom handlers do the heavy lifting because OData's query semantics
+# (``$top``, ``$skip``, ``$filter``, ``$orderby``, ``@odata.nextLink``)
+# don't map onto the declarative param-role pipeline; see
+# ``handlers/entity_set.py`` for the implementation.
+#
+# Service URL the tests use:
+#   https://example.com/V4/Northwind/Northwind.svc/
+# All paths below sit under that root.
+
+endpoints:
+  - path: "/V4/Northwind/Northwind.svc/$metadata"
+    method: GET
+    handler: databricks.labs.community_connector.source_simulator.specs.odata.handlers.metadata:serve_metadata
+
+  - path: "/V4/Northwind/Northwind.svc/Customers"
+    method: GET
+    corpus: Customers
+    handler: databricks.labs.community_connector.source_simulator.specs.odata.handlers.entity_set:serve_entity_set
+
+  - path: "/V4/Northwind/Northwind.svc/Orders"
+    method: GET
+    corpus: Orders
+    handler: databricks.labs.community_connector.source_simulator.specs.odata.handlers.entity_set:serve_entity_set
+    # Inject 3 future-dated clones of the tail record so the Orders cursor
+    # read advances across multiple batches before terminating. The connector
+    # has NO wall-clock/`_init_time` cursor cap — termination is via
+    # `max_records_per_batch` + the no-progress guard over a finite source
+    # (see ``odata.py`` ``_finalize_cursor_read`` and the comment at the
+    # incremental dispatch). The clone set is finite, so test_read_terminates
+    # exercises multi-batch cursor advance and then converges once no row
+    # exceeds the committed watermark.
+    synthesize_future_records:
+      cursor_field: OrderDate
+      count: 3

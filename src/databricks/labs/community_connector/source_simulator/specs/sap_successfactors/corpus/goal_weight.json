@@ -1,0 +1,26 @@
+[
+  {
+    "planId": 22950,
+    "type": "alpha-670",
+    "maxValue": 365.65,
+    "minValue": 726.17
+  },
+  {
+    "planId": 32001,
+    "type": "lima-460",
+    "maxValue": 596.81,
+    "minValue": 165.07
+  },
+  {
+    "planId": 87418,
+    "type": "whiskey-760",
+    "maxValue": 80.23,
+    "minValue": 265.99
+  },
+  {
+    "planId": 71038,
+    "type": "bravo-378",
+    "maxValue": 331.34,
+    "minValue": 467.24
+  }
+]

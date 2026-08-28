@@ -1,0 +1,137 @@
+[
+  {
+    "id": "alpha-40-pk0",
+    "createdBy": "foxtrot-662",
+    "createdOn": 38476,
+    "lastModifiedBy": "uniform-812",
+    "lastModifiedOn": 1704067200,
+    "system": false,
+    "role": {
+      "id": "yankee-584",
+      "name": "romeo-797",
+      "resourceType": "whiskey-418",
+      "resourceDiscriminator": "lima-346"
+    },
+    "baseResource": {
+      "id": "november-132",
+      "name": "victor-653",
+      "resourceType": "hotel-897",
+      "resourceDiscriminator": "whiskey-217"
+    },
+    "owner": {
+      "id": "juliet-755",
+      "name": "kilo-566",
+      "resourceType": "kilo-293",
+      "resourceDiscriminator": "alpha-985"
+    },
+    "collibra_org": "alpha-363"
+  },
+  {
+    "id": "charlie--pk1",
+    "createdBy": "november-338",
+    "createdOn": 46179,
+    "lastModifiedBy": "zulu-577",
+    "lastModifiedOn": 1704070800,
+    "system": true,
+    "role": {
+      "id": "foxtrot-526",
+      "name": "delta-213",
+      "resourceType": "juliet-413",
+      "resourceDiscriminator": "golf-701"
+    },
+    "baseResource": {
+      "id": "mike-260",
+      "name": "foxtrot-183",
+      "resourceType": "foxtrot-301",
+      "resourceDiscriminator": "india-909"
+    },
+    "owner": {
+      "id": "mike-157",
+      "name": "alpha-323",
+      "resourceType": "alpha-899",
+      "resourceDiscriminator": "uniform-626"
+    },
+    "collibra_org": "delta-151"
+  },
+  {
+    "id": "delta-15-pk2",
+    "createdBy": "echo-694",
+    "createdOn": 70827,
+    "lastModifiedBy": "victor-702",
+    "lastModifiedOn": 1704074400,
+    "system": false,
+    "role": {
+      "id": "juliet-199",
+      "name": "tango-695",
+      "resourceType": "charlie-374",
+      "resourceDiscriminator": "lima-457"
+    },
+    "baseResource": {
+      "id": "tango-868",
+      "name": "lima-211",
+      "resourceType": "romeo-352",
+      "resourceDiscriminator": "hotel-422"
+    },
+    "owner": {
+      "id": "lima-783",
+      "name": "sierra-319",
+      "resourceType": "india-579",
+      "resourceDiscriminator": "delta-180"
+    },
+    "collibra_org": "charlie-454"
+  },
+  {
+    "id": "papa-134-pk3",
+    "createdBy": "foxtrot-617",
+    "createdOn": 57553,
+    "lastModifiedBy": "juliet-488",
+    "lastModifiedOn": 1704078000,
+    "system": true,
+    "role": {
+      "id": "juliet-717",
+      "name": "victor-798",
+      "resourceType": "tango-610",
+      "resourceDiscriminator": "papa-438"
+    },
+    "baseResource": {
+      "id": "zulu-658",
+      "name": "uniform-862",
+      "resourceType": "victor-996",
+      "resourceDiscriminator": "mike-445"
+    },
+    "owner": {
+      "id": "uniform-778",
+      "name": "quebec-764",
+      "resourceType": "golf-571",
+      "resourceDiscriminator": "juliet-479"
+    },
+    "collibra_org": "november-679"
+  },
+  {
+    "id": "november-pk4",
+    "createdBy": "echo-850",
+    "createdOn": 51985,
+    "lastModifiedBy": "tango-755",
+    "lastModifiedOn": 1704081600,
+    "system": false,
+    "role": {
+      "id": "foxtrot-765",
+      "name": "echo-937",
+      "resourceType": "hotel-186",
+      "resourceDiscriminator": "bravo-826"
+    },
+    "baseResource": {
+      "id": "echo-745",
+      "name": "lima-743",
+      "resourceType": "tango-753",
+      "resourceDiscriminator": "bravo-375"
+    },
+    "owner": {
+      "id": "alpha-599",
+      "name": "victor-660",
+      "resourceType": "charlie-320",
+      "resourceDiscriminator": "mike-241"
+    },
+    "collibra_org": "quebec-248"
+  }
+]

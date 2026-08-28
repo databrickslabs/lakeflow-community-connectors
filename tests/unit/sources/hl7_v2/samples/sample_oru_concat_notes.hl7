@@ -1,0 +1,16 @@
+MSH|^~\&#|LIMS.WI.Stag^2.16.840.1.114222.4.3.3.2.8.2^ISO|WI.Madison.SPHL^2.16.840.1.114222.4.1.209842^ISO|AIMS.INTEGRATION.STG^2.16.840.1.114222.4.3.15.2^ISO|ViralExDHQPDiagMicro^2.16.840.1.114222.4.1.213285^ISO|20180207112233-0600||ORU^R01^ORU_R01|10012001|T|2.5.1|||||||||PHLabReport-NoAck^ELR251R1_Rcvr_Prof^2.16.840.1.113883.9.11^ISO
+PID|1||12345001^^^LIMS.WI.Stag&2.16.840.1.114222.4.3.3.2.8.2&ISO^PI^WI.Madison.SPHL&2.16.840.1.114222.4.1.209842&ISO||~^^^^^^S||19590203||||^^^WI
+NTE|1||memo 1 for PID
+NTE|2||memo 2 for PID
+ORC|RE|9001001^Fairview.Hosp.Lab^2.16.840.1.114222.4.1.9991^ISO|14MP001101^WI.Madison.SPHL^2.16.840.1.114222.4.1.209842^ISO|||||||||11D1234567^Fairview Hospital Lab^^^^^^^CLIA&2.16.840.1.113883.4.7&ISO^^^^XX|||||||||Fairview Hospital Lab^D|123 Main Street^^Beloit^WI^53511^USA^L^^55105|^WPN^PH^^1^123^4567890^1234
+OBR|1|9001001^Fairview.Hosp.Lab^2.16.840.1.114222.4.1.9991^ISO|14MP001101^WI.Madison.SPHL^2.16.840.1.114222.4.1.209842^ISO|PLT651^Activity 2 testing^PLT|||20180205113022-0600|||||||||11D1234567^Fairview Hospital Lab^^^^^^^CLIA&2.16.840.1.113883.4.7&ISO^^^^XX||||||20180207111122-0600|||F
+NTE|1||This is the first OBR note
+NTE|2||This is the secnd OBR Note.
+OBX|1|SN|35659-2^Age at specimen collection^LN|1|^30|a^year^UCUM|||||F||||||||20180207111122-0600||||Wisconsin State Laboratory of Hygiene^D^^^^CLIA&2.16.840.1.114222.4.1.209842&ISO^XX^^^52D0669558|465 Henry Mall^^Madison^WI^53706
+NTE|1||This is the first note for OBX 1 under OBR 1.
+OBX|2|ST|PLT667^Healthcare facility of origin name^PLT|2|Fairview Hospital||||||F||||||||20180207111122-0600||||Wisconsin State Laboratory of Hygiene^D^^^^CLIA&2.16.840.1.114222.4.1.209842&ISO^XX^^^52D0669558|465 Henry Mall^^Madison^WI^53706
+OBR|2|9001001_02^Fairview.Hosp.Lab^2.16.840.1.114222.4.1.9991^ISO|14MP001101_02^WI.Madison.SPHL^2.16.840.1.114222.4.1.209842^ISO|29576-6^Bacterial susceptibility panel^LN|||20180205113022-0600|||||||||11D1234567^Fairview Hospital Lab^^^^^^^CLIA&2.16.840.1.113883.4.7&ISO^^^^XX||||||20180207111122-0600|||F
+NTE|1||This is a note for the second OBR segment.
+OBX|1|SN|33333-6^Colistin Islt Grad strip^LN|1|^0.02|ug/mL^microgram per milliliter^UCUM|||||F||||||703442003^gradient strip susceptibility test^SCT||20180207111122-0600||||Wisconsin State Laboratory of Hygiene^D^^^^CLIA&2.16.840.1.114222.4.1.209842&ISO^XX^^^52D0669558|465 Henry Mall^^Madison^WI^53706
+NTE|1||This is the first note for OBX 1 under OBR 2.
+SPM|1|1009001&Fairview.Hosp.Lab&2.16.840.1.114222.4.1.9991&ISO^14MP001101&WI.Madison.SPHL&2.16.840.1.114222.4.1.209842&ISO||258528007^rectal swab^SCT|||||||||||||20180205113022-0600|20180206113022-0600

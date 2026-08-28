@@ -1,0 +1,107 @@
+# Zendesk REST API endpoints.
+#
+# Two response shapes:
+# * **Incremental** (tickets, organizations, ticket_comments, users):
+#     {"<key>": [...], "end_time": int, "end_of_stream": true}
+#   The connector uses ``end_of_stream`` to terminate, so we always set
+#   it true (single-page response).
+# * **Paginated** (articles, brands, groups, topics):
+#     {"<key>": [...], "next_page": null|<url>}
+#   We emit ``next_page: null`` so the connector stops after one page.
+
+endpoints:
+  # ---- incremental ----
+
+  - path: "/api/v2/incremental/tickets.json"
+    method: GET
+    corpus: tickets
+    response:
+      pagination_style: none
+      wrapper:
+        records_key: tickets
+        extras:
+          end_of_stream: true
+          end_time: 9999999999
+          count: 4
+
+  - path: "/api/v2/incremental/organizations.json"
+    method: GET
+    corpus: organizations
+    response:
+      pagination_style: none
+      wrapper:
+        records_key: organizations
+        extras:
+          end_of_stream: true
+          end_time: 9999999999
+          count: 4
+
+  - path: "/api/v2/incremental/users.json"
+    method: GET
+    corpus: users
+    response:
+      pagination_style: none
+      wrapper:
+        records_key: users
+        extras:
+          end_of_stream: true
+          end_time: 9999999999
+          count: 4
+
+  - path: "/api/v2/incremental/ticket_events.json"
+    method: GET
+    corpus: ticket_comments
+    response:
+      pagination_style: none
+      wrapper:
+        records_key: ticket_events
+        extras:
+          end_of_stream: true
+          end_time: 9999999999
+          count: 4
+
+  # ---- paginated ----
+
+  - path: "/api/v2/help_center/articles.json"
+    method: GET
+    corpus: articles
+    response:
+      pagination_style: none
+      wrapper:
+        records_key: articles
+        extras:
+          next_page: null
+          count: 4
+
+  - path: "/api/v2/brands.json"
+    method: GET
+    corpus: brands
+    response:
+      pagination_style: none
+      wrapper:
+        records_key: brands
+        extras:
+          next_page: null
+          count: 4
+
+  - path: "/api/v2/groups.json"
+    method: GET
+    corpus: groups
+    response:
+      pagination_style: none
+      wrapper:
+        records_key: groups
+        extras:
+          next_page: null
+          count: 4
+
+  - path: "/api/v2/community/topics.json"
+    method: GET
+    corpus: topics
+    response:
+      pagination_style: none
+      wrapper:
+        records_key: topics
+        extras:
+          next_page: null
+          count: 4

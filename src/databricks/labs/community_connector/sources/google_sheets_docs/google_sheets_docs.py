@@ -23,7 +23,7 @@ from pyspark.sql.types import StructType, StructField, StringType
 
 from databricks.labs.community_connector.interface import LakeflowConnect
 
-from databricks.labs.community_connector.sources.google_sheets_docs.google_sheets_docs_schemas import (
+from databricks.labs.community_connector.sources.google_sheets_docs.google_sheets_docs_schemas import (  # pylint: disable=line-too-long
     SUPPORTED_TABLES,
     TABLE_METADATA,
     TABLE_SCHEMAS,

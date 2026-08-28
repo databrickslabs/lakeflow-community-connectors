@@ -1,0 +1,50 @@
+[
+  {
+    "applicationId": 58090,
+    "order": 54052,
+    "question": "juliet-462",
+    "answer": "delta-509",
+    "questionResponse": "hotel-746",
+    "expectedAnswer": "hotel-821",
+    "expectedAnswerValue": 454.53,
+    "highLow": "golf-785",
+    "type": "echo-691",
+    "maxLength": 889.86
+  },
+  {
+    "applicationId": 44617,
+    "order": 17990,
+    "question": "lima-743",
+    "answer": "papa-214",
+    "questionResponse": "november-810",
+    "expectedAnswer": "echo-623",
+    "expectedAnswerValue": 166.19,
+    "highLow": "alpha-340",
+    "type": "mike-169",
+    "maxLength": 434.74
+  },
+  {
+    "applicationId": 17404,
+    "order": 29429,
+    "question": "yankee-404",
+    "answer": "whiskey-274",
+    "questionResponse": "tango-118",
+    "expectedAnswer": "oscar-127",
+    "expectedAnswerValue": 113.55,
+    "highLow": "victor-259",
+    "type": "bravo-327",
+    "maxLength": 565.94
+  },
+  {
+    "applicationId": 48070,
+    "order": 3087,
+    "question": "papa-979",
+    "answer": "india-674",
+    "questionResponse": "lima-347",
+    "expectedAnswer": "kilo-773",
+    "expectedAnswerValue": 289.6,
+    "highLow": "papa-162",
+    "type": "lima-433",
+    "maxLength": 408.41
+  }
+]

@@ -1,0 +1,46 @@
+[
+  {
+    "tag_webid": "juliet-387",
+    "timestamp": "2024-01-09T04:51:15Z",
+    "value": 660.3,
+    "good": true,
+    "questionable": true,
+    "substituted": true,
+    "annotated": false,
+    "units": "victor-871",
+    "ingestion_timestamp": "2024-01-14T23:51:33Z"
+  },
+  {
+    "tag_webid": "bravo-789",
+    "timestamp": "2024-01-25T19:47:55Z",
+    "value": 755.74,
+    "good": false,
+    "questionable": false,
+    "substituted": true,
+    "annotated": true,
+    "units": "yankee-727",
+    "ingestion_timestamp": "2024-01-13T14:05:43Z"
+  },
+  {
+    "tag_webid": "zulu-761",
+    "timestamp": "2024-01-24T01:36:06Z",
+    "value": 942.37,
+    "good": false,
+    "questionable": false,
+    "substituted": true,
+    "annotated": true,
+    "units": "tango-965",
+    "ingestion_timestamp": "2024-01-29T23:05:06Z"
+  },
+  {
+    "tag_webid": "uniform-691",
+    "timestamp": "2024-01-01T11:21:03Z",
+    "value": 933.72,
+    "good": true,
+    "questionable": true,
+    "substituted": false,
+    "annotated": false,
+    "units": "delta-976",
+    "ingestion_timestamp": "2024-01-15T07:12:29Z"
+  }
+]

@@ -1,0 +1,50 @@
+[
+  {
+    "onboardingStatusId": 70246,
+    "onboardingId": 92654,
+    "name": "zulu-322",
+    "status": "echo-411",
+    "statusType": "hotel-373",
+    "type": "victor-634",
+    "message": "echo-763",
+    "url": "november-918",
+    "createdDate": "foxtrot-229",
+    "lastModifiedDate": "kilo-342"
+  },
+  {
+    "onboardingStatusId": 40456,
+    "onboardingId": 23579,
+    "name": "oscar-605",
+    "status": "hotel-935",
+    "statusType": "quebec-951",
+    "type": "mike-953",
+    "message": "juliet-669",
+    "url": "quebec-926",
+    "createdDate": "alpha-404",
+    "lastModifiedDate": "zulu-215"
+  },
+  {
+    "onboardingStatusId": 47813,
+    "onboardingId": 63599,
+    "name": "delta-502",
+    "status": "whiskey-288",
+    "statusType": "tango-200",
+    "type": "hotel-911",
+    "message": "hotel-849",
+    "url": "uniform-562",
+    "createdDate": "sierra-469",
+    "lastModifiedDate": "whiskey-341"
+  },
+  {
+    "onboardingStatusId": 86308,
+    "onboardingId": 47920,
+    "name": "november-445",
+    "status": "hotel-800",
+    "statusType": "romeo-248",
+    "type": "kilo-418",
+    "message": "sierra-423",
+    "url": "charlie-553",
+    "createdDate": "mike-183",
+    "lastModifiedDate": "sierra-543"
+  }
+]

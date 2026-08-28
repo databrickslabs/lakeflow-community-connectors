@@ -1,0 +1,133 @@
+[
+  {
+    "id": "a6d72986e7",
+    "web_id": 10309941,
+    "type": "regular",
+    "create_time": "2026-07-09T23:38:16+00:00",
+    "archive_url": "http://eepurl.com/Qd_zgoNNIp",
+    "long_archive_url": "https://mailchi.mp/0b8382f3b405/test",
+    "status": "sent",
+    "emails_sent": 4,
+    "send_time": "2026-07-09T23:50:24+00:00",
+    "content_type": "multichannel",
+    "needs_block_refresh": false,
+    "resendable": true,
+    "recipients": {
+      "list_id": "ec2a1e70e5",
+      "list_is_active": true,
+      "list_name": "Dbx",
+      "segment_text": "",
+      "recipient_count": 4
+    },
+    "settings": {
+      "subject_line": "TEST",
+      "title": "",
+      "from_name": "Dbx",
+      "reply_to": "redacted@example.com",
+      "use_conversation": false,
+      "to_name": "",
+      "folder_id": "",
+      "authenticate": true,
+      "auto_footer": false,
+      "inline_css": false,
+      "auto_tweet": false,
+      "fb_comments": true,
+      "timewarp": false,
+      "template_id": 12,
+      "drag_and_drop": false
+    },
+    "tracking": {
+      "opens": true,
+      "html_clicks": true,
+      "text_clicks": false,
+      "goal_tracking": false,
+      "ecomm360": false,
+      "google_analytics": "",
+      "clicktale": ""
+    },
+    "report_summary": {
+      "opens": 0,
+      "unique_opens": 0,
+      "open_rate": 0,
+      "clicks": 0,
+      "subscriber_clicks": 0,
+      "click_rate": 0,
+      "ecommerce": {
+        "total_orders": 0,
+        "total_spent": 0,
+        "total_revenue": 0
+      }
+    },
+    "delivery_status": {
+      "enabled": false
+    },
+    "_links": [
+      {
+        "rel": "parent",
+        "href": "https://us1.api.mailchimp.com/3.0/campaigns",
+        "method": "GET",
+        "targetSchema": "https://us1.api.mailchimp.com/schema/3.0/Definitions/Campaigns/CollectionResponse.json",
+        "schema": "https://us1.api.mailchimp.com/schema/3.0/Paths/Campaigns/Collection.json"
+      },
+      {
+        "rel": "self",
+        "href": "https://us1.api.mailchimp.com/3.0/campaigns/a6d72986e7",
+        "method": "GET",
+        "targetSchema": "https://us1.api.mailchimp.com/schema/3.0/Definitions/Campaigns/Response.json"
+      },
+      {
+        "rel": "delete",
+        "href": "https://us1.api.mailchimp.com/3.0/campaigns/a6d72986e7",
+        "method": "DELETE"
+      },
+      {
+        "rel": "send",
+        "href": "https://us1.api.mailchimp.com/3.0/campaigns/a6d72986e7/actions/send",
+        "method": "POST"
+      },
+      {
+        "rel": "cancel_send",
+        "href": "https://us1.api.mailchimp.com/3.0/campaigns/a6d72986e7/actions/cancel-send",
+        "method": "POST"
+      },
+      {
+        "rel": "feedback",
+        "href": "https://us1.api.mailchimp.com/3.0/campaigns/a6d72986e7/feedback",
+        "method": "GET",
+        "targetSchema": "https://us1.api.mailchimp.com/schema/3.0/Definitions/Campaigns/Feedback/CollectionResponse.json"
+      },
+      {
+        "rel": "content",
+        "href": "https://us1.api.mailchimp.com/3.0/campaigns/a6d72986e7/content",
+        "method": "GET",
+        "targetSchema": "https://us1.api.mailchimp.com/schema/3.0/Definitions/Campaigns/Content/Response.json"
+      },
+      {
+        "rel": "send_checklist",
+        "href": "https://us1.api.mailchimp.com/3.0/campaigns/a6d72986e7/send-checklist",
+        "method": "GET",
+        "targetSchema": "https://us1.api.mailchimp.com/schema/3.0/Definitions/Campaigns/Checklist/Response.json"
+      },
+      {
+        "rel": "pause",
+        "href": "https://us1.api.mailchimp.com/3.0/campaigns/a6d72986e7/actions/pause",
+        "method": "POST"
+      },
+      {
+        "rel": "resume",
+        "href": "https://us1.api.mailchimp.com/3.0/campaigns/a6d72986e7/actions/resume",
+        "method": "POST"
+      },
+      {
+        "rel": "replicate",
+        "href": "https://us1.api.mailchimp.com/3.0/campaigns/a6d72986e7/actions/replicate",
+        "method": "POST"
+      },
+      {
+        "rel": "create_resend",
+        "href": "https://us1.api.mailchimp.com/3.0/campaigns/a6d72986e7/actions/create-resend",
+        "method": "POST"
+      }
+    ]
+  }
+]

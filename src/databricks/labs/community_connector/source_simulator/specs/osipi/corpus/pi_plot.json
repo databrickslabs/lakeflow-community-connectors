@@ -1,0 +1,46 @@
+[
+  {
+    "tag_webid": "yankee-946",
+    "timestamp": "2024-01-27T15:02:44Z",
+    "value": 964.85,
+    "good": true,
+    "questionable": false,
+    "substituted": true,
+    "annotated": false,
+    "units": "kilo-283",
+    "ingestion_timestamp": "2024-01-13T07:15:50Z"
+  },
+  {
+    "tag_webid": "quebec-727",
+    "timestamp": "2024-01-29T01:41:26Z",
+    "value": 737.66,
+    "good": false,
+    "questionable": true,
+    "substituted": true,
+    "annotated": true,
+    "units": "zulu-395",
+    "ingestion_timestamp": "2024-01-27T23:04:37Z"
+  },
+  {
+    "tag_webid": "delta-463",
+    "timestamp": "2024-01-03T08:01:22Z",
+    "value": 911.72,
+    "good": true,
+    "questionable": false,
+    "substituted": false,
+    "annotated": false,
+    "units": "romeo-553",
+    "ingestion_timestamp": "2024-01-02T09:12:11Z"
+  },
+  {
+    "tag_webid": "lima-731",
+    "timestamp": "2024-01-29T07:32:22Z",
+    "value": 44.37,
+    "good": false,
+    "questionable": true,
+    "substituted": true,
+    "annotated": true,
+    "units": "mike-569",
+    "ingestion_timestamp": "2024-01-13T04:09:04Z"
+  }
+]

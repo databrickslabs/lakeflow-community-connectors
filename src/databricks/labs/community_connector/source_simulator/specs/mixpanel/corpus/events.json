@@ -1,0 +1,119 @@
+[
+  {
+    "event": "yankee-521",
+    "$insert_id": "juliet-435",
+    "properties": {
+      "time": 86463,
+      "distinct_id": "quebec-762",
+      "$browser": "india-597",
+      "$browser_version": 43976,
+      "$city": "oscar-120",
+      "$current_url": "mike-245",
+      "$device_id": "victor-193",
+      "$initial_referrer": "lima-742",
+      "$initial_referring_domain": "papa-597",
+      "$lib_version": "quebec-120",
+      "$mp_api_endpoint": "whiskey-939",
+      "$mp_api_timestamp_ms": 7780,
+      "$os": "romeo-694",
+      "$region": "uniform-189",
+      "$screen_height": 95364,
+      "$screen_width": 6171,
+      "mp_country_code": "lima-113",
+      "mp_lib": "papa-192",
+      "mp_processing_time_ms": 90399,
+      "mp_sent_by_lib_version": "kilo-617",
+      "custom_properties": {}
+    },
+    "generated_timestamp": 71162
+  },
+  {
+    "event": "yankee-141",
+    "$insert_id": "bravo-797",
+    "properties": {
+      "time": 26890,
+      "distinct_id": "papa-508",
+      "$browser": "quebec-877",
+      "$browser_version": 82631,
+      "$city": "zulu-316",
+      "$current_url": "lima-352",
+      "$device_id": "alpha-966",
+      "$initial_referrer": "sierra-538",
+      "$initial_referring_domain": "hotel-362",
+      "$lib_version": "echo-366",
+      "$mp_api_endpoint": "kilo-734",
+      "$mp_api_timestamp_ms": 56461,
+      "$os": "echo-685",
+      "$region": "alpha-970",
+      "$screen_height": 65283,
+      "$screen_width": 53902,
+      "mp_country_code": "bravo-230",
+      "mp_lib": "charlie-340",
+      "mp_processing_time_ms": 83564,
+      "mp_sent_by_lib_version": "november-569",
+      "custom_properties": {
+        "key_0": "mike-864",
+        "key_1": "bravo-784"
+      }
+    },
+    "generated_timestamp": 81594
+  },
+  {
+    "event": "papa-482",
+    "$insert_id": "foxtrot-923",
+    "properties": {
+      "time": 80333,
+      "distinct_id": "hotel-638",
+      "$browser": "juliet-261",
+      "$browser_version": 57919,
+      "$city": "tango-879",
+      "$current_url": "delta-852",
+      "$device_id": "whiskey-417",
+      "$initial_referrer": "bravo-973",
+      "$initial_referring_domain": "november-780",
+      "$lib_version": "mike-375",
+      "$mp_api_endpoint": "yankee-692",
+      "$mp_api_timestamp_ms": 5631,
+      "$os": "victor-429",
+      "$region": "lima-787",
+      "$screen_height": 36693,
+      "$screen_width": 28543,
+      "mp_country_code": "quebec-631",
+      "mp_lib": "uniform-284",
+      "mp_processing_time_ms": 31603,
+      "mp_sent_by_lib_version": "golf-711",
+      "custom_properties": {
+        "key_0": "papa-382"
+      }
+    },
+    "generated_timestamp": 65581
+  },
+  {
+    "event": "whiskey-440",
+    "$insert_id": "victor-891",
+    "properties": {
+      "time": 49959,
+      "distinct_id": "delta-817",
+      "$browser": "mike-360",
+      "$browser_version": 47176,
+      "$city": "uniform-415",
+      "$current_url": "sierra-213",
+      "$device_id": "victor-751",
+      "$initial_referrer": "golf-580",
+      "$initial_referring_domain": "november-488",
+      "$lib_version": "november-869",
+      "$mp_api_endpoint": "foxtrot-273",
+      "$mp_api_timestamp_ms": 98842,
+      "$os": "oscar-934",
+      "$region": "charlie-566",
+      "$screen_height": 151,
+      "$screen_width": 24262,
+      "mp_country_code": "juliet-870",
+      "mp_lib": "uniform-916",
+      "mp_processing_time_ms": 37316,
+      "mp_sent_by_lib_version": "kilo-685",
+      "custom_properties": {}
+    },
+    "generated_timestamp": 91200
+  }
+]

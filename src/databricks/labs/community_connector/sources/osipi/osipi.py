@@ -168,6 +168,11 @@ class OsipiLakeflowConnect(LakeflowConnect):
         # Initialize HTTP client (handles auth, base_url resolution, SSL config)
         self._client = PiWebApiClient(options)
 
+        # Trigger.AvailableNow termination cap. Captured once per DataSource
+        # instance; threaded into compute_time_range so the read window cannot
+        # chase utcnow() across microbatches.
+        self._init_time = utcnow()
+
     def list_tables(self) -> List[str]:
         """Return a list of all supported table names."""
         return list(SUPPORTED_TABLES)
@@ -460,7 +465,7 @@ class OsipiLakeflowConnect(LakeflowConnect):
         """Read recorded time-series values."""
         tag_webids = self._resolve_tag_webids(table_options)
         start_str, end_str = compute_time_range(
-            start_offset, table_options, apply_window_seconds=True
+            start_offset, table_options, apply_window_seconds=True, init_time=self._init_time
         )
         max_count = int(table_options.get("maxCount", 1000))
         ingest_ts = utcnow()
@@ -560,7 +565,7 @@ class OsipiLakeflowConnect(LakeflowConnect):
         """Read recorded values via StreamSet endpoint."""
         tag_webids = self._resolve_tag_webids(table_options)
         start_str, end_str = compute_time_range(
-            start_offset, table_options, apply_window_seconds=True
+            start_offset, table_options, apply_window_seconds=True, init_time=self._init_time
         )
         max_count = int(table_options.get("maxCount", 1000))
         ingest_ts = utcnow()
@@ -612,7 +617,7 @@ class OsipiLakeflowConnect(LakeflowConnect):
         """Read interpolated values."""
         tag_webids = self._resolve_tag_webids(table_options)
         start_str, end_str = compute_time_range(
-            start_offset, table_options, apply_window_seconds=False
+            start_offset, table_options, apply_window_seconds=False, init_time=self._init_time
         )
 
         interval = (
@@ -722,7 +727,7 @@ class OsipiLakeflowConnect(LakeflowConnect):
         """Read plot values."""
         tag_webids = self._resolve_tag_webids(table_options)
         start_str, end_str = compute_time_range(
-            start_offset, table_options, apply_window_seconds=False
+            start_offset, table_options, apply_window_seconds=False, init_time=self._init_time
         )
         intervals = int(table_options.get("intervals", 300) or 300)
         ingest_ts = utcnow()
@@ -936,7 +941,7 @@ class OsipiLakeflowConnect(LakeflowConnect):
         """Read multi-tag summary via StreamSet endpoint."""
         tag_webids = self._resolve_tag_webids(table_options)
         start_str, end_str = compute_time_range(
-            start_offset, table_options, apply_window_seconds=False
+            start_offset, table_options, apply_window_seconds=False, init_time=self._init_time
         )
 
         summary_type = (table_options.get("summaryType") or "Total").strip()

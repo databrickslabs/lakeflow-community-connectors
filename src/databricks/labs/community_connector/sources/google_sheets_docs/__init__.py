@@ -10,4 +10,18 @@ from databricks.labs.community_connector.sources.google_sheets_docs.google_sheet
     GoogleSheetsDocsLakeflowConnect,
 )
 
-__all__ = ["GoogleSheetsDocsLakeflowConnect"]
+
+from databricks.labs.community_connector.sparkpds import LakeflowSource
+
+
+class GoogleSheetsDocsDataSource(LakeflowSource):
+    _lakeflow_connect_cls = GoogleSheetsDocsLakeflowConnect
+    # Override the Spark format name with the source name once this no
+    # longer relies on UC connection-option injection. Kept as the default
+    # "lakeflow_connect" for now so existing pipelines keep working.
+    # _format_name = "google_sheets_docs"
+
+
+__all__ = ["GoogleSheetsDocsLakeflowConnect",
+    "GoogleSheetsDocsDataSource",
+]

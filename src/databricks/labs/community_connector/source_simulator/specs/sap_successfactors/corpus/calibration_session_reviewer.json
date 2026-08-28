@@ -1,0 +1,26 @@
+[
+  {
+    "sessionReviewerId": "whiskey-374",
+    "calSessionId": "uniform-999",
+    "reviewerType": "mike-972",
+    "userId": "juliet-145"
+  },
+  {
+    "sessionReviewerId": "uniform-278",
+    "calSessionId": "bravo-556",
+    "reviewerType": "hotel-100",
+    "userId": "bravo-916"
+  },
+  {
+    "sessionReviewerId": "quebec-594",
+    "calSessionId": "uniform-673",
+    "reviewerType": "kilo-550",
+    "userId": "uniform-728"
+  },
+  {
+    "sessionReviewerId": "india-663",
+    "calSessionId": "kilo-274",
+    "reviewerType": "foxtrot-419",
+    "userId": "whiskey-608"
+  }
+]

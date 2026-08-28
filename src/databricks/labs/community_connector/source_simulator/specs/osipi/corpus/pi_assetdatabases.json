@@ -1,0 +1,26 @@
+[
+  {
+    "webid": "bravo-975",
+    "name": "alpha-720",
+    "path": "mike-396",
+    "assetserver_webid": "charlie-247"
+  },
+  {
+    "webid": "hotel-274",
+    "name": "romeo-701",
+    "path": "foxtrot-231",
+    "assetserver_webid": "hotel-491"
+  },
+  {
+    "webid": "charlie-544",
+    "name": "delta-587",
+    "path": "uniform-822",
+    "assetserver_webid": "kilo-475"
+  },
+  {
+    "webid": "charlie-440",
+    "name": "zulu-447",
+    "path": "quebec-396",
+    "assetserver_webid": "tango-934"
+  }
+]

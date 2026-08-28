@@ -18,17 +18,18 @@ For simple connectors, keeping everything in a single `{source_name}.py` file is
 
 ## Implementation Requirements
 
-- **Interface:** Implement all methods declared in the `LakeflowConnect` interface. Do not add an extra main function.
 - **Schema:** In `get_table_schema`, prefer `StructType` over `MapType` to enforce explicit typing. Avoid flattening nested fields. Prefer `LongType` over `IntegerType` to avoid overflow. Do not convert the JSON into dictionaries based on the schema before returning in `read_table`; return the raw parsed JSON and let the framework handle type coercion.
 - **Metadata:** If `ingestion_type` returned from `read_table_metadata` is `cdc` or `cdc_with_deletes`, both `primary_keys` and `cursor_field` are required.
 - **Deletes:** If `ingestion_type` is `cdc_with_deletes`, you must implement `read_table_deletes()`. This method should return records with at minimum the primary key fields and cursor field populated.
-- **Data Processing:** If a StructType field is absent in the response, assign `None` as the default value instead of an empty dictionary `{}`. Avoid creating mock objects.
-- **Table Options:** The functions `get_table_schema`, `read_table_metadata`, and `read_table` accept a `table_options` dictionary. Do not include parameters required by individual tables in the global connection options; rely on `table_options` instead.
+- **Data Processing:** If a StructType field is absent in the response, assign `None` as the default value instead of an empty dictionary `{}`.
+- **Table Options:** Do not include parameters required by individual tables in the global connection options; rely on `table_options` instead.
 - **API Usage:** If a data source provides both a list API and a get API for the same object, always use the list API. Only call the get API for individual entries if explicitly requested. For child objects that require a parent identifier, list the parent objects first, then list child objects for each parent, and combine the results.
 
 ## Incremental read_table with offsets 
 
 For incremental ingestion of tables (`cdc` and `append_only`), the framework calls `read_table` repeatedly within a single trigger run. Each call produces one microbatch. A trigger run stops when the returned `end_offset` equals `start_offset`.
+
+**This termination condition is critical for Trigger AvailableNow.** The connector runs under `Trigger.AvailableNow`, which issues microbatches until the source reports "no more data available" — signalled by `read_table` returning `end_offset == start_offset`. If the connector keeps advancing the offset (e.g. by chasing continuously-arriving new data), the trigger never terminates and the pipeline hangs. Every incremental connector must guarantee this condition is reached — see **Guaranteeing Termination** below.
 
 ### Admission Control: `max_records_per_batch` 
 
@@ -36,7 +37,7 @@ Every incremental table **must** support a `max_records_per_batch` table option.
 
 This is **orthogonal** to the query-scoping strategies below. Regardless of whether you use a sliding window, a server-side limit, or neither, you must still respect `max_records_per_batch` by stopping record accumulation once the count is reached.
 
-**Exception — best-effort enforcement:** When the API does not support ascending sort and a sliding time-window is used (see below), `max_records_per_batch` becomes best-effort. The window must be drained completely to avoid skipping or duplicating records, so the actual batch size is governed by the window size rather than a strict record count.
+**Exception — best-effort enforcement:** When the API does not support ascending sort and a sliding time-window is used (see below), `max_records_per_batch` becomes best-effort. The window must be drained completely to avoid skipping or duplicating records, so the actual batch size is governed by `window_seconds` rather than a strict record count.
 
 ### Ascending Sort Order Requirement
 
@@ -101,6 +102,28 @@ These options are **critical for testing**. Without them, tests may hang or take
 - **Always set explicit timeouts:** Every HTTP request must include a `timeout` parameter (e.g., `timeout=20`). Without it, a slow API hangs the connector and tests indefinitely with no error output.
 - **Prefer server-side filtering:** Push filters (`since`/`until` etc.) to the API instead of fetching everything and filtering in Python. Client-side filtering still forces the server to scan the full dataset, which can cause timeouts on large accounts.
 - **Design for large accounts:** What works on a small dev account may hang on a production account with millions of records. Avoid unbounded full-history parameters like `date_range=all`. Always scope queries to a bounded range.
+
+## Out of scope: ingestion-agent surface
+
+The framework exposes an experimental ingestion-agent operation surface
+(`spark.read.format("lakeflow_connect").option("operation", ...)`)
+that's derived automatically from the `LakeflowConnect` methods you
+implement. **Do not** subclass `SupportsIngestionAgent`, `AgentOperation`,
+or any of the built-in op classes (`ListObjectsOp`, `ReadTableOp`,
+…); do not override `agent_operations()`. The shape of the
+customisation API is still being finalised. Just implement
+`LakeflowConnect` — the agent surface comes along for free.
+
+## Expose the DataSource class
+
+In the source package's `__init__.py`, expose a `<Source>DataSource`
+subclass of `LakeflowSource` that binds your connector via
+`_lakeflow_connect_cls` (name = connector class with `LakeflowConnect`
+replaced by `DataSource`, e.g. `GmailLakeflowConnect` → `GmailDataSource`).
+This is required — it's what lets the source register through
+`spark.dataSource.register(...)` / `find_data_source("{source_name}")`.
+Set only `_lakeflow_connect_cls`; leave `_format_name` at its default and
+add the class to `__all__`. Copy the shape from `sources/example/__init__.py`.
 
 ## Merge files
 After completion, run `python tools/scripts/merge_python_source.py {source_name}` to generate the merged connector file `_generated_{source_name}_python_source.py`. 

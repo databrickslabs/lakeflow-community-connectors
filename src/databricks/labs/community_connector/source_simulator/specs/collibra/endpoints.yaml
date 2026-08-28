@@ -1,0 +1,88 @@
+# Collibra Data Intelligence Platform — Core REST API v2 endpoints exercised
+# by the connector.
+#
+# Connector flow:
+#   * read_table(assets)           -> GET /assets            (cursor paginated)
+#   * read_table(attributes)       -> GET /attributes        (cursor paginated)
+#   * read_table(responsibilities) -> GET /responsibilities  (offset paginated)
+#   * read_table(domains)          -> GET /domains  (snapshot, cursor paginated)
+#
+# Pagination:
+#   Collibra's cursor endpoints follow a ``nextCursor`` field in the response
+#   body (assets / attributes / domains). The simulator has no cursor style,
+#   so we use ``pagination_style: none`` and return the whole corpus in one
+#   response with the ``results`` wrapper; the connector's cursor_paginate
+#   loop terminates after one page when ``nextCursor`` is absent.
+#   ``/responsibilities`` is offset/limit paginated and is modeled with the
+#   ``offset_limit`` style.
+#
+# Cursor / termination:
+#   The incremental cursor is ``lastModifiedOn`` (int64 epoch ms). The
+#   connector caps its returned cursor at an init-time epoch-ms snapshot.
+#   The schema-bootstrapped corpus generates epoch-*second* Long values which
+#   are always below the ms cap, so Trigger.AvailableNow converges after the
+#   corpus drains (no ``synthesize_future_records`` needed — and it would emit
+#   ISO-string cursors that clash with the int corpus values).
+
+endpoints:
+  # ---- /assets (cdc, lastModifiedOn) ----
+  - path: "/rest/2.0/assets"
+    method: GET
+    corpus: assets
+    response:
+      pagination_style: none
+      default_sort: "lastModifiedOn asc"
+      wrapper: {records_key: results}
+    params:
+      sortField:    {role: ignore}
+      sortOrder:    {role: ignore}
+      countLimit:   {role: ignore}
+      cursor:       {role: ignore}
+      limit:        {role: ignore}
+      domainId:     {role: filter, field: domain.id, op: eq}
+      communityId:  {role: ignore}
+
+  # ---- /attributes (cdc, lastModifiedOn) ----
+  - path: "/rest/2.0/attributes"
+    method: GET
+    corpus: attributes
+    response:
+      pagination_style: none
+      default_sort: "lastModifiedOn asc"
+      wrapper: {records_key: results}
+    params:
+      sortField:      {role: ignore}
+      sortOrder:      {role: ignore}
+      cursor:         {role: ignore}
+      limit:          {role: ignore}
+      assetId:        {role: filter, field: asset.id, op: eq}
+      typePublicIds:  {role: ignore}
+
+  # ---- /responsibilities (cdc, lastModifiedOn, offset paginated) ----
+  - path: "/rest/2.0/responsibilities"
+    method: GET
+    corpus: responsibilities
+    response:
+      pagination_style: offset_limit
+      default_sort: "lastModifiedOn asc"
+      wrapper: {records_key: results}
+    params:
+      sortField:         {role: ignore}
+      sortOrder:         {role: ignore}
+      includeInherited:  {role: ignore}
+      resourceIds:       {role: filter, field: baseResource.id, op: eq}
+      roleIds:           {role: filter, field: role.id, op: eq}
+      offset:            {role: offset}
+      limit:             {role: limit, default: 100, max: 1000}
+
+  # ---- /domains (snapshot) ----
+  - path: "/rest/2.0/domains"
+    method: GET
+    corpus: domains
+    response:
+      pagination_style: none
+      wrapper: {records_key: results}
+    params:
+      cursor:       {role: ignore}
+      limit:        {role: ignore}
+      communityId:  {role: filter, field: community.id, op: eq}

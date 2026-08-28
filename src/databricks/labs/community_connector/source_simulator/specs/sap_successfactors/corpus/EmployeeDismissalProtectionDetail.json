@@ -1,0 +1,50 @@
+[
+  {
+    "EmployeeDismissalProtection_workerId": "foxtrot-486",
+    "externalCode": "hotel-871",
+    "createdBy": "alpha-140",
+    "createdDateTime": "kilo-616",
+    "dismissalProtectionType": "sierra-629",
+    "lastModifiedBy": "delta-771",
+    "lastModifiedDateTime": "oscar-199",
+    "mdfSystemRecordStatus": "uniform-145",
+    "protectionEndDate": "papa-432",
+    "protectionStartDate": "delta-799"
+  },
+  {
+    "EmployeeDismissalProtection_workerId": "tango-802",
+    "externalCode": "sierra-245",
+    "createdBy": "india-592",
+    "createdDateTime": "hotel-364",
+    "dismissalProtectionType": "victor-614",
+    "lastModifiedBy": "delta-743",
+    "lastModifiedDateTime": "quebec-692",
+    "mdfSystemRecordStatus": "delta-150",
+    "protectionEndDate": "oscar-110",
+    "protectionStartDate": "india-913"
+  },
+  {
+    "EmployeeDismissalProtection_workerId": "foxtrot-775",
+    "externalCode": "oscar-309",
+    "createdBy": "mike-480",
+    "createdDateTime": "quebec-793",
+    "dismissalProtectionType": "delta-441",
+    "lastModifiedBy": "xray-232",
+    "lastModifiedDateTime": "papa-897",
+    "mdfSystemRecordStatus": "yankee-736",
+    "protectionEndDate": "echo-727",
+    "protectionStartDate": "foxtrot-756"
+  },
+  {
+    "EmployeeDismissalProtection_workerId": "uniform-122",
+    "externalCode": "oscar-613",
+    "createdBy": "juliet-215",
+    "createdDateTime": "delta-221",
+    "dismissalProtectionType": "golf-723",
+    "lastModifiedBy": "kilo-405",
+    "lastModifiedDateTime": "yankee-840",
+    "mdfSystemRecordStatus": "delta-352",
+    "protectionEndDate": "foxtrot-650",
+    "protectionStartDate": "juliet-606"
+  }
+]

@@ -1,0 +1,34 @@
+[
+  {
+    "webid": "whiskey-520",
+    "name": "alpha-779",
+    "descriptor": "sierra-290",
+    "engineering_units": "whiskey-873",
+    "path": "quebec-713",
+    "dataserver_webid": "yankee-867"
+  },
+  {
+    "webid": "xray-471",
+    "name": "delta-863",
+    "descriptor": "hotel-347",
+    "engineering_units": "echo-193",
+    "path": "golf-336",
+    "dataserver_webid": "alpha-775"
+  },
+  {
+    "webid": "xray-323",
+    "name": "xray-286",
+    "descriptor": "lima-912",
+    "engineering_units": "uniform-884",
+    "path": "foxtrot-313",
+    "dataserver_webid": "golf-516"
+  },
+  {
+    "webid": "kilo-326",
+    "name": "golf-566",
+    "descriptor": "tango-393",
+    "engineering_units": "zulu-642",
+    "path": "uniform-212",
+    "dataserver_webid": "oscar-765"
+  }
+]

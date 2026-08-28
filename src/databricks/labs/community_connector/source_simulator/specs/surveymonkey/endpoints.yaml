@@ -1,0 +1,163 @@
+# SurveyMonkey API v3.
+#
+# Standard wrapped responses: {"data": [...], "links": {"next": null}, ...}.
+# We emit links.next null so the connector stops pagination after one page.
+
+endpoints:
+  # Single-entity endpoints — return the corpus dict directly.
+  - path: /v3/users/me
+    method: GET
+    corpus: users
+    response:
+      single_entity: true
+      pagination_style: none
+
+  - path: /v3/surveys/{survey_id}/details
+    method: GET
+    corpus: surveys
+    response:
+      single_entity: true
+      pagination_style: none
+
+  # Listing endpoints with the standard SurveyMonkey envelope.
+  - path: /v3/surveys
+    method: GET
+    corpus: surveys
+    response:
+      pagination_style: none
+      wrapper:
+        records_key: data
+        extras:
+          links: {}
+          per_page: 50
+          total: 0
+          page: 1
+
+  - path: /v3/surveys/{survey_id}/responses/bulk
+    method: GET
+    corpus: survey_responses
+    response:
+      pagination_style: none
+      wrapper:
+        records_key: data
+        extras:
+          links: {}
+          per_page: 50
+          total: 0
+          page: 1
+
+  - path: /v3/surveys/{survey_id}/collectors
+    method: GET
+    corpus: collectors
+    response:
+      pagination_style: none
+      wrapper:
+        records_key: data
+        extras:
+          links: {}
+          per_page: 50
+          total: 0
+          page: 1
+
+  - path: /v3/surveys/{survey_id}/rollups
+    method: GET
+    corpus: survey_rollups
+    response:
+      pagination_style: none
+      wrapper:
+        records_key: data
+        extras:
+          links: {}
+          per_page: 50
+          total: 0
+          page: 1
+
+  - path: /v3/groups
+    method: GET
+    corpus: groups
+    response:
+      pagination_style: none
+      wrapper:
+        records_key: data
+        extras:
+          links: {}
+          per_page: 50
+          total: 0
+          page: 1
+
+  - path: /v3/groups/{group_id}/members
+    method: GET
+    corpus: group_members
+    response:
+      pagination_style: none
+      wrapper:
+        records_key: data
+        extras:
+          links: {}
+          per_page: 50
+          total: 0
+          page: 1
+
+  - path: /v3/contact_lists
+    method: GET
+    corpus: contact_lists
+    response:
+      pagination_style: none
+      wrapper:
+        records_key: data
+        extras:
+          links: {}
+          per_page: 50
+          total: 0
+          page: 1
+
+  - path: /v3/contacts
+    method: GET
+    corpus: contacts
+    response:
+      pagination_style: none
+      wrapper:
+        records_key: data
+        extras:
+          links: {}
+          per_page: 50
+          total: 0
+          page: 1
+
+  # Tables we may not have generated spec entries for; follow the same pattern.
+  - path: /v3/survey_pages
+    method: GET
+    corpus: survey_pages
+    response: {pagination_style: none, wrapper: {records_key: data, extras: {links: {}, page: 1}}}
+  - path: /v3/survey_questions
+    method: GET
+    corpus: survey_questions
+    response: {pagination_style: none, wrapper: {records_key: data, extras: {links: {}, page: 1}}}
+  - path: /v3/workgroups
+    method: GET
+    corpus: workgroups
+    response: {pagination_style: none, wrapper: {records_key: data, extras: {links: {}, page: 1}}}
+  - path: /v3/survey_folders
+    method: GET
+    corpus: survey_folders
+    response: {pagination_style: none, wrapper: {records_key: data, extras: {links: {}, page: 1}}}
+  - path: /v3/survey_categories
+    method: GET
+    corpus: survey_categories
+    response: {pagination_style: none, wrapper: {records_key: data, extras: {links: {}, page: 1}}}
+  - path: /v3/survey_templates
+    method: GET
+    corpus: survey_templates
+    response: {pagination_style: none, wrapper: {records_key: data, extras: {links: {}, page: 1}}}
+  - path: /v3/survey_languages
+    method: GET
+    corpus: survey_languages
+    response: {pagination_style: none, wrapper: {records_key: data, extras: {links: {}, page: 1}}}
+  - path: /v3/webhooks
+    method: GET
+    corpus: webhooks
+    response: {pagination_style: none, wrapper: {records_key: data, extras: {links: {}, page: 1}}}
+  - path: /v3/benchmark_bundles
+    method: GET
+    corpus: benchmark_bundles
+    response: {pagination_style: none, wrapper: {records_key: data, extras: {links: {}, page: 1}}}

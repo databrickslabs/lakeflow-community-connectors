@@ -1,0 +1,154 @@
+[
+  {
+    "pullRequestId": 52565,
+    "codeReviewId": 59089,
+    "status": "tango-871",
+    "createdBy": {
+      "id": "victor-880",
+      "displayName": "victor-657",
+      "uniqueName": "zulu-254",
+      "url": "papa-849",
+      "imageUrl": "hotel-571"
+    },
+    "creationDate": "whiskey-439",
+    "closedDate": "golf-759",
+    "title": "golf-210",
+    "description": "oscar-299",
+    "sourceRefName": "charlie-780",
+    "targetRefName": "charlie-831",
+    "mergeStatus": "xray-365",
+    "mergeId": "hotel-722",
+    "lastMergeSourceCommit": {
+      "commitId": "papa-990",
+      "url": "foxtrot-125"
+    },
+    "lastMergeTargetCommit": {
+      "commitId": "golf-127",
+      "url": "oscar-235"
+    },
+    "lastMergeCommit": {
+      "commitId": "november-471",
+      "url": "echo-984"
+    },
+    "url": "yankee-578",
+    "supportsIterations": true,
+    "artifactId": "zulu-229",
+    "organization": "romeo-667",
+    "project_name": "whiskey-793",
+    "repository_id": "oscar-875"
+  },
+  {
+    "pullRequestId": 32775,
+    "codeReviewId": 30882,
+    "status": "papa-108",
+    "createdBy": {
+      "id": "delta-760",
+      "displayName": "echo-449",
+      "uniqueName": "charlie-152",
+      "url": "foxtrot-893",
+      "imageUrl": "juliet-787"
+    },
+    "creationDate": "charlie-147",
+    "closedDate": "sierra-459",
+    "title": "november-385",
+    "description": "november-236",
+    "sourceRefName": "alpha-869",
+    "targetRefName": "zulu-458",
+    "mergeStatus": "sierra-866",
+    "mergeId": "hotel-415",
+    "lastMergeSourceCommit": {
+      "commitId": "uniform-120",
+      "url": "sierra-725"
+    },
+    "lastMergeTargetCommit": {
+      "commitId": "echo-874",
+      "url": "november-525"
+    },
+    "lastMergeCommit": {
+      "commitId": "bravo-186",
+      "url": "lima-294"
+    },
+    "url": "romeo-525",
+    "supportsIterations": true,
+    "artifactId": "xray-688",
+    "organization": "romeo-162",
+    "project_name": "november-807",
+    "repository_id": "juliet-769"
+  },
+  {
+    "pullRequestId": 94194,
+    "codeReviewId": 68431,
+    "status": "sierra-810",
+    "createdBy": {
+      "id": "juliet-519",
+      "displayName": "bravo-406",
+      "uniqueName": "hotel-218",
+      "url": "india-314",
+      "imageUrl": "victor-942"
+    },
+    "creationDate": "delta-799",
+    "closedDate": "romeo-265",
+    "title": "india-792",
+    "description": "uniform-418",
+    "sourceRefName": "lima-226",
+    "targetRefName": "foxtrot-682",
+    "mergeStatus": "zulu-544",
+    "mergeId": "tango-622",
+    "lastMergeSourceCommit": {
+      "commitId": "tango-140",
+      "url": "victor-295"
+    },
+    "lastMergeTargetCommit": {
+      "commitId": "echo-384",
+      "url": "zulu-815"
+    },
+    "lastMergeCommit": {
+      "commitId": "sierra-354",
+      "url": "lima-634"
+    },
+    "url": "foxtrot-798",
+    "supportsIterations": false,
+    "artifactId": "alpha-897",
+    "organization": "oscar-814",
+    "project_name": "tango-953",
+    "repository_id": "oscar-294"
+  },
+  {
+    "pullRequestId": 48099,
+    "codeReviewId": 74877,
+    "status": "whiskey-248",
+    "createdBy": {
+      "id": "uniform-530",
+      "displayName": "juliet-130",
+      "uniqueName": "delta-826",
+      "url": "romeo-861",
+      "imageUrl": "foxtrot-126"
+    },
+    "creationDate": "foxtrot-960",
+    "closedDate": "oscar-394",
+    "title": "romeo-422",
+    "description": "romeo-316",
+    "sourceRefName": "yankee-353",
+    "targetRefName": "sierra-853",
+    "mergeStatus": "whiskey-601",
+    "mergeId": "sierra-594",
+    "lastMergeSourceCommit": {
+      "commitId": "lima-161",
+      "url": "xray-460"
+    },
+    "lastMergeTargetCommit": {
+      "commitId": "alpha-782",
+      "url": "bravo-590"
+    },
+    "lastMergeCommit": {
+      "commitId": "quebec-653",
+      "url": "india-631"
+    },
+    "url": "tango-149",
+    "supportsIterations": false,
+    "artifactId": "xray-971",
+    "organization": "echo-656",
+    "project_name": "victor-249",
+    "repository_id": "bravo-284"
+  }
+]

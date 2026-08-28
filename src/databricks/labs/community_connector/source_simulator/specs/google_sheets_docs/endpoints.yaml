@@ -1,0 +1,49 @@
+# Google Sheets + Docs (uses ``requests`` directly).
+#
+# Three hosts:
+# * https://oauth2.googleapis.com/token — OAuth refresh
+# * https://www.googleapis.com/drive/v3/files — Drive list (spreadsheets, documents)
+# * https://sheets.googleapis.com/v4/spreadsheets/{id} — sheet metadata + values
+# * https://docs.googleapis.com/v1/documents/{id} — Docs API
+
+endpoints:
+  - path: /token
+    method: POST
+    corpus: oauth_token
+    response: {single_entity: true, pagination_style: none}
+
+  # Drive list — spreadsheets/documents discovery.
+  - path: /drive/v3/files
+    method: GET
+    corpus: empty_files
+    response: {single_entity: true, pagination_style: none}
+
+  # Drive single-file fetch + export.
+  - path: /drive/v3/files/{file_id}
+    method: GET
+    corpus: empty_spreadsheet
+    response: {single_entity: true, pagination_style: none}
+
+  - path: /drive/v3/files/{file_id}/export
+    method: GET
+    corpus: doc_export
+    response: {single_entity: true, pagination_style: none}
+
+  # Sheets API.
+  - path: /v4/spreadsheets/{spreadsheet_id}
+    method: GET
+    corpus: empty_spreadsheet
+    response: {single_entity: true, pagination_style: none}
+
+  # Sheet values endpoints. Uses URL-encoded range in the path; placeholder
+  # captures whatever segment(s) the connector emits.
+  - path: /v4/spreadsheets/{spreadsheet_id}/values/{range}
+    method: GET
+    corpus: empty_values
+    response: {single_entity: true, pagination_style: none}
+
+  # Docs API.
+  - path: /v1/documents/{document_id}
+    method: GET
+    corpus: empty_document
+    response: {single_entity: true, pagination_style: none}

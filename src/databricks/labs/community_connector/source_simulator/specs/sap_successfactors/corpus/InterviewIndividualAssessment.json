@@ -1,0 +1,38 @@
+[
+  {
+    "interviewIndividualAssessmentId": 33246,
+    "interviewOverallAssessmentId": 93452,
+    "refId": 34736,
+    "type": "victor-578",
+    "rating": "quebec-408",
+    "comments": "zulu-965",
+    "isDeleted": "delta-288"
+  },
+  {
+    "interviewIndividualAssessmentId": 18511,
+    "interviewOverallAssessmentId": 19973,
+    "refId": 29320,
+    "type": "uniform-390",
+    "rating": "whiskey-425",
+    "comments": "victor-982",
+    "isDeleted": "mike-295"
+  },
+  {
+    "interviewIndividualAssessmentId": 1210,
+    "interviewOverallAssessmentId": 60229,
+    "refId": 51837,
+    "type": "hotel-926",
+    "rating": "november-668",
+    "comments": "romeo-831",
+    "isDeleted": "november-539"
+  },
+  {
+    "interviewIndividualAssessmentId": 57116,
+    "interviewOverallAssessmentId": 86228,
+    "refId": 97651,
+    "type": "zulu-691",
+    "rating": "whiskey-578",
+    "comments": "mike-616",
+    "isDeleted": "delta-531"
+  }
+]

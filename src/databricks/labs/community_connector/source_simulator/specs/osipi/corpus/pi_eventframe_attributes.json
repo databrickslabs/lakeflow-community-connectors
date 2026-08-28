@@ -1,0 +1,50 @@
+[
+  {
+    "event_frame_webid": "zulu-271",
+    "attribute_webid": "papa-912",
+    "name": "delta-142",
+    "description": "golf-117",
+    "path": "whiskey-123",
+    "type": "foxtrot-732",
+    "default_units_name": "juliet-104",
+    "data_reference_plugin": "bravo-932",
+    "is_configuration_item": true,
+    "ingestion_timestamp": "2024-01-13T16:35:41Z"
+  },
+  {
+    "event_frame_webid": "delta-629",
+    "attribute_webid": "golf-938",
+    "name": "quebec-255",
+    "description": "kilo-775",
+    "path": "yankee-528",
+    "type": "charlie-120",
+    "default_units_name": "quebec-545",
+    "data_reference_plugin": "oscar-782",
+    "is_configuration_item": false,
+    "ingestion_timestamp": "2024-01-28T23:40:00Z"
+  },
+  {
+    "event_frame_webid": "delta-944",
+    "attribute_webid": "uniform-854",
+    "name": "yankee-278",
+    "description": "india-709",
+    "path": "zulu-140",
+    "type": "charlie-624",
+    "default_units_name": "zulu-106",
+    "data_reference_plugin": "xray-426",
+    "is_configuration_item": false,
+    "ingestion_timestamp": "2024-01-02T21:43:05Z"
+  },
+  {
+    "event_frame_webid": "sierra-509",
+    "attribute_webid": "foxtrot-331",
+    "name": "bravo-500",
+    "description": "papa-221",
+    "path": "uniform-814",
+    "type": "tango-380",
+    "default_units_name": "xray-776",
+    "data_reference_plugin": "november-455",
+    "is_configuration_item": true,
+    "ingestion_timestamp": "2024-01-25T02:24:41Z"
+  }
+]

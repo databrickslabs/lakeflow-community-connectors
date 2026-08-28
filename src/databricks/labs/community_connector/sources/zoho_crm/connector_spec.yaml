@@ -74,9 +74,6 @@ connection:
 # External Options Allowlist
 # These table-specific options must be included in the externalOptionsAllowList
 # parameter of the UC connection to allow them to be passed through.
-#
-# This connector does not use any table-specific options - all configuration
-# is handled at the connection level. Table names are dynamically discovered
-# from the Zoho CRM Modules API.
+# Use a comma-separated string of option names.
 # ============================================================================
-external_options_allowlist: ""
+external_options_allowlist: "max_records_per_batch"

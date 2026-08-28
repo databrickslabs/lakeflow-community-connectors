@@ -1,0 +1,132 @@
+# OSIsoft PI Web API.
+#
+# All responses use the standard ``{"Items": [...]}`` wrapper. We return
+# empty Items for everything — the connector terminates immediately on
+# empty parents, so drill-down loops don't fire and per-stream endpoints
+# never get hit.
+
+endpoints:
+  - path: /piwebapi/dataservers
+    method: GET
+    corpus: empty_items
+    response: {pagination_style: none, single_entity: true}
+
+  - path: /piwebapi/dataservers/{webid}/points
+    method: GET
+    corpus: empty_items
+    response: {pagination_style: none, single_entity: true}
+
+  - path: /piwebapi/points/{webid}/attributes
+    method: GET
+    corpus: empty_items
+    response: {pagination_style: none, single_entity: true}
+
+  - path: /piwebapi/streamsets/recorded
+    method: GET
+    corpus: empty_items
+    response: {pagination_style: none, single_entity: true}
+
+  - path: /piwebapi/streamsets/interpolated
+    method: GET
+    corpus: empty_items
+    response: {pagination_style: none, single_entity: true}
+
+  - path: /piwebapi/streamsets/plot
+    method: GET
+    corpus: empty_items
+    response: {pagination_style: none, single_entity: true}
+
+  - path: /piwebapi/streamsets/summary
+    method: GET
+    corpus: empty_items
+    response: {pagination_style: none, single_entity: true}
+
+  - path: /piwebapi/streamsets/end
+    method: GET
+    corpus: empty_items
+    response: {pagination_style: none, single_entity: true}
+
+  - path: /piwebapi/streams/{webid}/recorded
+    method: GET
+    corpus: empty_items
+    response: {pagination_style: none, single_entity: true}
+
+  - path: /piwebapi/streams/{webid}/interpolated
+    method: GET
+    corpus: empty_items
+    response: {pagination_style: none, single_entity: true}
+
+  - path: /piwebapi/streams/{webid}/plot
+    method: GET
+    corpus: empty_items
+    response: {pagination_style: none, single_entity: true}
+
+  - path: /piwebapi/streams/{webid}/summary
+    method: GET
+    corpus: empty_items
+    response: {pagination_style: none, single_entity: true}
+
+  - path: /piwebapi/streams/{webid}/value
+    method: GET
+    corpus: empty_items
+    response: {pagination_style: none, single_entity: true}
+
+  - path: /piwebapi/streams/{webid}/end
+    method: GET
+    corpus: empty_items
+    response: {pagination_style: none, single_entity: true}
+
+  - path: /piwebapi/streams/{webid}/recordedattime
+    method: GET
+    corpus: empty_items
+    response: {pagination_style: none, single_entity: true}
+
+  - path: /piwebapi/assetservers
+    method: GET
+    corpus: empty_items
+    response: {pagination_style: none, single_entity: true}
+
+  - path: /piwebapi/assetdatabases
+    method: GET
+    corpus: empty_items
+    response: {pagination_style: none, single_entity: true}
+
+  - path: /piwebapi/uoms
+    method: GET
+    corpus: empty_items
+    response: {pagination_style: none, single_entity: true}
+
+  - path: /piwebapi/eventframes
+    method: GET
+    corpus: empty_items
+    response: {pagination_style: none, single_entity: true}
+
+  - path: /piwebapi/elements
+    method: GET
+    corpus: empty_items
+    response: {pagination_style: none, single_entity: true}
+
+  - path: /piwebapi/elementtemplates
+    method: GET
+    corpus: empty_items
+    response: {pagination_style: none, single_entity: true}
+
+  - path: /piwebapi/categories
+    method: GET
+    corpus: empty_items
+    response: {pagination_style: none, single_entity: true}
+
+  - path: /piwebapi/analyses
+    method: GET
+    corpus: empty_items
+    response: {pagination_style: none, single_entity: true}
+
+  - path: /piwebapi/analysistemplates
+    method: GET
+    corpus: empty_items
+    response: {pagination_style: none, single_entity: true}
+
+  - path: /piwebapi/tables
+    method: GET
+    corpus: empty_items
+    response: {pagination_style: none, single_entity: true}

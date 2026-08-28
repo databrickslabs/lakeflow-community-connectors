@@ -1,0 +1,58 @@
+[
+  {
+    "OnboardingNewHireActivitiesStep_processStepId": 3820,
+    "OnboardingProcess_onboardingProcessId": 4949,
+    "activityId": 33079,
+    "activityStatus": "alpha-440",
+    "createdBy": "uniform-164",
+    "createdDateTime": "echo-415",
+    "eventTriggered": false,
+    "externalName": "india-914",
+    "lastModifiedBy": "hotel-805",
+    "lastModifiedDateTime": "alpha-250",
+    "mdfSystemRecordStatus": "india-371",
+    "optional": false
+  },
+  {
+    "OnboardingNewHireActivitiesStep_processStepId": 56151,
+    "OnboardingProcess_onboardingProcessId": 16537,
+    "activityId": 47514,
+    "activityStatus": "romeo-725",
+    "createdBy": "tango-438",
+    "createdDateTime": "zulu-199",
+    "eventTriggered": false,
+    "externalName": "hotel-538",
+    "lastModifiedBy": "xray-115",
+    "lastModifiedDateTime": "golf-431",
+    "mdfSystemRecordStatus": "tango-625",
+    "optional": true
+  },
+  {
+    "OnboardingNewHireActivitiesStep_processStepId": 76967,
+    "OnboardingProcess_onboardingProcessId": 24434,
+    "activityId": 29897,
+    "activityStatus": "juliet-385",
+    "createdBy": "bravo-816",
+    "createdDateTime": "hotel-424",
+    "eventTriggered": true,
+    "externalName": "kilo-134",
+    "lastModifiedBy": "echo-570",
+    "lastModifiedDateTime": "oscar-127",
+    "mdfSystemRecordStatus": "lima-486",
+    "optional": true
+  },
+  {
+    "OnboardingNewHireActivitiesStep_processStepId": 44667,
+    "OnboardingProcess_onboardingProcessId": 56859,
+    "activityId": 1695,
+    "activityStatus": "bravo-118",
+    "createdBy": "zulu-220",
+    "createdDateTime": "uniform-481",
+    "eventTriggered": true,
+    "externalName": "alpha-177",
+    "lastModifiedBy": "lima-876",
+    "lastModifiedDateTime": "november-614",
+    "mdfSystemRecordStatus": "oscar-193",
+    "optional": true
+  }
+]

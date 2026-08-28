@@ -1,0 +1,34 @@
+[
+  {
+    "workerId": "whiskey-569",
+    "createdBy": "november-587",
+    "createdDateTime": "foxtrot-551",
+    "lastModifiedBy": "kilo-602",
+    "lastModifiedDateTime": "juliet-211",
+    "mdfSystemRecordStatus": "foxtrot-802"
+  },
+  {
+    "workerId": "bravo-868",
+    "createdBy": "oscar-952",
+    "createdDateTime": "lima-455",
+    "lastModifiedBy": "hotel-378",
+    "lastModifiedDateTime": "bravo-546",
+    "mdfSystemRecordStatus": "whiskey-787"
+  },
+  {
+    "workerId": "zulu-181",
+    "createdBy": "victor-455",
+    "createdDateTime": "echo-299",
+    "lastModifiedBy": "november-266",
+    "lastModifiedDateTime": "juliet-502",
+    "mdfSystemRecordStatus": "echo-382"
+  },
+  {
+    "workerId": "hotel-862",
+    "createdBy": "bravo-205",
+    "createdDateTime": "charlie-360",
+    "lastModifiedBy": "charlie-833",
+    "lastModifiedDateTime": "november-955",
+    "mdfSystemRecordStatus": "oscar-512"
+  }
+]

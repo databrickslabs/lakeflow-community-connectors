@@ -1,0 +1,58 @@
+[
+  {
+    "jobReqId": 7067,
+    "operatorRole": "echo-469",
+    "userName": "lima-983",
+    "usersSysId": "kilo-689",
+    "firstName": "india-955",
+    "lastName": "juliet-658",
+    "email": "november-498",
+    "phone": "november-662",
+    "fax": "mike-628",
+    "isOwner": false,
+    "isAdminSelected": false,
+    "adminSelectedUserToBeRemoved": true
+  },
+  {
+    "jobReqId": 58188,
+    "operatorRole": "alpha-478",
+    "userName": "uniform-885",
+    "usersSysId": "lima-258",
+    "firstName": "lima-505",
+    "lastName": "hotel-494",
+    "email": "golf-501",
+    "phone": "oscar-889",
+    "fax": "xray-245",
+    "isOwner": true,
+    "isAdminSelected": true,
+    "adminSelectedUserToBeRemoved": false
+  },
+  {
+    "jobReqId": 76847,
+    "operatorRole": "india-593",
+    "userName": "uniform-323",
+    "usersSysId": "yankee-343",
+    "firstName": "uniform-889",
+    "lastName": "november-341",
+    "email": "zulu-424",
+    "phone": "sierra-411",
+    "fax": "xray-328",
+    "isOwner": true,
+    "isAdminSelected": false,
+    "adminSelectedUserToBeRemoved": false
+  },
+  {
+    "jobReqId": 59669,
+    "operatorRole": "uniform-976",
+    "userName": "golf-382",
+    "usersSysId": "echo-765",
+    "firstName": "whiskey-567",
+    "lastName": "uniform-339",
+    "email": "alpha-819",
+    "phone": "delta-597",
+    "fax": "november-356",
+    "isOwner": true,
+    "isAdminSelected": true,
+    "adminSelectedUserToBeRemoved": true
+  }
+]

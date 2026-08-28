@@ -248,13 +248,13 @@ class ZohoAPIClient:  # pylint: disable=too-many-instance-attributes
         """
         method = method.upper()
         if method == "GET":
-            return self._session.get(url, headers=headers, params=params)
+            return self._session.get(url, headers=headers, params=params, timeout=60)
         elif method == "POST":
-            return self._session.post(url, headers=headers, json=data, params=params)
+            return self._session.post(url, headers=headers, json=data, params=params, timeout=60)
         elif method == "PUT":
-            return self._session.put(url, headers=headers, json=data, params=params)
+            return self._session.put(url, headers=headers, json=data, params=params, timeout=60)
         elif method == "DELETE":
-            return self._session.delete(url, headers=headers, params=params)
+            return self._session.delete(url, headers=headers, params=params, timeout=60)
         else:
             raise ValueError(f"Unsupported HTTP method: {method}")
 

@@ -1,0 +1,5 @@
+MSH|^~\&|DICTATION_SYS|GENERAL_HOSPITAL|EHR|EHR|20240320110000||MDM^T02^MDM_T02|MSGMDM001|P|2.5.1
+PID|1||MRN90002^^^HOSP^MR||Baker^James^William||19651210|M|||100 Broad St^^New York^NY^10004^US
+PV1|1|I|MED^401^A^HOSP||||DOC005^Kumar^Anil^^^Dr^MD
+TXA|1|DS|TX|20240320110000|DOC005^Kumar^Anil^^^Dr|20240320080000|20240320100000||DOC005^Kumar^Anil|ASSIGN001^Smith^John|TRANS001^Rivera^Ana|TXA10001^HOSP||||DISCHSUM_20240320.txt|AU||AV|AC|||||Discharge Summary for Baker, James
+OBX|1|TX|18842-5^Discharge Summary^LN||Patient Baker, James W. was admitted on 2024-03-15 with acute respiratory distress. Treatment included supplemental oxygen therapy and antibiotics. Patient responded well to treatment and is discharged in stable condition.||||||F

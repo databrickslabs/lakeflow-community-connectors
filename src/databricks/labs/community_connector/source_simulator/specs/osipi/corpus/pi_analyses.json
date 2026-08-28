@@ -1,0 +1,38 @@
+[
+  {
+    "webid": "papa-673",
+    "name": "delta-723",
+    "description": "foxtrot-894",
+    "path": "hotel-683",
+    "analysis_template_name": "hotel-838",
+    "target_element_webid": "romeo-777",
+    "assetdatabase_webid": "golf-600"
+  },
+  {
+    "webid": "golf-344",
+    "name": "quebec-115",
+    "description": "zulu-756",
+    "path": "papa-470",
+    "analysis_template_name": "romeo-526",
+    "target_element_webid": "charlie-289",
+    "assetdatabase_webid": "whiskey-143"
+  },
+  {
+    "webid": "alpha-207",
+    "name": "victor-448",
+    "description": "uniform-984",
+    "path": "echo-466",
+    "analysis_template_name": "hotel-163",
+    "target_element_webid": "delta-370",
+    "assetdatabase_webid": "golf-167"
+  },
+  {
+    "webid": "golf-963",
+    "name": "uniform-791",
+    "description": "oscar-195",
+    "path": "whiskey-398",
+    "analysis_template_name": "quebec-331",
+    "target_element_webid": "zulu-138",
+    "assetdatabase_webid": "quebec-126"
+  }
+]

@@ -1,0 +1,50 @@
+{
+  "legalTags": [
+    {
+      "name":        "opendes-public-usa-dataset-1",
+      "description": "Public domain US oil and gas data — no export restriction, no personal data",
+      "isValid":     true,
+      "properties":  {
+        "countryOfOrigin":        ["US"],
+        "contractId":             "PUBLIC-DOMAIN",
+        "expirationDate":         "2099-12-31",
+        "dataType":               "Public Domain Data",
+        "originator":             "USGS / BOEM",
+        "securityClassification": "Public",
+        "personalData":           "No Personal Data",
+        "exportClassification":   "EAR99"
+      }
+    },
+    {
+      "name":        "opendes-north-sea-dataset-1",
+      "description": "Norwegian North Sea E&P data shared under NPD open data licence",
+      "isValid":     true,
+      "properties":  {
+        "countryOfOrigin":        ["NO", "GB"],
+        "contractId":             "NPD-OPEN-DATA-LICENCE-2022",
+        "expirationDate":         "2040-12-31",
+        "dataType":               "Third Party Data",
+        "originator":             "Norwegian Petroleum Directorate",
+        "securityClassification": "Restricted",
+        "personalData":           "No Personal Data",
+        "exportClassification":   "EAR99"
+      }
+    },
+    {
+      "name":        "opendes-boem-ocs-dataset-1",
+      "description": "US Gulf of Mexico OCS data submitted under BOEM OCS lease obligations",
+      "isValid":     true,
+      "properties":  {
+        "countryOfOrigin":        ["US"],
+        "contractId":             "BOEM-OCS-LICENSE-2021",
+        "expirationDate":         "2050-12-31",
+        "dataType":               "Public Domain Data",
+        "originator":             "Bureau of Ocean Energy Management",
+        "securityClassification": "Public",
+        "personalData":           "No Personal Data",
+        "exportClassification":   "EAR99"
+      }
+    }
+  ],
+  "totalCount": 3
+}

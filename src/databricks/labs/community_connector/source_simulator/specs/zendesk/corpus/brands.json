@@ -1,0 +1,76 @@
+[
+  {
+    "id": 1000,
+    "url": "delta-667",
+    "name": "zulu-880",
+    "brand_url": "xray-356",
+    "subdomain": "juliet-968",
+    "host_mapping": "delta-295",
+    "has_help_center": false,
+    "help_center_state": "xray-950",
+    "active": false,
+    "default": true,
+    "is_deleted": false,
+    "created_at": "mike-514",
+    "updated_at": "hotel-592",
+    "ticket_form_ids": [
+      60693
+    ],
+    "signature_template": "papa-580"
+  },
+  {
+    "id": 1001,
+    "url": "yankee-569",
+    "name": "papa-371",
+    "brand_url": "kilo-453",
+    "subdomain": "echo-302",
+    "host_mapping": "oscar-132",
+    "has_help_center": true,
+    "help_center_state": "charlie-126",
+    "active": false,
+    "default": true,
+    "is_deleted": false,
+    "created_at": "whiskey-266",
+    "updated_at": "tango-523",
+    "ticket_form_ids": [
+      96249
+    ],
+    "signature_template": "lima-603"
+  },
+  {
+    "id": 1002,
+    "url": "november-765",
+    "name": "hotel-252",
+    "brand_url": "tango-882",
+    "subdomain": "charlie-739",
+    "host_mapping": "echo-294",
+    "has_help_center": false,
+    "help_center_state": "delta-671",
+    "active": true,
+    "default": true,
+    "is_deleted": false,
+    "created_at": "zulu-230",
+    "updated_at": "hotel-292",
+    "ticket_form_ids": [],
+    "signature_template": "quebec-925"
+  },
+  {
+    "id": 1003,
+    "url": "mike-164",
+    "name": "alpha-709",
+    "brand_url": "delta-883",
+    "subdomain": "xray-416",
+    "host_mapping": "mike-630",
+    "has_help_center": true,
+    "help_center_state": "lima-200",
+    "active": false,
+    "default": false,
+    "is_deleted": true,
+    "created_at": "yankee-174",
+    "updated_at": "delta-605",
+    "ticket_form_ids": [
+      13798
+    ],
+    "signature_template": "delta-553"
+  }
+]

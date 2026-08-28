@@ -1,0 +1,152 @@
+# Azure DevOps REST API.
+#
+# Two base hosts:
+# * https://dev.azure.com/{org} — main API
+# * https://vssps.dev.azure.com/{org} — graph (users)
+#
+# Standard wrapper: {"value": [...], "count": N, "continuationToken": null}.
+# Empty value array → connector terminates pagination immediately.
+
+endpoints:
+  - path: /{organization}/_apis/projects
+    method: GET
+    corpus: projects
+    response:
+      pagination_style: none
+      wrapper:
+        records_key: value
+        extras:
+          count: 0
+          continuationToken: null
+
+  - path: /{organization}/{project}/_apis/git/repositories
+    method: GET
+    corpus: repositories
+    response:
+      pagination_style: none
+      wrapper:
+        records_key: value
+        extras:
+          count: 0
+
+  - path: /{organization}/{project}/_apis/git/repositories/{repo_id}/commits
+    method: GET
+    corpus: commits
+    response:
+      pagination_style: none
+      wrapper:
+        records_key: value
+        extras:
+          count: 0
+
+  - path: /{organization}/{project}/_apis/git/repositories/{repo_id}/pullrequests
+    method: GET
+    corpus: pullrequests
+    response:
+      pagination_style: none
+      wrapper:
+        records_key: value
+        extras:
+          count: 0
+
+  - path: /{organization}/{project}/_apis/git/repositories/{repo_id}/refs
+    method: GET
+    corpus: refs
+    response:
+      pagination_style: none
+      wrapper:
+        records_key: value
+        extras:
+          count: 0
+
+  - path: /{organization}/{project}/_apis/git/repositories/{repo_id}/pushes
+    method: GET
+    corpus: pushes
+    response:
+      pagination_style: none
+      wrapper:
+        records_key: value
+        extras:
+          count: 0
+
+  - path: /{organization}/{project}/_apis/git/repositories/{repo_id}/pullRequests/{pull_request_id}/threads
+    method: GET
+    corpus: pullrequest_threads
+    response:
+      pagination_style: none
+      wrapper:
+        records_key: value
+        extras: {count: 0}
+
+  - path: /{organization}/{project}/_apis/git/repositories/{repo_id}/pullRequests/{pull_request_id}/workitems
+    method: GET
+    corpus: pullrequest_workitems
+    response:
+      pagination_style: none
+      wrapper:
+        records_key: value
+        extras: {count: 0}
+
+  - path: /{organization}/{project}/_apis/git/repositories/{repo_id}/pullRequests/{pull_request_id}/commits
+    method: GET
+    corpus: pullrequest_commits
+    response:
+      pagination_style: none
+      wrapper:
+        records_key: value
+        extras: {count: 0}
+
+  - path: /{organization}/{project}/_apis/git/repositories/{repo_id}/pullRequests/{pull_request_id}/reviewers
+    method: GET
+    corpus: pullrequest_reviewers
+    response:
+      pagination_style: none
+      wrapper:
+        records_key: value
+        extras: {count: 0}
+
+  - path: /{organization}/{project}/_apis/wit/wiql
+    method: POST
+    corpus: wiql_empty
+    response:
+      pagination_style: none
+      single_entity: true
+
+  - path: /{organization}/{project}/_apis/wit/workitems
+    method: GET
+    corpus: workitems
+    response:
+      pagination_style: none
+      wrapper:
+        records_key: value
+        extras: {count: 0}
+
+  - path: /{organization}/{project}/_apis/wit/workitemtypes
+    method: GET
+    corpus: workitem_types
+    response:
+      pagination_style: none
+      wrapper:
+        records_key: value
+        extras: {count: 0}
+
+  - path: /{organization}/_apis/graph/users
+    method: GET
+    corpus: users
+    response:
+      pagination_style: none
+      wrapper:
+        records_key: value
+        extras: {count: 0}
+
+  - path: /{organization}/{project}/_apis/wit/reporting/workitemrevisions
+    method: GET
+    corpus: workitem_revisions
+    response:
+      pagination_style: none
+      wrapper:
+        records_key: values
+        extras:
+          count: 0
+          isLastBatch: true
+          nextLink: null

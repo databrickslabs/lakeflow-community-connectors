@@ -1,0 +1,70 @@
+[
+  {
+    "name": "dev_agent",
+    "commit": {
+      "sha": "e6f94409c0761f2abe65e3aa3cf4da03812ef124",
+      "url": "https://api.github.com/repos/yyoli-db/lakeflow-community-connectors/commits/e6f94409c0761f2abe65e3aa3cf4da03812ef124"
+    },
+    "protected": false,
+    "protection": {
+      "enabled": false,
+      "required_status_checks": {
+        "enforcement_level": "off",
+        "contexts": [],
+        "checks": []
+      }
+    },
+    "protection_url": "https://api.github.com/repos/yyoli-db/lakeflow-community-connectors/branches/dev_agent/protection"
+  },
+  {
+    "name": "dev",
+    "commit": {
+      "sha": "30a36292bb89a56b6462f8f2190f74c827b06850",
+      "url": "https://api.github.com/repos/yyoli-db/lakeflow-community-connectors/commits/30a36292bb89a56b6462f8f2190f74c827b06850"
+    },
+    "protected": false,
+    "protection": {
+      "enabled": false,
+      "required_status_checks": {
+        "enforcement_level": "off",
+        "contexts": [],
+        "checks": []
+      }
+    },
+    "protection_url": "https://api.github.com/repos/yyoli-db/lakeflow-community-connectors/branches/dev/protection"
+  },
+  {
+    "name": "master",
+    "commit": {
+      "sha": "e6f94409c0761f2abe65e3aa3cf4da03812ef124",
+      "url": "https://api.github.com/repos/yyoli-db/lakeflow-community-connectors/commits/e6f94409c0761f2abe65e3aa3cf4da03812ef124"
+    },
+    "protected": false,
+    "protection": {
+      "enabled": false,
+      "required_status_checks": {
+        "enforcement_level": "off",
+        "contexts": [],
+        "checks": []
+      }
+    },
+    "protection_url": "https://api.github.com/repos/yyoli-db/lakeflow-community-connectors/branches/master/protection"
+  },
+  {
+    "name": "test_branch",
+    "commit": {
+      "sha": "e6f94409c0761f2abe65e3aa3cf4da03812ef124",
+      "url": "https://api.github.com/repos/yyoli-db/lakeflow-community-connectors/commits/e6f94409c0761f2abe65e3aa3cf4da03812ef124"
+    },
+    "protected": false,
+    "protection": {
+      "enabled": false,
+      "required_status_checks": {
+        "enforcement_level": "off",
+        "contexts": [],
+        "checks": []
+      }
+    },
+    "protection_url": "https://api.github.com/repos/yyoli-db/lakeflow-community-connectors/branches/test_branch/protection"
+  }
+]

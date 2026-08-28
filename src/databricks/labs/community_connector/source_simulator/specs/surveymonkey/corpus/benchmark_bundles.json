@@ -1,0 +1,50 @@
+[
+  {
+    "id": "kilo-325",
+    "name": "delta-297",
+    "description": "tango-133",
+    "title": "oscar-357",
+    "details": {
+      "industry": "victor-845",
+      "sample_size": 50219
+    },
+    "country_code": "mike-475",
+    "href": "romeo-686"
+  },
+  {
+    "id": "foxtrot-768",
+    "name": "echo-666",
+    "description": "foxtrot-230",
+    "title": "sierra-887",
+    "details": {
+      "industry": "bravo-423",
+      "sample_size": 73348
+    },
+    "country_code": "oscar-909",
+    "href": "romeo-781"
+  },
+  {
+    "id": "kilo-138",
+    "name": "romeo-443",
+    "description": "whiskey-603",
+    "title": "foxtrot-302",
+    "details": {
+      "industry": "foxtrot-804",
+      "sample_size": 7701
+    },
+    "country_code": "victor-217",
+    "href": "whiskey-722"
+  },
+  {
+    "id": "bravo-433",
+    "name": "kilo-380",
+    "description": "hotel-164",
+    "title": "sierra-902",
+    "details": {
+      "industry": "whiskey-604",
+      "sample_size": 10064
+    },
+    "country_code": "foxtrot-217",
+    "href": "victor-403"
+  }
+]

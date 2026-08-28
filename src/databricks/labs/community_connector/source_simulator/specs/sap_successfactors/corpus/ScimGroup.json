@@ -1,0 +1,62 @@
+[
+  {
+    "id": "india-246",
+    "displayName": "bravo-903",
+    "meta_resourceType": "papa-373",
+    "meta_created": "yankee-605",
+    "meta_lastModified": "papa-628",
+    "meta_location": "foxtrot-245",
+    "meta_version": "golf-990",
+    "meta_members_nextId": "hotel-821",
+    "meta_members_cnt": 68861,
+    "sap_type": "golf-333",
+    "sap_supportedOperations": "alpha-841",
+    "members": "oscar-295",
+    "schemas": "uniform-789"
+  },
+  {
+    "id": "sierra-688",
+    "displayName": "whiskey-534",
+    "meta_resourceType": "tango-854",
+    "meta_created": "india-399",
+    "meta_lastModified": "juliet-835",
+    "meta_location": "juliet-426",
+    "meta_version": "xray-758",
+    "meta_members_nextId": "uniform-867",
+    "meta_members_cnt": 33360,
+    "sap_type": "india-440",
+    "sap_supportedOperations": "echo-383",
+    "members": "foxtrot-663",
+    "schemas": "golf-701"
+  },
+  {
+    "id": "uniform-108",
+    "displayName": "bravo-736",
+    "meta_resourceType": "xray-984",
+    "meta_created": "bravo-651",
+    "meta_lastModified": "echo-239",
+    "meta_location": "mike-476",
+    "meta_version": "mike-357",
+    "meta_members_nextId": "romeo-123",
+    "meta_members_cnt": 47319,
+    "sap_type": "romeo-479",
+    "sap_supportedOperations": "india-459",
+    "members": "bravo-587",
+    "schemas": "sierra-252"
+  },
+  {
+    "id": "juliet-619",
+    "displayName": "juliet-964",
+    "meta_resourceType": "oscar-995",
+    "meta_created": "bravo-443",
+    "meta_lastModified": "hotel-209",
+    "meta_location": "oscar-296",
+    "meta_version": "romeo-441",
+    "meta_members_nextId": "charlie-304",
+    "meta_members_cnt": 54689,
+    "sap_type": "lima-588",
+    "sap_supportedOperations": "golf-726",
+    "members": "alpha-245",
+    "schemas": "quebec-340"
+  }
+]

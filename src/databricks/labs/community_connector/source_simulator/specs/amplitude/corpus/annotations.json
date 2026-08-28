@@ -1,0 +1,98 @@
+[
+  {
+    "id": 1000,
+    "label": "india-235",
+    "start": "2024-01-03T06:47:43Z",
+    "end": "2024-01-08T07:22:29Z",
+    "details": "juliet-963",
+    "chart_id": "hotel-851",
+    "category": {
+      "id": 90734,
+      "name": "november-257"
+    }
+  },
+  {
+    "id": 1001,
+    "label": "victor-744",
+    "start": "2024-01-24T07:18:59Z",
+    "end": "2024-01-26T20:07:41Z",
+    "details": "november-139",
+    "chart_id": "golf-663",
+    "category": {
+      "id": 90184,
+      "name": "hotel-793"
+    }
+  },
+  {
+    "id": 1002,
+    "label": "charlie-748",
+    "start": "2024-01-16T00:33:58Z",
+    "end": "2024-01-24T14:04:43Z",
+    "details": "november-149",
+    "chart_id": "alpha-160",
+    "category": {
+      "id": 57235,
+      "name": "victor-247"
+    }
+  },
+  {
+    "id": 1003,
+    "label": "lima-187",
+    "start": "2024-01-25T01:14:47Z",
+    "end": "2024-01-17T03:24:09Z",
+    "details": "lima-219",
+    "chart_id": "tango-915",
+    "category": {
+      "id": 73782,
+      "name": "zulu-812"
+    }
+  },
+  {
+    "id": 1004,
+    "label": "echo-220",
+    "start": "2024-01-19T02:30:23Z",
+    "end": "2024-01-26T16:57:18Z",
+    "details": "foxtrot-993",
+    "chart_id": "bravo-300",
+    "category": {
+      "id": 79309,
+      "name": "lima-116"
+    }
+  },
+  {
+    "id": 1005,
+    "label": "lima-532",
+    "start": "2024-01-14T04:00:30Z",
+    "end": "2024-01-23T22:00:50Z",
+    "details": "hotel-764",
+    "chart_id": "zulu-566",
+    "category": {
+      "id": 22900,
+      "name": "xray-546"
+    }
+  },
+  {
+    "id": 1006,
+    "label": "romeo-438",
+    "start": "2024-01-23T13:03:38Z",
+    "end": "2024-01-14T05:21:35Z",
+    "details": "lima-462",
+    "chart_id": "sierra-772",
+    "category": {
+      "id": 64389,
+      "name": "delta-790"
+    }
+  },
+  {
+    "id": 1007,
+    "label": "yankee-108",
+    "start": "2024-01-22T00:01:37Z",
+    "end": "2024-01-19T16:36:09Z",
+    "details": "mike-357",
+    "chart_id": "xray-882",
+    "category": {
+      "id": 90146,
+      "name": "quebec-547"
+    }
+  }
+]

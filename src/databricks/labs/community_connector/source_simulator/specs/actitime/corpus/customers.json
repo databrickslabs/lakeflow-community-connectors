@@ -1,0 +1,38 @@
+[
+  {
+    "id": 6,
+    "name": "Big Bang Company",
+    "archived": false,
+    "created": 1770163200000,
+    "url": "https://online.actitime.com/mystartup/tasks/tasklist.do?customerId=6",
+    "allowedActions": {
+      "canModify": true,
+      "canDelete": true
+    },
+    "description": "Building and testing a new generation spaceship"
+  },
+  {
+    "id": 7,
+    "name": "Galaxy Corporation",
+    "archived": false,
+    "created": 1770163200000,
+    "url": "https://online.actitime.com/mystartup/tasks/tasklist.do?customerId=7",
+    "allowedActions": {
+      "canModify": true,
+      "canDelete": true
+    },
+    "description": null
+  },
+  {
+    "id": 9,
+    "name": "Our company",
+    "archived": false,
+    "created": 1770163200000,
+    "url": "https://online.actitime.com/mystartup/tasks/tasklist.do?customerId=9",
+    "allowedActions": {
+      "canModify": true,
+      "canDelete": true
+    },
+    "description": null
+  }
+]

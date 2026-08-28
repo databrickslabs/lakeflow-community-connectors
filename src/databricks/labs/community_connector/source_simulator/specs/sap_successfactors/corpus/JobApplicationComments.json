@@ -1,0 +1,46 @@
+[
+  {
+    "commentId": 43441,
+    "applicationId": 59520,
+    "associatedId": "juliet-446",
+    "associatedCommentId": 37621,
+    "commentator": "golf-734",
+    "content": "romeo-282",
+    "hasAssociatedComment": "tango-267",
+    "refType": "uniform-378",
+    "migratedCommentatorUserName": "delta-780"
+  },
+  {
+    "commentId": 31298,
+    "applicationId": 14394,
+    "associatedId": "india-189",
+    "associatedCommentId": 63049,
+    "commentator": "xray-751",
+    "content": "victor-268",
+    "hasAssociatedComment": "juliet-937",
+    "refType": "romeo-452",
+    "migratedCommentatorUserName": "november-431"
+  },
+  {
+    "commentId": 58366,
+    "applicationId": 74367,
+    "associatedId": "sierra-174",
+    "associatedCommentId": 95953,
+    "commentator": "tango-624",
+    "content": "november-465",
+    "hasAssociatedComment": "romeo-933",
+    "refType": "yankee-726",
+    "migratedCommentatorUserName": "hotel-609"
+  },
+  {
+    "commentId": 47661,
+    "applicationId": 94395,
+    "associatedId": "mike-813",
+    "associatedCommentId": 86927,
+    "commentator": "delta-125",
+    "content": "lima-527",
+    "hasAssociatedComment": "xray-164",
+    "refType": "romeo-832",
+    "migratedCommentatorUserName": "golf-102"
+  }
+]

@@ -1,0 +1,54 @@
+[
+  {
+    "id": "xray-839",
+    "team_id": "sierra-464",
+    "displayName": "xray-356",
+    "description": "xray-293",
+    "email": "xray-235",
+    "webUrl": "hotel-973",
+    "membershipType": "delta-118",
+    "createdDateTime": "romeo-836",
+    "isFavoriteByDefault": true,
+    "isArchived": false,
+    "tenantId": "uniform-944"
+  },
+  {
+    "id": "papa-119",
+    "team_id": "hotel-267",
+    "displayName": "november-334",
+    "description": "quebec-453",
+    "email": "lima-617",
+    "webUrl": "juliet-906",
+    "membershipType": "uniform-363",
+    "createdDateTime": "oscar-788",
+    "isFavoriteByDefault": false,
+    "isArchived": true,
+    "tenantId": "india-718"
+  },
+  {
+    "id": "whiskey-770",
+    "team_id": "charlie-517",
+    "displayName": "november-619",
+    "description": "sierra-337",
+    "email": "golf-220",
+    "webUrl": "mike-290",
+    "membershipType": "mike-683",
+    "createdDateTime": "oscar-187",
+    "isFavoriteByDefault": true,
+    "isArchived": false,
+    "tenantId": "november-139"
+  },
+  {
+    "id": "kilo-507",
+    "team_id": "delta-479",
+    "displayName": "kilo-941",
+    "description": "mike-490",
+    "email": "bravo-424",
+    "webUrl": "foxtrot-993",
+    "membershipType": "delta-560",
+    "createdDateTime": "romeo-859",
+    "isFavoriteByDefault": true,
+    "isArchived": true,
+    "tenantId": "india-692"
+  }
+]

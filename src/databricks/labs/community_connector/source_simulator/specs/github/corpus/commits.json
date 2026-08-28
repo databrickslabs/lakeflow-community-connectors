@@ -1,0 +1,2046 @@
+[
+  {
+    "sha": "e6f94409c0761f2abe65e3aa3cf4da03812ef124",
+    "node_id": "C_kwDOQ5ifOtoAKGU2Zjk0NDA5YzA3NjFmMmFiZTY1ZTNhYTNjZjRkYTAzODEyZWYxMjQ",
+    "commit": {
+      "author": {
+        "name": "Sheldon Tauro",
+        "email": "redacted@example.com",
+        "date": "2026-01-14T05:11:16Z"
+      },
+      "committer": {
+        "name": "GitHub",
+        "email": "redacted@example.com",
+        "date": "2026-01-14T05:11:16Z"
+      },
+      "message": "Add support for validating incremental syncs when write back to source is not implemented. (#74)",
+      "tree": {
+        "sha": "f124d7af711ecf1d97e08b96ded32bce6fd0258a",
+        "url": "https://api.github.com/repos/yyoli-db/lakeflow-community-connectors/git/trees/f124d7af711ecf1d97e08b96ded32bce6fd0258a"
+      },
+      "url": "https://api.github.com/repos/yyoli-db/lakeflow-community-connectors/git/commits/e6f94409c0761f2abe65e3aa3cf4da03812ef124",
+      "comment_count": 0,
+      "verification": {
+        "verified": true,
+        "reason": "valid",
+        "signature": "-----BEGIN PGP SIGNATURE-----\n\nwsFcBAABCAAQBQJpZyV0CRC1aQ7uu5UhlAAAvy4QAHleO2vtfB5QRRxAvm1WC/Zn\n7TFGahzf5dd50LE2agiEGuq1ZuxcQA7cAnGcncISi0hOZu7L3h1t2biUqMgBr6it\nTKg/ybToB/Zikdq8UOesIWRj0JQwPx37GTzvY68S43lduNVtVmcfQlfj6f7ny1tl\nxYNpoQQXEaJfaAHv7jSJGHwxPZzFFjzfoNrVjY6C0hPZNlZvpsR5LJKRUB8Y+n90\n55oO5T4P7IrDSkxoEoF4N1p+HIjsMvOvuGdE9UVqOaQfLPu71T+6TEkCtygD5FBT\nsG+k9hUEYRY4fmUlk0DJ97rXKSbD+Zs6H5iObi4muNoZrovJQ92u81IkPDOP1Ztv\nQPHF1hlM0cfGXAwZUqINsPH8SQ+5hEkjJR23J0y69dVromCYIz4RxICJVk5fCLEc\nU2dPSUX4aS6wBXW+Pv2dds59J+X3hI8dv0wYltwbqjH09rYNA/a/a2GuzQIvc3B9\np8c2StfGVSM+ZusBB8XFhyvurQ4A9iMd4Rf+WWQTI3x+RA0YbbooAsvV+a8n7RBD\negl1RaJVRx5X5YmMGurgzrVNOBykA/zA4oTimpQbKce7OaARG1YAbx/QEpB+qwpE\ns5C0bwIxnh//iUf3HbuN+KBZ2Kn24I7khjXb+8gUrh+l/8Q6sz3NkalMPBl5JcuX\n/vKzoRXSAOXZMRKcX+wh\n=Hpei\n-----END PGP SIGNATURE-----\n",
+        "payload": "tree f124d7af711ecf1d97e08b96ded32bce6fd0258a\nparent bc33ee17829f0b5c0d651a48e74745cea5c538b1\nauthor Sheldon Tauro <redacted@example.com> 1768367476 -0800\ncommitter GitHub <redacted@example.com> 1768367476 -0800\n\nAdd support for validating incremental syncs when write back to source is not implemented. (#74)\n\n",
+        "verified_at": "2026-01-14T05:11:17Z"
+      }
+    },
+    "url": "https://api.github.com/repos/yyoli-db/lakeflow-community-connectors/commits/e6f94409c0761f2abe65e3aa3cf4da03812ef124",
+    "html_url": "https://github.com/yyoli-db/lakeflow-community-connectors/commit/e6f94409c0761f2abe65e3aa3cf4da03812ef124",
+    "comments_url": "https://api.github.com/repos/yyoli-db/lakeflow-community-connectors/commits/e6f94409c0761f2abe65e3aa3cf4da03812ef124/comments",
+    "author": {
+      "login": "sheltauro",
+      "id": 21174348,
+      "node_id": "MDQ6VXNlcjIxMTc0MzQ4",
+      "avatar_url": "https://avatars.githubusercontent.com/u/21174348?v=4",
+      "gravatar_id": "",
+      "url": "https://api.github.com/users/sheltauro",
+      "html_url": "https://github.com/sheltauro",
+      "followers_url": "https://api.github.com/users/sheltauro/followers",
+      "following_url": "https://api.github.com/users/sheltauro/following{/other_user}",
+      "gists_url": "https://api.github.com/users/sheltauro/gists{/gist_id}",
+      "starred_url": "https://api.github.com/users/sheltauro/starred{/owner}{/repo}",
+      "subscriptions_url": "https://api.github.com/users/sheltauro/subscriptions",
+      "organizations_url": "https://api.github.com/users/sheltauro/orgs",
+      "repos_url": "https://api.github.com/users/sheltauro/repos",
+      "events_url": "https://api.github.com/users/sheltauro/events{/privacy}",
+      "received_events_url": "https://api.github.com/users/sheltauro/received_events",
+      "type": "User",
+      "user_view_type": "public",
+      "site_admin": false
+    },
+    "committer": {
+      "login": "web-flow",
+      "id": 19864447,
+      "node_id": "MDQ6VXNlcjE5ODY0NDQ3",
+      "avatar_url": "https://avatars.githubusercontent.com/u/19864447?v=4",
+      "gravatar_id": "",
+      "url": "https://api.github.com/users/web-flow",
+      "html_url": "https://github.com/web-flow",
+      "followers_url": "https://api.github.com/users/web-flow/followers",
+      "following_url": "https://api.github.com/users/web-flow/following{/other_user}",
+      "gists_url": "https://api.github.com/users/web-flow/gists{/gist_id}",
+      "starred_url": "https://api.github.com/users/web-flow/starred{/owner}{/repo}",
+      "subscriptions_url": "https://api.github.com/users/web-flow/subscriptions",
+      "organizations_url": "https://api.github.com/users/web-flow/orgs",
+      "repos_url": "https://api.github.com/users/web-flow/repos",
+      "events_url": "https://api.github.com/users/web-flow/events{/privacy}",
+      "received_events_url": "https://api.github.com/users/web-flow/received_events",
+      "type": "User",
+      "user_view_type": "public",
+      "site_admin": false
+    },
+    "parents": [
+      {
+        "sha": "bc33ee17829f0b5c0d651a48e74745cea5c538b1",
+        "url": "https://api.github.com/repos/yyoli-db/lakeflow-community-connectors/commits/bc33ee17829f0b5c0d651a48e74745cea5c538b1",
+        "html_url": "https://github.com/yyoli-db/lakeflow-community-connectors/commit/bc33ee17829f0b5c0d651a48e74745cea5c538b1"
+      }
+    ]
+  },
+  {
+    "sha": "442eb1d316cb6f43ec700d0402ef19b1bcd3be92",
+    "node_id": "C_kwDOQ5ifOtoAKDQ0MmViMWQzMTZjYjZmNDNlYzcwMGQwNDAyZWYxOWIxYmNkM2JlOTI",
+    "commit": {
+      "author": {
+        "name": "service-corpeng-db",
+        "email": "redacted@example.com",
+        "date": "2025-11-13T01:36:41Z"
+      },
+      "committer": {
+        "name": "GitHub",
+        "email": "redacted@example.com",
+        "date": "2025-11-13T01:36:41Z"
+      },
+      "message": "Initial commit",
+      "tree": {
+        "sha": "79c989f131ebde8b19b56a421a788678aaecab34",
+        "url": "https://api.github.com/repos/yyoli-db/lakeflow-community-connectors/git/trees/79c989f131ebde8b19b56a421a788678aaecab34"
+      },
+      "url": "https://api.github.com/repos/yyoli-db/lakeflow-community-connectors/git/commits/442eb1d316cb6f43ec700d0402ef19b1bcd3be92",
+      "comment_count": 0,
+      "verification": {
+        "verified": true,
+        "reason": "valid",
+        "signature": "-----BEGIN PGP SIGNATURE-----\n\nwsFcBAABCAAQBQJpFTYpCRC1aQ7uu5UhlAAAt5oQACNTxvIkDqjC7sg/hv9r+AJN\nBLnxNa7kp+i2I6JvzBKZVPD4OgAl5abpMCnFTBhJkdclGaNo9uoRqyCplRPY0rgY\n3WOeVJJi+fGbWMRKKox9hVxY7CM/aXKvWIwHHfZ+ByHKMFBDwjyrqcn0rURkjbLA\n139pED2qXpuXIHI1peIxcheVEyvvoTIkgu3asflQpZl7Hm0MWFsfOHPFfXACTbYd\nvQeJ3uI3E9ZiZDCF7j/TqocqOvPwPIYQYlzoMdypibjBGQsNS3QBTfjlFYh7dJIx\nxMl01Sw2vaIaa2lRzayCmZlC6IDVZjLIeZ1vF260Oq+6haWaTy1f+R9yy+IpR7/u\noMA5KpCzeR2+uJBIzgw1ow92TidDbasNdTzAoPmtsVQiFLw04vvkyhnGliCKgzBg\nhLkgLILRM0QkjtDF0629voAisjBc4vhe0CntVe3+SXtYyNmtZb0q+YTY0woiyTDh\nlSmvolHl09AxZpVNhiWEln2ryUJfqFIGyYw0sC6/8QKmcFV5sCRuEvUThDVQcwkL\nzYPivdeTy+jQPhimKAfV210t/qd9bG6/Ztnr3biaOPzxKACY3QgdbxjfRiMHJJe1\ncysD0O8QZB13QkIhPhymwcRD2I85cctld2BWxjmChl6Md5MXFVxut6aUNnCNQJ1p\nTXxRIR4jcdXYCvWYD48h\n=/FDJ\n-----END PGP SIGNATURE-----\n",
+        "payload": "tree 79c989f131ebde8b19b56a421a788678aaecab34\nauthor service-corpeng-db <redacted@example.com> 1762997801 -0600\ncommitter GitHub <redacted@example.com> 1762997801 -0600\n\nInitial commit",
+        "verified_at": "2025-11-13T01:36:42Z"
+      }
+    },
+    "url": "https://api.github.com/repos/yyoli-db/lakeflow-community-connectors/commits/442eb1d316cb6f43ec700d0402ef19b1bcd3be92",
+    "html_url": "https://github.com/yyoli-db/lakeflow-community-connectors/commit/442eb1d316cb6f43ec700d0402ef19b1bcd3be92",
+    "comments_url": "https://api.github.com/repos/yyoli-db/lakeflow-community-connectors/commits/442eb1d316cb6f43ec700d0402ef19b1bcd3be92/comments",
+    "author": {
+      "login": "service-corpeng-db",
+      "id": 175971882,
+      "node_id": "U_kgDOCn0eKg",
+      "avatar_url": "https://avatars.githubusercontent.com/u/175971882?v=4",
+      "gravatar_id": "",
+      "url": "https://api.github.com/users/service-corpeng-db",
+      "html_url": "https://github.com/service-corpeng-db",
+      "followers_url": "https://api.github.com/users/service-corpeng-db/followers",
+      "following_url": "https://api.github.com/users/service-corpeng-db/following{/other_user}",
+      "gists_url": "https://api.github.com/users/service-corpeng-db/gists{/gist_id}",
+      "starred_url": "https://api.github.com/users/service-corpeng-db/starred{/owner}{/repo}",
+      "subscriptions_url": "https://api.github.com/users/service-corpeng-db/subscriptions",
+      "organizations_url": "https://api.github.com/users/service-corpeng-db/orgs",
+      "repos_url": "https://api.github.com/users/service-corpeng-db/repos",
+      "events_url": "https://api.github.com/users/service-corpeng-db/events{/privacy}",
+      "received_events_url": "https://api.github.com/users/service-corpeng-db/received_events",
+      "type": "User",
+      "user_view_type": "public",
+      "site_admin": false
+    },
+    "committer": {
+      "login": "web-flow",
+      "id": 19864447,
+      "node_id": "MDQ6VXNlcjE5ODY0NDQ3",
+      "avatar_url": "https://avatars.githubusercontent.com/u/19864447?v=4",
+      "gravatar_id": "",
+      "url": "https://api.github.com/users/web-flow",
+      "html_url": "https://github.com/web-flow",
+      "followers_url": "https://api.github.com/users/web-flow/followers",
+      "following_url": "https://api.github.com/users/web-flow/following{/other_user}",
+      "gists_url": "https://api.github.com/users/web-flow/gists{/gist_id}",
+      "starred_url": "https://api.github.com/users/web-flow/starred{/owner}{/repo}",
+      "subscriptions_url": "https://api.github.com/users/web-flow/subscriptions",
+      "organizations_url": "https://api.github.com/users/web-flow/orgs",
+      "repos_url": "https://api.github.com/users/web-flow/repos",
+      "events_url": "https://api.github.com/users/web-flow/events{/privacy}",
+      "received_events_url": "https://api.github.com/users/web-flow/received_events",
+      "type": "User",
+      "user_view_type": "public",
+      "site_admin": false
+    },
+    "parents": []
+  },
+  {
+    "sha": "98d4d802901e4963094330188acf78e17785d4f9",
+    "node_id": "C_kwDOQ5ifOtoAKDk4ZDRkODAyOTAxZTQ5NjMwOTQzMzAxODhhY2Y3OGUxNzc4NWQ0Zjk",
+    "commit": {
+      "author": {
+        "name": "Yong Li",
+        "email": "redacted@example.com",
+        "date": "2025-11-18T20:28:41Z"
+      },
+      "committer": {
+        "name": "Yong Li",
+        "email": "redacted@example.com",
+        "date": "2025-11-18T20:28:41Z"
+      },
+      "message": "initial commit: move from yyoli-db/lakeflow-community-connectors",
+      "tree": {
+        "sha": "45becea5f4a909dcd42e949d4751cc0f8e94e46c",
+        "url": "https://api.github.com/repos/yyoli-db/lakeflow-community-connectors/git/trees/45becea5f4a909dcd42e949d4751cc0f8e94e46c"
+      },
+      "url": "https://api.github.com/repos/yyoli-db/lakeflow-community-connectors/git/commits/98d4d802901e4963094330188acf78e17785d4f9",
+      "comment_count": 0,
+      "verification": {
+        "verified": false,
+        "reason": "unsigned",
+        "signature": null,
+        "payload": null,
+        "verified_at": null
+      }
+    },
+    "url": "https://api.github.com/repos/yyoli-db/lakeflow-community-connectors/commits/98d4d802901e4963094330188acf78e17785d4f9",
+    "html_url": "https://github.com/yyoli-db/lakeflow-community-connectors/commit/98d4d802901e4963094330188acf78e17785d4f9",
+    "comments_url": "https://api.github.com/repos/yyoli-db/lakeflow-community-connectors/commits/98d4d802901e4963094330188acf78e17785d4f9/comments",
+    "author": {
+      "login": "yyoli-db",
+      "id": 113948208,
+      "node_id": "U_kgDOBsq2MA",
+      "avatar_url": "https://avatars.githubusercontent.com/u/113948208?v=4",
+      "gravatar_id": "",
+      "url": "https://api.github.com/users/yyoli-db",
+      "html_url": "https://github.com/yyoli-db",
+      "followers_url": "https://api.github.com/users/yyoli-db/followers",
+      "following_url": "https://api.github.com/users/yyoli-db/following{/other_user}",
+      "gists_url": "https://api.github.com/users/yyoli-db/gists{/gist_id}",
+      "starred_url": "https://api.github.com/users/yyoli-db/starred{/owner}{/repo}",
+      "subscriptions_url": "https://api.github.com/users/yyoli-db/subscriptions",
+      "organizations_url": "https://api.github.com/users/yyoli-db/orgs",
+      "repos_url": "https://api.github.com/users/yyoli-db/repos",
+      "events_url": "https://api.github.com/users/yyoli-db/events{/privacy}",
+      "received_events_url": "https://api.github.com/users/yyoli-db/received_events",
+      "type": "User",
+      "user_view_type": "public",
+      "site_admin": false
+    },
+    "committer": {
+      "login": "yyoli-db",
+      "id": 113948208,
+      "node_id": "U_kgDOBsq2MA",
+      "avatar_url": "https://avatars.githubusercontent.com/u/113948208?v=4",
+      "gravatar_id": "",
+      "url": "https://api.github.com/users/yyoli-db",
+      "html_url": "https://github.com/yyoli-db",
+      "followers_url": "https://api.github.com/users/yyoli-db/followers",
+      "following_url": "https://api.github.com/users/yyoli-db/following{/other_user}",
+      "gists_url": "https://api.github.com/users/yyoli-db/gists{/gist_id}",
+      "starred_url": "https://api.github.com/users/yyoli-db/starred{/owner}{/repo}",
+      "subscriptions_url": "https://api.github.com/users/yyoli-db/subscriptions",
+      "organizations_url": "https://api.github.com/users/yyoli-db/orgs",
+      "repos_url": "https://api.github.com/users/yyoli-db/repos",
+      "events_url": "https://api.github.com/users/yyoli-db/events{/privacy}",
+      "received_events_url": "https://api.github.com/users/yyoli-db/received_events",
+      "type": "User",
+      "user_view_type": "public",
+      "site_admin": false
+    },
+    "parents": [
+      {
+        "sha": "442eb1d316cb6f43ec700d0402ef19b1bcd3be92",
+        "url": "https://api.github.com/repos/yyoli-db/lakeflow-community-connectors/commits/442eb1d316cb6f43ec700d0402ef19b1bcd3be92",
+        "html_url": "https://github.com/yyoli-db/lakeflow-community-connectors/commit/442eb1d316cb6f43ec700d0402ef19b1bcd3be92"
+      }
+    ]
+  },
+  {
+    "sha": "1f1f59d0a464582f958165502a3bed6ca20304b5",
+    "node_id": "C_kwDOQ5ifOtoAKDFmMWY1OWQwYTQ2NDU4MmY5NTgxNjU1MDJhM2JlZDZjYTIwMzA0YjU",
+    "commit": {
+      "author": {
+        "name": "Sheldon Tauro",
+        "email": "redacted@example.com",
+        "date": "2025-12-03T09:14:24Z"
+      },
+      "committer": {
+        "name": "GitHub",
+        "email": "redacted@example.com",
+        "date": "2025-12-03T09:14:24Z"
+      },
+      "message": "[SC-212314] Remove transformations from stripe and hubspot that were flattening the schema (#2)\n\nAs titled.\n\nMade some minor improvements to the stripe connector as well.",
+      "tree": {
+        "sha": "72babad7610f8ae545abd2b07b175844c31677e9",
+        "url": "https://api.github.com/repos/yyoli-db/lakeflow-community-connectors/git/trees/72babad7610f8ae545abd2b07b175844c31677e9"
+      },
+      "url": "https://api.github.com/repos/yyoli-db/lakeflow-community-connectors/git/commits/1f1f59d0a464582f958165502a3bed6ca20304b5",
+      "comment_count": 0,
+      "verification": {
+        "verified": true,
+        "reason": "valid",
+        "signature": "-----BEGIN PGP SIGNATURE-----\n\nwsFcBAABCAAQBQJpL/9wCRC1aQ7uu5UhlAAApwAQAKjPEPcirIF1T/r2YbqiOVcH\nfXvWX9e8Timzev6e/J6OH7Phi3H4QyGWYsfm0ew6eG1PAIbbgqfX6l4NmQFYPSWL\nPy+ReU2kBpzk6mn9INQNkNlMsg0BkkHolwkkwTuClx3jPfhVm7tIHCb232WCtacx\nCtNdx4u/Od39QmIUkkiVuCmUIxvIyWWMM2aQfyewKAmfUpHcl7fXbb5cLsW8UGyx\nXUnbAa6uioFxKqfzO8b2uLrL0P/aMKNCxRjw+iql+r60d/Lm0Vc1Num+h2DitPLa\nwf/ldUbRVmLwZw76O8S+iNUHe+pW6Qf+TspDy/+AwW7j/sENwfADiXMDiqkDjScE\n4Wkf2+DvkX0ZN4AO2b8eh6bN0Vx540/tLbHG2uthVSelylNO4DGca5zqyWz0bOAx\n7YsD89kchGis7IC6OHfkMhmv8RhOG96gZ6vXaN9ib6j5h0zNFrDkNRfpkt3RyQ6R\nJPr1tCuEMOeyx2ncwigUenRX+RWno7vR7TnCLahpH7FLQw0Jh5JIRNYo2Yx5sjMI\n+46/NBIEwJSNkr3wkF+0po0zmgAh+XsIq0FmVqAJIe2+4yRoRTmgIB89VuP9fEaw\nlqu/CKv0qdDF+bRYp/Mvt1p7SF31wspyoNzQzawk9v4hX7iGLKvoek4xTJbxMv5x\n/efdK5+aTxTWlTtWt5Fr\n=0j3g\n-----END PGP SIGNATURE-----\n",
+        "payload": "tree 72babad7610f8ae545abd2b07b175844c31677e9\nparent 06f6fc387508168a0e0a71e74d8f63a204d7239e\nauthor Sheldon Tauro <redacted@example.com> 1764753264 +0530\ncommitter GitHub <redacted@example.com> 1764753264 +0530\n\n[SC-212314] Remove transformations from stripe and hubspot that were flattening the schema (#2)\n\nAs titled.\n\nMade some minor improvements to the stripe connector as well.",
+        "verified_at": "2025-12-03T09:14:25Z"
+      }
+    },
+    "url": "https://api.github.com/repos/yyoli-db/lakeflow-community-connectors/commits/1f1f59d0a464582f958165502a3bed6ca20304b5",
+    "html_url": "https://github.com/yyoli-db/lakeflow-community-connectors/commit/1f1f59d0a464582f958165502a3bed6ca20304b5",
+    "comments_url": "https://api.github.com/repos/yyoli-db/lakeflow-community-connectors/commits/1f1f59d0a464582f958165502a3bed6ca20304b5/comments",
+    "author": {
+      "login": "sheltauro",
+      "id": 21174348,
+      "node_id": "MDQ6VXNlcjIxMTc0MzQ4",
+      "avatar_url": "https://avatars.githubusercontent.com/u/21174348?v=4",
+      "gravatar_id": "",
+      "url": "https://api.github.com/users/sheltauro",
+      "html_url": "https://github.com/sheltauro",
+      "followers_url": "https://api.github.com/users/sheltauro/followers",
+      "following_url": "https://api.github.com/users/sheltauro/following{/other_user}",
+      "gists_url": "https://api.github.com/users/sheltauro/gists{/gist_id}",
+      "starred_url": "https://api.github.com/users/sheltauro/starred{/owner}{/repo}",
+      "subscriptions_url": "https://api.github.com/users/sheltauro/subscriptions",
+      "organizations_url": "https://api.github.com/users/sheltauro/orgs",
+      "repos_url": "https://api.github.com/users/sheltauro/repos",
+      "events_url": "https://api.github.com/users/sheltauro/events{/privacy}",
+      "received_events_url": "https://api.github.com/users/sheltauro/received_events",
+      "type": "User",
+      "user_view_type": "public",
+      "site_admin": false
+    },
+    "committer": {
+      "login": "web-flow",
+      "id": 19864447,
+      "node_id": "MDQ6VXNlcjE5ODY0NDQ3",
+      "avatar_url": "https://avatars.githubusercontent.com/u/19864447?v=4",
+      "gravatar_id": "",
+      "url": "https://api.github.com/users/web-flow",
+      "html_url": "https://github.com/web-flow",
+      "followers_url": "https://api.github.com/users/web-flow/followers",
+      "following_url": "https://api.github.com/users/web-flow/following{/other_user}",
+      "gists_url": "https://api.github.com/users/web-flow/gists{/gist_id}",
+      "starred_url": "https://api.github.com/users/web-flow/starred{/owner}{/repo}",
+      "subscriptions_url": "https://api.github.com/users/web-flow/subscriptions",
+      "organizations_url": "https://api.github.com/users/web-flow/orgs",
+      "repos_url": "https://api.github.com/users/web-flow/repos",
+      "events_url": "https://api.github.com/users/web-flow/events{/privacy}",
+      "received_events_url": "https://api.github.com/users/web-flow/received_events",
+      "type": "User",
+      "user_view_type": "public",
+      "site_admin": false
+    },
+    "parents": [
+      {
+        "sha": "06f6fc387508168a0e0a71e74d8f63a204d7239e",
+        "url": "https://api.github.com/repos/yyoli-db/lakeflow-community-connectors/commits/06f6fc387508168a0e0a71e74d8f63a204d7239e",
+        "html_url": "https://github.com/yyoli-db/lakeflow-community-connectors/commit/06f6fc387508168a0e0a71e74d8f63a204d7239e"
+      }
+    ]
+  },
+  {
+    "sha": "06f6fc387508168a0e0a71e74d8f63a204d7239e",
+    "node_id": "C_kwDOQ5ifOtoAKDA2ZjZmYzM4NzUwODE2OGEwZTBhNzFlNzRkOGY2M2EyMDRkNzIzOWU",
+    "commit": {
+      "author": {
+        "name": "Sheldon Tauro",
+        "email": "redacted@example.com",
+        "date": "2025-12-02T09:15:05Z"
+      },
+      "committer": {
+        "name": "GitHub",
+        "email": "redacted@example.com",
+        "date": "2025-12-02T09:15:05Z"
+      },
+      "message": "Adding a full stop to verify that creating a PR works. (#1)\n\nN.A.",
+      "tree": {
+        "sha": "541c8a393300d5ca9c2c4380250283d3f40dacf3",
+        "url": "https://api.github.com/repos/yyoli-db/lakeflow-community-connectors/git/trees/541c8a393300d5ca9c2c4380250283d3f40dacf3"
+      },
+      "url": "https://api.github.com/repos/yyoli-db/lakeflow-community-connectors/git/commits/06f6fc387508168a0e0a71e74d8f63a204d7239e",
+      "comment_count": 0,
+      "verification": {
+        "verified": true,
+        "reason": "valid",
+        "signature": "-----BEGIN PGP SIGNATURE-----\n\nwsFcBAABCAAQBQJpLq4ZCRC1aQ7uu5UhlAAAjkMQAB+N4He2eaN1hFwj10Fd6qpq\nMM6sf2/AQvdaGxDDHR+TumCPbTM4DxLy/OAxrSvlvMoDniy80Gzx3uzd1WRa7Bnn\nbWk5nhwoCwJzs3+0FbFQImYyNu35paIIo+KpEDl1otPN2YkdVIxEB+2ORpuAa735\nNXGwMiqvTphauu4D7MMnzWrlA4HKeIdBug3D+iY/tlz6fbI1wFFJbkJKfl6cww8p\n4L7VU1nt7vCJhByoypeypbnFQWlBhFpAYNxx/SrA0qhAPd7jo3wY711DgdFd0und\nYC8XQ10gNyoTRymFKYqwYazACaQKMIRc/0D7KeYLoVZP2eZSSTWKvlZR+jRhU4py\nsGcZlZ8/3HbzQSorNbMXShU47w5YhUN+rCQCLQVl3WiRexV5jcGHuXhOe3wwyIuq\nbP2L+R24FWryLxSWQytv32mXWRz541bn7aSswQHQrwkS0t/d8VTxguV9R46Sie5q\nted7awfOlWSrzMBmB+LhL8hCKdjHKGH5D9asVsvtbihKkAsnxTEmK11/cg1K5gmc\nEpkQVBtW4j4705P93SY1+Zcaq+v1F8et2CzoH+fvUv2eZ5f3gQeE2d4r7vrcUMrm\n5UadjdCqS+EV5MFcob+GuteSSGc9XqH6TeaoYwVCMi9sq5BuLgChvSnu1l3kGJEg\nb27xT4CEJOs94/JDGb/b\n=KSGO\n-----END PGP SIGNATURE-----\n",
+        "payload": "tree 541c8a393300d5ca9c2c4380250283d3f40dacf3\nparent 98d4d802901e4963094330188acf78e17785d4f9\nauthor Sheldon Tauro <redacted@example.com> 1764666905 +0530\ncommitter GitHub <redacted@example.com> 1764666905 +0530\n\nAdding a full stop to verify that creating a PR works. (#1)\n\nN.A.",
+        "verified_at": "2025-12-02T09:15:05Z"
+      }
+    },
+    "url": "https://api.github.com/repos/yyoli-db/lakeflow-community-connectors/commits/06f6fc387508168a0e0a71e74d8f63a204d7239e",
+    "html_url": "https://github.com/yyoli-db/lakeflow-community-connectors/commit/06f6fc387508168a0e0a71e74d8f63a204d7239e",
+    "comments_url": "https://api.github.com/repos/yyoli-db/lakeflow-community-connectors/commits/06f6fc387508168a0e0a71e74d8f63a204d7239e/comments",
+    "author": {
+      "login": "sheltauro",
+      "id": 21174348,
+      "node_id": "MDQ6VXNlcjIxMTc0MzQ4",
+      "avatar_url": "https://avatars.githubusercontent.com/u/21174348?v=4",
+      "gravatar_id": "",
+      "url": "https://api.github.com/users/sheltauro",
+      "html_url": "https://github.com/sheltauro",
+      "followers_url": "https://api.github.com/users/sheltauro/followers",
+      "following_url": "https://api.github.com/users/sheltauro/following{/other_user}",
+      "gists_url": "https://api.github.com/users/sheltauro/gists{/gist_id}",
+      "starred_url": "https://api.github.com/users/sheltauro/starred{/owner}{/repo}",
+      "subscriptions_url": "https://api.github.com/users/sheltauro/subscriptions",
+      "organizations_url": "https://api.github.com/users/sheltauro/orgs",
+      "repos_url": "https://api.github.com/users/sheltauro/repos",
+      "events_url": "https://api.github.com/users/sheltauro/events{/privacy}",
+      "received_events_url": "https://api.github.com/users/sheltauro/received_events",
+      "type": "User",
+      "user_view_type": "public",
+      "site_admin": false
+    },
+    "committer": {
+      "login": "web-flow",
+      "id": 19864447,
+      "node_id": "MDQ6VXNlcjE5ODY0NDQ3",
+      "avatar_url": "https://avatars.githubusercontent.com/u/19864447?v=4",
+      "gravatar_id": "",
+      "url": "https://api.github.com/users/web-flow",
+      "html_url": "https://github.com/web-flow",
+      "followers_url": "https://api.github.com/users/web-flow/followers",
+      "following_url": "https://api.github.com/users/web-flow/following{/other_user}",
+      "gists_url": "https://api.github.com/users/web-flow/gists{/gist_id}",
+      "starred_url": "https://api.github.com/users/web-flow/starred{/owner}{/repo}",
+      "subscriptions_url": "https://api.github.com/users/web-flow/subscriptions",
+      "organizations_url": "https://api.github.com/users/web-flow/orgs",
+      "repos_url": "https://api.github.com/users/web-flow/repos",
+      "events_url": "https://api.github.com/users/web-flow/events{/privacy}",
+      "received_events_url": "https://api.github.com/users/web-flow/received_events",
+      "type": "User",
+      "user_view_type": "public",
+      "site_admin": false
+    },
+    "parents": [
+      {
+        "sha": "98d4d802901e4963094330188acf78e17785d4f9",
+        "url": "https://api.github.com/repos/yyoli-db/lakeflow-community-connectors/commits/98d4d802901e4963094330188acf78e17785d4f9",
+        "html_url": "https://github.com/yyoli-db/lakeflow-community-connectors/commit/98d4d802901e4963094330188acf78e17785d4f9"
+      }
+    ]
+  },
+  {
+    "sha": "1a930cde7d1a5ff1154dec3e9e3d2ff712a0ff2e",
+    "node_id": "C_kwDOQ5ifOtoAKDFhOTMwY2RlN2QxYTVmZjExNTRkZWMzZTllM2QyZmY3MTJhMGZmMmU",
+    "commit": {
+      "author": {
+        "name": "Yong Li",
+        "email": "redacted@example.com",
+        "date": "2025-12-17T22:09:04Z"
+      },
+      "committer": {
+        "name": "GitHub",
+        "email": "redacted@example.com",
+        "date": "2025-12-17T22:09:04Z"
+      },
+      "message": "clean up obsolete token (#10)",
+      "tree": {
+        "sha": "179771b5812aa92b1bcf807b7790ca0ce8c427fa",
+        "url": "https://api.github.com/repos/yyoli-db/lakeflow-community-connectors/git/trees/179771b5812aa92b1bcf807b7790ca0ce8c427fa"
+      },
+      "url": "https://api.github.com/repos/yyoli-db/lakeflow-community-connectors/git/commits/1a930cde7d1a5ff1154dec3e9e3d2ff712a0ff2e",
+      "comment_count": 0,
+      "verification": {
+        "verified": true,
+        "reason": "valid",
+        "signature": "-----BEGIN PGP SIGNATURE-----\n\nwsFcBAABCAAQBQJpQyoACRC1aQ7uu5UhlAAAV1gQAGo3usXUVvEut2nMBB/EIkhp\n3sRoh39Vthxvlfs5JySCfUJp/JfCztjtUFIofjjxoKemYa/LdMBVFq2Gv7wNasLB\n5c2pB2yt76xPp7kbsHRRhvnl57D+LX1nWRYj2DG3hR16nQlhOw4tYPT57rJeOCu0\nmKIF4orZpcF1gzOPCTTrviFog4YV7bhzEfcPzH0yn2hEoOXF5CssAp3njH9TTQqy\nZjEOPExackBeWxAm+U6PTeT6ZCpR7W0Za+k9vq14CSTlvXvkpdu9ry1UX9qchFhN\njPv/fkiTHgZD2v+w4aib5zgE7We+bIAuJtYcwu6pyb0yIptkpN3Cvjl17EWSW3hn\nQuTDEYcRwLTnRaHzeCcOj97y1grQbaCP17N2nas3re3qNXrSzvp7s6onN9nhYmKV\njnnyIZl5xb166IXIMOX0wXyCCJ2y+ZD+y6IJ2v4AqqyJBKfdG0u789XmjdBSmtnT\ny7PcT7H9Y7qyMtmafkeNl1ehFNpDLs85NzK7aJFvsrFd+A8JEB3OB46oKDUe8i8A\n+gz9rTGKkwtWuJXJ7JYhQAjzmrrEbrCUBv0A3zg3LABv2wny9xslpZlcDtZdebyq\n3drhbksiJdYS9gZkJWQsCC/ORtQCmvB3pJ0Zg11+cItjo4O1X05o7WCmiOUwMmi+\nV88OeVK2/hysYdHbuD7w\n=ZqSH\n-----END PGP SIGNATURE-----\n",
+        "payload": "tree 179771b5812aa92b1bcf807b7790ca0ce8c427fa\nparent 2d061d5b23c397d84299044c79b6659915d0fb61\nauthor Yong Li <redacted@example.com> 1766009344 -0800\ncommitter GitHub <redacted@example.com> 1766009344 -0800\n\nclean up obsolete token (#10)\n\n",
+        "verified_at": "2025-12-17T22:09:04Z"
+      }
+    },
+    "url": "https://api.github.com/repos/yyoli-db/lakeflow-community-connectors/commits/1a930cde7d1a5ff1154dec3e9e3d2ff712a0ff2e",
+    "html_url": "https://github.com/yyoli-db/lakeflow-community-connectors/commit/1a930cde7d1a5ff1154dec3e9e3d2ff712a0ff2e",
+    "comments_url": "https://api.github.com/repos/yyoli-db/lakeflow-community-connectors/commits/1a930cde7d1a5ff1154dec3e9e3d2ff712a0ff2e/comments",
+    "author": {
+      "login": "yyoli-db",
+      "id": 113948208,
+      "node_id": "U_kgDOBsq2MA",
+      "avatar_url": "https://avatars.githubusercontent.com/u/113948208?v=4",
+      "gravatar_id": "",
+      "url": "https://api.github.com/users/yyoli-db",
+      "html_url": "https://github.com/yyoli-db",
+      "followers_url": "https://api.github.com/users/yyoli-db/followers",
+      "following_url": "https://api.github.com/users/yyoli-db/following{/other_user}",
+      "gists_url": "https://api.github.com/users/yyoli-db/gists{/gist_id}",
+      "starred_url": "https://api.github.com/users/yyoli-db/starred{/owner}{/repo}",
+      "subscriptions_url": "https://api.github.com/users/yyoli-db/subscriptions",
+      "organizations_url": "https://api.github.com/users/yyoli-db/orgs",
+      "repos_url": "https://api.github.com/users/yyoli-db/repos",
+      "events_url": "https://api.github.com/users/yyoli-db/events{/privacy}",
+      "received_events_url": "https://api.github.com/users/yyoli-db/received_events",
+      "type": "User",
+      "user_view_type": "public",
+      "site_admin": false
+    },
+    "committer": {
+      "login": "web-flow",
+      "id": 19864447,
+      "node_id": "MDQ6VXNlcjE5ODY0NDQ3",
+      "avatar_url": "https://avatars.githubusercontent.com/u/19864447?v=4",
+      "gravatar_id": "",
+      "url": "https://api.github.com/users/web-flow",
+      "html_url": "https://github.com/web-flow",
+      "followers_url": "https://api.github.com/users/web-flow/followers",
+      "following_url": "https://api.github.com/users/web-flow/following{/other_user}",
+      "gists_url": "https://api.github.com/users/web-flow/gists{/gist_id}",
+      "starred_url": "https://api.github.com/users/web-flow/starred{/owner}{/repo}",
+      "subscriptions_url": "https://api.github.com/users/web-flow/subscriptions",
+      "organizations_url": "https://api.github.com/users/web-flow/orgs",
+      "repos_url": "https://api.github.com/users/web-flow/repos",
+      "events_url": "https://api.github.com/users/web-flow/events{/privacy}",
+      "received_events_url": "https://api.github.com/users/web-flow/received_events",
+      "type": "User",
+      "user_view_type": "public",
+      "site_admin": false
+    },
+    "parents": [
+      {
+        "sha": "2d061d5b23c397d84299044c79b6659915d0fb61",
+        "url": "https://api.github.com/repos/yyoli-db/lakeflow-community-connectors/commits/2d061d5b23c397d84299044c79b6659915d0fb61",
+        "html_url": "https://github.com/yyoli-db/lakeflow-community-connectors/commit/2d061d5b23c397d84299044c79b6659915d0fb61"
+      }
+    ]
+  },
+  {
+    "sha": "2d061d5b23c397d84299044c79b6659915d0fb61",
+    "node_id": "C_kwDOQ5ifOtoAKDJkMDYxZDViMjNjMzk3ZDg0Mjk5MDQ0Yzc5YjY2NTk5MTVkMGZiNjE",
+    "commit": {
+      "author": {
+        "name": "Sheldon Tauro",
+        "email": "redacted@example.com",
+        "date": "2025-12-17T09:16:26Z"
+      },
+      "committer": {
+        "name": "GitHub",
+        "email": "redacted@example.com",
+        "date": "2025-12-17T09:16:26Z"
+      },
+      "message": "Adding a new Mixpanel connector (#7)\n\nAlso updated the unit tests to support nested primary keys and columns.\n\n\n### Testing\nTested ingesting all the tables in e2d",
+      "tree": {
+        "sha": "a52ddc42a997c2ae1017507cc53e90478f8fb528",
+        "url": "https://api.github.com/repos/yyoli-db/lakeflow-community-connectors/git/trees/a52ddc42a997c2ae1017507cc53e90478f8fb528"
+      },
+      "url": "https://api.github.com/repos/yyoli-db/lakeflow-community-connectors/git/commits/2d061d5b23c397d84299044c79b6659915d0fb61",
+      "comment_count": 0,
+      "verification": {
+        "verified": true,
+        "reason": "valid",
+        "signature": "-----BEGIN PGP SIGNATURE-----\n\nwsFcBAABCAAQBQJpQnTqCRC1aQ7uu5UhlAAArDcQAG/FmGTOp8Ljm0uwewnUyEY5\nYA+lMHBKqtyPjGbNMJIy9ZpkDe8eVznFcBHZ5VjBHAfMAiu42RgLIqWgR3wYc4xq\n7QnL73IdGBUNkq6BGsCYL7Y8fwi7QsJDTeSkoDU7NVzQivAn8UsJ1qhw2Rr95lF/\nX/jiGU2jqbWwgGkn/B1p6EzqxItjWPbzrCIaLAl8GdcKZnc2mq8kNs+E9EyAGfpl\nn/q0YRhqN5nMPt61PqD60Z+SsIiGS9IS975xFPLUuqZkZe1cGzgSZlwRGyUjD8Qx\nBNAy9bXj0IdnLBaLFA2PhUTC/WaZqKWgcyqquSJS43+J4KvAExspkCdSAHi2LW8U\nWfYz84sSi8y8vflqlx+ShiKWCp99qaCAZpGrxEAgTKB/2XQb0d/emW7sSFBKiKDL\nOeuI6fqGsgZtonPBKS1Pk3s+RdS4CuBzRiLIYLJ+OQh1NqTt4U3eYdoWYOXdufVo\ncSBROMxilqfxuPyZOrN12O6PlOgjFE0gf613ZGxrrN6TudIcuMoWTnkmKtXAL0G2\nJ06drOmDTW4TV/mlplH7DWBkbiPwATshprcJOxD6vLBH5Hd73pTjm8wZN9djNsU3\n6ya77EFE8tZmcE9kjadzv3mENxSwaOa+tFnqLxVXbG7yiZfHxQSGunglRZCWdEiy\nIKjpADD0/8c3CkIkSNai\n=zTBc\n-----END PGP SIGNATURE-----\n",
+        "payload": "tree a52ddc42a997c2ae1017507cc53e90478f8fb528\nparent 4ffbbf6bec617e27e0827c518ad0a7d89803d946\nauthor Sheldon Tauro <redacted@example.com> 1765962986 +0530\ncommitter GitHub <redacted@example.com> 1765962986 +0530\n\nAdding a new Mixpanel connector (#7)\n\nAlso updated the unit tests to support nested primary keys and columns.\n\n\n### Testing\nTested ingesting all the tables in e2d",
+        "verified_at": "2025-12-17T09:16:27Z"
+      }
+    },
+    "url": "https://api.github.com/repos/yyoli-db/lakeflow-community-connectors/commits/2d061d5b23c397d84299044c79b6659915d0fb61",
+    "html_url": "https://github.com/yyoli-db/lakeflow-community-connectors/commit/2d061d5b23c397d84299044c79b6659915d0fb61",
+    "comments_url": "https://api.github.com/repos/yyoli-db/lakeflow-community-connectors/commits/2d061d5b23c397d84299044c79b6659915d0fb61/comments",
+    "author": {
+      "login": "sheltauro",
+      "id": 21174348,
+      "node_id": "MDQ6VXNlcjIxMTc0MzQ4",
+      "avatar_url": "https://avatars.githubusercontent.com/u/21174348?v=4",
+      "gravatar_id": "",
+      "url": "https://api.github.com/users/sheltauro",
+      "html_url": "https://github.com/sheltauro",
+      "followers_url": "https://api.github.com/users/sheltauro/followers",
+      "following_url": "https://api.github.com/users/sheltauro/following{/other_user}",
+      "gists_url": "https://api.github.com/users/sheltauro/gists{/gist_id}",
+      "starred_url": "https://api.github.com/users/sheltauro/starred{/owner}{/repo}",
+      "subscriptions_url": "https://api.github.com/users/sheltauro/subscriptions",
+      "organizations_url": "https://api.github.com/users/sheltauro/orgs",
+      "repos_url": "https://api.github.com/users/sheltauro/repos",
+      "events_url": "https://api.github.com/users/sheltauro/events{/privacy}",
+      "received_events_url": "https://api.github.com/users/sheltauro/received_events",
+      "type": "User",
+      "user_view_type": "public",
+      "site_admin": false
+    },
+    "committer": {
+      "login": "web-flow",
+      "id": 19864447,
+      "node_id": "MDQ6VXNlcjE5ODY0NDQ3",
+      "avatar_url": "https://avatars.githubusercontent.com/u/19864447?v=4",
+      "gravatar_id": "",
+      "url": "https://api.github.com/users/web-flow",
+      "html_url": "https://github.com/web-flow",
+      "followers_url": "https://api.github.com/users/web-flow/followers",
+      "following_url": "https://api.github.com/users/web-flow/following{/other_user}",
+      "gists_url": "https://api.github.com/users/web-flow/gists{/gist_id}",
+      "starred_url": "https://api.github.com/users/web-flow/starred{/owner}{/repo}",
+      "subscriptions_url": "https://api.github.com/users/web-flow/subscriptions",
+      "organizations_url": "https://api.github.com/users/web-flow/orgs",
+      "repos_url": "https://api.github.com/users/web-flow/repos",
+      "events_url": "https://api.github.com/users/web-flow/events{/privacy}",
+      "received_events_url": "https://api.github.com/users/web-flow/received_events",
+      "type": "User",
+      "user_view_type": "public",
+      "site_admin": false
+    },
+    "parents": [
+      {
+        "sha": "4ffbbf6bec617e27e0827c518ad0a7d89803d946",
+        "url": "https://api.github.com/repos/yyoli-db/lakeflow-community-connectors/commits/4ffbbf6bec617e27e0827c518ad0a7d89803d946",
+        "html_url": "https://github.com/yyoli-db/lakeflow-community-connectors/commit/4ffbbf6bec617e27e0827c518ad0a7d89803d946"
+      }
+    ]
+  },
+  {
+    "sha": "4ffbbf6bec617e27e0827c518ad0a7d89803d946",
+    "node_id": "C_kwDOQ5ifOtoAKDRmZmJiZjZiZWM2MTdlMjdlMDgyN2M1MThhZDBhN2Q4OTgwM2Q5NDY",
+    "commit": {
+      "author": {
+        "name": "Yong Li",
+        "email": "redacted@example.com",
+        "date": "2025-12-15T05:45:45Z"
+      },
+      "committer": {
+        "name": "GitHub",
+        "email": "redacted@example.com",
+        "date": "2025-12-15T05:45:45Z"
+      },
+      "message": "Sync with latest change from experimental repo (#5)\n\nThis is to bring all the changes from\nhttps://github.com/yyoli-db/lakeflow-community-connectors/tree/main to\nthe new repo under databricks-labs.\n\nWe will retire the other repo which we have been using to prototype and\ntest.\n\n\nDirectly copied the main branch",
+      "tree": {
+        "sha": "763f10bf2dd35937cd9c93764506eaa1b7848f42",
+        "url": "https://api.github.com/repos/yyoli-db/lakeflow-community-connectors/git/trees/763f10bf2dd35937cd9c93764506eaa1b7848f42"
+      },
+      "url": "https://api.github.com/repos/yyoli-db/lakeflow-community-connectors/git/commits/4ffbbf6bec617e27e0827c518ad0a7d89803d946",
+      "comment_count": 0,
+      "verification": {
+        "verified": true,
+        "reason": "valid",
+        "signature": "-----BEGIN PGP SIGNATURE-----\n\nwsFcBAABCAAQBQJpP6CJCRC1aQ7uu5UhlAAA/ykQAB7j5KztdGGKpd5NlxE/N8Tm\nta9CDMMaxSQ2zLH/7vo3nNhpXogiJRGAXrqZinaDaUseBxL9SKrQeviuJLMXpCHD\nJhMd0zdrvrRW/IwIsbQlPdSgQGGA+0PsRxYRfUSmS46aH6ioYEUuXLfrhJ6px0+j\nTj7PJwvv6sV5zvR9qsk0eymdw7QNPu0OLYFsR5PvegFVJy0z4XdbLSYQsYMtPQBu\nGt3O7JSwq+fYxVn5fFb2XdqTPJeBzGVBS8AwvbGr02VOvzxGPTDTPCZOFOxngd1e\nBvu6d2cO2yLwAzHaWPG9iP+Gqt4BhxiVn8Eqd18N5+FxIVCF6yCRV3MpiO0Rmztk\nB05CO+nvVSJ1FLgiEI3nojUTnQzvd/ZBD+kRUcBBTaaeSMUDNY4S75JvDFuhxWKO\nm6ad5d5pAWelvEHyDvc1HO08TBnbS4FhJQrp2B3fq6Os+hnR1d4Hne3q+bKfySuL\nJmz+FTGfPp16GQer4lot46nHyPk5dQfyoDO+3voEqpBfhjX9sO93XO8pil0FSptI\nsjLkRj7yltFgOSpoITdOmBVYuAAAZ5Qm7SspgpvS5z/84xVayAIbqn1AGQsg7SrG\nC1smPq0yGIWJAECoRlZIJM0bxw+/Na9/GL8qGatMpukeAiRsEZdrywFgUPb+7OxE\nu7ClgwC0kD24zSSxAByw\n=wjk8\n-----END PGP SIGNATURE-----\n",
+        "payload": "tree 763f10bf2dd35937cd9c93764506eaa1b7848f42\nparent 1f1f59d0a464582f958165502a3bed6ca20304b5\nauthor Yong Li <redacted@example.com> 1765777545 -0800\ncommitter GitHub <redacted@example.com> 1765777545 -0800\n\nSync with latest change from experimental repo (#5)\n\nThis is to bring all the changes from\nhttps://github.com/yyoli-db/lakeflow-community-connectors/tree/main to\nthe new repo under databricks-labs.\n\nWe will retire the other repo which we have been using to prototype and\ntest.\n\n\nDirectly copied the main branch",
+        "verified_at": "2025-12-15T05:45:45Z"
+      }
+    },
+    "url": "https://api.github.com/repos/yyoli-db/lakeflow-community-connectors/commits/4ffbbf6bec617e27e0827c518ad0a7d89803d946",
+    "html_url": "https://github.com/yyoli-db/lakeflow-community-connectors/commit/4ffbbf6bec617e27e0827c518ad0a7d89803d946",
+    "comments_url": "https://api.github.com/repos/yyoli-db/lakeflow-community-connectors/commits/4ffbbf6bec617e27e0827c518ad0a7d89803d946/comments",
+    "author": {
+      "login": "yyoli-db",
+      "id": 113948208,
+      "node_id": "U_kgDOBsq2MA",
+      "avatar_url": "https://avatars.githubusercontent.com/u/113948208?v=4",
+      "gravatar_id": "",
+      "url": "https://api.github.com/users/yyoli-db",
+      "html_url": "https://github.com/yyoli-db",
+      "followers_url": "https://api.github.com/users/yyoli-db/followers",
+      "following_url": "https://api.github.com/users/yyoli-db/following{/other_user}",
+      "gists_url": "https://api.github.com/users/yyoli-db/gists{/gist_id}",
+      "starred_url": "https://api.github.com/users/yyoli-db/starred{/owner}{/repo}",
+      "subscriptions_url": "https://api.github.com/users/yyoli-db/subscriptions",
+      "organizations_url": "https://api.github.com/users/yyoli-db/orgs",
+      "repos_url": "https://api.github.com/users/yyoli-db/repos",
+      "events_url": "https://api.github.com/users/yyoli-db/events{/privacy}",
+      "received_events_url": "https://api.github.com/users/yyoli-db/received_events",
+      "type": "User",
+      "user_view_type": "public",
+      "site_admin": false
+    },
+    "committer": {
+      "login": "web-flow",
+      "id": 19864447,
+      "node_id": "MDQ6VXNlcjE5ODY0NDQ3",
+      "avatar_url": "https://avatars.githubusercontent.com/u/19864447?v=4",
+      "gravatar_id": "",
+      "url": "https://api.github.com/users/web-flow",
+      "html_url": "https://github.com/web-flow",
+      "followers_url": "https://api.github.com/users/web-flow/followers",
+      "following_url": "https://api.github.com/users/web-flow/following{/other_user}",
+      "gists_url": "https://api.github.com/users/web-flow/gists{/gist_id}",
+      "starred_url": "https://api.github.com/users/web-flow/starred{/owner}{/repo}",
+      "subscriptions_url": "https://api.github.com/users/web-flow/subscriptions",
+      "organizations_url": "https://api.github.com/users/web-flow/orgs",
+      "repos_url": "https://api.github.com/users/web-flow/repos",
+      "events_url": "https://api.github.com/users/web-flow/events{/privacy}",
+      "received_events_url": "https://api.github.com/users/web-flow/received_events",
+      "type": "User",
+      "user_view_type": "public",
+      "site_admin": false
+    },
+    "parents": [
+      {
+        "sha": "1f1f59d0a464582f958165502a3bed6ca20304b5",
+        "url": "https://api.github.com/repos/yyoli-db/lakeflow-community-connectors/commits/1f1f59d0a464582f958165502a3bed6ca20304b5",
+        "html_url": "https://github.com/yyoli-db/lakeflow-community-connectors/commit/1f1f59d0a464582f958165502a3bed6ca20304b5"
+      }
+    ]
+  },
+  {
+    "sha": "43bb893370d6afab056658adfc3cdee35dddefc2",
+    "node_id": "C_kwDOQ5ifOtoAKDQzYmI4OTMzNzBkNmFmYWIwNTY2NThhZGZjM2NkZWUzNWRkZGVmYzI",
+    "commit": {
+      "author": {
+        "name": "Yong Li",
+        "email": "redacted@example.com",
+        "date": "2025-12-23T07:28:13Z"
+      },
+      "committer": {
+        "name": "GitHub",
+        "email": "redacted@example.com",
+        "date": "2025-12-23T07:28:13Z"
+      },
+      "message": "Update documentation (#16)",
+      "tree": {
+        "sha": "3f72a6e0997cd79e75627d5aee8c71192f112569",
+        "url": "https://api.github.com/repos/yyoli-db/lakeflow-community-connectors/git/trees/3f72a6e0997cd79e75627d5aee8c71192f112569"
+      },
+      "url": "https://api.github.com/repos/yyoli-db/lakeflow-community-connectors/git/commits/43bb893370d6afab056658adfc3cdee35dddefc2",
+      "comment_count": 0,
+      "verification": {
+        "verified": true,
+        "reason": "valid",
+        "signature": "-----BEGIN PGP SIGNATURE-----\n\nwsFcBAABCAAQBQJpSkSNCRC1aQ7uu5UhlAAAR4cQAGg9TLT6aTo1T39fsz908oOK\nY6ahB8YCQmcl7C2aTSmiSOFVJAfFfG9Ra6N2Zo+9v4Phl+6zzDbeQP5WQ6oRYOYs\nTWW5KCJs1Rr6wP2vYQYaeDv8WsYZMsAyhPZcZRZ2FIRLQ/zhZoRs88QxLY5TiIVA\nOmLm48jfetxK3oHvOLHoi7fVbpgs1iG3NGb/2Dkfylflelml8uT5QXpn+rrTxivE\nZmCNsJKiic0sjBt9pmBFH4qGtV2mfnwjRnpuk2b59tGq6QTctoeo8uY1oUglMP7L\nCgM+I6dfz8kQEa3GzFUcXwsEU1XaYAkKHx2+/YM/aK6H0ueFHV/VJcfTNMecQXGF\nkrYZr1+DUCrHum2nXC8dd6RTkKVLA32fqhEoo1u2pmnaxuvMgKi/qNPrnVjD1ZSH\nuQDEnuO6KCHEheN765HZRu+ANpTdgG50x78zFEz1/hMDhuziPwpcs79nSiqR/KrV\nnw1hnmrHHQgab27FbDBqcvFW6VVSkWWF89+8xWRUSVzGVYA9AKDwHZ8fnsoP808w\nJ1YAl26i01IvrdoHK9FkONvQEwNY8NSXePCFUrg37W/CEkg0yfOWTln69Vqbz/Ou\nCwOf/LIqKX15Dn0/hU0GNrduKYwTh4fRnlGye29AO8ojX/2uFiT4UWHD344pG3Jk\nT8b2uO2Hd5d3txhhgkjc\n=iI24\n-----END PGP SIGNATURE-----\n",
+        "payload": "tree 3f72a6e0997cd79e75627d5aee8c71192f112569\nparent a08b6c04940c9d02dd186f6c7b6b018172e6e396\nauthor Yong Li <redacted@example.com> 1766474893 -0800\ncommitter GitHub <redacted@example.com> 1766474893 -0800\n\nUpdate documentation (#16)\n\n",
+        "verified_at": "2025-12-23T07:28:13Z"
+      }
+    },
+    "url": "https://api.github.com/repos/yyoli-db/lakeflow-community-connectors/commits/43bb893370d6afab056658adfc3cdee35dddefc2",
+    "html_url": "https://github.com/yyoli-db/lakeflow-community-connectors/commit/43bb893370d6afab056658adfc3cdee35dddefc2",
+    "comments_url": "https://api.github.com/repos/yyoli-db/lakeflow-community-connectors/commits/43bb893370d6afab056658adfc3cdee35dddefc2/comments",
+    "author": {
+      "login": "yyoli-db",
+      "id": 113948208,
+      "node_id": "U_kgDOBsq2MA",
+      "avatar_url": "https://avatars.githubusercontent.com/u/113948208?v=4",
+      "gravatar_id": "",
+      "url": "https://api.github.com/users/yyoli-db",
+      "html_url": "https://github.com/yyoli-db",
+      "followers_url": "https://api.github.com/users/yyoli-db/followers",
+      "following_url": "https://api.github.com/users/yyoli-db/following{/other_user}",
+      "gists_url": "https://api.github.com/users/yyoli-db/gists{/gist_id}",
+      "starred_url": "https://api.github.com/users/yyoli-db/starred{/owner}{/repo}",
+      "subscriptions_url": "https://api.github.com/users/yyoli-db/subscriptions",
+      "organizations_url": "https://api.github.com/users/yyoli-db/orgs",
+      "repos_url": "https://api.github.com/users/yyoli-db/repos",
+      "events_url": "https://api.github.com/users/yyoli-db/events{/privacy}",
+      "received_events_url": "https://api.github.com/users/yyoli-db/received_events",
+      "type": "User",
+      "user_view_type": "public",
+      "site_admin": false
+    },
+    "committer": {
+      "login": "web-flow",
+      "id": 19864447,
+      "node_id": "MDQ6VXNlcjE5ODY0NDQ3",
+      "avatar_url": "https://avatars.githubusercontent.com/u/19864447?v=4",
+      "gravatar_id": "",
+      "url": "https://api.github.com/users/web-flow",
+      "html_url": "https://github.com/web-flow",
+      "followers_url": "https://api.github.com/users/web-flow/followers",
+      "following_url": "https://api.github.com/users/web-flow/following{/other_user}",
+      "gists_url": "https://api.github.com/users/web-flow/gists{/gist_id}",
+      "starred_url": "https://api.github.com/users/web-flow/starred{/owner}{/repo}",
+      "subscriptions_url": "https://api.github.com/users/web-flow/subscriptions",
+      "organizations_url": "https://api.github.com/users/web-flow/orgs",
+      "repos_url": "https://api.github.com/users/web-flow/repos",
+      "events_url": "https://api.github.com/users/web-flow/events{/privacy}",
+      "received_events_url": "https://api.github.com/users/web-flow/received_events",
+      "type": "User",
+      "user_view_type": "public",
+      "site_admin": false
+    },
+    "parents": [
+      {
+        "sha": "a08b6c04940c9d02dd186f6c7b6b018172e6e396",
+        "url": "https://api.github.com/repos/yyoli-db/lakeflow-community-connectors/commits/a08b6c04940c9d02dd186f6c7b6b018172e6e396",
+        "html_url": "https://github.com/yyoli-db/lakeflow-community-connectors/commit/a08b6c04940c9d02dd186f6c7b6b018172e6e396"
+      }
+    ]
+  },
+  {
+    "sha": "a08b6c04940c9d02dd186f6c7b6b018172e6e396",
+    "node_id": "C_kwDOQ5ifOtoAKGEwOGI2YzA0OTQwYzlkMDJkZDE4NmY2YzdiNmIwMTgxNzJlNmUzOTY",
+    "commit": {
+      "author": {
+        "name": "Sheldon Tauro",
+        "email": "redacted@example.com",
+        "date": "2025-12-22T08:41:04Z"
+      },
+      "committer": {
+        "name": "GitHub",
+        "email": "redacted@example.com",
+        "date": "2025-12-22T08:41:04Z"
+      },
+      "message": "Add prompts for write to source testing functionality. (#11)\n\nAs titled.\n\nVerified that the prompts work well by creating write to source with a\ndummy slack connector.",
+      "tree": {
+        "sha": "be274af635b3e9db44edda972f602780c7ea52ad",
+        "url": "https://api.github.com/repos/yyoli-db/lakeflow-community-connectors/git/trees/be274af635b3e9db44edda972f602780c7ea52ad"
+      },
+      "url": "https://api.github.com/repos/yyoli-db/lakeflow-community-connectors/git/commits/a08b6c04940c9d02dd186f6c7b6b018172e6e396",
+      "comment_count": 0,
+      "verification": {
+        "verified": true,
+        "reason": "valid",
+        "signature": "-----BEGIN PGP SIGNATURE-----\n\nwsFcBAABCAAQBQJpSQQgCRC1aQ7uu5UhlAAA5L8QAJkNEGBJGpTyyq+bRP+S7ax3\np/WjLtIn4nqhld7iFMSR1HZr/2C2gAuuyr3fe3oYnkRGLHtjddG2Fr9SpWKgOJjw\n/hii/xOaXEoWPxKr4MU+JQleE/frd34SzYHYZGnHm11NIsMd2K2xSE+8/tRfWPA4\nQ83TeVceVoBc5oEVwvtbWwmO5FGHg6YjYXK0TK2T9oB7z+nQ8xDuFcyvRpz0Elyq\nh2c7pmwkR96UYb2180RQpp2Rck9wItxBWpPXZKChpySaOFcLXz9FV9OaATXpBpf3\nzQUxHGOG4OC4ZtZk5Qy5sc68ZeArr/ZXeMT4Chu/l38gEx7ESlPR3o7T8BWrVSE3\n3o3zNZPjdfXcupY3cERFRvQ3m4aoMReVL5G9HC4d6JO2MgYx5aLJMAJEMVmJdeBh\n6v3xWQPZrFSRGexyah2ROQRgOycHkBgRHwOxUXsTyVN4nj+z/Zu/toDiAvwJ5TXz\n59Z/frWVt9OeT7qkz5M0q+FWNTluZ0SglQXLwyXd4NAnuXl0dTeHprW9+zBrU4UE\nQKGRgUgEcvlsUBI3JpFXqNl/J4qczXUcoZfPrE75rP+dEXtdsjIX5cRrkfvEIhG8\nk/VjXkagzDGeaoEflPKuCCr0YvzuonF4pIt/iiyOda0O2Xh8VW+PMNAokvqT8V6Z\nOOl4DcHrIVoojo1PNA3k\n=9nCG\n-----END PGP SIGNATURE-----\n",
+        "payload": "tree be274af635b3e9db44edda972f602780c7ea52ad\nparent 19948809d5c0eac49773f264e3c87cca040d63a5\nauthor Sheldon Tauro <redacted@example.com> 1766392864 +0530\ncommitter GitHub <redacted@example.com> 1766392864 +0530\n\nAdd prompts for write to source testing functionality. (#11)\n\nAs titled.\n\nVerified that the prompts work well by creating write to source with a\ndummy slack connector.",
+        "verified_at": "2025-12-22T08:41:05Z"
+      }
+    },
+    "url": "https://api.github.com/repos/yyoli-db/lakeflow-community-connectors/commits/a08b6c04940c9d02dd186f6c7b6b018172e6e396",
+    "html_url": "https://github.com/yyoli-db/lakeflow-community-connectors/commit/a08b6c04940c9d02dd186f6c7b6b018172e6e396",
+    "comments_url": "https://api.github.com/repos/yyoli-db/lakeflow-community-connectors/commits/a08b6c04940c9d02dd186f6c7b6b018172e6e396/comments",
+    "author": {
+      "login": "sheltauro",
+      "id": 21174348,
+      "node_id": "MDQ6VXNlcjIxMTc0MzQ4",
+      "avatar_url": "https://avatars.githubusercontent.com/u/21174348?v=4",
+      "gravatar_id": "",
+      "url": "https://api.github.com/users/sheltauro",
+      "html_url": "https://github.com/sheltauro",
+      "followers_url": "https://api.github.com/users/sheltauro/followers",
+      "following_url": "https://api.github.com/users/sheltauro/following{/other_user}",
+      "gists_url": "https://api.github.com/users/sheltauro/gists{/gist_id}",
+      "starred_url": "https://api.github.com/users/sheltauro/starred{/owner}{/repo}",
+      "subscriptions_url": "https://api.github.com/users/sheltauro/subscriptions",
+      "organizations_url": "https://api.github.com/users/sheltauro/orgs",
+      "repos_url": "https://api.github.com/users/sheltauro/repos",
+      "events_url": "https://api.github.com/users/sheltauro/events{/privacy}",
+      "received_events_url": "https://api.github.com/users/sheltauro/received_events",
+      "type": "User",
+      "user_view_type": "public",
+      "site_admin": false
+    },
+    "committer": {
+      "login": "web-flow",
+      "id": 19864447,
+      "node_id": "MDQ6VXNlcjE5ODY0NDQ3",
+      "avatar_url": "https://avatars.githubusercontent.com/u/19864447?v=4",
+      "gravatar_id": "",
+      "url": "https://api.github.com/users/web-flow",
+      "html_url": "https://github.com/web-flow",
+      "followers_url": "https://api.github.com/users/web-flow/followers",
+      "following_url": "https://api.github.com/users/web-flow/following{/other_user}",
+      "gists_url": "https://api.github.com/users/web-flow/gists{/gist_id}",
+      "starred_url": "https://api.github.com/users/web-flow/starred{/owner}{/repo}",
+      "subscriptions_url": "https://api.github.com/users/web-flow/subscriptions",
+      "organizations_url": "https://api.github.com/users/web-flow/orgs",
+      "repos_url": "https://api.github.com/users/web-flow/repos",
+      "events_url": "https://api.github.com/users/web-flow/events{/privacy}",
+      "received_events_url": "https://api.github.com/users/web-flow/received_events",
+      "type": "User",
+      "user_view_type": "public",
+      "site_admin": false
+    },
+    "parents": [
+      {
+        "sha": "19948809d5c0eac49773f264e3c87cca040d63a5",
+        "url": "https://api.github.com/repos/yyoli-db/lakeflow-community-connectors/commits/19948809d5c0eac49773f264e3c87cca040d63a5",
+        "html_url": "https://github.com/yyoli-db/lakeflow-community-connectors/commit/19948809d5c0eac49773f264e3c87cca040d63a5"
+      }
+    ]
+  },
+  {
+    "sha": "19948809d5c0eac49773f264e3c87cca040d63a5",
+    "node_id": "C_kwDOQ5ifOtoAKDE5OTQ4ODA5ZDVjMGVhYzQ5NzczZjI2NGUzYzg3Y2NhMDQwZDYzYTU",
+    "commit": {
+      "author": {
+        "name": "Sheldon Tauro",
+        "email": "redacted@example.com",
+        "date": "2025-12-18T02:25:24Z"
+      },
+      "committer": {
+        "name": "GitHub",
+        "email": "redacted@example.com",
+        "date": "2025-12-18T02:25:24Z"
+      },
+      "message": "Minor prompt improvements to ensure the agent understands rate limiting and is able to identify which API to pick (#8)\n\nAs titled.",
+      "tree": {
+        "sha": "c7633bbe259c5765802377ba7c6544ec59132e2f",
+        "url": "https://api.github.com/repos/yyoli-db/lakeflow-community-connectors/git/trees/c7633bbe259c5765802377ba7c6544ec59132e2f"
+      },
+      "url": "https://api.github.com/repos/yyoli-db/lakeflow-community-connectors/git/commits/19948809d5c0eac49773f264e3c87cca040d63a5",
+      "comment_count": 0,
+      "verification": {
+        "verified": true,
+        "reason": "valid",
+        "signature": "-----BEGIN PGP SIGNATURE-----\n\nwsFcBAABCAAQBQJpQ2YUCRC1aQ7uu5UhlAAAPQoQADIE26QryGBaEYEAuAalh7b7\nT29foey4K/JnrC9mvGzhOTd8bm2EIFPA++Ys1ckJqAtR/Jr1GlGduYC2YnAd7Q3L\ndYWnHTEkq2hIxha5e/KIO05pJUEQVX37RxS8lDIBVTb6hVpW43UhOQ3v5AW+CyrU\njvNN8cDhwdC8V9tmEPeyPmpLddPsxDqxk0Xjd+sJdqtYaIAorvvh8RQr6JV6ktmA\nmweF0OAMWmQyD16A+BrhhgNnRm0sDEWkUtsCPIWReAHNCpT8eMUplqZc0UsT7DUH\n7BDDgkAJmbL+SlO020vRiPegf2NdU7uAFzrD38HWHJehE6dlGIHEw4cMYtYAeasH\na2BRB86dKXDnExQ3dbhst+ferBAlWVyWu4a0rDchXXLXAl+p6D1fm9BNzvIjVvXc\neAqU9f7V3jL38iUWr3R3wO7B2HAkbVI2YGgDeEzDsJVGBCv4mtb+MhZPsa1hxshh\nB2FvXmknlU+NSbwKcPKmj2AOhj3+mj3DbILVv/tijQ7YSERTqkL5+H3VgXVBRxj2\ngUecQTj0o4Sf/qYrYiKAarFo6HzS9A7y6qBS3SvJQEWTOENqe09r6/Bx8iGscUYN\ncBEG8NBanvvYCQI9O7nXJhIrXFWIflwE2Je9YwG27r/7KhXi0QTjJslAUzn/oPYG\nkAYE/W9Pv+W2c6UQG084\n=RwHr\n-----END PGP SIGNATURE-----\n",
+        "payload": "tree c7633bbe259c5765802377ba7c6544ec59132e2f\nparent 1a930cde7d1a5ff1154dec3e9e3d2ff712a0ff2e\nauthor Sheldon Tauro <redacted@example.com> 1766024724 +0530\ncommitter GitHub <redacted@example.com> 1766024724 -0800\n\nMinor prompt improvements to ensure the agent understands rate limiting and is able to identify which API to pick (#8)\n\nAs titled.",
+        "verified_at": "2025-12-18T02:25:25Z"
+      }
+    },
+    "url": "https://api.github.com/repos/yyoli-db/lakeflow-community-connectors/commits/19948809d5c0eac49773f264e3c87cca040d63a5",
+    "html_url": "https://github.com/yyoli-db/lakeflow-community-connectors/commit/19948809d5c0eac49773f264e3c87cca040d63a5",
+    "comments_url": "https://api.github.com/repos/yyoli-db/lakeflow-community-connectors/commits/19948809d5c0eac49773f264e3c87cca040d63a5/comments",
+    "author": {
+      "login": "sheltauro",
+      "id": 21174348,
+      "node_id": "MDQ6VXNlcjIxMTc0MzQ4",
+      "avatar_url": "https://avatars.githubusercontent.com/u/21174348?v=4",
+      "gravatar_id": "",
+      "url": "https://api.github.com/users/sheltauro",
+      "html_url": "https://github.com/sheltauro",
+      "followers_url": "https://api.github.com/users/sheltauro/followers",
+      "following_url": "https://api.github.com/users/sheltauro/following{/other_user}",
+      "gists_url": "https://api.github.com/users/sheltauro/gists{/gist_id}",
+      "starred_url": "https://api.github.com/users/sheltauro/starred{/owner}{/repo}",
+      "subscriptions_url": "https://api.github.com/users/sheltauro/subscriptions",
+      "organizations_url": "https://api.github.com/users/sheltauro/orgs",
+      "repos_url": "https://api.github.com/users/sheltauro/repos",
+      "events_url": "https://api.github.com/users/sheltauro/events{/privacy}",
+      "received_events_url": "https://api.github.com/users/sheltauro/received_events",
+      "type": "User",
+      "user_view_type": "public",
+      "site_admin": false
+    },
+    "committer": {
+      "login": "web-flow",
+      "id": 19864447,
+      "node_id": "MDQ6VXNlcjE5ODY0NDQ3",
+      "avatar_url": "https://avatars.githubusercontent.com/u/19864447?v=4",
+      "gravatar_id": "",
+      "url": "https://api.github.com/users/web-flow",
+      "html_url": "https://github.com/web-flow",
+      "followers_url": "https://api.github.com/users/web-flow/followers",
+      "following_url": "https://api.github.com/users/web-flow/following{/other_user}",
+      "gists_url": "https://api.github.com/users/web-flow/gists{/gist_id}",
+      "starred_url": "https://api.github.com/users/web-flow/starred{/owner}{/repo}",
+      "subscriptions_url": "https://api.github.com/users/web-flow/subscriptions",
+      "organizations_url": "https://api.github.com/users/web-flow/orgs",
+      "repos_url": "https://api.github.com/users/web-flow/repos",
+      "events_url": "https://api.github.com/users/web-flow/events{/privacy}",
+      "received_events_url": "https://api.github.com/users/web-flow/received_events",
+      "type": "User",
+      "user_view_type": "public",
+      "site_admin": false
+    },
+    "parents": [
+      {
+        "sha": "1a930cde7d1a5ff1154dec3e9e3d2ff712a0ff2e",
+        "url": "https://api.github.com/repos/yyoli-db/lakeflow-community-connectors/commits/1a930cde7d1a5ff1154dec3e9e3d2ff712a0ff2e",
+        "html_url": "https://github.com/yyoli-db/lakeflow-community-connectors/commit/1a930cde7d1a5ff1154dec3e9e3d2ff712a0ff2e"
+      }
+    ]
+  },
+  {
+    "sha": "122e707e53f5478f2722ae17d0fa3f703d2047d3",
+    "node_id": "C_kwDOQ5ifOtoAKDEyMmU3MDdlNTNmNTQ3OGYyNzIyYWUxN2QwZmEzZjcwM2QyMDQ3ZDM",
+    "commit": {
+      "author": {
+        "name": "Yong Li",
+        "email": "redacted@example.com",
+        "date": "2025-12-31T21:32:28Z"
+      },
+      "committer": {
+        "name": "GitHub",
+        "email": "redacted@example.com",
+        "date": "2025-12-31T21:32:28Z"
+      },
+      "message": "Fix for Pylint after workflow setup (#23)",
+      "tree": {
+        "sha": "c1d8e624516eb737966576371ee9eaea567690a5",
+        "url": "https://api.github.com/repos/yyoli-db/lakeflow-community-connectors/git/trees/c1d8e624516eb737966576371ee9eaea567690a5"
+      },
+      "url": "https://api.github.com/repos/yyoli-db/lakeflow-community-connectors/git/commits/122e707e53f5478f2722ae17d0fa3f703d2047d3",
+      "comment_count": 0,
+      "verification": {
+        "verified": true,
+        "reason": "valid",
+        "signature": "-----BEGIN PGP SIGNATURE-----\n\nwsFcBAABCAAQBQJpVZZsCRC1aQ7uu5UhlAAAQzUQABnT57GVf4xLYbFUAv2/Cv8P\nAYlaYwrwb1IN+ZZqU+s3yk/KAOHLHXsNoCRPl/7FR9kSc3B2BQLDJCUqZM0QLtFH\n1B/kfykPPTCgdduo8Ey+pHNcd3aRL5J19nUgkRcgDzShuGVoLKH6QIYnlCqlmED+\nqkwft47zK7u4awc3BvjPZPgNoBEu5F3CxYRHf0AX3zbzDG8FMRyyoQjU6cBrGbBQ\n3bwpK1bOK1rUIVh3ERzHASxa57nS7eZ+9bw1eLlhNlJj2OyEM6zpUdgaImbsek0n\nxK9cG49NhkxgL4+sQnUgromQGe/oSr+L8gaMzMpCMr0/AmlXeX0ATPu463RS+j9M\nUR0J/sL5jXI+IQM9sUrGITrABnzEwt/s1JkJRZTZ6iZM9hAnCoznwLHF/oGzDF0G\nskrI4gWzflPy8UtePng/ZlB5ytWnS1k8MlX3ecbPr22XT2QokqFAbuLPoFl2TIGu\naa3wlTbTZfITCcAkGld9bQMFA5XJ3G4PVsJWuBAoDp+dx9mDrzvK7wbIP/CBMDJ8\nZdeJ2WUyPDy0ho2rIsbEWsE0lHHf/oJsdz93MLkOTHxtoEGXH/KFiNrIxK38LWzg\nemLmuJlPLtnhvWaF4FLPCf76E+ObOs2mEFCzYfQLnjPzDAFdh04GIpuI2KejqwsM\nDCqTu+ntD3dXGXQ/6NSH\n=uB2L\n-----END PGP SIGNATURE-----\n",
+        "payload": "tree c1d8e624516eb737966576371ee9eaea567690a5\nparent bdf5825a0f3413de36a07e458d792b1b9edc0149\nauthor Yong Li <redacted@example.com> 1767216748 -0800\ncommitter GitHub <redacted@example.com> 1767216748 -0800\n\nFix for Pylint after workflow setup (#23)\n\n",
+        "verified_at": "2025-12-31T21:32:28Z"
+      }
+    },
+    "url": "https://api.github.com/repos/yyoli-db/lakeflow-community-connectors/commits/122e707e53f5478f2722ae17d0fa3f703d2047d3",
+    "html_url": "https://github.com/yyoli-db/lakeflow-community-connectors/commit/122e707e53f5478f2722ae17d0fa3f703d2047d3",
+    "comments_url": "https://api.github.com/repos/yyoli-db/lakeflow-community-connectors/commits/122e707e53f5478f2722ae17d0fa3f703d2047d3/comments",
+    "author": {
+      "login": "yyoli-db",
+      "id": 113948208,
+      "node_id": "U_kgDOBsq2MA",
+      "avatar_url": "https://avatars.githubusercontent.com/u/113948208?v=4",
+      "gravatar_id": "",
+      "url": "https://api.github.com/users/yyoli-db",
+      "html_url": "https://github.com/yyoli-db",
+      "followers_url": "https://api.github.com/users/yyoli-db/followers",
+      "following_url": "https://api.github.com/users/yyoli-db/following{/other_user}",
+      "gists_url": "https://api.github.com/users/yyoli-db/gists{/gist_id}",
+      "starred_url": "https://api.github.com/users/yyoli-db/starred{/owner}{/repo}",
+      "subscriptions_url": "https://api.github.com/users/yyoli-db/subscriptions",
+      "organizations_url": "https://api.github.com/users/yyoli-db/orgs",
+      "repos_url": "https://api.github.com/users/yyoli-db/repos",
+      "events_url": "https://api.github.com/users/yyoli-db/events{/privacy}",
+      "received_events_url": "https://api.github.com/users/yyoli-db/received_events",
+      "type": "User",
+      "user_view_type": "public",
+      "site_admin": false
+    },
+    "committer": {
+      "login": "web-flow",
+      "id": 19864447,
+      "node_id": "MDQ6VXNlcjE5ODY0NDQ3",
+      "avatar_url": "https://avatars.githubusercontent.com/u/19864447?v=4",
+      "gravatar_id": "",
+      "url": "https://api.github.com/users/web-flow",
+      "html_url": "https://github.com/web-flow",
+      "followers_url": "https://api.github.com/users/web-flow/followers",
+      "following_url": "https://api.github.com/users/web-flow/following{/other_user}",
+      "gists_url": "https://api.github.com/users/web-flow/gists{/gist_id}",
+      "starred_url": "https://api.github.com/users/web-flow/starred{/owner}{/repo}",
+      "subscriptions_url": "https://api.github.com/users/web-flow/subscriptions",
+      "organizations_url": "https://api.github.com/users/web-flow/orgs",
+      "repos_url": "https://api.github.com/users/web-flow/repos",
+      "events_url": "https://api.github.com/users/web-flow/events{/privacy}",
+      "received_events_url": "https://api.github.com/users/web-flow/received_events",
+      "type": "User",
+      "user_view_type": "public",
+      "site_admin": false
+    },
+    "parents": [
+      {
+        "sha": "bdf5825a0f3413de36a07e458d792b1b9edc0149",
+        "url": "https://api.github.com/repos/yyoli-db/lakeflow-community-connectors/commits/bdf5825a0f3413de36a07e458d792b1b9edc0149",
+        "html_url": "https://github.com/yyoli-db/lakeflow-community-connectors/commit/bdf5825a0f3413de36a07e458d792b1b9edc0149"
+      }
+    ]
+  },
+  {
+    "sha": "bdf5825a0f3413de36a07e458d792b1b9edc0149",
+    "node_id": "C_kwDOQ5ifOtoAKGJkZjU4MjVhMGYzNDEzZGUzNmEwN2U0NThkNzkyYjFiOWVkYzAxNDk",
+    "commit": {
+      "author": {
+        "name": "Yong Li",
+        "email": "redacted@example.com",
+        "date": "2025-12-31T07:53:22Z"
+      },
+      "committer": {
+        "name": "GitHub",
+        "email": "redacted@example.com",
+        "date": "2025-12-31T07:53:22Z"
+      },
+      "message": "Create pylint.yml",
+      "tree": {
+        "sha": "dac66187142924498fe3bd58220b1e389408be2c",
+        "url": "https://api.github.com/repos/yyoli-db/lakeflow-community-connectors/git/trees/dac66187142924498fe3bd58220b1e389408be2c"
+      },
+      "url": "https://api.github.com/repos/yyoli-db/lakeflow-community-connectors/git/commits/bdf5825a0f3413de36a07e458d792b1b9edc0149",
+      "comment_count": 0,
+      "verification": {
+        "verified": true,
+        "reason": "valid",
+        "signature": "-----BEGIN PGP SIGNATURE-----\n\nwsFcBAABCAAQBQJpVNZzCRC1aQ7uu5UhlAAAKMMQADZvzpGO+4Rw2MCxDOTtG5bN\nxj4tvGPFf4yY5PRo4CtxExi75FycaskJ9nY9g7tR5AqmBIaBU2x34WpkOSFkPw/O\nqUXY+wf13TLBLc8THsOreKdyBlJl/ROjtAgWFcCPG5wuSp7xAXuWvZ1yrcwY1VCa\nPdraJwsu8f0ZCl7hQt0KMYEYjyG06oCYAepwvewxTR11RpkDfJAs7svcH9NUg2t/\nweIQbtkPQJ3Bm2dHrbrzAZc4jZ6iBbeIMRDXSgUsyTmmr8SvjoEiS4WwlCafSqyV\ntxthQ6e/bY0hVo3yCc2RtkbLyl7GiCGOsXp95I8h3yKYrNTY25w1KQtILcmHvdyf\n53cQ5Z8g2ajX80IiwBg5NXusdsGsFI/lm7iewTUdtD3r8C+85rF0wQSJ3+Zc8u8B\nJIoHk1ITBuo28b2Wh+JWtxA06vrf2VhSKOlJuAbhZliEGTRwJFIfadr53YSpsSA/\nqd+yfL1PtAcQDM/uvg3QAxX5sA+Timgu4Np/UxV9t91jL+v1Docv1wuv/XHVDgYT\n36PSqMDlJicf5BaJ8DbV+MvLB3J6VUie9lrh8fLzdYBVVuiS+VSur4RhK/a91KBe\nqgFeFd3wG1KJN5psXjeEV4em1HleALZPmbOV6zQbGPv+v9hlvBHYnxGuEfZa43cH\nAeaoKoS37uOjPUDfRod5\n=+5cD\n-----END PGP SIGNATURE-----\n",
+        "payload": "tree dac66187142924498fe3bd58220b1e389408be2c\nparent 5b5f9ead9d0519d56326f9b33826aa8531236c0c\nauthor Yong Li <redacted@example.com> 1767167602 -0800\ncommitter GitHub <redacted@example.com> 1767167602 -0800\n\nCreate pylint.yml",
+        "verified_at": "2025-12-31T07:53:23Z"
+      }
+    },
+    "url": "https://api.github.com/repos/yyoli-db/lakeflow-community-connectors/commits/bdf5825a0f3413de36a07e458d792b1b9edc0149",
+    "html_url": "https://github.com/yyoli-db/lakeflow-community-connectors/commit/bdf5825a0f3413de36a07e458d792b1b9edc0149",
+    "comments_url": "https://api.github.com/repos/yyoli-db/lakeflow-community-connectors/commits/bdf5825a0f3413de36a07e458d792b1b9edc0149/comments",
+    "author": {
+      "login": "yyoli-db",
+      "id": 113948208,
+      "node_id": "U_kgDOBsq2MA",
+      "avatar_url": "https://avatars.githubusercontent.com/u/113948208?v=4",
+      "gravatar_id": "",
+      "url": "https://api.github.com/users/yyoli-db",
+      "html_url": "https://github.com/yyoli-db",
+      "followers_url": "https://api.github.com/users/yyoli-db/followers",
+      "following_url": "https://api.github.com/users/yyoli-db/following{/other_user}",
+      "gists_url": "https://api.github.com/users/yyoli-db/gists{/gist_id}",
+      "starred_url": "https://api.github.com/users/yyoli-db/starred{/owner}{/repo}",
+      "subscriptions_url": "https://api.github.com/users/yyoli-db/subscriptions",
+      "organizations_url": "https://api.github.com/users/yyoli-db/orgs",
+      "repos_url": "https://api.github.com/users/yyoli-db/repos",
+      "events_url": "https://api.github.com/users/yyoli-db/events{/privacy}",
+      "received_events_url": "https://api.github.com/users/yyoli-db/received_events",
+      "type": "User",
+      "user_view_type": "public",
+      "site_admin": false
+    },
+    "committer": {
+      "login": "web-flow",
+      "id": 19864447,
+      "node_id": "MDQ6VXNlcjE5ODY0NDQ3",
+      "avatar_url": "https://avatars.githubusercontent.com/u/19864447?v=4",
+      "gravatar_id": "",
+      "url": "https://api.github.com/users/web-flow",
+      "html_url": "https://github.com/web-flow",
+      "followers_url": "https://api.github.com/users/web-flow/followers",
+      "following_url": "https://api.github.com/users/web-flow/following{/other_user}",
+      "gists_url": "https://api.github.com/users/web-flow/gists{/gist_id}",
+      "starred_url": "https://api.github.com/users/web-flow/starred{/owner}{/repo}",
+      "subscriptions_url": "https://api.github.com/users/web-flow/subscriptions",
+      "organizations_url": "https://api.github.com/users/web-flow/orgs",
+      "repos_url": "https://api.github.com/users/web-flow/repos",
+      "events_url": "https://api.github.com/users/web-flow/events{/privacy}",
+      "received_events_url": "https://api.github.com/users/web-flow/received_events",
+      "type": "User",
+      "user_view_type": "public",
+      "site_admin": false
+    },
+    "parents": [
+      {
+        "sha": "5b5f9ead9d0519d56326f9b33826aa8531236c0c",
+        "url": "https://api.github.com/repos/yyoli-db/lakeflow-community-connectors/commits/5b5f9ead9d0519d56326f9b33826aa8531236c0c",
+        "html_url": "https://github.com/yyoli-db/lakeflow-community-connectors/commit/5b5f9ead9d0519d56326f9b33826aa8531236c0c"
+      }
+    ]
+  },
+  {
+    "sha": "5b5f9ead9d0519d56326f9b33826aa8531236c0c",
+    "node_id": "C_kwDOQ5ifOtoAKDViNWY5ZWFkOWQwNTE5ZDU2MzI2ZjliMzM4MjZhYTg1MzEyMzZjMGM",
+    "commit": {
+      "author": {
+        "name": "Yong Li",
+        "email": "redacted@example.com",
+        "date": "2025-12-31T07:04:15Z"
+      },
+      "committer": {
+        "name": "GitHub",
+        "email": "redacted@example.com",
+        "date": "2025-12-31T07:04:15Z"
+      },
+      "message": "update doc (#22)",
+      "tree": {
+        "sha": "451e9438023f3bff11cfd4b3ea2c3e59d1c1576b",
+        "url": "https://api.github.com/repos/yyoli-db/lakeflow-community-connectors/git/trees/451e9438023f3bff11cfd4b3ea2c3e59d1c1576b"
+      },
+      "url": "https://api.github.com/repos/yyoli-db/lakeflow-community-connectors/git/commits/5b5f9ead9d0519d56326f9b33826aa8531236c0c",
+      "comment_count": 0,
+      "verification": {
+        "verified": true,
+        "reason": "valid",
+        "signature": "-----BEGIN PGP SIGNATURE-----\n\nwsFcBAABCAAQBQJpVMrvCRC1aQ7uu5UhlAAAuYsQAEGZEnoHFZyVG27lHkaaZHvk\nK3k3o6ywnCGouv79ZAQiS/7MX4loQjDg+q0uEhGmZKYMRvhNgPwF8fSLzaUrco3r\nKpuPfuvYY2KxE6FQw72XEnk/cK/btmG1BeOZGeYqr2Zk77JJoxFIgUn0u+cnXu2L\nvUQS5diHc/5MaoGz23NNNPlAXwvbeUQ3hXrRuzrHx9phdaHRAz5BhMo/gjoE5tN5\ny/HInfX1RJquTsdWTr+MpMjvLl018ib6z+wsd3yNwbjrnwdweQpFZCdkX+x/aHOi\nHRPrMrQUC5oCNOArpJb194BZM3Wv7X6hinoKn3SXCma9p+JTfbKFlfFxMHYdrU/R\ndAKIcbiMEZDwfy5Lzy6MiHS/VOGH+CcU5iLMtn8n5sG7Gzla0Vi2I+VNrZnRwBoh\nnfRq3glk4gEmyyoJj7N2eVNBBQwDmSwl01gx3O0GIDsF0HU6iORlkhIyBuHslWYl\nt8PkM12V5Re9s2LpXrpmKxJFu98cVrHT1fNSP9MLxsZJQoVej6HrpSUSmTj4hEwk\nCTHV2Qw37fXcq3+XWJ7tOUh93GXZPJ4qPvsCglyWUvVCf/+bxZDTTEIIkexz39Tn\nExD2g9WhnNEZ0UCcQ0/wRAC7WlYDGWtsv2UIdygYkBCDnE81ugrCMIuf607EzLnf\nn1I8bJSNmkTaF3Z6/GHg\n=+AKc\n-----END PGP SIGNATURE-----\n",
+        "payload": "tree 451e9438023f3bff11cfd4b3ea2c3e59d1c1576b\nparent a9ef5d4f088d3917000f35848c0cd7bdc659ab9f\nauthor Yong Li <redacted@example.com> 1767164655 -0800\ncommitter GitHub <redacted@example.com> 1767164655 -0800\n\nupdate doc (#22)\n\n",
+        "verified_at": "2025-12-31T07:04:15Z"
+      }
+    },
+    "url": "https://api.github.com/repos/yyoli-db/lakeflow-community-connectors/commits/5b5f9ead9d0519d56326f9b33826aa8531236c0c",
+    "html_url": "https://github.com/yyoli-db/lakeflow-community-connectors/commit/5b5f9ead9d0519d56326f9b33826aa8531236c0c",
+    "comments_url": "https://api.github.com/repos/yyoli-db/lakeflow-community-connectors/commits/5b5f9ead9d0519d56326f9b33826aa8531236c0c/comments",
+    "author": {
+      "login": "yyoli-db",
+      "id": 113948208,
+      "node_id": "U_kgDOBsq2MA",
+      "avatar_url": "https://avatars.githubusercontent.com/u/113948208?v=4",
+      "gravatar_id": "",
+      "url": "https://api.github.com/users/yyoli-db",
+      "html_url": "https://github.com/yyoli-db",
+      "followers_url": "https://api.github.com/users/yyoli-db/followers",
+      "following_url": "https://api.github.com/users/yyoli-db/following{/other_user}",
+      "gists_url": "https://api.github.com/users/yyoli-db/gists{/gist_id}",
+      "starred_url": "https://api.github.com/users/yyoli-db/starred{/owner}{/repo}",
+      "subscriptions_url": "https://api.github.com/users/yyoli-db/subscriptions",
+      "organizations_url": "https://api.github.com/users/yyoli-db/orgs",
+      "repos_url": "https://api.github.com/users/yyoli-db/repos",
+      "events_url": "https://api.github.com/users/yyoli-db/events{/privacy}",
+      "received_events_url": "https://api.github.com/users/yyoli-db/received_events",
+      "type": "User",
+      "user_view_type": "public",
+      "site_admin": false
+    },
+    "committer": {
+      "login": "web-flow",
+      "id": 19864447,
+      "node_id": "MDQ6VXNlcjE5ODY0NDQ3",
+      "avatar_url": "https://avatars.githubusercontent.com/u/19864447?v=4",
+      "gravatar_id": "",
+      "url": "https://api.github.com/users/web-flow",
+      "html_url": "https://github.com/web-flow",
+      "followers_url": "https://api.github.com/users/web-flow/followers",
+      "following_url": "https://api.github.com/users/web-flow/following{/other_user}",
+      "gists_url": "https://api.github.com/users/web-flow/gists{/gist_id}",
+      "starred_url": "https://api.github.com/users/web-flow/starred{/owner}{/repo}",
+      "subscriptions_url": "https://api.github.com/users/web-flow/subscriptions",
+      "organizations_url": "https://api.github.com/users/web-flow/orgs",
+      "repos_url": "https://api.github.com/users/web-flow/repos",
+      "events_url": "https://api.github.com/users/web-flow/events{/privacy}",
+      "received_events_url": "https://api.github.com/users/web-flow/received_events",
+      "type": "User",
+      "user_view_type": "public",
+      "site_admin": false
+    },
+    "parents": [
+      {
+        "sha": "a9ef5d4f088d3917000f35848c0cd7bdc659ab9f",
+        "url": "https://api.github.com/repos/yyoli-db/lakeflow-community-connectors/commits/a9ef5d4f088d3917000f35848c0cd7bdc659ab9f",
+        "html_url": "https://github.com/yyoli-db/lakeflow-community-connectors/commit/a9ef5d4f088d3917000f35848c0cd7bdc659ab9f"
+      }
+    ]
+  },
+  {
+    "sha": "a9ef5d4f088d3917000f35848c0cd7bdc659ab9f",
+    "node_id": "C_kwDOQ5ifOtoAKGE5ZWY1ZDRmMDg4ZDM5MTcwMDBmMzU4NDhjMGNkN2JkYzY1OWFiOWY",
+    "commit": {
+      "author": {
+        "name": "Yong Li",
+        "email": "redacted@example.com",
+        "date": "2025-12-31T06:48:47Z"
+      },
+      "committer": {
+        "name": "GitHub",
+        "email": "redacted@example.com",
+        "date": "2025-12-31T06:48:47Z"
+      },
+      "message": "Move scripts into tools and update doc (#21)",
+      "tree": {
+        "sha": "6f70aa45331ff9fc83a5283daef7526c1c482cd7",
+        "url": "https://api.github.com/repos/yyoli-db/lakeflow-community-connectors/git/trees/6f70aa45331ff9fc83a5283daef7526c1c482cd7"
+      },
+      "url": "https://api.github.com/repos/yyoli-db/lakeflow-community-connectors/git/commits/a9ef5d4f088d3917000f35848c0cd7bdc659ab9f",
+      "comment_count": 0,
+      "verification": {
+        "verified": true,
+        "reason": "valid",
+        "signature": "-----BEGIN PGP SIGNATURE-----\n\nwsFcBAABCAAQBQJpVMdPCRC1aQ7uu5UhlAAAG10QAKemUzF0Awn1EVOzyn+nN8Ly\noZ2fO2KU5YzHLDL2adxWJkcr/9WIg+tOwYd1ykmNsgfAciW8P1zbRLRyxoxs/UwT\n3JC47vG8SwpMQ2WkuKuwEtJpjhiITlxOxZGojkY0alF41cmIc9oKc+/jJug2CDTY\n7O56bfrAswEhuhVPu8dz7pv71uRqIbhFJosNlwQezwAgnleOyopzcxp+OW+4Ds+E\n3uwfXFxoJuvam8TwGEXzOjtlsxkXONdRjo6W6PLNzzAV9MnsCENuEQE0TYUdEZXL\nagpEbnZmAMhO8eGXKoWX33ejFCqXWfiVZ6+FeccfSRFkohtvQ1XHgVX0afaJb69/\nj+FFMsPKubDcG2VqEHFh2SpXHSkINuFt9Zr8v3hGZ1+hHM3xKVOM/cT7cNhJiQfO\npNAgfQSL87S228tXMsN/upy95qB5g+xV5lg8hb2Oev5dmb5TBJDaNI4jXsnpuSOj\nXPR4VW79kNqme+XqvsU3mhz+HS/oxij/Gt/8PsifbzD3MSgcFnMbgRsTPaNWggUv\nSXguV7e2F7g1xf04z1ZX6tFN6cSA0Mqeq/niukgCMaUiBx5QBECAjnlDX/NLJ19w\nuBsTInBXOfz1vvGTzGXpMyfnuDujGFdqi7h7SNH+FMrEmge3FWkWdEWXl6qweRdV\nENVCwy7+PXNwxZ11cnw8\n=rYCm\n-----END PGP SIGNATURE-----\n",
+        "payload": "tree 6f70aa45331ff9fc83a5283daef7526c1c482cd7\nparent 698595503c2ec68f09f6fa82476f65bf13c51451\nauthor Yong Li <redacted@example.com> 1767163727 -0800\ncommitter GitHub <redacted@example.com> 1767163727 -0800\n\nMove scripts into tools and update doc (#21)\n\n",
+        "verified_at": "2025-12-31T06:48:48Z"
+      }
+    },
+    "url": "https://api.github.com/repos/yyoli-db/lakeflow-community-connectors/commits/a9ef5d4f088d3917000f35848c0cd7bdc659ab9f",
+    "html_url": "https://github.com/yyoli-db/lakeflow-community-connectors/commit/a9ef5d4f088d3917000f35848c0cd7bdc659ab9f",
+    "comments_url": "https://api.github.com/repos/yyoli-db/lakeflow-community-connectors/commits/a9ef5d4f088d3917000f35848c0cd7bdc659ab9f/comments",
+    "author": {
+      "login": "yyoli-db",
+      "id": 113948208,
+      "node_id": "U_kgDOBsq2MA",
+      "avatar_url": "https://avatars.githubusercontent.com/u/113948208?v=4",
+      "gravatar_id": "",
+      "url": "https://api.github.com/users/yyoli-db",
+      "html_url": "https://github.com/yyoli-db",
+      "followers_url": "https://api.github.com/users/yyoli-db/followers",
+      "following_url": "https://api.github.com/users/yyoli-db/following{/other_user}",
+      "gists_url": "https://api.github.com/users/yyoli-db/gists{/gist_id}",
+      "starred_url": "https://api.github.com/users/yyoli-db/starred{/owner}{/repo}",
+      "subscriptions_url": "https://api.github.com/users/yyoli-db/subscriptions",
+      "organizations_url": "https://api.github.com/users/yyoli-db/orgs",
+      "repos_url": "https://api.github.com/users/yyoli-db/repos",
+      "events_url": "https://api.github.com/users/yyoli-db/events{/privacy}",
+      "received_events_url": "https://api.github.com/users/yyoli-db/received_events",
+      "type": "User",
+      "user_view_type": "public",
+      "site_admin": false
+    },
+    "committer": {
+      "login": "web-flow",
+      "id": 19864447,
+      "node_id": "MDQ6VXNlcjE5ODY0NDQ3",
+      "avatar_url": "https://avatars.githubusercontent.com/u/19864447?v=4",
+      "gravatar_id": "",
+      "url": "https://api.github.com/users/web-flow",
+      "html_url": "https://github.com/web-flow",
+      "followers_url": "https://api.github.com/users/web-flow/followers",
+      "following_url": "https://api.github.com/users/web-flow/following{/other_user}",
+      "gists_url": "https://api.github.com/users/web-flow/gists{/gist_id}",
+      "starred_url": "https://api.github.com/users/web-flow/starred{/owner}{/repo}",
+      "subscriptions_url": "https://api.github.com/users/web-flow/subscriptions",
+      "organizations_url": "https://api.github.com/users/web-flow/orgs",
+      "repos_url": "https://api.github.com/users/web-flow/repos",
+      "events_url": "https://api.github.com/users/web-flow/events{/privacy}",
+      "received_events_url": "https://api.github.com/users/web-flow/received_events",
+      "type": "User",
+      "user_view_type": "public",
+      "site_admin": false
+    },
+    "parents": [
+      {
+        "sha": "698595503c2ec68f09f6fa82476f65bf13c51451",
+        "url": "https://api.github.com/repos/yyoli-db/lakeflow-community-connectors/commits/698595503c2ec68f09f6fa82476f65bf13c51451",
+        "html_url": "https://github.com/yyoli-db/lakeflow-community-connectors/commit/698595503c2ec68f09f6fa82476f65bf13c51451"
+      }
+    ]
+  },
+  {
+    "sha": "698595503c2ec68f09f6fa82476f65bf13c51451",
+    "node_id": "C_kwDOQ5ifOtoAKDY5ODU5NTUwM2MyZWM2OGYwOWY2ZmE4MjQ3NmY2NWJmMTNjNTE0NTE",
+    "commit": {
+      "author": {
+        "name": "Yong Li",
+        "email": "redacted@example.com",
+        "date": "2025-12-31T06:32:55Z"
+      },
+      "committer": {
+        "name": "GitHub",
+        "email": "redacted@example.com",
+        "date": "2025-12-31T06:32:55Z"
+      },
+      "message": "Add a community-connector CLI tool (#20)\n\nAs titled.\nSee `tools/community-connector/README.md` for more details.",
+      "tree": {
+        "sha": "21b16234269285676dac80427ceba0dad09718f5",
+        "url": "https://api.github.com/repos/yyoli-db/lakeflow-community-connectors/git/trees/21b16234269285676dac80427ceba0dad09718f5"
+      },
+      "url": "https://api.github.com/repos/yyoli-db/lakeflow-community-connectors/git/commits/698595503c2ec68f09f6fa82476f65bf13c51451",
+      "comment_count": 0,
+      "verification": {
+        "verified": true,
+        "reason": "valid",
+        "signature": "-----BEGIN PGP SIGNATURE-----\n\nwsFcBAABCAAQBQJpVMOXCRC1aQ7uu5UhlAAAQKsQAKgWybyVvw6jRb/sdcIwKWaF\nkliPHIUfW8VbwVk6PuwZRqhOb/BVkkst6nsiZ5sWLFH8ArzHz6jsX29qGWyD/qcJ\nAOeCp6RK/CXzvh59S1LkH6uVAdcrurOedXDqaUWg8MAA8mj8r4qMkaAtJfxPXBEh\nTkxN9sGS0rvyPguTMZRO/r5loCMJMt6ZznwUbXUbRrybFkxLNd4mCZOl007Hw533\nvOUzM/8skBtw+MMd3q3IZWkd56Vc7vqPCcyyuBJEm7Ietlm3TZeCJMznthEtreBk\niem7jYhVC3VCryXc4p2syjrVhqXc4WSBZMYMmpUmF1DdLmJlFm0LgKyzK3Fev+u9\neWNbtemCShboFD9x1IaIoqX4q2pkUazqcZ4jE5iXFSmdtqphqz4XawYX1ycXXQuh\nohya9D+fSMDeHWddF2z95omsCKoLJ4D6qmHi1gmOCStQwbbKJA5hcJISa+XmbU2I\nABZrpSB0xtkW4WLwU8cBmxD0wleovOra5gUB92ssnT4zan1ekrlGfq5wRIYk3DUU\nFyF3phYVHsSYnbLWgF5QOUzLmsKpCqs8DyEv7YyFNHRYXhpMd+Bes45F7+GVsGw3\nCc27NV2y226+0YIRSd4RFCmaJ3IsRgUl6gslYVcHAlSu5D45zxWEWoF6ZrBCDpnL\nU3+bc6b6TUlrXYXkeQSy\n=k0Uj\n-----END PGP SIGNATURE-----\n",
+        "payload": "tree 21b16234269285676dac80427ceba0dad09718f5\nparent 524782e8849f27f5287af45cef97098915c747c4\nauthor Yong Li <redacted@example.com> 1767162775 -0800\ncommitter GitHub <redacted@example.com> 1767162775 -0800\n\nAdd a community-connector CLI tool (#20)\n\nAs titled.\nSee `tools/community-connector/README.md` for more details.",
+        "verified_at": "2025-12-31T06:32:56Z"
+      }
+    },
+    "url": "https://api.github.com/repos/yyoli-db/lakeflow-community-connectors/commits/698595503c2ec68f09f6fa82476f65bf13c51451",
+    "html_url": "https://github.com/yyoli-db/lakeflow-community-connectors/commit/698595503c2ec68f09f6fa82476f65bf13c51451",
+    "comments_url": "https://api.github.com/repos/yyoli-db/lakeflow-community-connectors/commits/698595503c2ec68f09f6fa82476f65bf13c51451/comments",
+    "author": {
+      "login": "yyoli-db",
+      "id": 113948208,
+      "node_id": "U_kgDOBsq2MA",
+      "avatar_url": "https://avatars.githubusercontent.com/u/113948208?v=4",
+      "gravatar_id": "",
+      "url": "https://api.github.com/users/yyoli-db",
+      "html_url": "https://github.com/yyoli-db",
+      "followers_url": "https://api.github.com/users/yyoli-db/followers",
+      "following_url": "https://api.github.com/users/yyoli-db/following{/other_user}",
+      "gists_url": "https://api.github.com/users/yyoli-db/gists{/gist_id}",
+      "starred_url": "https://api.github.com/users/yyoli-db/starred{/owner}{/repo}",
+      "subscriptions_url": "https://api.github.com/users/yyoli-db/subscriptions",
+      "organizations_url": "https://api.github.com/users/yyoli-db/orgs",
+      "repos_url": "https://api.github.com/users/yyoli-db/repos",
+      "events_url": "https://api.github.com/users/yyoli-db/events{/privacy}",
+      "received_events_url": "https://api.github.com/users/yyoli-db/received_events",
+      "type": "User",
+      "user_view_type": "public",
+      "site_admin": false
+    },
+    "committer": {
+      "login": "web-flow",
+      "id": 19864447,
+      "node_id": "MDQ6VXNlcjE5ODY0NDQ3",
+      "avatar_url": "https://avatars.githubusercontent.com/u/19864447?v=4",
+      "gravatar_id": "",
+      "url": "https://api.github.com/users/web-flow",
+      "html_url": "https://github.com/web-flow",
+      "followers_url": "https://api.github.com/users/web-flow/followers",
+      "following_url": "https://api.github.com/users/web-flow/following{/other_user}",
+      "gists_url": "https://api.github.com/users/web-flow/gists{/gist_id}",
+      "starred_url": "https://api.github.com/users/web-flow/starred{/owner}{/repo}",
+      "subscriptions_url": "https://api.github.com/users/web-flow/subscriptions",
+      "organizations_url": "https://api.github.com/users/web-flow/orgs",
+      "repos_url": "https://api.github.com/users/web-flow/repos",
+      "events_url": "https://api.github.com/users/web-flow/events{/privacy}",
+      "received_events_url": "https://api.github.com/users/web-flow/received_events",
+      "type": "User",
+      "user_view_type": "public",
+      "site_admin": false
+    },
+    "parents": [
+      {
+        "sha": "524782e8849f27f5287af45cef97098915c747c4",
+        "url": "https://api.github.com/repos/yyoli-db/lakeflow-community-connectors/commits/524782e8849f27f5287af45cef97098915c747c4",
+        "html_url": "https://github.com/yyoli-db/lakeflow-community-connectors/commit/524782e8849f27f5287af45cef97098915c747c4"
+      }
+    ]
+  },
+  {
+    "sha": "7c818f356e677e1354829e4ca3c247f12f09835e",
+    "node_id": "C_kwDOQ5ifOtoAKDdjODE4ZjM1NmU2NzdlMTM1NDgyOWU0Y2EzYzI0N2YxMmYwOTgzNWU",
+    "commit": {
+      "author": {
+        "name": "Sheldon Tauro",
+        "email": "redacted@example.com",
+        "date": "2026-01-07T17:30:24Z"
+      },
+      "committer": {
+        "name": "GitHub",
+        "email": "redacted@example.com",
+        "date": "2026-01-07T17:30:24Z"
+      },
+      "message": "Support deletes via a separate flow for tables that support the new ingestion type \"cdc_with_deletes\". (#33)\n\nIntroduces a new **cdc_with_deletes** ingestion type that enables\nautomatic ingestion of deleted records from source systems.\nWhen enabled, a second streaming flow fetches deleted records and\napplies them as deletes to the destination table using apply_as_deletes.\n\nImplements read_table_deletes for HubSpot connector to fetch archived\nrecords. Added tests for the same as well.\n\n\n\n\nCDC with Deletes Architecture\n\n                              ┌──────────────────┐\n                              │   Source Table   │\n                              └────────┬─────────┘\n                                       │\n                 ┌─────────────────────┴─────────────────────┐\n                 │                                           │\n                 ▼                                           ▼\n┌────────────────────────┐ ┌────────────────────────────┐\n│ read_table() │ │ read_table_deletes() │\n│ │ │ │\n│ Returns: active │ │ Returns: deleted │\n│ records with changes │ │ records (PKs + cursor) │\n└───────────┬────────────┘ └─────────────┬──────────────┘\n                │                                         │\n                ▼                                         ▼\n┌────────────────────────┐ ┌────────────────────────────┐\n│ {table}_staging │ │ {table}_delete_staging │\n│ (view) │ │ (view) │\n│ │ │ option: isDeleteFlow=true │\n└───────────┬────────────┘ └─────────────┬──────────────┘\n                │                                         │\n                ▼                                         ▼\n┌────────────────────────┐ ┌────────────────────────────┐\n│ apply_changes() │ │ apply_changes() │\n│ │ │ │\n│ Upsert logic │ │ apply_as_deletes=true │\n└───────────┬────────────┘ └─────────────┬──────────────┘\n                │                                         │\n                └─────────────────┬───────────────────────┘\n                                  │\n                                  ▼\n                    ┌──────────────────────────┐\n                    │    Destination Table     │\n                    │    (Streaming Table)     │\n                    └──────────────────────────┘",
+      "tree": {
+        "sha": "a1fc4e7f536dcd3103a72056f3f5b66a49f3994a",
+        "url": "https://api.github.com/repos/yyoli-db/lakeflow-community-connectors/git/trees/a1fc4e7f536dcd3103a72056f3f5b66a49f3994a"
+      },
+      "url": "https://api.github.com/repos/yyoli-db/lakeflow-community-connectors/git/commits/7c818f356e677e1354829e4ca3c247f12f09835e",
+      "comment_count": 0,
+      "verification": {
+        "verified": true,
+        "reason": "valid",
+        "signature": "-----BEGIN PGP SIGNATURE-----\n\nwsFcBAABCAAQBQJpXpgwCRC1aQ7uu5UhlAAASoMQAIpmsgicBUqvecooygGm4TVd\nvW+g2aRiHXpj/JMMG11reoCl6+M+FxtPdgwGzOb/OK84UZ53fqfyaegCe1BHnbP7\nzRzeWB3wuFoN1/lDEZiDwpkFT2R4ls8pe8wPpMV4E+/9Cv1FJKwZe8DZbQBAe0o1\nIJ6VaUT0Uo5sP8emSBJls9RLO5fDX6YdkGVz9B3Rgg8vymFC2mj4M8KubP8njL08\nRsbPubJxJg3wysiYOe5eOjwO+9yZVjP7o0x2THm3iMTBaE4aN2gAgLc1U8oyDf52\ncfAVonKJtZEp5wwjl758iBKSE+SQdZt7LDEVzoaa7WnqHuTjOOMT0924PuhjozMb\nikUO0pu8i5mhIH5yGBWgDaCdCgoKdIbzL2PYlaFwfbaovRzOK0c+S1EDLH+jHON6\nBYz+P72Jmwby1GeryPQADwBe85Z4V0pYjx157YvrUJFIEOAgilyzvtJ0Y6Yu/9/B\nP1PE0VZ0YschQD51l0q0ZJ6iqDlCxEYJ+MhgC0nersA1BRQ0hz4fcwGCn+u299tH\neNWE2RFJKF1TYTXX2fbZTSprUHzG+dz0UJaYaoT7Bw4zlC3B0NtmNIPKVfnWzzsQ\na4YuvVzjoRp+LLJc6WOgxiv0zlsSP8aH6L0eE1LZvjyjmq/wRs3UnndhHdRvVSgz\nbW8G0d8H6gff2BRh/Hbg\n=Ggci\n-----END PGP SIGNATURE-----\n",
+        "payload": "tree a1fc4e7f536dcd3103a72056f3f5b66a49f3994a\nparent 2e5547fa0403f5b97bb91e2d2b5d3076d84ec263\nauthor Sheldon Tauro <redacted@example.com> 1767807024 -0800\ncommitter GitHub <redacted@example.com> 1767807024 -0800\n\nSupport deletes via a separate flow for tables that support the new ingestion type \"cdc_with_deletes\". (#33)\n\nIntroduces a new **cdc_with_deletes** ingestion type that enables\nautomatic ingestion of deleted records from source systems.\nWhen enabled, a second streaming flow fetches deleted records and\napplies them as deletes to the destination table using apply_as_deletes.\n\nImplements read_table_deletes for HubSpot connector to fetch archived\nrecords. Added tests for the same as well.\n\n\n\n\nCDC with Deletes Architecture\n\n                              ┌──────────────────┐\n                              │   Source Table   │\n                              └────────┬─────────┘\n                                       │\n                 ┌─────────────────────┴─────────────────────┐\n                 │                                           │\n                 ▼                                           ▼\n┌────────────────────────┐ ┌────────────────────────────┐\n│ read_table() │ │ read_table_deletes() │\n│ │ │ │\n│ Returns: active │ │ Returns: deleted │\n│ records with changes │ │ records (PKs + cursor) │\n└───────────┬────────────┘ └─────────────┬──────────────┘\n                │                                         │\n                ▼                                         ▼\n┌────────────────────────┐ ┌────────────────────────────┐\n│ {table}_staging │ │ {table}_delete_staging │\n│ (view) │ │ (view) │\n│ │ │ option: isDeleteFlow=true │\n└───────────┬────────────┘ └─────────────┬──────────────┘\n                │                                         │\n                ▼                                         ▼\n┌────────────────────────┐ ┌────────────────────────────┐\n│ apply_changes() │ │ apply_changes() │\n│ │ │ │\n│ Upsert logic │ │ apply_as_deletes=true │\n└───────────┬────────────┘ └─────────────┬──────────────┘\n                │                                         │\n                └─────────────────┬───────────────────────┘\n                                  │\n                                  ▼\n                    ┌──────────────────────────┐\n                    │    Destination Table     │\n                    │    (Streaming Table)     │\n                    └──────────────────────────┘",
+        "verified_at": "2026-01-07T17:30:25Z"
+      }
+    },
+    "url": "https://api.github.com/repos/yyoli-db/lakeflow-community-connectors/commits/7c818f356e677e1354829e4ca3c247f12f09835e",
+    "html_url": "https://github.com/yyoli-db/lakeflow-community-connectors/commit/7c818f356e677e1354829e4ca3c247f12f09835e",
+    "comments_url": "https://api.github.com/repos/yyoli-db/lakeflow-community-connectors/commits/7c818f356e677e1354829e4ca3c247f12f09835e/comments",
+    "author": {
+      "login": "sheltauro",
+      "id": 21174348,
+      "node_id": "MDQ6VXNlcjIxMTc0MzQ4",
+      "avatar_url": "https://avatars.githubusercontent.com/u/21174348?v=4",
+      "gravatar_id": "",
+      "url": "https://api.github.com/users/sheltauro",
+      "html_url": "https://github.com/sheltauro",
+      "followers_url": "https://api.github.com/users/sheltauro/followers",
+      "following_url": "https://api.github.com/users/sheltauro/following{/other_user}",
+      "gists_url": "https://api.github.com/users/sheltauro/gists{/gist_id}",
+      "starred_url": "https://api.github.com/users/sheltauro/starred{/owner}{/repo}",
+      "subscriptions_url": "https://api.github.com/users/sheltauro/subscriptions",
+      "organizations_url": "https://api.github.com/users/sheltauro/orgs",
+      "repos_url": "https://api.github.com/users/sheltauro/repos",
+      "events_url": "https://api.github.com/users/sheltauro/events{/privacy}",
+      "received_events_url": "https://api.github.com/users/sheltauro/received_events",
+      "type": "User",
+      "user_view_type": "public",
+      "site_admin": false
+    },
+    "committer": {
+      "login": "web-flow",
+      "id": 19864447,
+      "node_id": "MDQ6VXNlcjE5ODY0NDQ3",
+      "avatar_url": "https://avatars.githubusercontent.com/u/19864447?v=4",
+      "gravatar_id": "",
+      "url": "https://api.github.com/users/web-flow",
+      "html_url": "https://github.com/web-flow",
+      "followers_url": "https://api.github.com/users/web-flow/followers",
+      "following_url": "https://api.github.com/users/web-flow/following{/other_user}",
+      "gists_url": "https://api.github.com/users/web-flow/gists{/gist_id}",
+      "starred_url": "https://api.github.com/users/web-flow/starred{/owner}{/repo}",
+      "subscriptions_url": "https://api.github.com/users/web-flow/subscriptions",
+      "organizations_url": "https://api.github.com/users/web-flow/orgs",
+      "repos_url": "https://api.github.com/users/web-flow/repos",
+      "events_url": "https://api.github.com/users/web-flow/events{/privacy}",
+      "received_events_url": "https://api.github.com/users/web-flow/received_events",
+      "type": "User",
+      "user_view_type": "public",
+      "site_admin": false
+    },
+    "parents": [
+      {
+        "sha": "2e5547fa0403f5b97bb91e2d2b5d3076d84ec263",
+        "url": "https://api.github.com/repos/yyoli-db/lakeflow-community-connectors/commits/2e5547fa0403f5b97bb91e2d2b5d3076d84ec263",
+        "html_url": "https://github.com/yyoli-db/lakeflow-community-connectors/commit/2e5547fa0403f5b97bb91e2d2b5d3076d84ec263"
+      }
+    ]
+  },
+  {
+    "sha": "2e5547fa0403f5b97bb91e2d2b5d3076d84ec263",
+    "node_id": "C_kwDOQ5ifOtoAKDJlNTU0N2ZhMDQwM2Y1Yjk3YmI5MWUyZDJiNWQzMDc2ZDg0ZWMyNjM",
+    "commit": {
+      "author": {
+        "name": "Yong Li",
+        "email": "redacted@example.com",
+        "date": "2026-01-07T16:40:42Z"
+      },
+      "committer": {
+        "name": "GitHub",
+        "email": "redacted@example.com",
+        "date": "2026-01-07T16:40:42Z"
+      },
+      "message": "Fix lint errrors on github and zendesk (#36)",
+      "tree": {
+        "sha": "5c3621b35f9a5c974b0929abd41f839dd3edea90",
+        "url": "https://api.github.com/repos/yyoli-db/lakeflow-community-connectors/git/trees/5c3621b35f9a5c974b0929abd41f839dd3edea90"
+      },
+      "url": "https://api.github.com/repos/yyoli-db/lakeflow-community-connectors/git/commits/2e5547fa0403f5b97bb91e2d2b5d3076d84ec263",
+      "comment_count": 0,
+      "verification": {
+        "verified": true,
+        "reason": "valid",
+        "signature": "-----BEGIN PGP SIGNATURE-----\n\nwsFcBAABCAAQBQJpXoyKCRC1aQ7uu5UhlAAA5lIQAJU+MfjrLsWXcnQvquOYq3ob\niuog9ch1jiafUvtg/clETO8Hb7kYMhqbwT9pm6fVqCkFXMVX/LIN81+oj9nPGNJV\ncX8z08SjKHHYNplEQtp+QaqcwjQIhyaYk7WZT7dX2mIQCUgq+hgK69sVUGSqjXgI\nO7nsrAYsKL8RBICbzhG74fjp5w3tYE6eO5GXZsZRykYMU+hAz6R3Dc1O9EaujkgT\nq/yhLGFkWtshO9rMUf3Y3hU7xhbgXoIz2TsJCLRMcuuwHZOxyFQ7AjOQOi7X4CV4\n11/CxL9NRTpUTsg7074mY54r+2vqCutvJAPbvOPNQmcs6v0EunpFAuKeBmSlssXP\nWL2ZEpieKavzF7G6znkaGs5/Et/4xrqPMKk+XNXHAwZ5AQ2OOCS8GYJWuXzE8MyP\nwt/6WkFLSr1c3fpg4gaQafSUDV7hXbFyRYvx6Ch675X9C+mJ4cE5kHfPlJ2RRWbI\nQgnEj8K7XpXNk/LV7lXbKsPMU/xm4/n9BMvKo0zHPODbMzmxj27WiWwmXVQDfsny\nersg0Lj/nRCRJksgDfgy9mh7MY9rNtGU4svU6KAqypX13jQlzLFVsj0yWt/DjbKt\n6FuTiq55pZF+DPzx0TjOffwF9BNJg47S4fZOpt7uL2B574GjED6sEZpr8XbduU2c\nvoKF7MSnayMVaV9gvuKa\n=6+Qt\n-----END PGP SIGNATURE-----\n",
+        "payload": "tree 5c3621b35f9a5c974b0929abd41f839dd3edea90\nparent 9fed6284947b9e3747cefd6fef10e2dcf79a4976\nauthor Yong Li <redacted@example.com> 1767804042 -0800\ncommitter GitHub <redacted@example.com> 1767804042 -0800\n\nFix lint errrors on github and zendesk (#36)\n\n",
+        "verified_at": "2026-01-07T16:40:43Z"
+      }
+    },
+    "url": "https://api.github.com/repos/yyoli-db/lakeflow-community-connectors/commits/2e5547fa0403f5b97bb91e2d2b5d3076d84ec263",
+    "html_url": "https://github.com/yyoli-db/lakeflow-community-connectors/commit/2e5547fa0403f5b97bb91e2d2b5d3076d84ec263",
+    "comments_url": "https://api.github.com/repos/yyoli-db/lakeflow-community-connectors/commits/2e5547fa0403f5b97bb91e2d2b5d3076d84ec263/comments",
+    "author": {
+      "login": "yyoli-db",
+      "id": 113948208,
+      "node_id": "U_kgDOBsq2MA",
+      "avatar_url": "https://avatars.githubusercontent.com/u/113948208?v=4",
+      "gravatar_id": "",
+      "url": "https://api.github.com/users/yyoli-db",
+      "html_url": "https://github.com/yyoli-db",
+      "followers_url": "https://api.github.com/users/yyoli-db/followers",
+      "following_url": "https://api.github.com/users/yyoli-db/following{/other_user}",
+      "gists_url": "https://api.github.com/users/yyoli-db/gists{/gist_id}",
+      "starred_url": "https://api.github.com/users/yyoli-db/starred{/owner}{/repo}",
+      "subscriptions_url": "https://api.github.com/users/yyoli-db/subscriptions",
+      "organizations_url": "https://api.github.com/users/yyoli-db/orgs",
+      "repos_url": "https://api.github.com/users/yyoli-db/repos",
+      "events_url": "https://api.github.com/users/yyoli-db/events{/privacy}",
+      "received_events_url": "https://api.github.com/users/yyoli-db/received_events",
+      "type": "User",
+      "user_view_type": "public",
+      "site_admin": false
+    },
+    "committer": {
+      "login": "web-flow",
+      "id": 19864447,
+      "node_id": "MDQ6VXNlcjE5ODY0NDQ3",
+      "avatar_url": "https://avatars.githubusercontent.com/u/19864447?v=4",
+      "gravatar_id": "",
+      "url": "https://api.github.com/users/web-flow",
+      "html_url": "https://github.com/web-flow",
+      "followers_url": "https://api.github.com/users/web-flow/followers",
+      "following_url": "https://api.github.com/users/web-flow/following{/other_user}",
+      "gists_url": "https://api.github.com/users/web-flow/gists{/gist_id}",
+      "starred_url": "https://api.github.com/users/web-flow/starred{/owner}{/repo}",
+      "subscriptions_url": "https://api.github.com/users/web-flow/subscriptions",
+      "organizations_url": "https://api.github.com/users/web-flow/orgs",
+      "repos_url": "https://api.github.com/users/web-flow/repos",
+      "events_url": "https://api.github.com/users/web-flow/events{/privacy}",
+      "received_events_url": "https://api.github.com/users/web-flow/received_events",
+      "type": "User",
+      "user_view_type": "public",
+      "site_admin": false
+    },
+    "parents": [
+      {
+        "sha": "9fed6284947b9e3747cefd6fef10e2dcf79a4976",
+        "url": "https://api.github.com/repos/yyoli-db/lakeflow-community-connectors/commits/9fed6284947b9e3747cefd6fef10e2dcf79a4976",
+        "html_url": "https://github.com/yyoli-db/lakeflow-community-connectors/commit/9fed6284947b9e3747cefd6fef10e2dcf79a4976"
+      }
+    ]
+  },
+  {
+    "sha": "9fed6284947b9e3747cefd6fef10e2dcf79a4976",
+    "node_id": "C_kwDOQ5ifOtoAKDlmZWQ2Mjg0OTQ3YjllMzc0N2NlZmQ2ZmVmMTBlMmRjZjc5YTQ5NzY",
+    "commit": {
+      "author": {
+        "name": "Yong Li",
+        "email": "redacted@example.com",
+        "date": "2026-01-07T00:47:34Z"
+      },
+      "committer": {
+        "name": "GitHub",
+        "email": "redacted@example.com",
+        "date": "2026-01-07T00:47:34Z"
+      },
+      "message": "fix lint for cli tool (#32)\n\nDisabled lint on all existing source impl (will address in future)\nFixed lint errors (mostly in cli tools) and make pylint pass",
+      "tree": {
+        "sha": "7a3f39917038a221aa9cf647f151afcb3d0e836e",
+        "url": "https://api.github.com/repos/yyoli-db/lakeflow-community-connectors/git/trees/7a3f39917038a221aa9cf647f151afcb3d0e836e"
+      },
+      "url": "https://api.github.com/repos/yyoli-db/lakeflow-community-connectors/git/commits/9fed6284947b9e3747cefd6fef10e2dcf79a4976",
+      "comment_count": 0,
+      "verification": {
+        "verified": true,
+        "reason": "valid",
+        "signature": "-----BEGIN PGP SIGNATURE-----\n\nwsFcBAABCAAQBQJpXa0mCRC1aQ7uu5UhlAAA7W0QAGKEPAHZDV9cfIZ9gGFZGTfk\nJhfqB0O7Pw1BYaR+9Up1n2yDQqdmHuae3iK07LXF5Rpp9NGsWVv3fKcv4uN1o6S4\nXKJ9/mHo2T5kGUiimJ+9CvQFKN8AuLa8MINg6V/iE1PEzBb6dUQsP0KAw+xc6Fbw\nzIBmU/+D6fxJx0ltWiACGx4ZYhExlu1qRgqO4XooDARw93NEnua5+5dQvG3x+vG4\npSlB5CYBOveYMRni4Rs4mQyuarT7f98rJQc6cbt/5iNEfPpWLTsXxFHztBYg0liy\ncO5OC/yJQin2foDLRqarrw4xX1H7q1oYK9rYTZ7PCqgvNwtNVVQV5VvEp0S9EScX\nPduSFSHpM0Fre6VPpho+ips5iFgynvvoVHGitLlb2GgvE8kSpLhBOobjBbJrGVaD\nV5w4MBT1lSzHVWBZfRUcZZ8f4wIfkwMl6tiUV0ccDAR5BC8DEwncKNiMrNItHBuk\nTYtudftl0CFTjGe11R3z6NxmHGLM3fJQ6PzsIS1f2Y66GS/Sk/2UFf3uZ4mp4bup\n5GTacVND0QJ6PZhnPNGn6COA4yzeogyER/E31CDKQidHZ+ZxXGX+NZZyMtPhn17d\ndY8i7Bfw2F7xXFyPY8iQLyinX2STSnIKAJC8l9qLVfKB3xeDmlCTo7UIdOD77BL2\nmLBxKD+GdAoJiaVDp6Iv\n=q9t7\n-----END PGP SIGNATURE-----\n",
+        "payload": "tree 7a3f39917038a221aa9cf647f151afcb3d0e836e\nparent 9e5c251b4edace9fa6368bdbe8ea778a97ede510\nauthor Yong Li <redacted@example.com> 1767746854 -0800\ncommitter GitHub <redacted@example.com> 1767746854 -0800\n\nfix lint for cli tool (#32)\n\nDisabled lint on all existing source impl (will address in future)\nFixed lint errors (mostly in cli tools) and make pylint pass",
+        "verified_at": "2026-01-07T00:47:35Z"
+      }
+    },
+    "url": "https://api.github.com/repos/yyoli-db/lakeflow-community-connectors/commits/9fed6284947b9e3747cefd6fef10e2dcf79a4976",
+    "html_url": "https://github.com/yyoli-db/lakeflow-community-connectors/commit/9fed6284947b9e3747cefd6fef10e2dcf79a4976",
+    "comments_url": "https://api.github.com/repos/yyoli-db/lakeflow-community-connectors/commits/9fed6284947b9e3747cefd6fef10e2dcf79a4976/comments",
+    "author": {
+      "login": "yyoli-db",
+      "id": 113948208,
+      "node_id": "U_kgDOBsq2MA",
+      "avatar_url": "https://avatars.githubusercontent.com/u/113948208?v=4",
+      "gravatar_id": "",
+      "url": "https://api.github.com/users/yyoli-db",
+      "html_url": "https://github.com/yyoli-db",
+      "followers_url": "https://api.github.com/users/yyoli-db/followers",
+      "following_url": "https://api.github.com/users/yyoli-db/following{/other_user}",
+      "gists_url": "https://api.github.com/users/yyoli-db/gists{/gist_id}",
+      "starred_url": "https://api.github.com/users/yyoli-db/starred{/owner}{/repo}",
+      "subscriptions_url": "https://api.github.com/users/yyoli-db/subscriptions",
+      "organizations_url": "https://api.github.com/users/yyoli-db/orgs",
+      "repos_url": "https://api.github.com/users/yyoli-db/repos",
+      "events_url": "https://api.github.com/users/yyoli-db/events{/privacy}",
+      "received_events_url": "https://api.github.com/users/yyoli-db/received_events",
+      "type": "User",
+      "user_view_type": "public",
+      "site_admin": false
+    },
+    "committer": {
+      "login": "web-flow",
+      "id": 19864447,
+      "node_id": "MDQ6VXNlcjE5ODY0NDQ3",
+      "avatar_url": "https://avatars.githubusercontent.com/u/19864447?v=4",
+      "gravatar_id": "",
+      "url": "https://api.github.com/users/web-flow",
+      "html_url": "https://github.com/web-flow",
+      "followers_url": "https://api.github.com/users/web-flow/followers",
+      "following_url": "https://api.github.com/users/web-flow/following{/other_user}",
+      "gists_url": "https://api.github.com/users/web-flow/gists{/gist_id}",
+      "starred_url": "https://api.github.com/users/web-flow/starred{/owner}{/repo}",
+      "subscriptions_url": "https://api.github.com/users/web-flow/subscriptions",
+      "organizations_url": "https://api.github.com/users/web-flow/orgs",
+      "repos_url": "https://api.github.com/users/web-flow/repos",
+      "events_url": "https://api.github.com/users/web-flow/events{/privacy}",
+      "received_events_url": "https://api.github.com/users/web-flow/received_events",
+      "type": "User",
+      "user_view_type": "public",
+      "site_admin": false
+    },
+    "parents": [
+      {
+        "sha": "9e5c251b4edace9fa6368bdbe8ea778a97ede510",
+        "url": "https://api.github.com/repos/yyoli-db/lakeflow-community-connectors/commits/9e5c251b4edace9fa6368bdbe8ea778a97ede510",
+        "html_url": "https://github.com/yyoli-db/lakeflow-community-connectors/commit/9e5c251b4edace9fa6368bdbe8ea778a97ede510"
+      }
+    ]
+  },
+  {
+    "sha": "9e5c251b4edace9fa6368bdbe8ea778a97ede510",
+    "node_id": "C_kwDOQ5ifOtoAKDllNWMyNTFiNGVkYWNlOWZhNjM2OGJkYmU4ZWE3NzhhOTdlZGU1MTA",
+    "commit": {
+      "author": {
+        "name": "Yong Li",
+        "email": "redacted@example.com",
+        "date": "2026-01-06T23:03:38Z"
+      },
+      "committer": {
+        "name": "GitHub",
+        "email": "redacted@example.com",
+        "date": "2026-01-06T23:03:38Z"
+      },
+      "message": "Propagate table configurations for reading table metadata  (#34)\n\nThe `read_table_metadata` of `LakeflowConnect` includes `table_options`\nas an input argument but it was never hooked up as the metadata read is\ncombined as one query for a list of tables.\n\nThis PR wraps all table configurations into one JSON and passed into the\nLakeflow Python Data Source and then parse it and use the config for\neach table.",
+      "tree": {
+        "sha": "6e6ed5a75e78c5d743fcee9568eadf74cf42827c",
+        "url": "https://api.github.com/repos/yyoli-db/lakeflow-community-connectors/git/trees/6e6ed5a75e78c5d743fcee9568eadf74cf42827c"
+      },
+      "url": "https://api.github.com/repos/yyoli-db/lakeflow-community-connectors/git/commits/9e5c251b4edace9fa6368bdbe8ea778a97ede510",
+      "comment_count": 0,
+      "verification": {
+        "verified": true,
+        "reason": "valid",
+        "signature": "-----BEGIN PGP SIGNATURE-----\n\nwsFcBAABCAAQBQJpXZTKCRC1aQ7uu5UhlAAAiDEQAHb0+iNf4mWud/KYjBQfppOB\nnkiSL2u0K8EZ4Yb7kuTAZfjaH3+UhS5YRGlEDv+XvMMubDr2BEt12BN65YdVkFDz\njgjD8x8xiWNOF4vMZkgV5PZNo7F2f+GXSup0vsr5/aW6nO6l71gdYsCTjtdRTGFk\nZEtZBL4YtH8vY3zxARo7vyBwC39PDPHtasusRdSEl+0s+7C1FaUBBJ74ZsxL3Sgn\naFWHxKJBR5mdzMzpkY4ri/ivKUv9xakVE5yxfPkSc0XgAMro40BdL3Plhn6vVnyo\nxLXN73ZpkwDTi4WAM9iXZ3xDLRjVYc0DB8YG1x7BjTkxlU/g2oaecpMuzvuI8Hx3\nlQ4TzRSCLnrdibdo/ju4kO6sW7vpY5os7BJeiqyw/id/3YEGghZR/F/SVpy8MVu7\nQimhONRjH2gUMbfNtnn1LvAaXNkILNnYhvx7wNE4u5kQeenfjBL7WFuJ7mLFAbPa\nDjTBJqRjlJ1ndm+k+JS/DyuYhGfPwfCnhuM80WRHKSi7eHKx1jrL3bS1jObRxJh6\nmZjaHA+XeJda1l50M3pesGInF4iL5gc9gNZj5cToMB6sb2EyB4W6guyh3fgifwiD\nc7HM9X+Zkph+kOcfn7vSFZMl3+X5rIgVX4q4uydpVvlXMs+ciwLekGgZmvTnBve3\nSEkt7jg8eHAjtx8/TmC2\n=ggnQ\n-----END PGP SIGNATURE-----\n",
+        "payload": "tree 6e6ed5a75e78c5d743fcee9568eadf74cf42827c\nparent 591ac39b5f4b279ddcabcc21236dbd2b0d8e87a3\nauthor Yong Li <redacted@example.com> 1767740618 -0800\ncommitter GitHub <redacted@example.com> 1767740618 -0800\n\nPropagate table configurations for reading table metadata  (#34)\n\nThe `read_table_metadata` of `LakeflowConnect` includes `table_options`\nas an input argument but it was never hooked up as the metadata read is\ncombined as one query for a list of tables.\n\nThis PR wraps all table configurations into one JSON and passed into the\nLakeflow Python Data Source and then parse it and use the config for\neach table.",
+        "verified_at": "2026-01-06T23:03:39Z"
+      }
+    },
+    "url": "https://api.github.com/repos/yyoli-db/lakeflow-community-connectors/commits/9e5c251b4edace9fa6368bdbe8ea778a97ede510",
+    "html_url": "https://github.com/yyoli-db/lakeflow-community-connectors/commit/9e5c251b4edace9fa6368bdbe8ea778a97ede510",
+    "comments_url": "https://api.github.com/repos/yyoli-db/lakeflow-community-connectors/commits/9e5c251b4edace9fa6368bdbe8ea778a97ede510/comments",
+    "author": {
+      "login": "yyoli-db",
+      "id": 113948208,
+      "node_id": "U_kgDOBsq2MA",
+      "avatar_url": "https://avatars.githubusercontent.com/u/113948208?v=4",
+      "gravatar_id": "",
+      "url": "https://api.github.com/users/yyoli-db",
+      "html_url": "https://github.com/yyoli-db",
+      "followers_url": "https://api.github.com/users/yyoli-db/followers",
+      "following_url": "https://api.github.com/users/yyoli-db/following{/other_user}",
+      "gists_url": "https://api.github.com/users/yyoli-db/gists{/gist_id}",
+      "starred_url": "https://api.github.com/users/yyoli-db/starred{/owner}{/repo}",
+      "subscriptions_url": "https://api.github.com/users/yyoli-db/subscriptions",
+      "organizations_url": "https://api.github.com/users/yyoli-db/orgs",
+      "repos_url": "https://api.github.com/users/yyoli-db/repos",
+      "events_url": "https://api.github.com/users/yyoli-db/events{/privacy}",
+      "received_events_url": "https://api.github.com/users/yyoli-db/received_events",
+      "type": "User",
+      "user_view_type": "public",
+      "site_admin": false
+    },
+    "committer": {
+      "login": "web-flow",
+      "id": 19864447,
+      "node_id": "MDQ6VXNlcjE5ODY0NDQ3",
+      "avatar_url": "https://avatars.githubusercontent.com/u/19864447?v=4",
+      "gravatar_id": "",
+      "url": "https://api.github.com/users/web-flow",
+      "html_url": "https://github.com/web-flow",
+      "followers_url": "https://api.github.com/users/web-flow/followers",
+      "following_url": "https://api.github.com/users/web-flow/following{/other_user}",
+      "gists_url": "https://api.github.com/users/web-flow/gists{/gist_id}",
+      "starred_url": "https://api.github.com/users/web-flow/starred{/owner}{/repo}",
+      "subscriptions_url": "https://api.github.com/users/web-flow/subscriptions",
+      "organizations_url": "https://api.github.com/users/web-flow/orgs",
+      "repos_url": "https://api.github.com/users/web-flow/repos",
+      "events_url": "https://api.github.com/users/web-flow/events{/privacy}",
+      "received_events_url": "https://api.github.com/users/web-flow/received_events",
+      "type": "User",
+      "user_view_type": "public",
+      "site_admin": false
+    },
+    "parents": [
+      {
+        "sha": "591ac39b5f4b279ddcabcc21236dbd2b0d8e87a3",
+        "url": "https://api.github.com/repos/yyoli-db/lakeflow-community-connectors/commits/591ac39b5f4b279ddcabcc21236dbd2b0d8e87a3",
+        "html_url": "https://github.com/yyoli-db/lakeflow-community-connectors/commit/591ac39b5f4b279ddcabcc21236dbd2b0d8e87a3"
+      }
+    ]
+  },
+  {
+    "sha": "591ac39b5f4b279ddcabcc21236dbd2b0d8e87a3",
+    "node_id": "C_kwDOQ5ifOtoAKDU5MWFjMzliNWY0YjI3OWRkY2FiY2MyMTIzNmRiZDJiMGQ4ZTg3YTM",
+    "commit": {
+      "author": {
+        "name": "Yong Li",
+        "email": "redacted@example.com",
+        "date": "2026-01-06T19:05:24Z"
+      },
+      "committer": {
+        "name": "GitHub",
+        "email": "redacted@example.com",
+        "date": "2026-01-06T19:05:24Z"
+      },
+      "message": "Refactor utils parse_value for lint and support binaryType (#29)",
+      "tree": {
+        "sha": "5f67bfd68690c540003802b1c22d73abbb3bc816",
+        "url": "https://api.github.com/repos/yyoli-db/lakeflow-community-connectors/git/trees/5f67bfd68690c540003802b1c22d73abbb3bc816"
+      },
+      "url": "https://api.github.com/repos/yyoli-db/lakeflow-community-connectors/git/commits/591ac39b5f4b279ddcabcc21236dbd2b0d8e87a3",
+      "comment_count": 0,
+      "verification": {
+        "verified": true,
+        "reason": "valid",
+        "signature": "-----BEGIN PGP SIGNATURE-----\n\nwsFcBAABCAAQBQJpXVz0CRC1aQ7uu5UhlAAAQsAQAFVm5NcZl/2zniPuMDSc/adQ\nk+ZoCiYrf+QBEWyoilspOzXgySzX5TsbXpw5EBnYzof4v/Xr7aDIbwqgwWH9j5mg\nOXTF3rc8PBS20qq/WBDAzsezun1Dbyo89qdsf+sADaqZpCYSQVNBkhIlA7htPAL6\nEzYtnvRzdCHdlDyoKjK1zEqfwijWzfA1Qet2f/3NvrOC++sc73VxEv/cRNzoF1Ww\nsE61YbTpMuRIO8Jxam4KHBjR/6V583A34je10EPER7f0M6Kl5+/PLaw44vXcANof\n8aqHv92Xa/LqLr6BKjk0klZLNzK1Nue1QFs0cTF6oUt+sRD5hzExlQMpolB2idTH\nOohHnO6NcuNctont0lv/QBpyisMppV8aprsPzAQXEzNjaI8ULnjVDGjNNACgf54Q\nckP1UiQOB0tMh0pDkpWJwbCqr5iGVLzZW63kjWJ/N6OA/joTge/ZeyUDU/2E0slk\n/f4SephIRgihBY13LVj/869BBAT63ZK2coE0+34ozsiwQ9Gm8u05Yoavq4oeyYfI\nbBX1yC1vmIdcaZk4UNGzG/rQxTZ2kGjlYr3F3n1vEiOuHkSRAtYicdm5lGbkDUtu\nuMebyJCRy/A2YHhXIVq1ec70J7ljawA8L+pj5HIleUznrrAHNDiFxIo9K9BJDXFL\nf7QrHEI03qrxtQcc81in\n=KZ35\n-----END PGP SIGNATURE-----\n",
+        "payload": "tree 5f67bfd68690c540003802b1c22d73abbb3bc816\nparent 6baf5757ffc2ec27ad345484ed36f903e2a94d1b\nauthor Yong Li <redacted@example.com> 1767726324 -0800\ncommitter GitHub <redacted@example.com> 1767726324 -0800\n\nRefactor utils parse_value for lint and support binaryType (#29)\n\n",
+        "verified_at": "2026-01-06T19:05:25Z"
+      }
+    },
+    "url": "https://api.github.com/repos/yyoli-db/lakeflow-community-connectors/commits/591ac39b5f4b279ddcabcc21236dbd2b0d8e87a3",
+    "html_url": "https://github.com/yyoli-db/lakeflow-community-connectors/commit/591ac39b5f4b279ddcabcc21236dbd2b0d8e87a3",
+    "comments_url": "https://api.github.com/repos/yyoli-db/lakeflow-community-connectors/commits/591ac39b5f4b279ddcabcc21236dbd2b0d8e87a3/comments",
+    "author": {
+      "login": "yyoli-db",
+      "id": 113948208,
+      "node_id": "U_kgDOBsq2MA",
+      "avatar_url": "https://avatars.githubusercontent.com/u/113948208?v=4",
+      "gravatar_id": "",
+      "url": "https://api.github.com/users/yyoli-db",
+      "html_url": "https://github.com/yyoli-db",
+      "followers_url": "https://api.github.com/users/yyoli-db/followers",
+      "following_url": "https://api.github.com/users/yyoli-db/following{/other_user}",
+      "gists_url": "https://api.github.com/users/yyoli-db/gists{/gist_id}",
+      "starred_url": "https://api.github.com/users/yyoli-db/starred{/owner}{/repo}",
+      "subscriptions_url": "https://api.github.com/users/yyoli-db/subscriptions",
+      "organizations_url": "https://api.github.com/users/yyoli-db/orgs",
+      "repos_url": "https://api.github.com/users/yyoli-db/repos",
+      "events_url": "https://api.github.com/users/yyoli-db/events{/privacy}",
+      "received_events_url": "https://api.github.com/users/yyoli-db/received_events",
+      "type": "User",
+      "user_view_type": "public",
+      "site_admin": false
+    },
+    "committer": {
+      "login": "web-flow",
+      "id": 19864447,
+      "node_id": "MDQ6VXNlcjE5ODY0NDQ3",
+      "avatar_url": "https://avatars.githubusercontent.com/u/19864447?v=4",
+      "gravatar_id": "",
+      "url": "https://api.github.com/users/web-flow",
+      "html_url": "https://github.com/web-flow",
+      "followers_url": "https://api.github.com/users/web-flow/followers",
+      "following_url": "https://api.github.com/users/web-flow/following{/other_user}",
+      "gists_url": "https://api.github.com/users/web-flow/gists{/gist_id}",
+      "starred_url": "https://api.github.com/users/web-flow/starred{/owner}{/repo}",
+      "subscriptions_url": "https://api.github.com/users/web-flow/subscriptions",
+      "organizations_url": "https://api.github.com/users/web-flow/orgs",
+      "repos_url": "https://api.github.com/users/web-flow/repos",
+      "events_url": "https://api.github.com/users/web-flow/events{/privacy}",
+      "received_events_url": "https://api.github.com/users/web-flow/received_events",
+      "type": "User",
+      "user_view_type": "public",
+      "site_admin": false
+    },
+    "parents": [
+      {
+        "sha": "6baf5757ffc2ec27ad345484ed36f903e2a94d1b",
+        "url": "https://api.github.com/repos/yyoli-db/lakeflow-community-connectors/commits/6baf5757ffc2ec27ad345484ed36f903e2a94d1b",
+        "html_url": "https://github.com/yyoli-db/lakeflow-community-connectors/commit/6baf5757ffc2ec27ad345484ed36f903e2a94d1b"
+      }
+    ]
+  },
+  {
+    "sha": "bc33ee17829f0b5c0d651a48e74745cea5c538b1",
+    "node_id": "C_kwDOQ5ifOtoAKGJjMzNlZTE3ODI5ZjBiNWMwZDY1MWE0OGU3NDc0NWNlYTVjNTM4YjE",
+    "commit": {
+      "author": {
+        "name": "Yong Li",
+        "email": "redacted@example.com",
+        "date": "2026-01-14T00:57:24Z"
+      },
+      "committer": {
+        "name": "GitHub",
+        "email": "redacted@example.com",
+        "date": "2026-01-14T00:57:24Z"
+      },
+      "message": "U (#73)",
+      "tree": {
+        "sha": "3d947db54f906a9fee893d047b2f1310337a514f",
+        "url": "https://api.github.com/repos/yyoli-db/lakeflow-community-connectors/git/trees/3d947db54f906a9fee893d047b2f1310337a514f"
+      },
+      "url": "https://api.github.com/repos/yyoli-db/lakeflow-community-connectors/git/commits/bc33ee17829f0b5c0d651a48e74745cea5c538b1",
+      "comment_count": 0,
+      "verification": {
+        "verified": true,
+        "reason": "valid",
+        "signature": "-----BEGIN PGP SIGNATURE-----\n\nwsFcBAABCAAQBQJpZun0CRC1aQ7uu5UhlAAA/HUQAEeUz0sm94VLIR0H6FUEy9fA\nK2zsphvDQOcGoE7NTn4rUdZKl84y1ZfeCKKFSbB+21hvod2EivdvSp606kNthpLB\n/otVCUFCASAfk7S87ORcYcJub+xmPIGA84Mibpk3gnEld6H0Me9YmLQ1+LaiAXKh\n0dl+rHtndaJUaWxuvg+a5GZfdxlu2QZb4uX+gxYEeUBDZOgImlUluW+Bv/hudWXn\nCIUXgxbyjda3m18G4uoCSLABG/XNbt4/fzVXI2t5dJZHTCnO7qlPcqyuwq11+Hez\nFZkvJebop2NEYTojbasAi8p2FVINStjSYxWJTQJmJczhHTHr2wBZ+HtO991gaAva\n12mKEkKbqTX+qqwbqdGR/JfyJ2C1+6Ojo20EXdL+PoAoJmfl9mLKS5ZTO0VfiBHB\ne1kEm88FW+nqgkrjSOXe1ODOZANxgEgkFdQqPGeeTtVYoaznyErcWuWZW86Dj/ZH\np6wWtQ4mYtVDUol/BTdkPNWmws0BfW8mmG9UW3vUvq5iKaLXZunvtd3WHfIAEVdX\ncEYKw8x+JMQn4kaekplx8hAUTIMvQoGAlemFT4hKpYbW3k5YgJQCzlPEACUyxYnE\nxtwcb8AxOFgY7k8cO2KphIQ9DaR0bgZ6FYIyQYSCvg6cmZfiZiyKCeBeY36QgL+1\nvknKuODyi5BDBa877WjW\n=EryD\n-----END PGP SIGNATURE-----\n",
+        "payload": "tree 3d947db54f906a9fee893d047b2f1310337a514f\nparent 5946ea6684d5bef08d51165561c8d747060b57e2\nauthor Yong Li <redacted@example.com> 1768352244 -0800\ncommitter GitHub <redacted@example.com> 1768352244 -0800\n\nU (#73)\n\n",
+        "verified_at": "2026-01-14T00:57:25Z"
+      }
+    },
+    "url": "https://api.github.com/repos/yyoli-db/lakeflow-community-connectors/commits/bc33ee17829f0b5c0d651a48e74745cea5c538b1",
+    "html_url": "https://github.com/yyoli-db/lakeflow-community-connectors/commit/bc33ee17829f0b5c0d651a48e74745cea5c538b1",
+    "comments_url": "https://api.github.com/repos/yyoli-db/lakeflow-community-connectors/commits/bc33ee17829f0b5c0d651a48e74745cea5c538b1/comments",
+    "author": {
+      "login": "yyoli-db",
+      "id": 113948208,
+      "node_id": "U_kgDOBsq2MA",
+      "avatar_url": "https://avatars.githubusercontent.com/u/113948208?v=4",
+      "gravatar_id": "",
+      "url": "https://api.github.com/users/yyoli-db",
+      "html_url": "https://github.com/yyoli-db",
+      "followers_url": "https://api.github.com/users/yyoli-db/followers",
+      "following_url": "https://api.github.com/users/yyoli-db/following{/other_user}",
+      "gists_url": "https://api.github.com/users/yyoli-db/gists{/gist_id}",
+      "starred_url": "https://api.github.com/users/yyoli-db/starred{/owner}{/repo}",
+      "subscriptions_url": "https://api.github.com/users/yyoli-db/subscriptions",
+      "organizations_url": "https://api.github.com/users/yyoli-db/orgs",
+      "repos_url": "https://api.github.com/users/yyoli-db/repos",
+      "events_url": "https://api.github.com/users/yyoli-db/events{/privacy}",
+      "received_events_url": "https://api.github.com/users/yyoli-db/received_events",
+      "type": "User",
+      "user_view_type": "public",
+      "site_admin": false
+    },
+    "committer": {
+      "login": "web-flow",
+      "id": 19864447,
+      "node_id": "MDQ6VXNlcjE5ODY0NDQ3",
+      "avatar_url": "https://avatars.githubusercontent.com/u/19864447?v=4",
+      "gravatar_id": "",
+      "url": "https://api.github.com/users/web-flow",
+      "html_url": "https://github.com/web-flow",
+      "followers_url": "https://api.github.com/users/web-flow/followers",
+      "following_url": "https://api.github.com/users/web-flow/following{/other_user}",
+      "gists_url": "https://api.github.com/users/web-flow/gists{/gist_id}",
+      "starred_url": "https://api.github.com/users/web-flow/starred{/owner}{/repo}",
+      "subscriptions_url": "https://api.github.com/users/web-flow/subscriptions",
+      "organizations_url": "https://api.github.com/users/web-flow/orgs",
+      "repos_url": "https://api.github.com/users/web-flow/repos",
+      "events_url": "https://api.github.com/users/web-flow/events{/privacy}",
+      "received_events_url": "https://api.github.com/users/web-flow/received_events",
+      "type": "User",
+      "user_view_type": "public",
+      "site_admin": false
+    },
+    "parents": [
+      {
+        "sha": "5946ea6684d5bef08d51165561c8d747060b57e2",
+        "url": "https://api.github.com/repos/yyoli-db/lakeflow-community-connectors/commits/5946ea6684d5bef08d51165561c8d747060b57e2",
+        "html_url": "https://github.com/yyoli-db/lakeflow-community-connectors/commit/5946ea6684d5bef08d51165561c8d747060b57e2"
+      }
+    ]
+  },
+  {
+    "sha": "5946ea6684d5bef08d51165561c8d747060b57e2",
+    "node_id": "C_kwDOQ5ifOtoAKDU5NDZlYTY2ODRkNWJlZjA4ZDUxMTY1NTYxYzhkNzQ3MDYwYjU3ZTI",
+    "commit": {
+      "author": {
+        "name": "Yong Li",
+        "email": "redacted@example.com",
+        "date": "2026-01-13T22:13:14Z"
+      },
+      "committer": {
+        "name": "GitHub",
+        "email": "redacted@example.com",
+        "date": "2026-01-13T22:13:14Z"
+      },
+      "message": "add update_pipeline command to the CLI tool (#72)",
+      "tree": {
+        "sha": "5b92908ff29091d7a21495bd44d1b857807ab27b",
+        "url": "https://api.github.com/repos/yyoli-db/lakeflow-community-connectors/git/trees/5b92908ff29091d7a21495bd44d1b857807ab27b"
+      },
+      "url": "https://api.github.com/repos/yyoli-db/lakeflow-community-connectors/git/commits/5946ea6684d5bef08d51165561c8d747060b57e2",
+      "comment_count": 0,
+      "verification": {
+        "verified": true,
+        "reason": "valid",
+        "signature": "-----BEGIN PGP SIGNATURE-----\n\nwsFcBAABCAAQBQJpZsN6CRC1aQ7uu5UhlAAAdlIQAArqzT2pzJpfi0XF3pfe70Ke\ns744eDWQ7++KxNcASqdKaoUuEntlo5awo9WITZ/Ck5qt7DgDRZxTCiiNBVcyWRXL\nJOdqj4h3YHMiA0oOI2ruJVDWZQKRXVC1dzrMWXRwFfGFRYEg3Ut8Cc2fZrqcdcLX\nqkX4Jd/6A7ZMMiaOz10bwn3k3VPVrUvHq/hHzVpPekf0UZ/SxYVJyKCesYB9uO6z\nahZgFTo+Tv13aiBNGVF4Aa/rNPDo5g6KH/fnRQ+YJwtQqucvQlUMx3WlN/WEaeTS\nEaqDADgNPxRgerlOviwsyEN7HpitQsksh7ti85fjXIewO2u9aJWjM9aZxXiUHOK4\n/AeX9nY7RnuLJglnodbV1NsgbJS3LxcZywown1/cizsQJGjfhcU0SqAkHV+y1PXP\nrLTBOmWQRNPhWgL9NZ5dx8+cTF3wzpQgXD7zeFhtTh5VrN9VfWqYSH7WzaybM765\n+i3M5GBp0zS9gMMKopK9hwifMOyIXNnazZN1kj8Xztz+HoCynVVIueQyRRD3hMVf\n8QJD7K3PSne0l54Z2jPJrgCGsZKHeEcsRKO5sObWJ8wBP3GWtYaY4BYxUpXB2WoL\nFXSk4jhx0rAiF6DqHQGGM0sFf3T91cdI4OCYJHNWQuEHbpgXvEElqLffr7/gS/l4\nQxbzTdk5IGw/4uelW4va\n=YcZc\n-----END PGP SIGNATURE-----\n",
+        "payload": "tree 5b92908ff29091d7a21495bd44d1b857807ab27b\nparent a82685d4213e9e375be910200ba13c6d148f1f06\nauthor Yong Li <redacted@example.com> 1768342394 -0800\ncommitter GitHub <redacted@example.com> 1768342394 -0800\n\nadd update_pipeline command to the CLI tool (#72)\n\n",
+        "verified_at": "2026-01-13T22:13:15Z"
+      }
+    },
+    "url": "https://api.github.com/repos/yyoli-db/lakeflow-community-connectors/commits/5946ea6684d5bef08d51165561c8d747060b57e2",
+    "html_url": "https://github.com/yyoli-db/lakeflow-community-connectors/commit/5946ea6684d5bef08d51165561c8d747060b57e2",
+    "comments_url": "https://api.github.com/repos/yyoli-db/lakeflow-community-connectors/commits/5946ea6684d5bef08d51165561c8d747060b57e2/comments",
+    "author": {
+      "login": "yyoli-db",
+      "id": 113948208,
+      "node_id": "U_kgDOBsq2MA",
+      "avatar_url": "https://avatars.githubusercontent.com/u/113948208?v=4",
+      "gravatar_id": "",
+      "url": "https://api.github.com/users/yyoli-db",
+      "html_url": "https://github.com/yyoli-db",
+      "followers_url": "https://api.github.com/users/yyoli-db/followers",
+      "following_url": "https://api.github.com/users/yyoli-db/following{/other_user}",
+      "gists_url": "https://api.github.com/users/yyoli-db/gists{/gist_id}",
+      "starred_url": "https://api.github.com/users/yyoli-db/starred{/owner}{/repo}",
+      "subscriptions_url": "https://api.github.com/users/yyoli-db/subscriptions",
+      "organizations_url": "https://api.github.com/users/yyoli-db/orgs",
+      "repos_url": "https://api.github.com/users/yyoli-db/repos",
+      "events_url": "https://api.github.com/users/yyoli-db/events{/privacy}",
+      "received_events_url": "https://api.github.com/users/yyoli-db/received_events",
+      "type": "User",
+      "user_view_type": "public",
+      "site_admin": false
+    },
+    "committer": {
+      "login": "web-flow",
+      "id": 19864447,
+      "node_id": "MDQ6VXNlcjE5ODY0NDQ3",
+      "avatar_url": "https://avatars.githubusercontent.com/u/19864447?v=4",
+      "gravatar_id": "",
+      "url": "https://api.github.com/users/web-flow",
+      "html_url": "https://github.com/web-flow",
+      "followers_url": "https://api.github.com/users/web-flow/followers",
+      "following_url": "https://api.github.com/users/web-flow/following{/other_user}",
+      "gists_url": "https://api.github.com/users/web-flow/gists{/gist_id}",
+      "starred_url": "https://api.github.com/users/web-flow/starred{/owner}{/repo}",
+      "subscriptions_url": "https://api.github.com/users/web-flow/subscriptions",
+      "organizations_url": "https://api.github.com/users/web-flow/orgs",
+      "repos_url": "https://api.github.com/users/web-flow/repos",
+      "events_url": "https://api.github.com/users/web-flow/events{/privacy}",
+      "received_events_url": "https://api.github.com/users/web-flow/received_events",
+      "type": "User",
+      "user_view_type": "public",
+      "site_admin": false
+    },
+    "parents": [
+      {
+        "sha": "a82685d4213e9e375be910200ba13c6d148f1f06",
+        "url": "https://api.github.com/repos/yyoli-db/lakeflow-community-connectors/commits/a82685d4213e9e375be910200ba13c6d148f1f06",
+        "html_url": "https://github.com/yyoli-db/lakeflow-community-connectors/commit/a82685d4213e9e375be910200ba13c6d148f1f06"
+      }
+    ]
+  },
+  {
+    "sha": "a82685d4213e9e375be910200ba13c6d148f1f06",
+    "node_id": "C_kwDOQ5ifOtoAKGE4MjY4NWQ0MjEzZTllMzc1YmU5MTAyMDBiYTEzYzZkMTQ4ZjFmMDY",
+    "commit": {
+      "author": {
+        "name": "Sheldon Tauro",
+        "email": "redacted@example.com",
+        "date": "2026-01-09T22:59:26Z"
+      },
+      "committer": {
+        "name": "GitHub",
+        "email": "redacted@example.com",
+        "date": "2026-01-09T22:59:26Z"
+      },
+      "message": "Add delete write-back testing for tables with cdc_with_deletes ingestion type (#37)\n\n1. Added **list_deletable_tables()** and **delete_rows()** methods to\nthe test utils interface, with HubSpot implementation that archives\ncontacts and verifies they appear in read_table_deletes.\n2. Added two new test cases to the generic test suite:\n**test_list_deletable_tables** (validates tables have cdc_with_deletes\ningestion type) and **test_delete_and_read_deletes** (end-to-end delete\n→ read verification).\n3.  Updated documentation with Step 4 for implementing delete testing.",
+      "tree": {
+        "sha": "4e6d08e537ea6d5ebf1bcf0d350b9679e13cd7c6",
+        "url": "https://api.github.com/repos/yyoli-db/lakeflow-community-connectors/git/trees/4e6d08e537ea6d5ebf1bcf0d350b9679e13cd7c6"
+      },
+      "url": "https://api.github.com/repos/yyoli-db/lakeflow-community-connectors/git/commits/a82685d4213e9e375be910200ba13c6d148f1f06",
+      "comment_count": 0,
+      "verification": {
+        "verified": true,
+        "reason": "valid",
+        "signature": "-----BEGIN PGP SIGNATURE-----\n\nwsFcBAABCAAQBQJpYYhOCRC1aQ7uu5UhlAAAAtoQAAl65rpR0uDM0Zw+Jl/H8xN+\nvcVGQgqjr/rCNVbfPM7ripDrimXrexzSY1Z1RnldyZduG1BweQeBXWJhBhepBZGA\noFYKTGRxER6JYtUwshYfTS1uipmDhIu6OFen39kK/bcR6HIo1Djrpu66Xd2EtMp5\nUW3VuV50k6yiHzzp7A5sfw3ElLSdhfPct0fPWxLG15S9Cuum+sGF7J9zYFYbry0M\nB/XYnb896offgAgBsqey0bO25ohuHiJ89KugzNj4bsqKFPEfyV7w9FKkFDP76Xjj\nA4m9xfIcNfl0Z/ja/PdreimVm9VspFHMj4lQf9bq1kbjOyObqIiTl00dRxf3JjE0\nyE7l+d/G8IqOcJOGjqus9+e0uEJSx9Vtv6hBfn1Z/mqCE4jyrWijKlu14Cwz8wOO\ntSEB83TohjEZn8U0P/aKmU/vX9zcD8118MnF42Apoa8P+FSwIFO99Yg6TctqPTCV\nI1stXkBq1bLeyTAJVvqRYi/81wz9U5Y7dOGdpyqiOJ6FEEEhoc4Bu6vfFJ+pZPhR\nTZ9dLJ/V1+7LejuXZdGSs2rczVyuH5StOMoxAbppQOTtGzyDNIHqgoVDQE7/U7BN\n5iD+z7x7GkGt/Zz/2+K2ZfUIu0g/4yk+IHUsaM4WIvI2SP/upXXQasWGwFHfDBLc\nV4smXP46IGQVhvFU5FeQ\n=31sl\n-----END PGP SIGNATURE-----\n",
+        "payload": "tree 4e6d08e537ea6d5ebf1bcf0d350b9679e13cd7c6\nparent 7688ef4d66e7efe6c165639df5b516e89bd5e3fe\nauthor Sheldon Tauro <redacted@example.com> 1767999566 -0800\ncommitter GitHub <redacted@example.com> 1767999566 -0800\n\nAdd delete write-back testing for tables with cdc_with_deletes ingestion type (#37)\n\n1. Added **list_deletable_tables()** and **delete_rows()** methods to\nthe test utils interface, with HubSpot implementation that archives\ncontacts and verifies they appear in read_table_deletes.\n2. Added two new test cases to the generic test suite:\n**test_list_deletable_tables** (validates tables have cdc_with_deletes\ningestion type) and **test_delete_and_read_deletes** (end-to-end delete\n→ read verification).\n3.  Updated documentation with Step 4 for implementing delete testing.",
+        "verified_at": "2026-01-09T22:59:27Z"
+      }
+    },
+    "url": "https://api.github.com/repos/yyoli-db/lakeflow-community-connectors/commits/a82685d4213e9e375be910200ba13c6d148f1f06",
+    "html_url": "https://github.com/yyoli-db/lakeflow-community-connectors/commit/a82685d4213e9e375be910200ba13c6d148f1f06",
+    "comments_url": "https://api.github.com/repos/yyoli-db/lakeflow-community-connectors/commits/a82685d4213e9e375be910200ba13c6d148f1f06/comments",
+    "author": {
+      "login": "sheltauro",
+      "id": 21174348,
+      "node_id": "MDQ6VXNlcjIxMTc0MzQ4",
+      "avatar_url": "https://avatars.githubusercontent.com/u/21174348?v=4",
+      "gravatar_id": "",
+      "url": "https://api.github.com/users/sheltauro",
+      "html_url": "https://github.com/sheltauro",
+      "followers_url": "https://api.github.com/users/sheltauro/followers",
+      "following_url": "https://api.github.com/users/sheltauro/following{/other_user}",
+      "gists_url": "https://api.github.com/users/sheltauro/gists{/gist_id}",
+      "starred_url": "https://api.github.com/users/sheltauro/starred{/owner}{/repo}",
+      "subscriptions_url": "https://api.github.com/users/sheltauro/subscriptions",
+      "organizations_url": "https://api.github.com/users/sheltauro/orgs",
+      "repos_url": "https://api.github.com/users/sheltauro/repos",
+      "events_url": "https://api.github.com/users/sheltauro/events{/privacy}",
+      "received_events_url": "https://api.github.com/users/sheltauro/received_events",
+      "type": "User",
+      "user_view_type": "public",
+      "site_admin": false
+    },
+    "committer": {
+      "login": "web-flow",
+      "id": 19864447,
+      "node_id": "MDQ6VXNlcjE5ODY0NDQ3",
+      "avatar_url": "https://avatars.githubusercontent.com/u/19864447?v=4",
+      "gravatar_id": "",
+      "url": "https://api.github.com/users/web-flow",
+      "html_url": "https://github.com/web-flow",
+      "followers_url": "https://api.github.com/users/web-flow/followers",
+      "following_url": "https://api.github.com/users/web-flow/following{/other_user}",
+      "gists_url": "https://api.github.com/users/web-flow/gists{/gist_id}",
+      "starred_url": "https://api.github.com/users/web-flow/starred{/owner}{/repo}",
+      "subscriptions_url": "https://api.github.com/users/web-flow/subscriptions",
+      "organizations_url": "https://api.github.com/users/web-flow/orgs",
+      "repos_url": "https://api.github.com/users/web-flow/repos",
+      "events_url": "https://api.github.com/users/web-flow/events{/privacy}",
+      "received_events_url": "https://api.github.com/users/web-flow/received_events",
+      "type": "User",
+      "user_view_type": "public",
+      "site_admin": false
+    },
+    "parents": [
+      {
+        "sha": "7688ef4d66e7efe6c165639df5b516e89bd5e3fe",
+        "url": "https://api.github.com/repos/yyoli-db/lakeflow-community-connectors/commits/7688ef4d66e7efe6c165639df5b516e89bd5e3fe",
+        "html_url": "https://github.com/yyoli-db/lakeflow-community-connectors/commit/7688ef4d66e7efe6c165639df5b516e89bd5e3fe"
+      }
+    ]
+  },
+  {
+    "sha": "7688ef4d66e7efe6c165639df5b516e89bd5e3fe",
+    "node_id": "C_kwDOQ5ifOtoAKDc2ODhlZjRkNjZlN2VmZTZjMTY1NjM5ZGY1YjUxNmU4OWJkNWUzZmU",
+    "commit": {
+      "author": {
+        "name": "Sheldon Tauro",
+        "email": "redacted@example.com",
+        "date": "2026-01-09T19:09:54Z"
+      },
+      "committer": {
+        "name": "GitHub",
+        "email": "redacted@example.com",
+        "date": "2026-01-09T19:09:54Z"
+      },
+      "message": "Add a new gitignore file to prevent pushing unnecessary or local code. (#50)\n\nAs titled.\n\n---------\n\nCo-authored-by: Yong Li <redacted@example.com>",
+      "tree": {
+        "sha": "dd8646e40d8dec8a0edbc40475dff66edb4faf55",
+        "url": "https://api.github.com/repos/yyoli-db/lakeflow-community-connectors/git/trees/dd8646e40d8dec8a0edbc40475dff66edb4faf55"
+      },
+      "url": "https://api.github.com/repos/yyoli-db/lakeflow-community-connectors/git/commits/7688ef4d66e7efe6c165639df5b516e89bd5e3fe",
+      "comment_count": 0,
+      "verification": {
+        "verified": true,
+        "reason": "valid",
+        "signature": "-----BEGIN PGP SIGNATURE-----\n\nwsFcBAABCAAQBQJpYVKCCRC1aQ7uu5UhlAAAbWEQABOP5A100k6x025FeJh47brO\nL8lNgTGey9tD2CVoYl75HqwNd/VYHsQ9DhbFpDRWCB6HgUcL42oP0uOfsoUj0Phy\n7olvzrZrOLSNwJblKHiJ/wVd7UXNftrnbuZTh0KBoo8VmkkJWGsGrzLJtjNla0Qy\n4bpXxIG0JERlprrTdBPvglKyzRVxSMP1TaxxCE6aQGo1adYlE9AP+Z9EShVf8a/P\n5QvS306zUqC1ch/5sBnGJKhaG/JJw29EDoDCj7t6RRJ+qgf3iXBQUrL4o3feNflm\nLb/CrIDcONkzXTK1eyCRMfRDnNf65Nt1SuDo4j12rLx9NyzNB/I/+y/xn6iYqqwR\nyLHDVExy8DeP8fchsSH4EswO/+x9/rK0srQj/umj4UlV/LL8d/BJiatYodMBH9pc\nkQmg9XiFVtriHVCQld74N/prd2e1MH2uf4RHoiGczPttXaXTshDh8nQ6R0lginER\n9p2SLFqbSl0RyetKrWqmfFl9yTQws2QqqJNpB5KqRfyAC2AUv5eWGX+Vt/s6a9uR\nSvebBbFfMp1qpV45QIEplCW8v66m1brI72CDMARD/9/XojkjHqowH9SRxyq96RhC\nYNB+ZpmlhEy6/MreXcQ7zZyh4/3ik9ZSYQ+9kOTC84ReKa5v5jxpIr3Vd9i2W4Mm\n7LUc6CHHwEq2VTyLRiIk\n=BShr\n-----END PGP SIGNATURE-----\n",
+        "payload": "tree dd8646e40d8dec8a0edbc40475dff66edb4faf55\nparent ada446dafd856dbc71ffd805ad68e05634fba0eb\nauthor Sheldon Tauro <redacted@example.com> 1767985794 -0800\ncommitter GitHub <redacted@example.com> 1767985794 -0800\n\nAdd a new gitignore file to prevent pushing unnecessary or local code. (#50)\n\nAs titled.\n\n---------\n\nCo-authored-by: Yong Li <redacted@example.com>",
+        "verified_at": "2026-01-09T19:09:54Z"
+      }
+    },
+    "url": "https://api.github.com/repos/yyoli-db/lakeflow-community-connectors/commits/7688ef4d66e7efe6c165639df5b516e89bd5e3fe",
+    "html_url": "https://github.com/yyoli-db/lakeflow-community-connectors/commit/7688ef4d66e7efe6c165639df5b516e89bd5e3fe",
+    "comments_url": "https://api.github.com/repos/yyoli-db/lakeflow-community-connectors/commits/7688ef4d66e7efe6c165639df5b516e89bd5e3fe/comments",
+    "author": {
+      "login": "sheltauro",
+      "id": 21174348,
+      "node_id": "MDQ6VXNlcjIxMTc0MzQ4",
+      "avatar_url": "https://avatars.githubusercontent.com/u/21174348?v=4",
+      "gravatar_id": "",
+      "url": "https://api.github.com/users/sheltauro",
+      "html_url": "https://github.com/sheltauro",
+      "followers_url": "https://api.github.com/users/sheltauro/followers",
+      "following_url": "https://api.github.com/users/sheltauro/following{/other_user}",
+      "gists_url": "https://api.github.com/users/sheltauro/gists{/gist_id}",
+      "starred_url": "https://api.github.com/users/sheltauro/starred{/owner}{/repo}",
+      "subscriptions_url": "https://api.github.com/users/sheltauro/subscriptions",
+      "organizations_url": "https://api.github.com/users/sheltauro/orgs",
+      "repos_url": "https://api.github.com/users/sheltauro/repos",
+      "events_url": "https://api.github.com/users/sheltauro/events{/privacy}",
+      "received_events_url": "https://api.github.com/users/sheltauro/received_events",
+      "type": "User",
+      "user_view_type": "public",
+      "site_admin": false
+    },
+    "committer": {
+      "login": "web-flow",
+      "id": 19864447,
+      "node_id": "MDQ6VXNlcjE5ODY0NDQ3",
+      "avatar_url": "https://avatars.githubusercontent.com/u/19864447?v=4",
+      "gravatar_id": "",
+      "url": "https://api.github.com/users/web-flow",
+      "html_url": "https://github.com/web-flow",
+      "followers_url": "https://api.github.com/users/web-flow/followers",
+      "following_url": "https://api.github.com/users/web-flow/following{/other_user}",
+      "gists_url": "https://api.github.com/users/web-flow/gists{/gist_id}",
+      "starred_url": "https://api.github.com/users/web-flow/starred{/owner}{/repo}",
+      "subscriptions_url": "https://api.github.com/users/web-flow/subscriptions",
+      "organizations_url": "https://api.github.com/users/web-flow/orgs",
+      "repos_url": "https://api.github.com/users/web-flow/repos",
+      "events_url": "https://api.github.com/users/web-flow/events{/privacy}",
+      "received_events_url": "https://api.github.com/users/web-flow/received_events",
+      "type": "User",
+      "user_view_type": "public",
+      "site_admin": false
+    },
+    "parents": [
+      {
+        "sha": "ada446dafd856dbc71ffd805ad68e05634fba0eb",
+        "url": "https://api.github.com/repos/yyoli-db/lakeflow-community-connectors/commits/ada446dafd856dbc71ffd805ad68e05634fba0eb",
+        "html_url": "https://github.com/yyoli-db/lakeflow-community-connectors/commit/ada446dafd856dbc71ffd805ad68e05634fba0eb"
+      }
+    ]
+  }
+]

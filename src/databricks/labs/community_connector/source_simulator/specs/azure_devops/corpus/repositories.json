@@ -1,0 +1,270 @@
+[
+  {
+    "id": "november-pk0",
+    "name": "foxtrot-341",
+    "url": "juliet-533",
+    "project": {
+      "id": "juliet-193",
+      "name": "november-197",
+      "url": "xray-325",
+      "state": "tango-226",
+      "revision": 68187,
+      "visibility": "delta-513",
+      "lastUpdateTime": "golf-254"
+    },
+    "defaultBranch": "tango-389",
+    "size": 96452,
+    "remoteUrl": "golf-493",
+    "sshUrl": "golf-467",
+    "webUrl": "charlie-221",
+    "isDisabled": false,
+    "isInMaintenance": true,
+    "isFork": true,
+    "parentRepository": {
+      "id": "delta-570",
+      "name": "charlie-800",
+      "url": "whiskey-899",
+      "project": {
+        "id": "papa-688",
+        "name": "kilo-182",
+        "url": "xray-515",
+        "state": "victor-811",
+        "revision": 31319,
+        "visibility": "yankee-789",
+        "lastUpdateTime": "echo-225"
+      }
+    },
+    "_links": {
+      "self": {
+        "href": "juliet-526"
+      },
+      "project": {
+        "href": "hotel-828"
+      },
+      "web": {
+        "href": "delta-988"
+      },
+      "ssh": {
+        "href": "quebec-739"
+      },
+      "commits": {
+        "href": "mike-833"
+      },
+      "refs": {
+        "href": "delta-130"
+      },
+      "pullRequests": {
+        "href": "delta-236"
+      },
+      "items": {
+        "href": "delta-984"
+      },
+      "pushes": {
+        "href": "alpha-434"
+      }
+    },
+    "organization": "sierra-868",
+    "project_name": "whiskey-733"
+  },
+  {
+    "id": "echo-689-pk1",
+    "name": "kilo-546",
+    "url": "golf-336",
+    "project": {
+      "id": "zulu-896",
+      "name": "xray-715",
+      "url": "bravo-512",
+      "state": "romeo-778",
+      "revision": 32666,
+      "visibility": "alpha-839",
+      "lastUpdateTime": "india-138"
+    },
+    "defaultBranch": "zulu-444",
+    "size": 85546,
+    "remoteUrl": "delta-170",
+    "sshUrl": "oscar-646",
+    "webUrl": "romeo-699",
+    "isDisabled": true,
+    "isInMaintenance": false,
+    "isFork": true,
+    "parentRepository": {
+      "id": "whiskey-333",
+      "name": "papa-702",
+      "url": "kilo-341",
+      "project": {
+        "id": "zulu-880",
+        "name": "hotel-741",
+        "url": "papa-207",
+        "state": "papa-592",
+        "revision": 8136,
+        "visibility": "juliet-485",
+        "lastUpdateTime": "tango-859"
+      }
+    },
+    "_links": {
+      "self": {
+        "href": "victor-886"
+      },
+      "project": {
+        "href": "victor-911"
+      },
+      "web": {
+        "href": "india-428"
+      },
+      "ssh": {
+        "href": "quebec-100"
+      },
+      "commits": {
+        "href": "foxtrot-180"
+      },
+      "refs": {
+        "href": "xray-831"
+      },
+      "pullRequests": {
+        "href": "juliet-783"
+      },
+      "items": {
+        "href": "alpha-642"
+      },
+      "pushes": {
+        "href": "kilo-489"
+      }
+    },
+    "organization": "lima-458",
+    "project_name": "foxtrot-748"
+  },
+  {
+    "id": "papa-716-pk2",
+    "name": "golf-584",
+    "url": "bravo-128",
+    "project": {
+      "id": "alpha-119",
+      "name": "bravo-888",
+      "url": "hotel-478",
+      "state": "tango-475",
+      "revision": 93618,
+      "visibility": "victor-626",
+      "lastUpdateTime": "xray-738"
+    },
+    "defaultBranch": "delta-406",
+    "size": 36427,
+    "remoteUrl": "lima-194",
+    "sshUrl": "foxtrot-599",
+    "webUrl": "mike-768",
+    "isDisabled": false,
+    "isInMaintenance": false,
+    "isFork": false,
+    "parentRepository": {
+      "id": "delta-176",
+      "name": "november-979",
+      "url": "mike-671",
+      "project": {
+        "id": "whiskey-658",
+        "name": "delta-725",
+        "url": "whiskey-127",
+        "state": "foxtrot-658",
+        "revision": 61100,
+        "visibility": "zulu-456",
+        "lastUpdateTime": "juliet-347"
+      }
+    },
+    "_links": {
+      "self": {
+        "href": "papa-967"
+      },
+      "project": {
+        "href": "papa-770"
+      },
+      "web": {
+        "href": "tango-357"
+      },
+      "ssh": {
+        "href": "november-650"
+      },
+      "commits": {
+        "href": "zulu-397"
+      },
+      "refs": {
+        "href": "november-440"
+      },
+      "pullRequests": {
+        "href": "zulu-621"
+      },
+      "items": {
+        "href": "kilo-476"
+      },
+      "pushes": {
+        "href": "charlie-462"
+      }
+    },
+    "organization": "oscar-836",
+    "project_name": "xray-856"
+  },
+  {
+    "id": "charlie--pk3",
+    "name": "tango-500",
+    "url": "lima-414",
+    "project": {
+      "id": "delta-671",
+      "name": "charlie-862",
+      "url": "romeo-188",
+      "state": "november-524",
+      "revision": 14800,
+      "visibility": "charlie-575",
+      "lastUpdateTime": "tango-230"
+    },
+    "defaultBranch": "foxtrot-949",
+    "size": 74316,
+    "remoteUrl": "mike-445",
+    "sshUrl": "victor-374",
+    "webUrl": "charlie-410",
+    "isDisabled": true,
+    "isInMaintenance": false,
+    "isFork": true,
+    "parentRepository": {
+      "id": "india-270",
+      "name": "hotel-494",
+      "url": "bravo-214",
+      "project": {
+        "id": "india-770",
+        "name": "delta-451",
+        "url": "uniform-190",
+        "state": "bravo-458",
+        "revision": 82623,
+        "visibility": "india-104",
+        "lastUpdateTime": "lima-673"
+      }
+    },
+    "_links": {
+      "self": {
+        "href": "hotel-818"
+      },
+      "project": {
+        "href": "victor-703"
+      },
+      "web": {
+        "href": "juliet-909"
+      },
+      "ssh": {
+        "href": "quebec-240"
+      },
+      "commits": {
+        "href": "whiskey-649"
+      },
+      "refs": {
+        "href": "romeo-478"
+      },
+      "pullRequests": {
+        "href": "alpha-286"
+      },
+      "items": {
+        "href": "yankee-366"
+      },
+      "pushes": {
+        "href": "bravo-927"
+      }
+    },
+    "organization": "yankee-634",
+    "project_name": "charlie-966"
+  }
+]

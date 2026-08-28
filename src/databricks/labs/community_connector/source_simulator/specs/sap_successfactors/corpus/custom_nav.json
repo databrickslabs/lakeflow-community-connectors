@@ -1,0 +1,42 @@
+[
+  {
+    "title": "golf-285",
+    "altText": "juliet-700",
+    "alwaysShow": true,
+    "isModule": false,
+    "isSelected": true,
+    "label": "charlie-922",
+    "newWindow": false,
+    "url": "victor-714"
+  },
+  {
+    "title": "tango-847",
+    "altText": "juliet-541",
+    "alwaysShow": false,
+    "isModule": true,
+    "isSelected": false,
+    "label": "tango-834",
+    "newWindow": false,
+    "url": "bravo-475"
+  },
+  {
+    "title": "yankee-188",
+    "altText": "lima-476",
+    "alwaysShow": true,
+    "isModule": false,
+    "isSelected": true,
+    "label": "xray-463",
+    "newWindow": false,
+    "url": "mike-600"
+  },
+  {
+    "title": "hotel-414",
+    "altText": "uniform-375",
+    "alwaysShow": false,
+    "isModule": true,
+    "isSelected": true,
+    "label": "quebec-972",
+    "newWindow": false,
+    "url": "november-495"
+  }
+]

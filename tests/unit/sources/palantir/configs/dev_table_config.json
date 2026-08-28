@@ -1,0 +1,10 @@
+{
+    "FlightsFinal": {
+        "cursor_field": "arrivalTimestamp",
+        "page_size": "10000",
+        "max_records_per_batch": "20000"
+    },
+    "ExampleCarrier": {
+        "page_size": "10000"
+    }
+}

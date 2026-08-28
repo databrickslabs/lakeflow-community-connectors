@@ -1,0 +1,129 @@
+name: Verify Dependency Locks
+
+# Regenerates requirements/*.txt and fails if the committed locks differ
+# from a fresh regeneration. Enforces the internal guidance's "strongly
+# recommended" assertion that running uv pip compile produces no diff.
+
+# Triggers: see pull_request_target rationale in .github/workflows/pylint.yml.
+on:
+  pull_request_target:
+    # Default types (opened, synchronize, reopened) plus `labeled` so a
+    # maintainer's `safe-to-test` add fires CI on the exact labeled SHA.
+    types: [opened, synchronize, reopened, labeled]
+    # No workflow-level `paths:` filter on PR events: branch protection
+    # requires `Verify Dependency Locks / verify`, so the workflow must
+    # fire on every PR. PRs that don't touch lock-relevant files still
+    # regenerate the locks; the diff check is a no-op.
+  push:
+    branches: [master]
+    paths:
+      - 'pyproject.toml'
+      - 'tools/community_connector/pyproject.toml'
+      - 'src/databricks/labs/community_connector/sources/**/pyproject.toml'
+      - 'requirements/**'
+      - 'tools/scripts/regenerate-locks.sh'
+
+permissions:
+  contents: read
+  id-token: write  # Required for JFrog OIDC token exchange (see .github/actions/configure-jfrog-pypi).
+
+jobs:
+  verify:
+    runs-on:
+      group: databrickslabs-protected-runner-group
+      labels: linux-ubuntu-latest
+    steps:
+      # First step (runs before any fork-controlled code is on disk).
+      # Fork PRs only run CI when a maintainer adds the `safe-to-test`
+      # label, and only on the exact event (`action == 'labeled' &&
+      # label.name == 'safe-to-test'`). Explicit failure (rather than
+      # a job-level `if:` skip) ensures branch protection sees `failure`,
+      # not the ambiguous `skipped`. See CONTRIBUTING.md.
+      - name: Authorize
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
+          BASE_REPO: ${{ github.repository }}
+          ACTION: ${{ github.event.action }}
+          LABEL_NAME: ${{ github.event.label.name }}
+        run: |
+          if [ "$EVENT_NAME" = "push" ]; then
+            echo "OK: push to master."
+            exit 0
+          fi
+          if [ "$HEAD_REPO" = "$BASE_REPO" ]; then
+            echo "OK: same-repo PR ($HEAD_REPO)."
+            exit 0
+          fi
+          if [ "$ACTION" = "labeled" ] && [ "$LABEL_NAME" = "safe-to-test" ]; then
+            echo "OK: fork PR was just labeled 'safe-to-test'."
+            exit 0
+          fi
+          echo "::error title=Fork PR not authorized::Apply (or re-apply) the 'safe-to-test' label to authorize CI on this commit. See CONTRIBUTING.md."
+          exit 1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          # Opt-in required by actions/checkout >= v6.0.3 to check out a fork
+          # head from pull_request_target. See the rationale on the checkout
+          # step in .github/workflows/pylint.yml.
+          allow-unsafe-pr-checkout: true
+
+      - name: Setup uv
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9  # v9.0.0
+        with:
+          version: "0.11.7"
+          checksum: "6681d691eb7f9c00ac6a3af54252f7ab29ae72f0c8f95bdc7f9d1401c23ea868"
+
+      - name: Configure uv via JFrog proxy
+        uses: ./.github/actions/configure-jfrog-pypi
+        with:
+          index_var: UV_INDEX_URL
+
+      # The whole job is informational, not blocking. Two reasons it can
+      # produce noise that we don't want to fail PRs on:
+      #   1. JFrog Artifactory's PyPI proxy strips upload-time metadata for
+      #      some packages, breaking `uv pip compile --exclude-newer` even
+      #      when no actual drift exists. Tracked in
+      #      #unblock-github-action-for-eng.
+      #   2. PySpark is intentionally pinned to a prerelease floor
+      #      (>=4.2.0.dev0) so the lock can track upstream eagerly. New
+      #      pyspark dev/RC releases legitimately trigger drift between
+      #      regenerations on arca; we don't want PRs blocked on that — the
+      #      author who wants a fresh pyspark just re-runs the regen script.
+      # The drift summary is still emitted to the job step summary for
+      # anyone who wants to investigate.
+      - name: Regenerate locks
+        continue-on-error: true
+        run: ./tools/scripts/regenerate-locks.sh
+
+      - name: Check for drift
+        continue-on-error: true
+        run: |
+          if git diff --quiet requirements/; then
+            echo "✅ Lock files are up to date."
+            exit 0
+          fi
+
+          {
+            echo "### ⚠️ Dependency lock drift detected"
+            echo ""
+            echo "The committed \`requirements/*.txt\` files do not match a fresh regeneration."
+            echo "Regenerate on arca (per internal guidance) and commit:"
+            echo ""
+            echo '```sh'
+            echo './tools/scripts/regenerate-locks.sh'
+            echo 'git add requirements/'
+            echo 'git commit -m "Regenerate dependency locks"'
+            echo '```'
+            echo ""
+            echo "<details><summary>Files that would change</summary>"
+            echo ""
+            echo '```'
+            git diff --name-only requirements/
+            echo '```'
+            echo "</details>"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          echo "::error title=Lock drift::Dependency locks are out of date. See job summary for regeneration steps."
+          exit 1

@@ -1,0 +1,54 @@
+[
+  {
+    "mainAbsenceTimeType": false,
+    "favoriteTimeTypeBalance": false,
+    "timeType": {
+      "code": "quebec-329",
+      "name": "quebec-490",
+      "description": "yankee-962"
+    },
+    "balance": {
+      "value": 646.02,
+      "formattedWithUnit": "zulu-252"
+    }
+  },
+  {
+    "mainAbsenceTimeType": false,
+    "favoriteTimeTypeBalance": true,
+    "timeType": {
+      "code": "victor-607",
+      "name": "xray-212",
+      "description": "november-366"
+    },
+    "balance": {
+      "value": 138.67,
+      "formattedWithUnit": "quebec-888"
+    }
+  },
+  {
+    "mainAbsenceTimeType": true,
+    "favoriteTimeTypeBalance": true,
+    "timeType": {
+      "code": "whiskey-207",
+      "name": "sierra-965",
+      "description": "november-108"
+    },
+    "balance": {
+      "value": 831.53,
+      "formattedWithUnit": "kilo-112"
+    }
+  },
+  {
+    "mainAbsenceTimeType": true,
+    "favoriteTimeTypeBalance": false,
+    "timeType": {
+      "code": "hotel-870",
+      "name": "tango-323",
+      "description": "mike-389"
+    },
+    "balance": {
+      "value": 720.43,
+      "formattedWithUnit": "november-815"
+    }
+  }
+]

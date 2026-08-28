@@ -1,0 +1,138 @@
+[
+  {
+    "id": 1000,
+    "type": "november-718",
+    "request_id": 32821,
+    "requester_id": 10370,
+    "status": "victor-904",
+    "subject": "tango-217",
+    "priority": "romeo-739",
+    "organization_id": 4256,
+    "description": "romeo-337",
+    "created_at": "2024-01-01T00:00:00Z",
+    "updated_at": "zulu-117",
+    "assignee_id": 34467,
+    "group_id": 59866,
+    "collaborator_ids": [
+      18812
+    ],
+    "custom_fields": [],
+    "email_cc_ids": [
+      38423,
+      55458
+    ],
+    "follower_ids": [],
+    "ticket_form_id": 87019,
+    "brand_id": 91962,
+    "comments": [
+      {
+        "key_0": "delta-792",
+        "key_1": "bravo-995"
+      },
+      {
+        "key_0": "yankee-596"
+      }
+    ]
+  },
+  {
+    "id": 1001,
+    "type": "zulu-226",
+    "request_id": 53097,
+    "requester_id": 55160,
+    "status": "quebec-538",
+    "subject": "foxtrot-786",
+    "priority": "november-356",
+    "organization_id": 39494,
+    "description": "bravo-844",
+    "created_at": "2024-01-01T01:00:00Z",
+    "updated_at": "alpha-923",
+    "assignee_id": 96097,
+    "group_id": 28135,
+    "collaborator_ids": [
+      45630
+    ],
+    "custom_fields": [
+      {
+        "key_0": "echo-474",
+        "key_1": "alpha-191"
+      }
+    ],
+    "email_cc_ids": [],
+    "follower_ids": [
+      18777
+    ],
+    "ticket_form_id": 88889,
+    "brand_id": 49296,
+    "comments": []
+  },
+  {
+    "id": 1002,
+    "type": "papa-512",
+    "request_id": 47702,
+    "requester_id": 30754,
+    "status": "alpha-171",
+    "subject": "yankee-870",
+    "priority": "whiskey-183",
+    "organization_id": 12684,
+    "description": "charlie-921",
+    "created_at": "2024-01-01T02:00:00Z",
+    "updated_at": "lima-331",
+    "assignee_id": 97783,
+    "group_id": 91692,
+    "collaborator_ids": [],
+    "custom_fields": [
+      {},
+      {
+        "key_0": "delta-428",
+        "key_1": "hotel-321"
+      }
+    ],
+    "email_cc_ids": [],
+    "follower_ids": [
+      43985,
+      55769
+    ],
+    "ticket_form_id": 96825,
+    "brand_id": 71879,
+    "comments": [
+      {
+        "key_0": "tango-703",
+        "key_1": "mike-110"
+      }
+    ]
+  },
+  {
+    "id": 1003,
+    "type": "xray-966",
+    "request_id": 53406,
+    "requester_id": 44508,
+    "status": "echo-756",
+    "subject": "lima-309",
+    "priority": "whiskey-891",
+    "organization_id": 81031,
+    "description": "victor-436",
+    "created_at": "2024-01-01T03:00:00Z",
+    "updated_at": "bravo-112",
+    "assignee_id": 97641,
+    "group_id": 85158,
+    "collaborator_ids": [],
+    "custom_fields": [
+      {
+        "key_0": "mike-288",
+        "key_1": "kilo-892"
+      }
+    ],
+    "email_cc_ids": [
+      98966
+    ],
+    "follower_ids": [
+      39173,
+      39544
+    ],
+    "ticket_form_id": 75231,
+    "brand_id": 98478,
+    "comments": [
+      {}
+    ]
+  }
+]

@@ -1,0 +1,62 @@
+[
+  {
+    "contentId": "papa-232",
+    "bestPractice": true,
+    "comments": "delta-245",
+    "contentType": "charlie-762",
+    "customField": "hotel-419",
+    "defaultContent": false,
+    "defaultContentName": "golf-272",
+    "domain": "echo-332",
+    "expiryOnDate": "romeo-481",
+    "publishOnDate": "papa-370",
+    "revisionNo": "uniform-631",
+    "status": "charlie-188",
+    "wizardable": true
+  },
+  {
+    "contentId": "quebec-644",
+    "bestPractice": true,
+    "comments": "foxtrot-762",
+    "contentType": "foxtrot-412",
+    "customField": "xray-112",
+    "defaultContent": false,
+    "defaultContentName": "xray-418",
+    "domain": "yankee-569",
+    "expiryOnDate": "tango-666",
+    "publishOnDate": "alpha-990",
+    "revisionNo": "juliet-885",
+    "status": "mike-351",
+    "wizardable": true
+  },
+  {
+    "contentId": "papa-202",
+    "bestPractice": true,
+    "comments": "bravo-475",
+    "contentType": "mike-567",
+    "customField": "zulu-284",
+    "defaultContent": true,
+    "defaultContentName": "foxtrot-699",
+    "domain": "november-368",
+    "expiryOnDate": "oscar-965",
+    "publishOnDate": "foxtrot-121",
+    "revisionNo": "quebec-635",
+    "status": "golf-806",
+    "wizardable": false
+  },
+  {
+    "contentId": "yankee-512",
+    "bestPractice": true,
+    "comments": "oscar-260",
+    "contentType": "bravo-213",
+    "customField": "tango-579",
+    "defaultContent": false,
+    "defaultContentName": "juliet-898",
+    "domain": "xray-188",
+    "expiryOnDate": "foxtrot-777",
+    "publishOnDate": "zulu-186",
+    "revisionNo": "zulu-920",
+    "status": "alpha-149",
+    "wizardable": true
+  }
+]

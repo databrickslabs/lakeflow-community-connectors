@@ -29,6 +29,7 @@ from pyspark.sql.datasource import (
     InputPartition,
     SimpleDataSourceStreamReader,
 )
+from pyspark.sql.streaming.datasource import ReadAllAvailable, SupportsTriggerAvailableNow
 from pyspark.sql.types import (
     ArrayType,
     BinaryType,
@@ -478,14 +479,18 @@ def register_lakeflow_source(spark):
 
             Called by Spark on every micro-batch to discover new data.
 
+            Micro-batch sizing (by row count, time window, etc.) is entirely the
+            connector's responsibility — use table_options (e.g. ``window_days``,
+            ``max_records_per_batch``) to control it.  The framework always
+            requests "all available" and does not pass an admission-control
+            hint here.
+
             Args:
                 table_name: The name of the table.
                 table_options: A dictionary of options for accessing the table.
-                start_offset: The current start offset, or None on the first call.
-                    PySpark's ``DataSourceStreamReader.latestOffset()`` does not
-                    pass this yet, so the framework always sends None for now.
-                    Connectors may use it to implement windowed batching when
-                    called directly.
+                start_offset: The current committed offset.  ``{}`` on the very
+                    first call (from ``initialOffset``), then the last returned
+                    end_offset on each subsequent call.
             Returns:
                 A dict whose keys and values are primitive types (str, int, bool).
             """
@@ -517,6 +522,79 @@ def register_lakeflow_source(spark):
             Returns:
                 A sequence of partition descriptor dicts. Each dict must be
                 JSON-serialisable (primitive types only).
+            """
+
+
+    ########################################################
+    # src/databricks/labs/community_connector/interface/supports_namespaces.py
+    ########################################################
+
+    class SupportsNamespaces(ABC):
+        """Mixin for connectors whose tables live under hierarchical namespaces.
+
+        A namespace is a path of zero or more string segments (e.g. ``["org",
+        "repo"]`` for GitHub, ``["tenant", "project"]`` for Azure DevOps).
+        Connectors with a flat catalog do not need this mixin — the framework
+        falls back to :meth:`LakeflowConnect.list_tables` and reports each table
+        with an empty namespace.
+
+        Output ordering on the ``_community_namespaces`` and ``_community_tables``
+        Spark virtual tables is normalized by the framework via ``sorted(...)``,
+        so connector implementations of :meth:`list_namespaces` and
+        :meth:`list_tables_in_namespace` are free to return their results in
+        any order (including from a :class:`set` or generator).
+
+        Must be used together with :class:`LakeflowConnect`.
+
+        Usage::
+
+            class MyConnector(LakeflowConnect, SupportsNamespaces):
+                ...
+        """
+
+        @abstractmethod
+        def list_namespaces(
+            self,
+            prefix: list[str] | None = None,
+        ) -> list[list[str]]:
+            """Return the immediate child namespaces under ``prefix``.
+
+            This method returns one level of *namespace* children only — it
+            never returns tables. A namespace can hold tables and child
+            namespaces independently; callers must always call
+            :meth:`list_tables_in_namespace` for every namespace they care
+            about, regardless of whether :meth:`list_namespaces` returned
+            children for it. An empty return value just means there are no
+            further child namespaces under ``prefix``.
+
+            Walk the full tree by recursing on each returned child.
+
+            Args:
+                prefix: A namespace path under which to list children. ``None`` or
+                    an empty list lists the root-level namespaces.
+            Returns:
+                A list of full namespace paths (each path includes the prefix).
+            """
+
+        @abstractmethod
+        def list_tables_in_namespace(
+            self,
+            namespace: list[str],
+        ) -> list[str]:
+            """Return the table names that live directly under ``namespace``.
+
+            Callers that want every table across the whole catalog walk the
+            namespace tree via :meth:`list_namespaces` and call this method
+            once per leaf — there is no "list everything" shortcut.
+
+            Args:
+                namespace: The namespace path. An empty list ``[]`` selects
+                    root-level tables (those that live outside any namespace).
+            Returns:
+                A list of table names. The full ``(namespace, table_name)``
+                row exposed on ``_community_tables`` is reconstructed by the
+                framework from the namespace the caller already supplied, so
+                the connector does not need to echo it back.
             """
 
 
@@ -863,54 +941,29 @@ def register_lakeflow_source(spark):
 
 
     class GmailApiClient:
-        """Handles Gmail API communication: auth, requests, batch, and parallel fetching."""
+        """Gmail HTTP client authenticated with a pre-issued access token.
+
+        The ``access_token`` is injected by the Unity Catalog COMMUNITY
+        connection's u2m / u2m_per_user OAuth flow and treated as opaque — the
+        client never refreshes it or contacts a token endpoint.
+        """
 
         BASE_URL = "https://gmail.googleapis.com/gmail/v1"
         BATCH_URL = "https://gmail.googleapis.com/batch/gmail/v1"
 
         def __init__(
             self,
-            client_id: str,
-            client_secret: str,
-            refresh_token: str,
+            access_token: str,
             user_id: str = "me",
         ) -> None:
-            self.client_id = client_id
-            self.client_secret = client_secret
-            self.refresh_token = refresh_token
             self.user_id = user_id
-
-            self._access_token = None
-            self._token_expires_at = 0
             self._session = requests.Session()
-
-        def get_access_token(self) -> str:
-            """Exchange refresh token for access token with caching."""
-            # Return cached token if still valid (with 60s buffer)
-            if self._access_token and time.time() < self._token_expires_at - 60:
-                return self._access_token
-
-            response = requests.post(
-                "https://oauth2.googleapis.com/token",
-                data={
-                    "client_id": self.client_id,
-                    "client_secret": self.client_secret,
-                    "refresh_token": self.refresh_token,
-                    "grant_type": "refresh_token",
-                },
-            )
-            response.raise_for_status()
-            data = response.json()
-
-            self._access_token = data["access_token"]
-            self._token_expires_at = time.time() + data.get("expires_in", 3600)
-
-            return self._access_token
+            self.access_token = access_token
 
         def get_headers(self) -> Dict[str, str]:
-            """Get headers with valid access token."""
+            """Bearer-token headers for Gmail API calls."""
             return {
-                "Authorization": f"Bearer {self.get_access_token()}",
+                "Authorization": f"Bearer {self.access_token}",
                 "Accept": "application/json",
             }
 
@@ -922,7 +975,7 @@ def register_lakeflow_source(spark):
 
             for attempt in range(retry_count):
                 response = self._session.request(
-                    method, url, headers=self.get_headers(), params=params
+                    method, url, headers=self.get_headers(), params=params, timeout=60
                 )
 
                 if response.status_code == 200:
@@ -979,7 +1032,7 @@ def register_lakeflow_source(spark):
             headers = self.get_headers()
             headers["Content-Type"] = f"multipart/mixed; boundary={boundary}"
 
-            response = self._session.post(self.BATCH_URL, headers=headers, data=body)
+            response = self._session.post(self.BATCH_URL, headers=headers, data=body, timeout=120)
 
             if response.status_code != 200:
                 # Fall back to sequential requests on batch failure
@@ -1042,34 +1095,61 @@ def register_lakeflow_source(spark):
     # src/databricks/labs/community_connector/sources/gmail/gmail.py
     ########################################################
 
+    def _parse_max_per_batch(table_options: Dict[str, str] | None) -> int:
+        if not table_options:
+            return 0
+        raw = table_options.get("max_records_per_batch")
+        if raw is None:
+            return 0
+        try:
+            value = int(raw)
+        except (TypeError, ValueError):
+            return 0
+        return value if value > 0 else 0
+
+
     class GmailLakeflowConnect(LakeflowConnect):
         """Gmail connector implementing the LakeflowConnect interface with 100% API coverage."""
 
         def __init__(self, options: dict[str, str]) -> None:
             """
-            Initialize the Gmail connector with OAuth 2.0 credentials.
+            Initialize the Gmail connector.
+
+            Authentication is a pre-issued access token. The Unity Catalog
+            COMMUNITY connection (``community_oauth_flow=u2m`` or
+            ``u2m_per_user``) owns the OAuth dance — Databricks performs the
+            authorization-code exchange (and per-user refresh in u2m_per_user
+            mode) and injects a valid bearer token at query time. The connector
+            treats it as opaque: no client_id/secret, no refresh, no token
+            endpoint. A 401 mid-query means the token expired or was revoked;
+            the user re-authorizes through the connection.
 
             Expected options:
-                - client_id: OAuth 2.0 client ID from Google Cloud Console
-                - client_secret: OAuth 2.0 client secret
-                - refresh_token: Long-lived refresh token obtained via OAuth flow
-                - user_id (optional): User email or 'me' (default: 'me')
+                - access_token: OAuth 2.0 bearer token injected by the connection
+                - user_id (optional): user email or 'me' (default: 'me')
             """
-            self.client_id = options.get("client_id")
-            self.client_secret = options.get("client_secret")
-            self.refresh_token = options.get("refresh_token")
+            self.access_token = options.get("access_token")
             self.user_id = options.get("user_id", "me")
 
-            if not self.client_id:
-                raise ValueError("Gmail connector requires 'client_id' in options")
-            if not self.client_secret:
-                raise ValueError("Gmail connector requires 'client_secret' in options")
-            if not self.refresh_token:
-                raise ValueError("Gmail connector requires 'refresh_token' in options")
+            if not self.access_token:
+                raise ValueError(
+                    "Gmail connector requires 'access_token' in options. The "
+                    "Unity Catalog COMMUNITY connection's u2m / u2m_per_user "
+                    "OAuth flow injects it at query time."
+                )
 
-            self.api = GmailApiClient(
-                self.client_id, self.client_secret, self.refresh_token, self.user_id
+            self.api = GmailApiClient(self.access_token, self.user_id)
+
+            # Snapshot the mailbox historyId at init time. Gmail's mailbox
+            # historyId advances on every write (new mail, reads, label edits),
+            # so without an init-time cap, _read_messages_incremental would keep
+            # returning a higher offset every microbatch on an active mailbox
+            # and Trigger.AvailableNow would never terminate. The next pipeline
+            # update creates a fresh source and picks up a new snapshot.
+            profile = self.api.make_request(
+                "GET", f"/users/{self.user_id}/profile",
             )
+            self._init_history_id = profile.get("historyId") if profile else None
 
         # ─── Interface Methods ────────────────────────────────────────────────────
 
@@ -1165,6 +1245,14 @@ def register_lakeflow_source(spark):
                 if not page_token:
                     break
 
+            # Mirror the _init_history_id cap from the incremental readers so the
+            # deletes path also terminates under Trigger.AvailableNow.
+            if (
+                self._init_history_id
+                and int(latest_history_id) > int(self._init_history_id)
+            ):
+                latest_history_id = str(self._init_history_id)
+
             next_offset = {"historyId": latest_history_id}
             return iter(deleted_records), next_offset
 
@@ -1204,6 +1292,21 @@ def register_lakeflow_source(spark):
                 raise ValueError(
                     f"Unsupported table: '{table_name}'. Supported tables are: {SUPPORTED_TABLES}"
                 )
+
+        def _pin_to_init_offset(self, latest_history_id) -> Dict[str, str]:
+            """Return the next offset, pinned to the init-time historyId snapshot.
+
+            Pinning to ``self._init_history_id`` lets the next microbatch enter
+            ``_read_*_incremental`` with ``start == cap`` and short-circuit, so
+            Trigger.AvailableNow terminates.  Falls back to the highest
+            historyId seen on this drain only when the ``__init__`` profile
+            call failed; in that mode termination is best-effort.
+            """
+            if self._init_history_id:
+                return {"historyId": str(self._init_history_id)}
+            if latest_history_id:
+                return {"historyId": str(latest_history_id)}
+            return {}
 
         # ─── Table Readers ────────────────────────────────────────────────────────
 
@@ -1279,17 +1382,22 @@ def register_lakeflow_source(spark):
                 if not page_token:
                     break
 
-            next_offset = (
-                {"historyId": state["latest_history_id"]}
-                if state["latest_history_id"]
-                else {}
-            )
-            return iter(all_messages), next_offset
+            return iter(all_messages), self._pin_to_init_offset(state["latest_history_id"])
 
         def _read_messages_incremental(
             self, start_history_id: str, table_options: Dict[str, str]
         ) -> (Iterator[dict], dict):
             """Read messages incrementally using History API with batch fetching."""
+            # Already at or past the init-time snapshot — return empty so
+            # AvailableNow sees end_offset == start_offset and terminates.
+            if (
+                self._init_history_id
+                and int(start_history_id) >= int(self._init_history_id)
+            ):
+                return iter([]), {"historyId": str(self._init_history_id)}
+
+            max_per_batch = _parse_max_per_batch(table_options)
+
             params = {
                 "startHistoryId": start_history_id,
                 "maxResults": 500,
@@ -1318,6 +1426,8 @@ def register_lakeflow_source(spark):
                         if msg_id:
                             all_message_ids.add(msg_id)
 
+                if max_per_batch and len(all_message_ids) >= max_per_batch:
+                    break
                 page_token = response.get("nextPageToken")
                 if not page_token:
                     break
@@ -1333,6 +1443,16 @@ def register_lakeflow_source(spark):
 
                 batch_results = self.api.make_batch_request(endpoints, params_list)
                 all_messages.extend([r for r in batch_results if r])
+
+            # Cap the cursor at the init-time snapshot. Gmail's History API returns
+            # the *current* mailbox historyId in `response.historyId`, which advances
+            # on every mailbox write. Without this cap, an active mailbox would keep
+            # producing strictly higher offsets and AvailableNow would never terminate.
+            if (
+                self._init_history_id
+                and int(latest_history_id) > int(self._init_history_id)
+            ):
+                latest_history_id = str(self._init_history_id)
 
             next_offset = {"historyId": latest_history_id}
             return iter(all_messages), next_offset
@@ -1406,17 +1526,22 @@ def register_lakeflow_source(spark):
                 if not page_token:
                     break
 
-            next_offset = (
-                {"historyId": state["latest_history_id"]}
-                if state["latest_history_id"]
-                else {}
-            )
-            return iter(all_threads), next_offset
+            return iter(all_threads), self._pin_to_init_offset(state["latest_history_id"])
 
         def _read_threads_incremental(
             self, start_history_id: str, table_options: Dict[str, str]
         ) -> (Iterator[dict], dict):
             """Read threads incrementally using History API."""
+            # Already at or past the init-time snapshot — return empty so
+            # AvailableNow sees end_offset == start_offset and terminates.
+            if (
+                self._init_history_id
+                and int(start_history_id) >= int(self._init_history_id)
+            ):
+                return iter([]), {"historyId": str(self._init_history_id)}
+
+            max_per_batch = _parse_max_per_batch(table_options)
+
             params = {
                 "startHistoryId": start_history_id,
                 "maxResults": 500,
@@ -1445,6 +1570,8 @@ def register_lakeflow_source(spark):
                         if thread_id:
                             all_thread_ids.add(thread_id)
 
+                if max_per_batch and len(all_thread_ids) >= max_per_batch:
+                    break
                 page_token = response.get("nextPageToken")
                 if not page_token:
                     break
@@ -1460,6 +1587,13 @@ def register_lakeflow_source(spark):
 
                 batch_results = self.api.make_batch_request(endpoints, params_list)
                 all_threads.extend([r for r in batch_results if r])
+
+            # Cap at init-time snapshot — see _read_messages_incremental.
+            if (
+                self._init_history_id
+                and int(latest_history_id) > int(self._init_history_id)
+            ):
+                latest_history_id = str(self._init_history_id)
 
             next_offset = {"historyId": latest_history_id}
             return iter(all_threads), next_offset
@@ -1624,14 +1758,64 @@ def register_lakeflow_source(spark):
 
     LakeflowConnectImpl = GmailLakeflowConnect
     # Constant option or column names
-    METADATA_TABLE = "_lakeflow_metadata"
+    METADATA_TABLE = "_community_table_metadata"
+    NAMESPACES_TABLE = "_community_namespaces"
+    TABLES_TABLE = "_community_tables"
+    VIRTUAL_TABLES = (METADATA_TABLE, NAMESPACES_TABLE, TABLES_TABLE)
     TABLE_NAME = "tableName"
     TABLE_NAME_LIST = "tableNameList"
     TABLE_CONFIGS = "tableConfigs"
     IS_DELETE_FLOW = "isDeleteFlow"
+    NAMESPACE_PREFIX = "namespacePrefix"
+    NAMESPACE = "namespace"
 
 
-    class LakeflowStreamReader(SimpleDataSourceStreamReader):
+    def _decode_list_of_str_option(option_name: str, value: str | None) -> list[str] | None:
+        """Decode and validate a JSON-encoded ``list[str]`` Spark option.
+
+        Returns ``None`` if the option is absent; otherwise the parsed list.
+        Raises ``ValueError`` with the offending value if the JSON is malformed
+        or the decoded value is not a list of strings.
+        """
+        if value is None:
+            return None
+        try:
+            decoded = json.loads(value)
+        except json.JSONDecodeError as e:
+            raise ValueError(
+                f"option '{option_name}' must be a JSON-encoded list[str]; "
+                f"got non-JSON value: {value!r}"
+            ) from e
+        if not isinstance(decoded, list) or not all(isinstance(s, str) for s in decoded):
+            raise ValueError(
+                f"option '{option_name}' must be a JSON-encoded list[str]; "
+                f"got: {decoded!r}"
+            )
+        return decoded
+
+
+    def _decode_dict_option(option_name: str, value: str | None) -> dict:
+        """Decode and validate a JSON-encoded ``dict`` Spark option."""
+        if value is None:
+            return {}
+        try:
+            decoded = json.loads(value)
+        except json.JSONDecodeError as e:
+            raise ValueError(
+                f"option '{option_name}' must be a JSON-encoded dict; "
+                f"got non-JSON value: {value!r}"
+            ) from e
+        if not isinstance(decoded, dict):
+            raise ValueError(
+                f"option '{option_name}' must be a JSON-encoded dict; got: {decoded!r}"
+            )
+        return decoded
+
+
+    # PySpark's DataSource API requires camelCase method names and inherits
+    # semantics from the parent class, so per-method docstrings are redundant.
+    # pylint: disable=invalid-name,missing-function-docstring
+    class LakeflowStreamReader(SimpleDataSourceStreamReader, SupportsTriggerAvailableNow):
         """
         Implements a data source stream reader for Lakeflow Connect.
         Currently, only the simpleStreamReader is implemented, which uses a
@@ -1678,8 +1862,12 @@ def register_lakeflow_source(spark):
             # are missed in the returned records.
             return self.read(start)[0]
 
+        def prepareForTriggerAvailableNow(self) -> None:
+            # No need to do anything special here. Everything is handled in the __init__ method.
+            pass
 
-    class LakeflowPartitionedStreamReader(DataSourceStreamReader):
+
+    class LakeflowPartitionedStreamReader(DataSourceStreamReader, SupportsTriggerAvailableNow):
         """Proxy that bridges SupportsPartitionedStream to PySpark's DataSourceStreamReader.
 
         Used when a connector implements the SupportsPartitionedStream mixin to
@@ -1701,10 +1889,25 @@ def register_lakeflow_source(spark):
         def initialOffset(self):
             return {}
 
-        def latestOffset(self):
-            # PySpark does not pass the current offset to latestOffset() yet,
-            # so we forward None.  Once PySpark supports it, pass the real value.
-            return self.lakeflow_connect.latest_offset(self.table_name, self.table_options, None)
+        def getDefaultReadLimit(self):
+            # Admission control is the connector's responsibility (e.g. via
+            # window_days, max_records_per_batch), not the engine's.  Always
+            # ask the engine for ReadAllAvailable.
+            return ReadAllAvailable()
+
+        def latestOffset(self, start: dict, limit) -> dict:
+            # We declared ReadAllAvailable via getDefaultReadLimit; the engine
+            # must respect it.  Anything else means admission-control expectations
+            # we do not support — fail loudly rather than silently ignore.
+            if not isinstance(limit, ReadAllAvailable):
+                raise ValueError(
+                    f"LakeflowPartitionedStreamReader only supports ReadAllAvailable; "
+                    f"got {type(limit).__name__}. Micro-batch sizing must be controlled "
+                    f"by the connector implementation (table_options), not the engine."
+                )
+            return self.lakeflow_connect.latest_offset(
+                self.table_name, self.table_options, start
+            )
 
         def partitions(self, start: dict, end: dict):
             partition_descs = self.lakeflow_connect.get_partitions(
@@ -1718,6 +1921,10 @@ def register_lakeflow_source(spark):
                 self.table_name, partition_desc, self.table_options
             )
             return map(lambda x: parse_value(x, self.schema), records)
+
+        def prepareForTriggerAvailableNow(self) -> None:
+            # No need to do anything special here. Everything is handled in the __init__ method.
+            pass
 
 
     class LakeflowBatchReader(DataSourceReader):
@@ -1734,7 +1941,7 @@ def register_lakeflow_source(spark):
             self._supports_partition = isinstance(lakeflow_connect, SupportsPartition)
 
         def partitions(self):
-            if self._supports_partition and self.table_name != METADATA_TABLE:
+            if self._supports_partition and self.table_name not in VIRTUAL_TABLES:
                 try:
                     partition_descs = self.lakeflow_connect.get_partitions(
                         self.table_name, self.options
@@ -1747,6 +1954,10 @@ def register_lakeflow_source(spark):
         def read(self, partition):
             if self.table_name == METADATA_TABLE:
                 records = self._read_table_metadata()
+            elif self.table_name == NAMESPACES_TABLE:
+                records = self._read_namespaces()
+            elif self.table_name == TABLES_TABLE:
+                records = self._read_tables()
             elif self._supports_partition and partition.value is not None:
                 partition_desc = json.loads(partition.value)
                 records = self.lakeflow_connect.read_partition(
@@ -1757,10 +1968,14 @@ def register_lakeflow_source(spark):
             return map(lambda x: parse_value(x, self.schema), records)
 
         def _read_table_metadata(self):
-            table_name_list = self.options.get(TABLE_NAME_LIST, "")
-            table_names = [o.strip() for o in table_name_list.split(",") if o.strip()]
+            table_names = _decode_list_of_str_option(
+                TABLE_NAME_LIST, self.options.get(TABLE_NAME_LIST)
+            ) or []
+            table_configs = _decode_dict_option(
+                TABLE_CONFIGS, self.options.get(TABLE_CONFIGS)
+            )
             all_records = []
-            table_configs = json.loads(self.options.get(TABLE_CONFIGS, "{}"))
+            # Preserve caller-supplied table order — caller controls it.
             for table in table_names:
                 metadata = self.lakeflow_connect.read_table_metadata(
                     table, table_configs.get(table, {})
@@ -1768,21 +1983,104 @@ def register_lakeflow_source(spark):
                 all_records.append({TABLE_NAME: table, **metadata})
             return all_records
 
+        def _read_namespaces(self):
+            # Connectors without SupportsNamespaces are flat — no rows.
+            if not isinstance(self.lakeflow_connect, SupportsNamespaces):
+                return []
+            prefix = _decode_list_of_str_option(
+                NAMESPACE_PREFIX, self.options.get(NAMESPACE_PREFIX)
+            )
+            namespaces = self.lakeflow_connect.list_namespaces(prefix)
+            # Sort framework-side for deterministic output regardless of
+            # connector iteration order.
+            return [{"namespace": ns} for ns in sorted(namespaces)]
+
+        def _read_tables(self):
+            namespace_supplied = NAMESPACE in self.options
+            if isinstance(self.lakeflow_connect, SupportsNamespaces):
+                if not namespace_supplied:
+                    raise ValueError(
+                        f"option '{NAMESPACE}' is required when reading "
+                        f"'{TABLES_TABLE}' against a connector that implements "
+                        f"SupportsNamespaces. Pass a JSON-encoded list[str] "
+                        f"(use '[]' for root-level tables; walk the tree via "
+                        f"'{NAMESPACES_TABLE}' to enumerate every namespace)."
+                    )
+                namespace = _decode_list_of_str_option(
+                    NAMESPACE, self.options[NAMESPACE]
+                )
+                tables = self.lakeflow_connect.list_tables_in_namespace(namespace)
+                return [
+                    {"namespace": namespace, TABLE_NAME: tn}
+                    for tn in sorted(tables)
+                ]
+            # Flat connector path. Reject a stray `namespace` option — the
+            # caller probably mistook this connector for namespace-aware and
+            # silently ignoring the option would mask the bug.
+            if namespace_supplied:
+                raise ValueError(
+                    f"option '{NAMESPACE}' was supplied but the connector does "
+                    f"not implement SupportsNamespaces. Either omit the option "
+                    f"or use a namespace-aware connector."
+                )
+            return [
+                {"namespace": [], TABLE_NAME: tn}
+                for tn in sorted(self.lakeflow_connect.list_tables())
+            ]
+
 
     class LakeflowSource(DataSource):
         """
-        PySpark DataSource implementation for Lakeflow Connect.
+        PySpark DataSource base for Lakeflow Connect.
+
+        Two ways the connector implementation is bound:
+
+        - Per-source subclass (wheel / multi-file deployment): subclass and set
+          ``_lakeflow_connect_cls``::
+
+              class GmailDataSource(LakeflowSource):
+                  _lakeflow_connect_cls = GmailLakeflowConnect
+
+              spark.dataSource.register(GmailDataSource)
+
+        - Merged single-file deployment (SDP): ``_lakeflow_connect_cls`` is left
+          ``None`` and the connector is taken from the module-level
+          ``LakeflowConnectImpl`` placeholder, which the merge script substitutes
+          with the actual implementation class.
         """
+
+        # Per-source subclasses set this. Left ``None`` on the base so the merged
+        # single-file path falls back to the ``LakeflowConnectImpl`` placeholder.
+        _lakeflow_connect_cls = None
+
+        # Spark format name. Defaults to "lakeflow_connect" because Unity Catalog
+        # connection-option injection looks for that exact string. A per-source
+        # subclass may override this with its source name once it no longer relies
+        # on UC injection (see the commented override in each source's __init__.py).
+        _format_name = "lakeflow_connect"
 
         def __init__(self, options):
             self.options = options
-            # TEMPORARY: LakeflowConnectImpl is replaced with the actual implementation
-            # class during merge. See the placeholder comment at the top of this file.
-            self.lakeflow_connect = LakeflowConnectImpl(options)  # pylint: disable=abstract-class-instantiated
+            table = options.get(TABLE_NAME)
+            # Catch typos against the framework's reserved virtual-table namespace
+            # early — falling through to the connector with an unknown
+            # `_community_*` name yields a confusing per-connector error.
+            if table and table.startswith("_community_") and table not in VIRTUAL_TABLES:
+                raise ValueError(
+                    f"unknown framework virtual table '{table}'. Valid framework "
+                    f"virtual tables are: {', '.join(VIRTUAL_TABLES)}. "
+                    f"For a regular source table, use a name that does not start "
+                    f"with '_community_'."
+                )
+            # Per-source subclasses bind the implementation via _lakeflow_connect_cls.
+            # The merged single-file path leaves it None and relies on the
+            # LakeflowConnectImpl placeholder (substituted by the merge script).
+            connect_cls = type(self)._lakeflow_connect_cls or LakeflowConnectImpl
+            self.lakeflow_connect = connect_cls(options)  # pylint: disable=abstract-class-instantiated
 
         @classmethod
         def name(cls):
-            return "lakeflow_connect"
+            return cls._format_name
 
         def schema(self):
             table = self.options[TABLE_NAME]
@@ -1795,8 +2093,20 @@ def register_lakeflow_source(spark):
                         StructField("ingestion_type", StringType(), True),
                     ]
                 )
-            else:
-                return self.lakeflow_connect.get_table_schema(table, self.options)
+            if table == NAMESPACES_TABLE:
+                return StructType(
+                    [
+                        StructField("namespace", ArrayType(StringType()), False),
+                    ]
+                )
+            if table == TABLES_TABLE:
+                return StructType(
+                    [
+                        StructField("namespace", ArrayType(StringType()), False),
+                        StructField(TABLE_NAME, StringType(), False),
+                    ]
+                )
+            return self.lakeflow_connect.get_table_schema(table, self.options)
 
         def reader(self, schema: StructType):
             return LakeflowBatchReader(self.options, schema, self.lakeflow_connect)

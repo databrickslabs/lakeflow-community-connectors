@@ -1,0 +1,46 @@
+[
+  {
+    "tag_webid": "juliet-799",
+    "timestamp": "2024-01-10T20:44:53Z",
+    "value": 995.19,
+    "good": false,
+    "questionable": true,
+    "substituted": false,
+    "annotated": true,
+    "units": "zulu-370",
+    "ingestion_timestamp": "2024-01-31T14:19:07Z"
+  },
+  {
+    "tag_webid": "lima-685",
+    "timestamp": "2024-01-24T02:46:15Z",
+    "value": 242.7,
+    "good": false,
+    "questionable": true,
+    "substituted": true,
+    "annotated": true,
+    "units": "delta-175",
+    "ingestion_timestamp": "2024-01-23T09:40:08Z"
+  },
+  {
+    "tag_webid": "kilo-208",
+    "timestamp": "2024-01-27T15:27:02Z",
+    "value": 869.23,
+    "good": false,
+    "questionable": false,
+    "substituted": true,
+    "annotated": false,
+    "units": "quebec-948",
+    "ingestion_timestamp": "2024-01-01T14:25:59Z"
+  },
+  {
+    "tag_webid": "lima-764",
+    "timestamp": "2024-01-19T01:25:20Z",
+    "value": 122.38,
+    "good": false,
+    "questionable": false,
+    "substituted": false,
+    "annotated": true,
+    "units": "yankee-568",
+    "ingestion_timestamp": "2024-01-24T12:43:50Z"
+  }
+]

@@ -1,0 +1,88 @@
+[
+  {
+    "id": 13,
+    "customerId": 6,
+    "name": "Spaceship building",
+    "archived": false,
+    "created": 1770163200000,
+    "url": "https://online.actitime.com/mystartup/tasks/tasklist.do?projectId=13",
+    "customerName": "Big Bang Company",
+    "allowedActions": {
+      "canModify": true,
+      "canDelete": true
+    },
+    "description": null
+  },
+  {
+    "id": 14,
+    "customerId": 6,
+    "name": "Spaceship testing",
+    "archived": false,
+    "created": 1770163200000,
+    "url": "https://online.actitime.com/mystartup/tasks/tasklist.do?projectId=14",
+    "customerName": "Big Bang Company",
+    "allowedActions": {
+      "canModify": true,
+      "canDelete": true
+    },
+    "description": null
+  },
+  {
+    "id": 15,
+    "customerId": 6,
+    "name": "Flight operations",
+    "archived": false,
+    "created": 1770163200000,
+    "url": "https://online.actitime.com/mystartup/tasks/tasklist.do?projectId=15",
+    "customerName": "Big Bang Company",
+    "allowedActions": {
+      "canModify": true,
+      "canDelete": true
+    },
+    "description": null
+  },
+  {
+    "id": 16,
+    "customerId": 7,
+    "name": "Android prototyping",
+    "archived": false,
+    "created": 1770163200000,
+    "url": "https://online.actitime.com/mystartup/tasks/tasklist.do?projectId=16",
+    "customerName": "Galaxy Corporation",
+    "allowedActions": {
+      "canModify": true,
+      "canDelete": true
+    },
+    "description": null
+  },
+  {
+    "id": 17,
+    "customerId": 7,
+    "name": "Android testing",
+    "archived": false,
+    "created": 1770163200000,
+    "url": "https://online.actitime.com/mystartup/tasks/tasklist.do?projectId=17",
+    "customerName": "Galaxy Corporation",
+    "allowedActions": {
+      "canModify": true,
+      "canDelete": true
+    },
+    "description": null
+  },
+  {
+    "id": 99001,
+    "customerId": 6,
+    "name": "Synthetic — column coverage augmentation",
+    "archived": false,
+    "created": 1770163200000,
+    "url": "https://online.actitime.com/mystartup/tasks/tasklist.do?projectId=99001",
+    "customerName": "Big Bang Company",
+    "allowedActions": {
+      "canModify": false,
+      "canDelete": false
+    },
+    "description": "Synthetic project added to satisfy the simulator column-coverage invariant; not from any live tenant capture.",
+    "workflowEnabled": true,
+    "defaultTypeOfWorkId": 1
+  }
+]

@@ -19,6 +19,21 @@ from databricks.labs.community_connector.sources.osipi.osipi_utils import (
     utcnow,
 )
 
+_SENSITIVE_HEADERS = {"authorization", "proxy-authorization", "cookie", "set-cookie", "x-api-key"}
+
+
+def _redact_headers(headers: Any) -> Dict[str, str]:
+    out: Dict[str, str] = {}
+    for k, v in dict(headers).items():
+        out[k] = "<redacted>" if k.lower() in _SENSITIVE_HEADERS else str(v)
+    return out
+
+
+def _redact_auth(auth: Any) -> Any:
+    if isinstance(auth, tuple) and len(auth) == 2:
+        return (auth[0], "<redacted>")
+    return None if auth is None else "<redacted>"
+
 
 class PiWebApiClient:
     """HTTP client for PI Web API with authentication support.
@@ -192,8 +207,8 @@ class PiWebApiClient:
         if debug:
             print("🔍 DEBUG get_json:")
             print(f"   URL: {url}")
-            print(f"   Headers: {dict(self.session.headers)}")
-            print(f"   Auth: {self.session.auth}")
+            print(f"   Headers: {_redact_headers(self.session.headers)}")
+            print(f"   Auth: {_redact_auth(self.session.auth)}")
             print(f"   Params: {params}")
             print(f"   verify_ssl: {self.verify_ssl}")
 
@@ -298,6 +313,7 @@ def compute_time_range(
     table_options: Dict[str, str],
     *,
     apply_window_seconds: bool = False,
+    init_time: Optional[datetime] = None,
 ) -> Tuple[str, str]:
     """Compute start/end time range for time-series reads.
 
@@ -305,6 +321,10 @@ def compute_time_range(
         start_offset: Offset dictionary with optional "offset" key.
         table_options: Table options with time configuration.
         apply_window_seconds: Whether to apply window_seconds cap.
+        init_time: When provided, caps both start and end at this time.
+            Required for Trigger.AvailableNow termination — without it,
+            each microbatch's end-time chases ``utcnow()`` and reads
+            never converge.
 
     Returns:
         Tuple of (start_time_str, end_time_str) in ISO format.
@@ -327,6 +347,10 @@ def compute_time_range(
         window_seconds = int(table_options.get("window_seconds", 0) or 0)
         if window_seconds > 0:
             end_dt = min(end_dt, start_dt + timedelta(seconds=window_seconds))
+
+    if init_time is not None:
+        end_dt = min(end_dt, init_time)
+        start_dt = min(start_dt, init_time)
 
     return isoformat_z(start_dt), isoformat_z(end_dt)
 

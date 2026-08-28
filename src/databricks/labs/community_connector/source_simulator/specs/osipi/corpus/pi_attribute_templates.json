@@ -1,0 +1,38 @@
+[
+  {
+    "webid": "bravo-954",
+    "name": "oscar-183",
+    "description": "lima-288",
+    "path": "alpha-212",
+    "type": "alpha-769",
+    "elementtemplate_webid": "quebec-379",
+    "assetdatabase_webid": "uniform-483"
+  },
+  {
+    "webid": "november-285",
+    "name": "foxtrot-482",
+    "description": "bravo-806",
+    "path": "alpha-493",
+    "type": "delta-638",
+    "elementtemplate_webid": "echo-380",
+    "assetdatabase_webid": "bravo-895"
+  },
+  {
+    "webid": "victor-642",
+    "name": "mike-930",
+    "description": "juliet-220",
+    "path": "bravo-331",
+    "type": "echo-286",
+    "elementtemplate_webid": "echo-521",
+    "assetdatabase_webid": "mike-182"
+  },
+  {
+    "webid": "whiskey-307",
+    "name": "alpha-472",
+    "description": "romeo-607",
+    "path": "tango-444",
+    "type": "alpha-161",
+    "elementtemplate_webid": "zulu-900",
+    "assetdatabase_webid": "mike-954"
+  }
+]

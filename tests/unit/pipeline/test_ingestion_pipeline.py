@@ -1138,3 +1138,187 @@ class TestTableConfigFiltering:
             assert passed_options == {"custom_setting": "enabled"}
             assert "scd_type" not in passed_options
             assert "sequence_by" not in passed_options
+
+
+class TestClusterBy:
+    """Test that cluster_by is forwarded to sdp.create_streaming_table and stripped from
+    source options.
+
+    cluster_by is a destination-side Delta option (target table layout). It must be
+    consumed by the pipeline layer and never reach the source's .options() call.
+    """
+
+    def test_cluster_by_forwarded_to_create_streaming_table_for_cdc(
+        self, mock_spark, base_metadata
+    ):
+        """CDC flow: cluster_by is passed to sdp.create_streaming_table."""
+        spec = {
+            "connection_name": "test_connection",
+            "objects": [
+                {
+                    "table": {
+                        "source_table": "users",
+                        "table_configuration": {
+                            "cluster_by": ["user_id", "updated_at"],
+                        },
+                    }
+                }
+            ],
+        }
+
+        with patch(
+            "databricks.labs.community_connector.pipeline.ingestion_pipeline._get_table_metadata",
+            return_value=base_metadata,
+        ):
+            ingest(mock_spark, spec)
+
+            mock_sdp.create_streaming_table.assert_called_once_with(
+                name="users", cluster_by=["user_id", "updated_at"]
+            )
+
+    def test_cluster_by_forwarded_for_snapshot(self, mock_spark, base_metadata):
+        """Snapshot flow: cluster_by is passed to sdp.create_streaming_table."""
+        spec = {
+            "connection_name": "test_connection",
+            "objects": [
+                {
+                    "table": {
+                        "source_table": "orders",
+                        "table_configuration": {
+                            "cluster_by": ["order_id"],
+                        },
+                    }
+                }
+            ],
+        }
+
+        with patch(
+            "databricks.labs.community_connector.pipeline.ingestion_pipeline._get_table_metadata",
+            return_value=base_metadata,
+        ):
+            ingest(mock_spark, spec)
+
+            mock_sdp.create_streaming_table.assert_called_once_with(
+                name="orders", cluster_by=["order_id"]
+            )
+
+    def test_cluster_by_forwarded_for_append(self, mock_spark, base_metadata):
+        """Append flow: cluster_by is passed to sdp.create_streaming_table."""
+        spec = {
+            "connection_name": "test_connection",
+            "objects": [
+                {
+                    "table": {
+                        "source_table": "events",
+                        "table_configuration": {
+                            "cluster_by": ["event_id", "timestamp"],
+                        },
+                    }
+                }
+            ],
+        }
+
+        with patch(
+            "databricks.labs.community_connector.pipeline.ingestion_pipeline._get_table_metadata",
+            return_value=base_metadata,
+        ):
+            ingest(mock_spark, spec)
+
+            mock_sdp.create_streaming_table.assert_called_once_with(
+                name="events", cluster_by=["event_id", "timestamp"]
+            )
+
+    def test_cluster_by_omitted_when_not_specified(self, mock_spark, base_metadata):
+        """When cluster_by is absent, sdp.create_streaming_table receives only `name`."""
+        spec = {
+            "connection_name": "test_connection",
+            "objects": [
+                {
+                    "table": {
+                        "source_table": "users",
+                        "table_configuration": {},
+                    }
+                }
+            ],
+        }
+
+        with patch(
+            "databricks.labs.community_connector.pipeline.ingestion_pipeline._get_table_metadata",
+            return_value=base_metadata,
+        ):
+            ingest(mock_spark, spec)
+
+            mock_sdp.create_streaming_table.assert_called_once_with(name="users")
+
+    def test_cluster_by_string_value_is_parsed(self, mock_spark, base_metadata):
+        """cluster_by as a comma-separated string is parsed into a list."""
+        spec = {
+            "connection_name": "test_connection",
+            "objects": [
+                {
+                    "table": {
+                        "source_table": "users",
+                        "table_configuration": {
+                            "cluster_by": "user_id, updated_at",
+                        },
+                    }
+                }
+            ],
+        }
+
+        with patch(
+            "databricks.labs.community_connector.pipeline.ingestion_pipeline._get_table_metadata",
+            return_value=base_metadata,
+        ):
+            ingest(mock_spark, spec)
+
+            mock_sdp.create_streaming_table.assert_called_once_with(
+                name="users", cluster_by=["user_id", "updated_at"]
+            )
+
+    def test_cluster_by_is_stripped_from_source_options(self, base_metadata):
+        """cluster_by must not be forwarded to the source's .options() call."""
+        captured_view_funcs = []
+
+        def capture_view(name):
+            def decorator(f):
+                captured_view_funcs.append((name, f))
+                return f
+
+            return decorator
+
+        mock_sdp.view = MagicMock(side_effect=capture_view)
+
+        mock_spark = MagicMock()
+
+        spec = {
+            "connection_name": "test_connection",
+            "objects": [
+                {
+                    "table": {
+                        "source_table": "users",
+                        "table_configuration": {
+                            "cluster_by": ["user_id"],
+                            "regular_option": "value",
+                        },
+                    }
+                }
+            ],
+        }
+
+        with patch(
+            "databricks.labs.community_connector.pipeline.ingestion_pipeline._get_table_metadata",
+            return_value=base_metadata,
+        ):
+            ingest(mock_spark, spec)
+
+            assert len(captured_view_funcs) == 1
+            _, view_func = captured_view_funcs[0]
+            view_func()
+
+            stream_chain = mock_spark.readStream.format.return_value.option.return_value
+            options_call = stream_chain.option.return_value.options
+            options_call.assert_called_once()
+            passed_options = options_call.call_args[1]
+            assert passed_options == {"regular_option": "value"}
+            assert "cluster_by" not in passed_options

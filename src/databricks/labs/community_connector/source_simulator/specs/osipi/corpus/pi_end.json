@@ -1,0 +1,46 @@
+[
+  {
+    "tag_webid": "juliet-140",
+    "timestamp": "2024-01-29T23:27:10Z",
+    "value": 253.57,
+    "good": true,
+    "questionable": true,
+    "substituted": false,
+    "annotated": true,
+    "units": "quebec-743",
+    "ingestion_timestamp": "2024-01-24T02:44:54Z"
+  },
+  {
+    "tag_webid": "papa-235",
+    "timestamp": "2024-01-20T16:59:37Z",
+    "value": 86.2,
+    "good": false,
+    "questionable": true,
+    "substituted": false,
+    "annotated": true,
+    "units": "november-433",
+    "ingestion_timestamp": "2024-01-12T06:25:52Z"
+  },
+  {
+    "tag_webid": "alpha-654",
+    "timestamp": "2024-01-25T09:51:00Z",
+    "value": 778.59,
+    "good": false,
+    "questionable": true,
+    "substituted": true,
+    "annotated": false,
+    "units": "oscar-737",
+    "ingestion_timestamp": "2024-01-14T16:53:32Z"
+  },
+  {
+    "tag_webid": "november-309",
+    "timestamp": "2024-01-10T18:59:10Z",
+    "value": 634.65,
+    "good": false,
+    "questionable": false,
+    "substituted": true,
+    "annotated": true,
+    "units": "echo-436",
+    "ingestion_timestamp": "2024-01-05T22:06:13Z"
+  }
+]

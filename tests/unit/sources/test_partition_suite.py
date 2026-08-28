@@ -23,6 +23,9 @@ from databricks.labs.community_connector.interface.supports_partition import (
     SupportsPartitionedStream,
 )
 from databricks.labs.community_connector.libs.utils import parse_value
+from databricks.labs.community_connector.source_simulator import MODE_SIMULATE
+
+from tests.unit.sources.test_suite import _resolve_env_mode_for_simulator
 
 
 class SupportsPartitionTests:
@@ -34,7 +37,7 @@ class SupportsPartitionTests:
 
     """
 
-    sample_records: int = 50
+    sample_records: int = 200
 
     # ------------------------------------------------------------------
     # test_get_partitions
@@ -75,6 +78,40 @@ class SupportsPartitionTests:
                         break
             except Exception as e:
                 errors.append(f"[{table}] get_partitions raised: {e}\n{traceback.format_exc()}")
+        if errors:
+            pytest.fail("\n\n".join(errors))
+
+    # ------------------------------------------------------------------
+    # test_get_partitions_stable
+    # ------------------------------------------------------------------
+
+    def test_get_partitions_stable(self):
+        """get_partitions returns the same partition list across calls.
+
+        Spark assumes idempotent partition discovery and may re-invoke
+        get_partitions on retry. Non-deterministic output causes plan/state
+        mismatches that are hard to debug.
+        """
+        tables = self._partitioned_tables()
+        if not tables:
+            pytest.skip("No partitioned tables")
+
+        errors = []
+        for table in tables:
+            try:
+                first = list(self.connector.get_partitions(table, self._opts(table)))
+                second = list(self.connector.get_partitions(table, self._opts(table)))
+                if first != second:
+                    errors.append(
+                        f"[{table}] get_partitions is non-deterministic.\n"
+                        f"  First call:  {first}\n"
+                        f"  Second call: {second}\n"
+                        "  Fix: get_partitions() must be a pure function of "
+                        "(table_name, table_options[, offsets]). Do not derive "
+                        "partitions from wall-clock state or random seeds."
+                    )
+            except Exception as e:
+                errors.append(f"[{table}] get_partitions raised: {e}")
         if errors:
             pytest.fail("\n\n".join(errors))
 
@@ -186,10 +223,101 @@ class SupportsPartitionTests:
 
         return None
 
+    # ------------------------------------------------------------------
+    # test_every_column_populated_by_at_least_one_partition_record
+    # ------------------------------------------------------------------
+
+    def test_every_column_populated_by_at_least_one_partition_record(self):
+        """Partition-side mirror of
+        ``LakeflowConnectTests.test_every_column_populated_by_at_least_one_record``.
+
+        For every column the connector advertises in ``get_table_schema``,
+        at least one record returned across ``read_partition`` calls must
+        be non-null. Honors ``allow_null_columns`` on the host test class.
+        Simulate mode only — see the non-partitioned twin for the rationale.
+        """
+        tables = self._partitioned_tables()
+        if not tables:
+            pytest.skip("No partitioned tables")
+        if _resolve_env_mode_for_simulator(self.simulator_source) != MODE_SIMULATE:
+            pytest.skip("Column-coverage invariant only enforced in simulate mode")
+        errors = []
+        for table in tables:
+            err = self._validate_column_population_partitioned(table)
+            if err:
+                errors.append(err)
+        if errors:
+            pytest.fail("\n\n".join(errors))
+
+    def _validate_column_population_partitioned(self, table: str) -> Optional[str]:
+        """Returns error string or None.
+
+        Mirrors ``_validate_column_population`` on the non-partitioned path
+        but consumes records from ``get_partitions`` + ``read_partition``,
+        capped at ``sample_records`` total across all partitions. Top-level
+        columns only.
+        """
+        try:
+            schema = self.connector.get_table_schema(table, self._opts(table))
+        except Exception:
+            # test_get_table_schema will surface the underlying error.
+            return None
+
+        try:
+            partitions = self.connector.get_partitions(table, self._opts(table))
+        except Exception:
+            # test_get_partitions will surface the underlying error.
+            return None
+        if not partitions:
+            # test_read_partition reports the empty-partitions case.
+            return None
+
+        records: List[dict] = []
+        budget = self.sample_records
+        for partition in partitions:
+            if budget <= 0:
+                break
+            try:
+                iterator = self.connector.read_partition(
+                    table, partition, self._opts(table)
+                )
+            except Exception:
+                return None
+            if not hasattr(iterator, "__iter__"):
+                return None
+            try:
+                for rec in iterator:
+                    if not isinstance(rec, dict):
+                        continue
+                    records.append(rec)
+                    if len(records) >= self.sample_records:
+                        break
+            except Exception:
+                return None
+            budget = self.sample_records - len(records)
+
+        if not records:
+            # test_read_partition reports the zero-records case.
+            return None
+
+        return self._check_column_population(table, schema, records)
+
     def _validate_partition_records(
         self, table: str, partition_idx: int, records: list, schema: StructType
     ) -> Optional[str]:
-        """Validate records from a single partition against the schema."""
+        """Validate records from a single partition against schema and metadata.
+
+        Applies the same field-level checks as the simple-reader path so a
+        partitioned connector cannot silently emit null PKs or all-null
+        records.
+        """
+        try:
+            meta = self.connector.read_table_metadata(table, self._opts(table))
+        except Exception:
+            meta = {}
+        ingestion_type = meta.get("ingestion_type")
+        pks = meta.get("primary_keys", []) or []
+
         for j, rec in enumerate(records):
             try:
                 parse_value(rec, schema)
@@ -200,6 +328,12 @@ class SupportsPartitionTests:
                     "  Fix: Ensure read_partition() yields records compatible "
                     "with get_table_schema()."
                 )
+            err = self._validate_record_fields(
+                table, rec, schema, ingestion_type, pks,
+                method_name="read_partition", is_read_table=True,
+            )
+            if err:
+                return f"[{table}] Partition {partition_idx}, record {j}: {err}"
         return None
 
 
@@ -315,8 +449,17 @@ class SupportsPartitionedStreamTests(SupportsPartitionTests):
 
         Simulates the Spark micro-batch loop: each iteration calls
         latest_offset(start_offset=previous), then get_partitions with the
-        resulting range. The offsets must eventually stabilise (returned
-        offset == start_offset), meaning there is no more data to process.
+        resulting range. The contract is equality-only — Spark stops the
+        trigger when ``latest_offset(start_offset=X) == X``. Offsets are
+        otherwise opaque, so this test does not impose ordering on them.
+
+        **Cap-mechanism testing.** Termination under genuinely-unbounded
+        source data depends on the connector clamping ``latest_offset``
+        at ``self._init_time``. A non-clamping connector is forced to
+        fail this test only when the simulator spec uses
+        ``synthesize_future_records`` with ``count`` larger than the
+        iteration limit (otherwise the corpus drains naturally and the
+        cap path is unexercised).
         """
         tables = self._partitioned_tables()
         if not tables:
@@ -330,8 +473,13 @@ class SupportsPartitionedStreamTests(SupportsPartitionTests):
         if errors:
             pytest.fail("\n\n".join(errors))
 
-    def _validate_offset_convergence(self, table: str) -> Optional[str]:
-        """Run micro-batch iterations until offset converges or limit hit."""
+    def _validate_offset_convergence(self, table: str) -> Optional[str]:  # pylint: disable=too-many-return-statements,too-many-branches
+        """Run micro-batch iterations until offset converges or limit hit.
+
+        Convergence is equality-only — Spark stops when
+        ``latest_offset(start_offset=X) == X``. Offsets are opaque to
+        the framework; no ordering is imposed here.
+        """
         opts = self._opts(table)
         try:
             end_offset = self.connector.latest_offset(table, opts)
@@ -348,7 +496,7 @@ class SupportsPartitionedStreamTests(SupportsPartitionTests):
         for iteration in range(self.max_microbatch_iterations):
             # Simulate Spark calling get_partitions for this micro-batch
             try:
-                partitions = self.connector.get_partitions(
+                self.connector.get_partitions(
                     table, opts,
                     start_offset=start_offset, end_offset=end_offset,
                 )

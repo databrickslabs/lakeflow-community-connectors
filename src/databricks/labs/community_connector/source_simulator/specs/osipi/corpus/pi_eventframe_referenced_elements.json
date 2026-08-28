@@ -1,0 +1,34 @@
+[
+  {
+    "event_frame_webid": "november-870",
+    "element_webid": "bravo-612",
+    "relationship_type": "oscar-712",
+    "start_time": "2024-01-07T18:25:52Z",
+    "end_time": "2024-01-03T16:55:55Z",
+    "ingestion_timestamp": "2024-01-20T07:27:04Z"
+  },
+  {
+    "event_frame_webid": "foxtrot-207",
+    "element_webid": "india-577",
+    "relationship_type": "november-831",
+    "start_time": "2024-01-03T02:27:45Z",
+    "end_time": "2024-01-30T12:06:03Z",
+    "ingestion_timestamp": "2024-01-02T17:08:24Z"
+  },
+  {
+    "event_frame_webid": "xray-153",
+    "element_webid": "tango-725",
+    "relationship_type": "whiskey-589",
+    "start_time": "2024-01-17T21:49:46Z",
+    "end_time": "2024-01-16T16:02:31Z",
+    "ingestion_timestamp": "2024-01-01T16:36:16Z"
+  },
+  {
+    "event_frame_webid": "zulu-670",
+    "element_webid": "juliet-405",
+    "relationship_type": "sierra-588",
+    "start_time": "2024-01-20T08:25:54Z",
+    "end_time": "2024-01-14T17:05:11Z",
+    "ingestion_timestamp": "2024-01-06T08:38:18Z"
+  }
+]

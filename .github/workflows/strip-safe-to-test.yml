@@ -1,0 +1,39 @@
+name: Strip safe-to-test on new commits
+
+# Every new push to a PR invalidates any prior `safe-to-test` review. This
+# workflow removes the label automatically on `pull_request_target:
+# synchronize`, forcing the next CI run to require a fresh maintainer
+# approval against the new head SHA.
+#
+# Why pull_request_target (and not pull_request): fork PRs need the
+# base-repo GITHUB_TOKEN's pull-requests:write permission to remove a
+# label; the fork-run token is read-only. This workflow does NOT check
+# out PR code — it only calls the labels API, so the usual "pwn request"
+# concern doesn't apply here.
+
+on:
+  pull_request_target:
+    types: [synchronize]
+
+permissions:
+  contents: read
+  pull-requests: write  # required to remove labels via the API
+
+jobs:
+  strip:
+    runs-on:
+      group: databrickslabs-protected-runner-group
+      labels: linux-ubuntu-latest
+    steps:
+      - name: Remove safe-to-test label if present
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          # 404 if the label wasn't present — that's the common case, ignore.
+          gh api -X DELETE \
+            "repos/${REPO}/issues/${PR_NUMBER}/labels/safe-to-test" \
+            --silent 2>/dev/null && \
+            echo "Removed safe-to-test (new commits require re-approval)." || \
+            echo "safe-to-test was not set; nothing to remove."

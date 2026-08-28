@@ -1,0 +1,47 @@
+[
+  {
+    "competencyId": 45990,
+    "competencyName": "foxtrot-241",
+    "competencySectionId": 49426,
+    "competencySectionName": "lima-679",
+    "rating": 360.61,
+    "ratingLabel": "papa-148",
+    "ratingOptions": []
+  },
+  {
+    "competencyId": 53258,
+    "competencyName": "echo-517",
+    "competencySectionId": 34224,
+    "competencySectionName": "tango-215",
+    "rating": 41.92,
+    "ratingLabel": "delta-263",
+    "ratingOptions": [
+      {
+        "value": 132.7,
+        "label": "victor-528"
+      },
+      {
+        "value": 272.85,
+        "label": "romeo-538"
+      }
+    ]
+  },
+  {
+    "competencyId": 21433,
+    "competencyName": "delta-232",
+    "competencySectionId": 59041,
+    "competencySectionName": "juliet-993",
+    "rating": 843.55,
+    "ratingLabel": "xray-733",
+    "ratingOptions": []
+  },
+  {
+    "competencyId": 41396,
+    "competencyName": "november-701",
+    "competencySectionId": 12569,
+    "competencySectionName": "uniform-335",
+    "rating": 257.8,
+    "ratingLabel": "romeo-524",
+    "ratingOptions": []
+  }
+]

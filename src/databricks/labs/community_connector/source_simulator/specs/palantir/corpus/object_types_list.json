@@ -1,0 +1,908 @@
+[
+  {
+    "apiName": "FlightsFinal",
+    "displayName": "Flights Final",
+    "status": "EXPERIMENTAL",
+    "description": "",
+    "pluralDisplayName": "Flights Finals",
+    "icon": {
+      "type": "blueprint",
+      "color": "#4C90F0",
+      "name": "cube"
+    },
+    "primaryKey": "flightId",
+    "properties": {
+      "date": {
+        "displayName": "Date",
+        "dataType": {
+          "type": "date"
+        },
+        "rid": "ri.ontology.main.property.4644b085-1ea7-45db-93c7-aa8fd65211ef",
+        "status": {
+          "type": "experimental"
+        },
+        "visibility": "NORMAL",
+        "typeClasses": []
+      },
+      "destinationDisplayAirportCityNameFull": {
+        "displayName": "Destination Display Airport City Name Full",
+        "dataType": {
+          "type": "string"
+        },
+        "rid": "ri.ontology.main.property.88212794-e9f6-45a9-8bcb-fca7f52430a1",
+        "status": {
+          "type": "experimental"
+        },
+        "visibility": "NORMAL",
+        "typeClasses": [
+          {
+            "kind": "render_hint",
+            "name": "SELECTABLE"
+          },
+          {
+            "kind": "render_hint",
+            "name": "SORTABLE"
+          }
+        ]
+      },
+      "weatherDelay": {
+        "displayName": "Weather Delay",
+        "dataType": {
+          "type": "string"
+        },
+        "rid": "ri.ontology.main.property.a3863eff-c75c-4d78-9d53-cc1a4cd9e3ad",
+        "status": {
+          "type": "experimental"
+        },
+        "visibility": "NORMAL",
+        "typeClasses": [
+          {
+            "kind": "render_hint",
+            "name": "SELECTABLE"
+          },
+          {
+            "kind": "render_hint",
+            "name": "SORTABLE"
+          }
+        ]
+      },
+      "originDisplayCityMarketNameFull": {
+        "displayName": "Origin Display City Market Name Full",
+        "dataType": {
+          "type": "string"
+        },
+        "rid": "ri.ontology.main.property.70b851b5-7100-40b5-afba-ad55a46dadf1",
+        "status": {
+          "type": "experimental"
+        },
+        "visibility": "NORMAL",
+        "typeClasses": [
+          {
+            "kind": "render_hint",
+            "name": "SELECTABLE"
+          },
+          {
+            "kind": "render_hint",
+            "name": "SORTABLE"
+          }
+        ]
+      },
+      "destinationAirport": {
+        "displayName": "Destination Airport",
+        "dataType": {
+          "type": "string"
+        },
+        "rid": "ri.ontology.main.property.e959f1d2-c695-465b-a1d7-3b8c372e3571",
+        "status": {
+          "type": "experimental"
+        },
+        "visibility": "NORMAL",
+        "typeClasses": [
+          {
+            "kind": "render_hint",
+            "name": "SELECTABLE"
+          },
+          {
+            "kind": "render_hint",
+            "name": "SORTABLE"
+          }
+        ]
+      },
+      "carrierName": {
+        "displayName": "Carrier Name",
+        "dataType": {
+          "type": "string"
+        },
+        "rid": "ri.ontology.main.property.e81c6786-962d-46f6-9953-8edb88d80d14",
+        "status": {
+          "type": "experimental"
+        },
+        "visibility": "NORMAL",
+        "typeClasses": [
+          {
+            "kind": "render_hint",
+            "name": "SELECTABLE"
+          },
+          {
+            "kind": "render_hint",
+            "name": "SORTABLE"
+          }
+        ]
+      },
+      "destinationDisplayCityMarketNameFull": {
+        "displayName": "Destination Display City Market Name Full",
+        "dataType": {
+          "type": "string"
+        },
+        "rid": "ri.ontology.main.property.582a556e-0e3d-4f85-a502-662254e1341a",
+        "status": {
+          "type": "experimental"
+        },
+        "visibility": "NORMAL",
+        "typeClasses": [
+          {
+            "kind": "render_hint",
+            "name": "SELECTABLE"
+          },
+          {
+            "kind": "render_hint",
+            "name": "SORTABLE"
+          }
+        ]
+      },
+      "destinationGeopoint": {
+        "displayName": "Destination Geopoint",
+        "dataType": {
+          "type": "string"
+        },
+        "rid": "ri.ontology.main.property.f2c3808c-affa-4c1c-9ff3-c207b6b1c283",
+        "status": {
+          "type": "experimental"
+        },
+        "visibility": "NORMAL",
+        "typeClasses": [
+          {
+            "kind": "render_hint",
+            "name": "SELECTABLE"
+          },
+          {
+            "kind": "render_hint",
+            "name": "SORTABLE"
+          }
+        ]
+      },
+      "destinationLatitude": {
+        "displayName": "Destination Latitude",
+        "dataType": {
+          "type": "double"
+        },
+        "rid": "ri.ontology.main.property.86bda454-cee0-43ad-903f-31b6cfec3d86",
+        "status": {
+          "type": "experimental"
+        },
+        "visibility": "NORMAL",
+        "typeClasses": []
+      },
+      "cancellationCode": {
+        "displayName": "Cancellation Code",
+        "dataType": {
+          "type": "string"
+        },
+        "rid": "ri.ontology.main.property.db18fe3b-c06a-4080-91e0-db3a0aca7478",
+        "status": {
+          "type": "experimental"
+        },
+        "visibility": "NORMAL",
+        "typeClasses": [
+          {
+            "kind": "render_hint",
+            "name": "SELECTABLE"
+          },
+          {
+            "kind": "render_hint",
+            "name": "SORTABLE"
+          }
+        ]
+      },
+      "securityDelay": {
+        "displayName": "Security Delay",
+        "dataType": {
+          "type": "string"
+        },
+        "rid": "ri.ontology.main.property.2fb3a8b3-25f3-46ea-aabc-1bdbd5b9d30b",
+        "status": {
+          "type": "experimental"
+        },
+        "visibility": "NORMAL",
+        "typeClasses": [
+          {
+            "kind": "render_hint",
+            "name": "SELECTABLE"
+          },
+          {
+            "kind": "render_hint",
+            "name": "SORTABLE"
+          }
+        ]
+      },
+      "arrivalTimestamp": {
+        "displayName": "Arrival Timestamp",
+        "dataType": {
+          "type": "timestamp"
+        },
+        "rid": "ri.ontology.main.property.051a5ade-6636-4b9b-ab3b-ad4bccf72483",
+        "status": {
+          "type": "experimental"
+        },
+        "visibility": "NORMAL",
+        "typeClasses": []
+      },
+      "lateAircraftDelay": {
+        "displayName": "Late Aircraft Delay",
+        "dataType": {
+          "type": "string"
+        },
+        "rid": "ri.ontology.main.property.4ac6e867-bc56-46fc-b5da-0205995b6276",
+        "status": {
+          "type": "experimental"
+        },
+        "visibility": "NORMAL",
+        "typeClasses": [
+          {
+            "kind": "render_hint",
+            "name": "SELECTABLE"
+          },
+          {
+            "kind": "render_hint",
+            "name": "SORTABLE"
+          }
+        ]
+      },
+      "endAt": {
+        "displayName": "END AT",
+        "dataType": {
+          "type": "string"
+        },
+        "rid": "ri.ontology.main.property.d419fc15-752a-4067-abbc-e36e685e7f2e",
+        "status": {
+          "type": "experimental"
+        },
+        "visibility": "NORMAL",
+        "typeClasses": [
+          {
+            "kind": "render_hint",
+            "name": "SELECTABLE"
+          },
+          {
+            "kind": "render_hint",
+            "name": "SORTABLE"
+          }
+        ]
+      },
+      "flightNumber": {
+        "displayName": "Flight Number",
+        "dataType": {
+          "type": "string"
+        },
+        "rid": "ri.ontology.main.property.068e9f3d-8c0c-426a-aab3-6e703babf98d",
+        "status": {
+          "type": "experimental"
+        },
+        "visibility": "NORMAL",
+        "typeClasses": [
+          {
+            "kind": "render_hint",
+            "name": "SELECTABLE"
+          },
+          {
+            "kind": "render_hint",
+            "name": "SORTABLE"
+          }
+        ]
+      },
+      "wheelsOffTimestamp": {
+        "displayName": "Wheels Off Timestamp",
+        "dataType": {
+          "type": "string"
+        },
+        "rid": "ri.ontology.main.property.dae55b95-f804-456b-818b-716a63bbcf53",
+        "status": {
+          "type": "experimental"
+        },
+        "visibility": "NORMAL",
+        "typeClasses": [
+          {
+            "kind": "render_hint",
+            "name": "SELECTABLE"
+          },
+          {
+            "kind": "render_hint",
+            "name": "SORTABLE"
+          }
+        ]
+      },
+      "scheduledElapsedTime": {
+        "displayName": "Scheduled Elapsed Time",
+        "dataType": {
+          "type": "integer"
+        },
+        "rid": "ri.ontology.main.property.f6bebc39-df8e-47fd-95f5-477afb136547",
+        "status": {
+          "type": "experimental"
+        },
+        "visibility": "NORMAL",
+        "typeClasses": []
+      },
+      "originLongitude": {
+        "displayName": "Origin Longitude",
+        "dataType": {
+          "type": "double"
+        },
+        "rid": "ri.ontology.main.property.caf96dad-2ff7-4605-899a-a0351e1400a6",
+        "status": {
+          "type": "experimental"
+        },
+        "visibility": "NORMAL",
+        "typeClasses": []
+      },
+      "carrierCode": {
+        "displayName": "Carrier Code",
+        "dataType": {
+          "type": "string"
+        },
+        "rid": "ri.ontology.main.property.9929a838-12a7-4a21-9bf1-f53b72a9ef66",
+        "status": {
+          "type": "experimental"
+        },
+        "visibility": "NORMAL",
+        "typeClasses": [
+          {
+            "kind": "render_hint",
+            "name": "SELECTABLE"
+          },
+          {
+            "kind": "render_hint",
+            "name": "SORTABLE"
+          }
+        ]
+      },
+      "cancelled": {
+        "displayName": "Cancelled",
+        "dataType": {
+          "type": "boolean"
+        },
+        "rid": "ri.ontology.main.property.b7f75460-3457-407b-b208-38daf9141416",
+        "status": {
+          "type": "experimental"
+        },
+        "visibility": "NORMAL",
+        "typeClasses": [
+          {
+            "kind": "render_hint",
+            "name": "LOW_CARDINALITY"
+          },
+          {
+            "kind": "render_hint",
+            "name": "SELECTABLE"
+          }
+        ]
+      },
+      "destinationDisplayAirportName": {
+        "displayName": "Destination Display Airport Name",
+        "dataType": {
+          "type": "string"
+        },
+        "rid": "ri.ontology.main.property.0fe8aa66-c190-441b-9b2b-932eab2c1597",
+        "status": {
+          "type": "experimental"
+        },
+        "visibility": "NORMAL",
+        "typeClasses": [
+          {
+            "kind": "render_hint",
+            "name": "SELECTABLE"
+          },
+          {
+            "kind": "render_hint",
+            "name": "SORTABLE"
+          }
+        ]
+      },
+      "destAirportId": {
+        "displayName": "Dest Airport Id",
+        "dataType": {
+          "type": "integer"
+        },
+        "rid": "ri.ontology.main.property.fb0e8ab8-b61d-4a2c-aa9b-be3d9ec0a3a7",
+        "status": {
+          "type": "experimental"
+        },
+        "visibility": "NORMAL",
+        "typeClasses": []
+      },
+      "originLatitude": {
+        "displayName": "Origin Latitude",
+        "dataType": {
+          "type": "double"
+        },
+        "rid": "ri.ontology.main.property.a220efc3-0fe4-4e9c-a7b4-c17dbf013ff0",
+        "status": {
+          "type": "experimental"
+        },
+        "visibility": "NORMAL",
+        "typeClasses": []
+      },
+      "tailNum": {
+        "displayName": "Tail Num",
+        "dataType": {
+          "type": "string"
+        },
+        "rid": "ri.ontology.main.property.ce52f199-3570-4e0b-b845-e6d14d31b2b4",
+        "status": {
+          "type": "experimental"
+        },
+        "visibility": "NORMAL",
+        "typeClasses": [
+          {
+            "kind": "render_hint",
+            "name": "SELECTABLE"
+          },
+          {
+            "kind": "render_hint",
+            "name": "SORTABLE"
+          }
+        ]
+      },
+      "carrierDelay": {
+        "displayName": "Carrier Delay",
+        "dataType": {
+          "type": "string"
+        },
+        "rid": "ri.ontology.main.property.a0b79ccb-1a3e-45ca-b323-bbc5a73dd272",
+        "status": {
+          "type": "experimental"
+        },
+        "visibility": "NORMAL",
+        "typeClasses": [
+          {
+            "kind": "render_hint",
+            "name": "SELECTABLE"
+          },
+          {
+            "kind": "render_hint",
+            "name": "SORTABLE"
+          }
+        ]
+      },
+      "distance": {
+        "displayName": "Distance",
+        "dataType": {
+          "type": "double"
+        },
+        "rid": "ri.ontology.main.property.4af95cb4-3b15-4ea5-ac70-11694afa63f6",
+        "status": {
+          "type": "experimental"
+        },
+        "visibility": "NORMAL",
+        "typeClasses": []
+      },
+      "routeTitle": {
+        "displayName": "Route Title",
+        "dataType": {
+          "type": "string"
+        },
+        "rid": "ri.ontology.main.property.7024ea4b-8670-49ea-b72e-e598123bd918",
+        "status": {
+          "type": "experimental"
+        },
+        "visibility": "NORMAL",
+        "typeClasses": [
+          {
+            "kind": "render_hint",
+            "name": "SELECTABLE"
+          },
+          {
+            "kind": "render_hint",
+            "name": "SORTABLE"
+          }
+        ]
+      },
+      "flightId": {
+        "displayName": "Flight Id",
+        "dataType": {
+          "type": "string"
+        },
+        "rid": "ri.ontology.main.property.4c81a378-5400-4a05-be71-24c1aff19825",
+        "status": {
+          "type": "experimental"
+        },
+        "visibility": "NORMAL",
+        "typeClasses": [
+          {
+            "kind": "render_hint",
+            "name": "SELECTABLE"
+          },
+          {
+            "kind": "render_hint",
+            "name": "SORTABLE"
+          }
+        ]
+      },
+      "diverted": {
+        "displayName": "Diverted",
+        "dataType": {
+          "type": "boolean"
+        },
+        "rid": "ri.ontology.main.property.e39eb134-f4f4-4d6a-83c4-26344f5a7d5b",
+        "status": {
+          "type": "experimental"
+        },
+        "visibility": "NORMAL",
+        "typeClasses": [
+          {
+            "kind": "render_hint",
+            "name": "LOW_CARDINALITY"
+          },
+          {
+            "kind": "render_hint",
+            "name": "SELECTABLE"
+          }
+        ]
+      },
+      "routeId": {
+        "displayName": "Route Id",
+        "dataType": {
+          "type": "string"
+        },
+        "rid": "ri.ontology.main.property.1ba2502e-320a-48ca-9a47-3881a35826c8",
+        "status": {
+          "type": "experimental"
+        },
+        "visibility": "NORMAL",
+        "typeClasses": [
+          {
+            "kind": "render_hint",
+            "name": "SELECTABLE"
+          },
+          {
+            "kind": "render_hint",
+            "name": "SORTABLE"
+          }
+        ]
+      },
+      "flightTitle": {
+        "displayName": "Flight Title",
+        "dataType": {
+          "type": "string"
+        },
+        "rid": "ri.ontology.main.property.d7e20987-eca8-4919-999a-d325b85e7796",
+        "status": {
+          "type": "experimental"
+        },
+        "visibility": "NORMAL",
+        "typeClasses": [
+          {
+            "kind": "render_hint",
+            "name": "SELECTABLE"
+          },
+          {
+            "kind": "render_hint",
+            "name": "SORTABLE"
+          }
+        ]
+      },
+      "originGeopoint": {
+        "displayName": "Origin Geopoint",
+        "dataType": {
+          "type": "string"
+        },
+        "rid": "ri.ontology.main.property.fb1970a4-cd42-4607-af4d-02a00dd4eecd",
+        "status": {
+          "type": "experimental"
+        },
+        "visibility": "NORMAL",
+        "typeClasses": [
+          {
+            "kind": "render_hint",
+            "name": "SELECTABLE"
+          },
+          {
+            "kind": "render_hint",
+            "name": "SORTABLE"
+          }
+        ]
+      },
+      "actualElapsedTime": {
+        "displayName": "Actual Elapsed Time",
+        "dataType": {
+          "type": "double"
+        },
+        "rid": "ri.ontology.main.property.8efd61a4-51aa-4b47-9aa6-7af4c76f938f",
+        "status": {
+          "type": "experimental"
+        },
+        "visibility": "NORMAL",
+        "typeClasses": []
+      },
+      "startAt": {
+        "displayName": "START AT",
+        "dataType": {
+          "type": "string"
+        },
+        "rid": "ri.ontology.main.property.6ea6846b-a28a-4c30-81fd-13639fda9d25",
+        "status": {
+          "type": "experimental"
+        },
+        "visibility": "NORMAL",
+        "typeClasses": [
+          {
+            "kind": "render_hint",
+            "name": "SELECTABLE"
+          },
+          {
+            "kind": "render_hint",
+            "name": "SORTABLE"
+          }
+        ]
+      },
+      "originDisplayAirportCityNameFull": {
+        "displayName": "Origin Display Airport City Name Full",
+        "dataType": {
+          "type": "string"
+        },
+        "rid": "ri.ontology.main.property.ba176c0d-9467-4d54-a2ce-270458fefdc2",
+        "status": {
+          "type": "experimental"
+        },
+        "visibility": "NORMAL",
+        "typeClasses": [
+          {
+            "kind": "render_hint",
+            "name": "SELECTABLE"
+          },
+          {
+            "kind": "render_hint",
+            "name": "SORTABLE"
+          }
+        ]
+      },
+      "airTime": {
+        "displayName": "Air Time",
+        "dataType": {
+          "type": "double"
+        },
+        "rid": "ri.ontology.main.property.996483f4-39e9-426f-a0b7-ef4f9a6e300d",
+        "status": {
+          "type": "experimental"
+        },
+        "visibility": "NORMAL",
+        "typeClasses": []
+      },
+      "taxiIn": {
+        "displayName": "Taxi In",
+        "dataType": {
+          "type": "integer"
+        },
+        "rid": "ri.ontology.main.property.e1a5b634-2d4c-4ddd-b7b1-d856be7237fc",
+        "status": {
+          "type": "experimental"
+        },
+        "visibility": "NORMAL",
+        "typeClasses": []
+      },
+      "depDelay": {
+        "displayName": "Dep Delay",
+        "dataType": {
+          "type": "integer"
+        },
+        "rid": "ri.ontology.main.property.84c781fc-61f3-432a-af0a-b124c983a4bc",
+        "status": {
+          "type": "experimental"
+        },
+        "visibility": "NORMAL",
+        "typeClasses": []
+      },
+      "wheelsOnTimestamp": {
+        "displayName": "Wheels On Timestamp",
+        "dataType": {
+          "type": "string"
+        },
+        "rid": "ri.ontology.main.property.a331ffeb-5205-48d2-a8fc-3804eb30c56b",
+        "status": {
+          "type": "experimental"
+        },
+        "visibility": "NORMAL",
+        "typeClasses": [
+          {
+            "kind": "render_hint",
+            "name": "SELECTABLE"
+          },
+          {
+            "kind": "render_hint",
+            "name": "SORTABLE"
+          }
+        ]
+      },
+      "longitudeSensorSeriesId": {
+        "displayName": "Longitude Sensor Series Id",
+        "dataType": {
+          "type": "string"
+        },
+        "rid": "ri.ontology.main.property.92aa5a47-76e9-4ef3-ae2c-33455abacd45",
+        "status": {
+          "type": "experimental"
+        },
+        "visibility": "NORMAL",
+        "typeClasses": [
+          {
+            "kind": "render_hint",
+            "name": "SELECTABLE"
+          },
+          {
+            "kind": "render_hint",
+            "name": "SORTABLE"
+          }
+        ]
+      },
+      "latitudeSensorSeriesId": {
+        "displayName": "Latitude Sensor Series Id",
+        "dataType": {
+          "type": "string"
+        },
+        "rid": "ri.ontology.main.property.284f4c0d-a8ba-43a7-82cb-ac666bc7b0c2",
+        "status": {
+          "type": "experimental"
+        },
+        "visibility": "NORMAL",
+        "typeClasses": [
+          {
+            "kind": "render_hint",
+            "name": "SELECTABLE"
+          },
+          {
+            "kind": "render_hint",
+            "name": "SORTABLE"
+          }
+        ]
+      },
+      "nasDelay": {
+        "displayName": "Nas Delay",
+        "dataType": {
+          "type": "string"
+        },
+        "rid": "ri.ontology.main.property.e208893c-10c5-4ef3-b66a-75b2c85f4063",
+        "status": {
+          "type": "experimental"
+        },
+        "visibility": "NORMAL",
+        "typeClasses": [
+          {
+            "kind": "render_hint",
+            "name": "SELECTABLE"
+          },
+          {
+            "kind": "render_hint",
+            "name": "SORTABLE"
+          }
+        ]
+      },
+      "arrDelay": {
+        "displayName": "Arr Delay",
+        "dataType": {
+          "type": "integer"
+        },
+        "rid": "ri.ontology.main.property.b6667fd9-0919-4d79-984d-841ee08fc54f",
+        "status": {
+          "type": "experimental"
+        },
+        "visibility": "NORMAL",
+        "typeClasses": []
+      },
+      "originAirportId": {
+        "displayName": "Origin Airport Id",
+        "dataType": {
+          "type": "integer"
+        },
+        "rid": "ri.ontology.main.property.c4325ce0-461f-4e9c-b767-e5f46c34a8d4",
+        "status": {
+          "type": "experimental"
+        },
+        "visibility": "NORMAL",
+        "typeClasses": []
+      },
+      "destinationLongitude": {
+        "displayName": "Destination Longitude",
+        "dataType": {
+          "type": "double"
+        },
+        "rid": "ri.ontology.main.property.f32c58ea-195f-4dc3-8422-e3ec41402a3e",
+        "status": {
+          "type": "experimental"
+        },
+        "visibility": "NORMAL",
+        "typeClasses": []
+      },
+      "airlineId": {
+        "displayName": "Airline Id",
+        "dataType": {
+          "type": "integer"
+        },
+        "rid": "ri.ontology.main.property.9aab2977-5f00-46ee-b162-3b1122cd28a5",
+        "status": {
+          "type": "experimental"
+        },
+        "visibility": "NORMAL",
+        "typeClasses": []
+      },
+      "originAirport": {
+        "displayName": "Origin Airport",
+        "dataType": {
+          "type": "string"
+        },
+        "rid": "ri.ontology.main.property.0ed5b7f1-8f43-4dae-b185-718be1659345",
+        "status": {
+          "type": "experimental"
+        },
+        "visibility": "NORMAL",
+        "typeClasses": [
+          {
+            "kind": "render_hint",
+            "name": "SELECTABLE"
+          },
+          {
+            "kind": "render_hint",
+            "name": "SORTABLE"
+          }
+        ]
+      },
+      "originDisplayAirportName": {
+        "displayName": "Origin Display Airport Name",
+        "dataType": {
+          "type": "string"
+        },
+        "rid": "ri.ontology.main.property.c7187471-89f7-4c30-8866-b334e7709557",
+        "status": {
+          "type": "experimental"
+        },
+        "visibility": "NORMAL",
+        "typeClasses": [
+          {
+            "kind": "render_hint",
+            "name": "SELECTABLE"
+          },
+          {
+            "kind": "render_hint",
+            "name": "SORTABLE"
+          }
+        ]
+      },
+      "taxiOut": {
+        "displayName": "Taxi Out",
+        "dataType": {
+          "type": "integer"
+        },
+        "rid": "ri.ontology.main.property.90cd7c02-3810-4d93-9ab8-335deed5c935",
+        "status": {
+          "type": "experimental"
+        },
+        "visibility": "NORMAL",
+        "typeClasses": []
+      },
+      "flights": {
+        "displayName": "Flights",
+        "dataType": {
+          "type": "double"
+        },
+        "rid": "ri.ontology.main.property.ef568c40-c195-488e-b6b4-982dce88738c",
+        "status": {
+          "type": "experimental"
+        },
+        "visibility": "NORMAL",
+        "typeClasses": []
+      }
+    },
+    "rid": "ri.ontology.main.object-type.a37d0b87-918d-4496-8f6c-4d70dc784abd",
+    "titleProperty": "flightId",
+    "visibility": "NORMAL"
+  }
+]

@@ -58,48 +58,58 @@ packages = ["databricks.labs.community_connector.sources.{{source_name}}"]
 
 2. **Package Naming**: Use `lakeflow-community-connectors-{{source_name}}` format (with hyphens, not underscores)
 
-## Build Commands
+## Build + upload via the CLI (recommended)
 
-Run the following commands to set up a virtual environment and build the source package:
+`community-connector upload` wraps the build step and pushes the wheel to a UC
+Volume in one call. The destination volume and any subdirectories are created
+if they don't exist.
 
 ```bash
-# Navigate to the source directory
-cd src/databricks/labs/community_connector/sources/{{source_name}}
-
-# Create and activate a virtual environment
-python3 -m venv .venv
-source .venv/bin/activate  # On Windows: .venv\Scripts\activate
-
-# Install build dependencies
-pip install build
-
-# Build the package
-python -m build
-
-# The built packages will be in the dist/ directory:
-# - lakeflow_community_connectors_{{source_name}}-0.1.0.tar.gz (source distribution)
-# - lakeflow_community_connectors_{{source_name}}-0.1.0-py3-none-any.whl (wheel)
+community-connector upload {{source_name}} \
+  --volume-path /Volumes/<catalog>/<schema>/community_connector/packages
 ```
 
-## Clean Up
-
-After building, clean up build artifacts:
+To skip the build step and upload a pre-built wheel:
 
 ```bash
-# Remove build artifacts (optional, before committing)
-rm -rf dist/ build/ *.egg-info .venv
+community-connector upload {{source_name}} \
+  --volume-path /Volumes/<catalog>/<schema>/community_connector/packages \
+  --wheel dist/{{source_name}}/lakeflow_community_connectors_{{source_name}}-0.1.0-py3-none-any.whl
+```
+
+The CLI sanity-checks the built wheel against
+`databricks/labs/community_connector/sources/{{source_name}}/` before upload, so
+a misconfigured `pyproject.toml` is caught before it reaches the volume.
+
+## Build-only commands (no upload)
+
+Use these only when you need a local wheel artifact without uploading.
+`python -m build` runs setuptools inside a PEP 517 isolated environment, so a
+per-connector `.venv` is not needed — install `build` once into whichever venv
+runs the command.
+
+```bash
+# One-time, in the venv that owns the CLI / your dev workflow
+pip install build
+
+# Build the wheel for {{source_name}}
+python -m build --wheel \
+  src/databricks/labs/community_connector/sources/{{source_name}} \
+  --outdir dist/{{source_name}}
+
+# Result:
+# dist/{{source_name}}/lakeflow_community_connectors_{{source_name}}-0.1.0-py3-none-any.whl
 ```
 
 ## Verification
 
-After building, verify the package contents:
+After building, list the wheel contents:
 
 ```bash
-# List contents of the wheel
-unzip -l dist/*.whl
+unzip -l dist/{{source_name}}/*.whl
 ```
 
-The wheel should contain files under the path:
+The wheel must contain files under:
 `databricks/labs/community_connector/sources/{{source_name}}/`
 
 ## References

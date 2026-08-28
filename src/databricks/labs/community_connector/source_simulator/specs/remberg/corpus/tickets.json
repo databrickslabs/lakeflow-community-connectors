@@ -1,0 +1,328 @@
+[
+  {
+    "id": "golf-693-pk0",
+    "subject": "kilo-983",
+    "createdAt": "2024-01-14T22:56:43Z",
+    "updatedAt": "2024-01-01T00:00:00Z",
+    "status": "sierra-318",
+    "ticketID": "oscar-134",
+    "priority": "charlie-244",
+    "assignedPersonId": "november-310",
+    "assignedPerson": {
+      "id": "juliet-846",
+      "firstName": "foxtrot-654",
+      "lastName": "delta-209",
+      "email": "alpha-105"
+    },
+    "summary": "delta-132",
+    "solution": "quebec-632",
+    "resolutionTime": 790.08,
+    "relatedOrganizationIds": [
+      "quebec-273",
+      "tango-210"
+    ],
+    "relatedOrganizations": [],
+    "relatedContactIds": [
+      "india-796",
+      "uniform-993"
+    ],
+    "relatedContacts": [
+      {
+        "id": "bravo-853",
+        "firstName": "india-389",
+        "lastName": "mike-933",
+        "email": "romeo-175"
+      }
+    ],
+    "relatedAssetIds": [
+      "charlie-191",
+      "tango-936"
+    ],
+    "relatedAssets": [
+      {
+        "id": "charlie-977",
+        "assetNumber": "uniform-986",
+        "assetType": "india-978"
+      },
+      {
+        "id": "hotel-976",
+        "assetNumber": "lima-217",
+        "assetType": "mike-509"
+      }
+    ],
+    "relatedParts": [
+      {
+        "partId": "whiskey-845",
+        "quantity": 591.16
+      }
+    ],
+    "sourceType": "charlie-491",
+    "supportEmailAddress": "quebec-915",
+    "categoryId": "zulu-988",
+    "customPropertyValues": []
+  },
+  {
+    "id": "tango-42-pk1",
+    "subject": "golf-966",
+    "createdAt": "2024-01-07T19:26:47Z",
+    "updatedAt": "2024-01-01T01:00:00Z",
+    "status": "india-858",
+    "ticketID": "victor-592",
+    "priority": "mike-204",
+    "assignedPersonId": "xray-720",
+    "assignedPerson": {
+      "id": "charlie-951",
+      "firstName": "hotel-701",
+      "lastName": "xray-877",
+      "email": "zulu-905"
+    },
+    "summary": "golf-403",
+    "solution": "uniform-174",
+    "resolutionTime": 696.46,
+    "relatedOrganizationIds": [
+      "alpha-102",
+      "papa-849"
+    ],
+    "relatedOrganizations": [
+      {
+        "id": "bravo-436",
+        "organizationName": "juliet-172",
+        "organizationNumber": "uniform-898"
+      },
+      {
+        "id": "romeo-256",
+        "organizationName": "uniform-720",
+        "organizationNumber": "papa-350"
+      }
+    ],
+    "relatedContactIds": [
+      "uniform-192",
+      "tango-121"
+    ],
+    "relatedContacts": [
+      {
+        "id": "papa-932",
+        "firstName": "xray-969",
+        "lastName": "victor-787",
+        "email": "alpha-676"
+      },
+      {
+        "id": "india-657",
+        "firstName": "juliet-714",
+        "lastName": "india-632",
+        "email": "papa-343"
+      }
+    ],
+    "relatedAssetIds": [
+      "november-768",
+      "india-840"
+    ],
+    "relatedAssets": [
+      {
+        "id": "oscar-567",
+        "assetNumber": "juliet-338",
+        "assetType": "victor-176"
+      },
+      {
+        "id": "charlie-342",
+        "assetNumber": "hotel-883",
+        "assetType": "alpha-867"
+      }
+    ],
+    "relatedParts": [
+      {
+        "partId": "xray-472",
+        "quantity": 44.27
+      }
+    ],
+    "sourceType": "golf-199",
+    "supportEmailAddress": "hotel-273",
+    "categoryId": "golf-120",
+    "customPropertyValues": [
+      {
+        "reference": "mike-130",
+        "value": "echo-547",
+        "associationValue": []
+      }
+    ]
+  },
+  {
+    "id": "echo-239-pk2",
+    "subject": "tango-175",
+    "createdAt": "2024-01-01T02:41:21Z",
+    "updatedAt": "2024-01-01T02:00:00Z",
+    "status": "quebec-827",
+    "ticketID": "kilo-202",
+    "priority": "kilo-819",
+    "assignedPersonId": "sierra-268",
+    "assignedPerson": {
+      "id": "juliet-566",
+      "firstName": "golf-496",
+      "lastName": "whiskey-424",
+      "email": "quebec-259"
+    },
+    "summary": "whiskey-650",
+    "solution": "papa-323",
+    "resolutionTime": 160.26,
+    "relatedOrganizationIds": [
+      "foxtrot-373",
+      "alpha-467"
+    ],
+    "relatedOrganizations": [],
+    "relatedContactIds": [],
+    "relatedContacts": [
+      {
+        "id": "victor-765",
+        "firstName": "mike-961",
+        "lastName": "charlie-594",
+        "email": "delta-575"
+      }
+    ],
+    "relatedAssetIds": [],
+    "relatedAssets": [
+      {
+        "id": "kilo-910",
+        "assetNumber": "echo-280",
+        "assetType": "tango-767"
+      },
+      {
+        "id": "foxtrot-481",
+        "assetNumber": "echo-381",
+        "assetType": "golf-465"
+      }
+    ],
+    "relatedParts": [],
+    "sourceType": "xray-365",
+    "supportEmailAddress": "november-798",
+    "categoryId": "golf-806",
+    "customPropertyValues": []
+  },
+  {
+    "id": "xray-884-pk3",
+    "subject": "juliet-334",
+    "createdAt": "2024-01-09T08:03:55Z",
+    "updatedAt": "2024-01-01T03:00:00Z",
+    "status": "bravo-351",
+    "ticketID": "oscar-738",
+    "priority": "november-238",
+    "assignedPersonId": "alpha-991",
+    "assignedPerson": {
+      "id": "foxtrot-282",
+      "firstName": "yankee-896",
+      "lastName": "yankee-724",
+      "email": "yankee-305"
+    },
+    "summary": "kilo-212",
+    "solution": "delta-974",
+    "resolutionTime": 638.9,
+    "relatedOrganizationIds": [
+      "zulu-931"
+    ],
+    "relatedOrganizations": [
+      {
+        "id": "tango-882",
+        "organizationName": "zulu-915",
+        "organizationNumber": "tango-308"
+      },
+      {
+        "id": "xray-879",
+        "organizationName": "uniform-406",
+        "organizationNumber": "uniform-519"
+      }
+    ],
+    "relatedContactIds": [
+      "foxtrot-855"
+    ],
+    "relatedContacts": [],
+    "relatedAssetIds": [],
+    "relatedAssets": [],
+    "relatedParts": [],
+    "sourceType": "victor-155",
+    "supportEmailAddress": "sierra-343",
+    "categoryId": "hotel-855",
+    "customPropertyValues": []
+  },
+  {
+    "id": "quebec-6-pk4",
+    "subject": "sierra-846",
+    "createdAt": "2024-01-28T13:33:17Z",
+    "updatedAt": "2024-01-01T04:00:00Z",
+    "status": "xray-980",
+    "ticketID": "charlie-934",
+    "priority": "kilo-434",
+    "assignedPersonId": "zulu-795",
+    "assignedPerson": {
+      "id": "november-552",
+      "firstName": "lima-750",
+      "lastName": "golf-551",
+      "email": "india-654"
+    },
+    "summary": "juliet-452",
+    "solution": "foxtrot-519",
+    "resolutionTime": 37.92,
+    "relatedOrganizationIds": [
+      "bravo-739"
+    ],
+    "relatedOrganizations": [
+      {
+        "id": "zulu-141",
+        "organizationName": "charlie-122",
+        "organizationNumber": "november-599"
+      },
+      {
+        "id": "uniform-266",
+        "organizationName": "zulu-498",
+        "organizationNumber": "tango-653"
+      }
+    ],
+    "relatedContactIds": [
+      "yankee-998",
+      "xray-383"
+    ],
+    "relatedContacts": [],
+    "relatedAssetIds": [
+      "alpha-995",
+      "alpha-751"
+    ],
+    "relatedAssets": [
+      {
+        "id": "november-600",
+        "assetNumber": "golf-682",
+        "assetType": "echo-431"
+      },
+      {
+        "id": "romeo-674",
+        "assetNumber": "zulu-900",
+        "assetType": "kilo-402"
+      }
+    ],
+    "relatedParts": [
+      {
+        "partId": "kilo-473",
+        "quantity": 746.21
+      },
+      {
+        "partId": "lima-440",
+        "quantity": 866.14
+      }
+    ],
+    "sourceType": "xray-741",
+    "supportEmailAddress": "xray-164",
+    "categoryId": "delta-390",
+    "customPropertyValues": [
+      {
+        "reference": "tango-782",
+        "value": "yankee-576",
+        "associationValue": [
+          "hotel-110",
+          "zulu-800"
+        ]
+      },
+      {
+        "reference": "sierra-128",
+        "value": "alpha-141",
+        "associationValue": []
+      }
+    ]
+  }
+]

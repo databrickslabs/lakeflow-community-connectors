@@ -1,0 +1,46 @@
+[
+  {
+    "tag_webid": "whiskey-200",
+    "timestamp": "2024-01-14T12:17:22Z",
+    "value": 184.59,
+    "good": true,
+    "questionable": true,
+    "substituted": true,
+    "annotated": false,
+    "units": "uniform-856",
+    "ingestion_timestamp": "2024-01-17T02:40:05Z"
+  },
+  {
+    "tag_webid": "charlie-670",
+    "timestamp": "2024-01-17T20:12:26Z",
+    "value": 145.51,
+    "good": false,
+    "questionable": false,
+    "substituted": false,
+    "annotated": false,
+    "units": "alpha-368",
+    "ingestion_timestamp": "2024-01-05T06:36:11Z"
+  },
+  {
+    "tag_webid": "foxtrot-669",
+    "timestamp": "2024-01-04T05:26:15Z",
+    "value": 999.51,
+    "good": false,
+    "questionable": false,
+    "substituted": false,
+    "annotated": true,
+    "units": "zulu-944",
+    "ingestion_timestamp": "2024-01-08T20:36:42Z"
+  },
+  {
+    "tag_webid": "kilo-492",
+    "timestamp": "2024-01-06T12:51:23Z",
+    "value": 403.14,
+    "good": false,
+    "questionable": true,
+    "substituted": false,
+    "annotated": true,
+    "units": "whiskey-147",
+    "ingestion_timestamp": "2024-01-10T23:19:06Z"
+  }
+]
