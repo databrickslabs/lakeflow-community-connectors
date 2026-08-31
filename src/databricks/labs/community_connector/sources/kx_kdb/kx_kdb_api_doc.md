@@ -150,15 +150,3 @@ Users must review the [KDB-X Python license terms][kx-license], accept the
 applicable KX terms, and provide their own licensed runtime.
 
 [kx-license]: https://code.kx.com/pykx/4.0/license.html
-
-## CI and live validation
-
-Offline CI follows the repository's HL7 v2 Volume precedent: tests create a
-temporary HDB-shaped directory and replace only the PyKX schema, enumeration,
-and column-read boundaries with deterministic corpus data. Filesystem
-discovery, offsets, partition planning, schema conversion, and row contracts
-run through production code.
-
-Live validation must additionally run against a licensed HDB and cover at
-least two tables, multiple dates, multiple symbols, restart/resume behavior,
-and a large symbol partition.

@@ -157,13 +157,3 @@ Example table selection:
 
 See `kx_kdb_api_doc.md` for the complete source, schema, offset, and runtime
 contract.
-
-## Testing
-
-Offline CI uses the same pattern as the community HL7 v2 Volume connector:
-a temporary HDB-shaped directory plus deterministic replacements for the
-PyKX boundary. The production filesystem discovery, partition planning,
-offset, schema conversion, and row contracts still execute.
-
-Live validation requires a licensed KDB-X environment and must cover multiple
-tables, dates, symbols, restart/resume behavior, and a large symbol partition.
