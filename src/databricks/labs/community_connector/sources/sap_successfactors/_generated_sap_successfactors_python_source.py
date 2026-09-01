@@ -2036,6 +2036,13 @@ def register_lakeflow_source(spark):
             "primary_keys": ["userId"],
             "cursor_field": "lastModifiedDateTime",
             "ingestion_type": "cdc",
+            # Without this, inactive users are omitted from every response (KBA
+            # 2166571), which on a live tenant hid the majority of the
+            # population. 't'/'f' are active/inactive. Tenants with external users may
+            # need "status in 'active','active_external','inactive','inactive_external'"
+            # instead — the two forms are not interchangeable, and the wrong one
+            # returns zero rows rather than erroring.
+            "status_filter": "status in 't','f'",
         },
         "UserPermissions": {
             "entity_set": "UserPermissions",
@@ -7458,6 +7465,11 @@ def register_lakeflow_source(spark):
                 table_meta = build_table_config_from_metadata(entity_info)
                 # Add entity_set which is the EntitySet name (same as table_name in dynamic mode)
                 table_meta["entity_set"] = entity_info["entity_set_name"]
+                # $metadata does not express which entities hide inactive records,
+                # so carry the static status_filter across where one is declared.
+                static_config = TABLE_CONFIG.get(table_name, {})
+                if "status_filter" in static_config:
+                    table_meta["status_filter"] = static_config["status_filter"]
                 return table_meta
 
             if table_name not in TABLE_CONFIG:
@@ -7514,6 +7526,12 @@ def register_lakeflow_source(spark):
             if start_offset and start_offset.get("cursor_value"):
                 cursor_value = start_offset["cursor_value"]
                 filters.insert(0, f"{cursor_field} gt datetime'{cursor_value}'")
+            # Entities that hide inactive records by default need an explicit
+            # status predicate, or deactivation looks like the record vanishing —
+            # which a cdc upsert never reflects downstream.  See table_metadata.
+            status_filter = config.get("status_filter")
+            if status_filter:
+                filters.append(status_filter)
             params["$filter"] = " and ".join(filters)
 
             # Fetch all pages of data
@@ -7567,6 +7585,12 @@ def register_lakeflow_source(spark):
             # Add $orderby if cursor field exists for consistent ordering
             if cursor_field:
                 params["$orderby"] = f"{cursor_field} asc"
+
+            # Snapshot reads need the same status predicate as cdc reads — an entity
+            # that hides inactive records does so regardless of ingestion type.
+            status_filter = config.get("status_filter")
+            if status_filter:
+                params["$filter"] = status_filter
 
             # Fetch all pages of data
             all_records, max_cursor = self._fetch_all_pages(url, params, cursor_field)

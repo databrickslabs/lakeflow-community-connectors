@@ -269,6 +269,11 @@ class SapSuccessFactorsLakeflowConnect(LakeflowConnect):
             table_meta = build_table_config_from_metadata(entity_info)
             # Add entity_set which is the EntitySet name (same as table_name in dynamic mode)
             table_meta["entity_set"] = entity_info["entity_set_name"]
+            # $metadata does not express which entities hide inactive records,
+            # so carry the static status_filter across where one is declared.
+            static_config = TABLE_CONFIG.get(table_name, {})
+            if "status_filter" in static_config:
+                table_meta["status_filter"] = static_config["status_filter"]
             return table_meta
 
         if table_name not in TABLE_CONFIG:
@@ -325,6 +330,12 @@ class SapSuccessFactorsLakeflowConnect(LakeflowConnect):
         if start_offset and start_offset.get("cursor_value"):
             cursor_value = start_offset["cursor_value"]
             filters.insert(0, f"{cursor_field} gt datetime'{cursor_value}'")
+        # Entities that hide inactive records by default need an explicit
+        # status predicate, or deactivation looks like the record vanishing —
+        # which a cdc upsert never reflects downstream.  See table_metadata.
+        status_filter = config.get("status_filter")
+        if status_filter:
+            filters.append(status_filter)
         params["$filter"] = " and ".join(filters)
 
         # Fetch all pages of data
@@ -378,6 +389,12 @@ class SapSuccessFactorsLakeflowConnect(LakeflowConnect):
         # Add $orderby if cursor field exists for consistent ordering
         if cursor_field:
             params["$orderby"] = f"{cursor_field} asc"
+
+        # Snapshot reads need the same status predicate as cdc reads — an entity
+        # that hides inactive records does so regardless of ingestion type.
+        status_filter = config.get("status_filter")
+        if status_filter:
+            params["$filter"] = status_filter
 
         # Fetch all pages of data
         all_records, max_cursor = self._fetch_all_pages(url, params, cursor_field)
