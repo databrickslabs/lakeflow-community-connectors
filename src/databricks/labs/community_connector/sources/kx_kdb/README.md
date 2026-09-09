@@ -26,7 +26,7 @@ visible to every executor are not supported.
 - A Unity Catalog Volume containing the HDB.
 - `READ VOLUME` for the Lakeflow pipeline identity.
 - PyKX in the pipeline environment, or a configured PyKX wheel/package spec.
-- A valid KX license.
+- A customer-provided commercial KX license that permits third-party-cloud use.
 - KDB-X already available, staged as an offline bundle, or installable with a
   secret-backed KX installer token.
 
@@ -36,6 +36,14 @@ components. Review the [KDB-X Python license terms][kx-license] and
 `q.so`, KDB-X, the KX installer, offline bundles, and KX license files are not
 bundled or redistributed with the connector. Each user must obtain and accept
 the applicable KX terms and provide their own licensed runtime.
+
+For this connector on Databricks, Personal and Community licenses are not
+supported. Customers are responsible for obtaining a commercial KX license
+whose terms expressly permit deployment on a third-party cloud platform.
+
+See [NOTICE.md](NOTICE.md) for the connector dependency and attribution list.
+No GPL, LGPL, or AGPL dependency is declared by the connector or identified
+among its mandatory runtime dependencies.
 
 [kx-license]: https://code.kx.com/pykx/4.0/license.html
 [kx-install]: https://code.kx.com/pykx/4.0/getting-started/installing.html
@@ -62,15 +70,17 @@ lower-case names such as `trades` and `quotes`.
 Create a Generic Lakeflow Connect connection with `sourceName: kx_kdb` and
 the parameters from `connector_spec.yaml`.
 
-Minimum configuration when PyKX/KDB-X and the license are already staged:
+The recommended deployment is to provide a licensed PyKX/KDB-X runtime and
+license through customer-controlled paths:
 
 ```yaml
 hdb_root_path: /Volumes/<catalog>/<schema>/<volume>/hdb
 license_volume_path: /Volumes/<catalog>/<schema>/<volume>/keys
 ```
 
-For online bootstrap, store the bearer token and base64 license in Databricks
-secrets and expose them through secret-backed connection options:
+The optional online bootstrap uses only a KX bearer token and license supplied
+by the customer. Store both values in customer-controlled Databricks secrets
+and expose them through secret-backed connection options:
 
 ```sql
 CREATE CONNECTION kx_hdb TYPE GENERIC_LAKEFLOW_CONNECT
@@ -86,6 +96,14 @@ OPTIONS (
 
 Do not place bearer tokens or license contents directly in source control or
 pipeline specifications.
+
+The online bootstrap downloads the installer directly from KX into a
+process-local temporary directory, executes it there, and removes the
+temporary directory afterward. The connector does not persist, cache, upload,
+or re-serve the installer to another customer or workspace. It has no
+Databricks-held KX credential or license and never falls back to one. Missing
+or incomplete customer bootstrap credentials produce an error or use the
+customer-provided preinstalled runtime path.
 
 ## Connection parameters
 

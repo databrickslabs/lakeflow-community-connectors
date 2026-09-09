@@ -18,6 +18,8 @@ connection:
         Directory path used for `QLIC` and working-directory setup before importing
         PyKX. This must be the containing directory (for example
         /Volumes/<catalog>/<schema>/<volume>/keys/), not the direct kc.lic file path.
+        On Databricks, customers must provide a commercial KX license whose terms
+        permit third-party-cloud use.
 
     - name: kdbx_secret_scope
       type: string
@@ -47,26 +49,26 @@ connection:
       required: false
       secret: true
       description: >
-        Preferred Lakeflow option for the KDB-X installer bearer token. Define
-        it in SQL with `secret('<scope>', '<key>')` so the connector receives the
-        resolved value directly from the Unity Catalog connection options.
+        Preferred Lakeflow option for the customer's KDB-X installer bearer token.
+        Define it in SQL with `secret('<scope>', '<key>')` so the connector receives
+        the resolved value directly from the Unity Catalog connection options.
 
     - name: kdbx_license_b64
       type: string
       required: false
       secret: true
       description: >
-        Preferred Lakeflow option for the base64 `kc.lic` value. Define it in
-        SQL with `secret('<scope>', '<key>')` so the connector receives the
-        resolved value directly from the Unity Catalog connection options.
+        Preferred Lakeflow option for the customer's base64 commercial KX license.
+        Define it in SQL with `secret('<scope>', '<key>')` so the connector receives
+        the resolved value directly from the Unity Catalog connection options.
 
     - name: kdbx_license_file_path
       type: string
       required: false
       description: >
-        Optional FUSE path to a KX license file or license directory. When set,
-        the connector reads the license at runtime and uses it for KDB-X
-        bootstrap without storing the base64 license in the pipeline spec.
+        Optional FUSE path to the customer's commercial KX license file or license
+        directory. When set, the connector reads the license at runtime and uses it
+        for KDB-X bootstrap without storing the base64 license in the pipeline spec.
 
     - name: kdbx_offline_bundle_path
       type: string

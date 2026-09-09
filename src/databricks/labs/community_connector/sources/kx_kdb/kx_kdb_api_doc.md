@@ -123,6 +123,18 @@ Direct bearer-token and base64-license values must be supplied through
 secret-backed Unity Catalog connection options. They must never appear in a
 pipeline specification or logs.
 
+## Bootstrap isolation
+
+The recommended deployment uses a customer-provided licensed PyKX/KDB-X
+runtime. The optional online mode uses only the customer's KX bearer token and
+license. It downloads `install_kdb.sh` directly from KX into a process-local
+temporary directory, executes it there, and removes that directory afterward.
+
+The connector does not store the installer in a shared cache or Volume and
+does not upload or re-serve it to another customer or workspace. It contains
+no shared or Databricks-held KX credential or license, and there is no fallback
+to one.
+
 ## Table options
 
 | Option | Default | Purpose |
@@ -139,14 +151,17 @@ pipeline specification or logs.
 - A Lakeflow runtime with Unity Catalog Volume FUSE access.
 - PyKX available in the pipeline environment or installable from the
   configured package spec.
-- A valid KX license.
+- A customer-provided commercial KX license that permits third-party-cloud use.
 - `READ VOLUME` on the HDB, license, wheel, and optional offline-bundle
   locations.
 
 PyKX uses a dual-license model, including commercial terms for its `q.so`
 components. PyKX, `q.so`, KDB-X, the KX installer, offline bundles, and license
-files are not bundled or redistributed with this Apache-2.0 connector package.
-Users must review the [KDB-X Python license terms][kx-license], accept the
-applicable KX terms, and provide their own licensed runtime.
+files are not bundled or redistributed with this connector package. For this
+connector on Databricks, Personal and Community licenses are not supported.
+Customers must obtain a commercial KX license whose terms expressly permit
+deployment on a third-party cloud platform.
+
+See [NOTICE.md](NOTICE.md) for dependency attributions and the copyleft review.
 
 [kx-license]: https://code.kx.com/pykx/4.0/license.html
