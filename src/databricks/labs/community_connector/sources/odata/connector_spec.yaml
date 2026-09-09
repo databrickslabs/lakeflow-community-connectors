@@ -45,6 +45,65 @@ connection:
           required: false
           description: Header name to carry the API key. Default ``x-api-key``.
 
+    - name: oauth2
+      description: >
+        Connector-side OAuth 2.0 (set ``auth_type=oauth2``). The connector
+        itself mints and refreshes the access token — use this when the
+        connection carries the client identity directly rather than through
+        a Unity Catalog COMMUNITY OAuth connection (see the ``oauth`` method
+        below, which is preferred when the deployment can create one). Two
+        grant flows share the same parameter set:
+
+          1. **Client credentials** (server-to-server). Provide
+             ``oauth2_token_url``, ``oauth2_client_id``,
+             ``oauth2_client_secret``. The connector mints a fresh
+             access token at session start.
+
+          2. **Authorization code with refresh** (user-delegated).
+             Additionally supply ``oauth2_refresh_token`` and optionally
+             ``oauth2_access_token``. The pre-supplied access token is
+             used as-is when present; when it expires (HTTP 401 from
+             the source), the connector POSTs ``grant_type=refresh_token``
+             to ``oauth2_token_url`` to mint a fresh one. Providers that
+             rotate refresh tokens have the new value tracked in-process
+             for the duration of the run.
+      parameters:
+        - name: oauth2_token_url
+          type: string
+          required: true
+          description: Token endpoint URL.
+        - name: oauth2_client_id
+          type: string
+          required: true
+          description: OAuth2 client id.
+        - name: oauth2_client_secret
+          type: string
+          required: true
+          secret: true
+          description: OAuth2 client secret.
+        - name: oauth2_scope
+          type: string
+          required: false
+          description: Optional scope string.
+        - name: oauth2_access_token
+          type: string
+          required: false
+          secret: true
+          description: >
+            Pre-issued access token from the authorization-code flow.
+            Used directly until the source returns 401, then refreshed
+            via ``oauth2_refresh_token``. Omit for the client-credentials
+            flow — the connector mints one itself.
+        - name: oauth2_refresh_token
+          type: string
+          required: false
+          secret: true
+          description: >
+            Long-lived refresh token from the authorization-code flow.
+            When set, the connector uses the ``refresh_token`` grant to
+            re-mint the access token on expiry. Required for the
+            authorization-code flow; omit for client credentials.
+
     - name: oauth
       description: >
         OAuth 2.0 via a Unity Catalog COMMUNITY connection
@@ -121,9 +180,9 @@ connection:
       required: false
       description: >
         Authentication method used by the connector. Set to ``bearer``,
-        ``basic``, or ``api_key`` to match the selected authentication
-        method. Omit for Unity Catalog OAuth, which injects an
-        ``access_token`` at query time.
+        ``basic``, ``api_key``, or ``oauth2`` to match the selected
+        authentication method. Omit for Unity Catalog OAuth, which injects
+        an ``access_token`` at query time.
 
     - name: timeout_seconds
       type: string

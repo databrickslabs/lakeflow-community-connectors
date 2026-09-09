@@ -12,6 +12,7 @@ import pytest
 from databricks.labs.community_connector.sources.odata.odata import (
     _clear_capability_cache,
     _clear_metadata_cache,
+    _clear_rotated_refresh_tokens,
 )
 
 
@@ -22,6 +23,10 @@ def _reset_odata_metadata_cache():
     # SERVICE_URL across cases whose mocked servers have different $batch /
     # $expand behaviours, so one case's verdict must not leak into the next.
     _clear_capability_cache()
+    # And for the rotated-refresh-token stash: tests reuse the same token
+    # endpoint + client id with different mocked rotation behaviours.
+    _clear_rotated_refresh_tokens()
     yield
     _clear_metadata_cache()
     _clear_capability_cache()
+    _clear_rotated_refresh_tokens()

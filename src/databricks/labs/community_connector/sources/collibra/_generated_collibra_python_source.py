@@ -826,6 +826,39 @@ def register_lakeflow_source(spark):
             page_params["cursor"] = next_cursor
 
 
+    def cursor_paginate_pages(
+        session: requests.Session,
+        url: str,
+        params: dict[str, str],
+        label: str,
+        records_key: str = "results",
+        *,
+        start_cursor: str = "",
+        timeout: int = DEFAULT_TIMEOUT,
+    ) -> Iterator[tuple[list[dict[str, Any]], str | None]]:
+        """Like ``cursor_paginate`` but yields whole pages with their resume token.
+
+        Yields ``(batch, next_cursor)`` per page, where ``next_cursor`` is the
+        opaque ``nextCursor`` to resume *after* this page (``None`` on the last
+        page). Lets a caller stop at a page boundary and persist ``next_cursor`` as
+        a durable resume point — the basis for resumable ``/assets`` ingest (the
+        cursor is an ID-keyset token, so resuming from it is exact). ``start_cursor``
+        begins pagination partway through (``""`` = first page).
+        """
+        page_params = dict(params)
+        page_params["cursor"] = start_cursor
+        while True:
+            body = api_get(session, url, page_params, label, timeout=timeout)
+            batch = body.get(records_key, []) or []
+            next_cursor = body.get("nextCursor")
+            # Normalize the "no more pages" signal to None.
+            if not next_cursor or not batch:
+                yield batch, None
+                break
+            yield batch, next_cursor
+            page_params["cursor"] = next_cursor
+
+
     def offset_paginate(
         session: requests.Session,
         url: str,
@@ -1031,13 +1064,30 @@ def register_lakeflow_source(spark):
             if table_options.get("community_id"):
                 base_params["communityId"] = table_options["community_id"]
 
+            # `/assets` is keyset-paginated by the sort field (LAST_MODIFIED is
+            # rejected 400), so records do NOT arrive in lastModifiedOn order and a
+            # count-based batch cap cannot safely advance the lastModifiedOn
+            # watermark. Two strategies:
+            #
+            #   * sort_field == "ID" (default, UNIQUE keyset): use the resumable
+            #     path — page by the opaque nextCursor (which is an `AFTER:id:`
+            #     keyset token), honor max_records_per_batch as a page-granular cap,
+            #     and only advance the lastModifiedOn watermark when a full id-pass
+            #     completes. This lets a run killed mid-collection (e.g. m2m token
+            #     expiry on a large full-load) resume from the last page instead of
+            #     restarting. See `_incremental_assets_resumable`.
+            #   * sort_field in {NAME, DISPLAY_NAME} (NON-unique): fall back to the
+            #     full-drain path (ignore the cap, drain the whole collection per
+            #     run bounded by _init_ts). A non-unique sort key can't be a safe
+            #     resume cursor, so we don't batch it.
+            if sort_field == "ID":
+                return self._incremental_assets_resumable(
+                    base_params, start_offset, table_options
+                )
+
             record_iter = cursor_paginate(
                 self._session, f"{self.base_url}/assets", base_params, "assets"
             )
-            # assets are ID-sorted (LAST_MODIFIED is rejected 400 on /assets), so
-            # records do NOT arrive in lastModifiedOn order — count-based batch
-            # truncation cannot safely advance the watermark. Drain the full
-            # collection per run (bounded by _init_ts); see _incremental_from_iter.
             return self._incremental_from_iter(
                 record_iter, start_offset, table_options, cursor_sorted=False
             )
@@ -1213,6 +1263,108 @@ def register_lakeflow_source(spark):
                 return iter(records), start_offset
 
             return iter(records), {"cursor": max_seen}
+
+        def _incremental_assets_resumable(
+            self,
+            base_params: dict[str, str],
+            start_offset: dict,
+            table_options: dict[str, str],
+        ) -> tuple[Iterator[dict], dict]:
+            """Resumable incremental read for the ID-sorted ``assets`` path.
+
+            ``/assets`` is keyset-paginated by ``id`` (its opaque ``nextCursor`` is
+            an ``AFTER:id:<id>`` token), but filtered incrementally on
+            ``lastModifiedOn``. Those are two independent dimensions, so we track
+            them separately in the offset:
+
+              * ``cursor``     — the committed ``lastModifiedOn`` watermark (floor).
+                                 Only advances when a full id-pass completes.
+              * ``page_token`` — the opaque nextCursor to resume an in-progress
+                                 id-pass. Absent ⇒ start a fresh pass.
+              * ``pass_ts``    — ``_init_ts`` frozen at the start of a pass, kept
+                                 across resumes so the pass sees one consistent
+                                 snapshot upper bound.
+
+            Per run we page by id from ``page_token`` (or the start), emitting rows
+            where ``cursor < lastModifiedOn <= pass_ts``. ``max_records_per_batch``
+            is a page-granular cap: once reached we stop at the page boundary and
+            persist ``page_token`` = that page's nextCursor, leaving the committed
+            watermark UNCHANGED (we haven't proven we've seen everything ≤ any given
+            lastModifiedOn yet). When pagination is exhausted the pass is complete —
+            we advance the committed watermark to ``pass_ts`` and clear
+            ``page_token``/``pass_ts`` so the next run starts a fresh pass from the
+            new floor. A run killed mid-pass (e.g. m2m token expiry) resumes from
+            the last committed ``page_token`` instead of restarting.
+
+            Progress within a pass is by id (the true sort key), so truncation never
+            skips a record; the watermark only moves after a provably complete pass,
+            so the next fresh pass's strict ``> committed`` filter can't skip an
+            un-emitted record.
+            """
+            start_offset = start_offset or {}
+            committed = self._as_cursor(start_offset.get("cursor"))
+            page_token = start_offset.get("page_token") or ""
+            # Freeze the snapshot boundary at pass start; keep it across resumes.
+            pass_ts = start_offset.get("pass_ts")
+            if not page_token or pass_ts is None:
+                # Fresh pass.
+                page_token = ""
+                pass_ts = self._init_ts
+            pass_ts = int(pass_ts)
+
+            # Already caught up: committed floor has reached the snapshot boundary
+            # and no pass is in flight — nothing new to emit, converge.
+            if not page_token and committed is not None and committed >= pass_ts:
+                return iter([]), {"cursor": committed}
+
+            max_records = self._parse_max_records(table_options)
+            url = f"{self.base_url}/assets"
+
+            records: list[dict[str, Any]] = []
+            next_page_token: str | None = None
+            pass_complete = True
+            for batch, next_cursor in cursor_paginate_pages(
+                self._session, url, base_params, "assets", start_cursor=page_token
+            ):
+                for raw in batch:
+                    cursor = self._as_cursor(raw.get("lastModifiedOn"))
+                    # Incremental window: (committed, pass_ts].
+                    if committed is not None and cursor is not None and cursor <= committed:
+                        continue
+                    if cursor is not None and cursor > pass_ts:
+                        continue
+                    records.append(self._shape_asset(raw))
+
+                # Page-granular cap: stop at this boundary, resume here next run.
+                # Only a page that has a real nextCursor can be a resume point; if
+                # next_cursor is None this was the last page (pass completes).
+                if (
+                    max_records is not None
+                    and len(records) >= max_records
+                    and next_cursor is not None
+                ):
+                    next_page_token = next_cursor
+                    pass_complete = False
+                    break
+            else:
+                # Iterator exhausted without hitting the cap ⇒ pass complete.
+                pass_complete = True
+
+            if pass_complete:
+                # Whole id-space scanned under one snapshot: safe to advance the
+                # committed watermark to the snapshot boundary and clear pass state.
+                new_committed = pass_ts if committed is None else max(committed, pass_ts)
+                end_offset = {"cursor": new_committed}
+            else:
+                # Mid-pass: hold the watermark, persist the id resume point + the
+                # frozen snapshot boundary.
+                end_offset = {
+                    "cursor": committed if committed is not None else 0,
+                    "page_token": next_page_token,
+                    "pass_ts": pass_ts,
+                }
+
+            return iter(records), end_offset
 
         # ------------------------------------------------------------------ #
         # Record shaping

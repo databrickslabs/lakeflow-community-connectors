@@ -258,18 +258,15 @@ def test_uc_injected_access_token_authenticates():
     assert sent == {"Bearer uc-injected-token"}  # every request carried it
 
 
-def test_auth_type_oauth2_retired_raises_actionable():
-    """``auth_type=oauth2`` (the old connector-side minting/refresh mode)
-    is retired: the curated error names the UC COMMUNITY OAuth connection,
-    the flow option, and the parameters the user must move to."""
+def test_auth_type_oauth2_missing_token_url_raises_actionable():
+    """``auth_type=oauth2`` mints the token itself, so it needs
+    ``oauth2_token_url``. Omitting it fails fast at session build with the
+    missing option named, not with an opaque error mid-request."""
     c = _make({"auth_type": "oauth2", "oauth2_client_id": "x", "oauth2_client_secret": "y"})
     with pytest.raises(ValueError) as ei:
         c._get_session()
     msg = str(ei.value)
-    assert "retired" in msg
-    assert "community_oauth_flow" in msg
-    assert "token_endpoint" in msg
-    assert "access_token" in msg
+    assert "oauth2_token_url" in msg
 
 
 @responses.activate
@@ -290,14 +287,14 @@ def test_uc_injected_token_401_names_the_connection_layer():
 
 
 def test_unknown_auth_type_names_static_modes_and_uc_oauth():
-    """The unknown-auth_type error lists the static modes and points at
-    the UC-managed OAuth alternative (oauth2 is gone from the list)."""
+    """The unknown-auth_type error lists every supported mode (including
+    connector-side oauth2) and points at the UC-managed OAuth alternative."""
     c = _make({"auth_type": "kerberos"})
     with pytest.raises(ValueError) as ei:
         c._get_session()
     msg = str(ei.value)
     assert "bearer" in msg and "basic" in msg and "api_key" in msg
-    assert "oauth2" not in msg
+    assert "oauth2" in msg
     assert "COMMUNITY OAuth connection" in msg
 
 
