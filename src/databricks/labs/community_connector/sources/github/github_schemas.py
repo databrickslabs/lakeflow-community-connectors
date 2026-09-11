@@ -392,6 +392,33 @@ REVIEWS_SCHEMA = StructType(
 )
 """Schema for the reviews table."""
 
+REPOSITORY_FILES_SCHEMA = StructType(
+    [
+        StructField("repository_owner", StringType(), False),
+        StructField("repository_name", StringType(), False),
+        StructField("path", StringType(), False),
+        StructField("ref", StringType(), True),
+        StructField("commit_sha", StringType(), True),
+        StructField("blob_sha", StringType(), True),
+        StructField("size", LongType(), True),
+        StructField("mode", StringType(), True),
+        StructField("encoding", StringType(), True),
+        StructField("is_binary", BooleanType(), True),
+        StructField("skipped_reason", StringType(), True),
+        StructField("content", StringType(), True),
+        StructField("content_base64", StringType(), True),
+        StructField("html_url", StringType(), True),
+        StructField("ingested_at", StringType(), True),
+    ]
+)
+"""Schema for the repository_files table (source code contents at a ref).
+
+Read-only: populated entirely from GitHub GET endpoints (Git trees + blobs),
+so a fine-grained PAT with only ``Contents: Read`` (plus mandatory
+``Metadata: Read``) is sufficient. ``content`` holds decoded UTF-8 text for
+text files; binary files have ``content = null`` and ``is_binary = true``.
+"""
+
 
 # =============================================================================
 # Schema Mapping
@@ -410,6 +437,7 @@ TABLE_SCHEMAS: dict[str, StructType] = {
     "collaborators": COLLABORATORS_SCHEMA,
     "branches": BRANCHES_SCHEMA,
     "reviews": REVIEWS_SCHEMA,
+    "repository_files": REPOSITORY_FILES_SCHEMA,
 }
 """Mapping of table names to their StructType schemas."""
 
@@ -469,6 +497,10 @@ TABLE_METADATA: dict[str, dict] = {
     "reviews": {
         "primary_keys": ["id"],
         "ingestion_type": "append",
+    },
+    "repository_files": {
+        "primary_keys": ["repository_owner", "repository_name", "path"],
+        "ingestion_type": "snapshot",
     },
 }
 """Metadata for each table including primary keys, cursor field, and ingestion type."""

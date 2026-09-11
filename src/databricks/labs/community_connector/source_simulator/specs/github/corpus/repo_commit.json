@@ -1,0 +1,9 @@
+{
+  "sha": "c0ffee1234567890abcdef1234567890abcdef12",
+  "commit": {
+    "message": "seed commit",
+    "tree": {
+      "sha": "tree000000000000000000000000000000000000"
+    }
+  }
+}

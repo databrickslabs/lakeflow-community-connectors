@@ -8,9 +8,18 @@ This documentation describes how to configure and use the **GitHub** Lakeflow co
 - **GitHub account**: You need a GitHub user or service account with access to the repositories and organizations you want to read.
 - **Personal Access Token (PAT)**:
   - Must be created in GitHub and supplied to the connector as the `token` option.
-  - Minimum scopes:
-    - For public repositories only: `public_repo`
-    - For public + private repositories: `repo`
+  - This connector only issues **read (GET)** calls, so use a **fine-grained PAT** with **read-only** permissions, scoped to just the repositories you ingest. Do not use the classic `repo` scope: it grants full read+write control of private repositories.
+  - **Recommended fine-grained permissions (all read-only):**
+
+    | Fine-grained permission | Access | Needed for |
+    |---|---|---|
+    | Metadata | Read | Mandatory baseline (all tables) |
+    | Contents | Read | `repository_files`, `commits`, `branches`, repo listing |
+    | Issues | Read | `issues`, `comments` (only if ingested) |
+    | Pull requests | Read | `pull_requests`, `reviews` (only if ingested) |
+
+  - Repository access: choose **"Only select repositories"** and pick the subset you are allowed to read. The `collaborators`, `organizations`, and `teams` tables need extra org/admin read grants; omit them to keep the token minimal.
+  - **No write permission is required or used.** A read-only token satisfies the connector; a write call with such a token returns `403`.
 - **Network access**: The environment running the connector must be able to reach `https://api.github.com`.
 - **Lakeflow / Databricks environment**: A workspace where you can register a Lakeflow community connector and run ingestion pipelines.
 
@@ -70,6 +79,7 @@ The GitHub connector exposes a **static list** of tables:
 - `teams`
 - `users`
 - `reviews`
+- `repository_files`
 
 ### Object summary, primary keys, and ingestion mode
 
@@ -89,6 +99,7 @@ The connector defines the ingestion mode and primary key for each table:
 | `teams`         | Teams visible to the authenticated account/org       | `snapshot`     | `id` (64-bit integer)                                 | n/a                          |
 | `users`         | Authenticated user profile / user metadata           | `snapshot`     | `id` (64-bit integer)                                 | n/a                          |
 | `reviews`       | Pull request reviews per repository                  | `append`       | `id` (64-bit integer)                                 | n/a (append-only)           |
+| `repository_files` | Source code file contents at a ref (one row per file) | `snapshot` | `["repository_owner", "repository_name", "path"]`     | n/a                          |
 
 ## Table Configurations
 
@@ -133,6 +144,15 @@ Table-specific options are passed via the pipeline spec under `table_configurati
 - **`reviews`**:
   - `owner` / `repo` as above.
   - `pull_number` (integer, optional): If provided, restricts the read to a specific pull request; if omitted, the connector will iterate through PRs and combine reviews into a single logical table.
+- **`repository_files`** (source code contents, read-only):
+  - `owner` / `repo` (required).
+  - `ref` (string, optional): Branch, tag, or commit sha. Defaults to the repository's default branch.
+  - `include_extensions` (string, optional): Comma-separated extensions to include, e.g. `"py,java,ts"` (leading dot optional).
+  - `include_globs` / `exclude_globs` (string, optional): Comma-separated `fnmatch` patterns. Excludes always win. Note `*` also matches `/`.
+  - `max_file_bytes` (integer, optional): Files larger than this are skipped (default `1000000`). A skipped file still emits a metadata row with `content = null` and `skipped_reason = "size_exceeds_max_file_bytes"`.
+  - `include_binary` (boolean, optional): `"true"` keeps binary files as base64 in `content_base64` (default `false`; binary files otherwise have null content and `skipped_reason = "binary_excluded"`).
+  - `max_records_per_batch` (integer, optional): When set, the read is split into deterministic index-based batches; when unset, all matching files return in one batch.
+  - Only the read endpoints `GET /repos/{owner}/{repo}` (default branch), `GET /repos/{owner}/{repo}/commits/{ref}`, `GET /repos/{owner}/{repo}/git/trees/{sha}?recursive=1`, and `GET /repos/{owner}/{repo}/git/blobs/{sha}` are used, all covered by `Contents: Read`.
 
 For metadata tables (`users`, `organizations`, `teams`), no additional table options are required in the initial implementation.
 
@@ -219,6 +239,19 @@ Example `pipeline_spec` snippet for a single repository:
             "owner": "my-org-or-user",
             "repo": "my-repo",
             "start_date": "2024-01-01T00:00:00Z"
+          }
+        }
+      },
+      {
+        "table": {
+          "source_table": "repository_files",
+          "table_configuration": {
+            "owner": "my-org-or-user",
+            "repo": "my-repo",
+            "ref": "main",
+            "include_extensions": "py,java,ts,go",
+            "exclude_globs": "**/vendor/**,**/node_modules/**,*.min.js",
+            "max_file_bytes": "1000000"
           }
         }
       }
