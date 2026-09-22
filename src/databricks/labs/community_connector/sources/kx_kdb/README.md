@@ -4,7 +4,7 @@ Ingest immutable, splayed KDB+ HDB tables from a Unity Catalog Volume into
 Delta streaming tables. The connector reads HDB files locally through PyKX;
 it does not require a running q process.
 
-![KX KDB HDB connector](kx_kdb.svg)
+![KX KDB HDB connector](kx_kdb.png)
 
 ## Capabilities
 
