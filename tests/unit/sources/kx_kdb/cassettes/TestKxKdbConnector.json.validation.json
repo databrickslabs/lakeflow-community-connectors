@@ -1,0 +1,26 @@
+{
+  "version": 1,
+  "generated_at": "2026-09-22T11:49:55Z",
+  "endpoints": [],
+  "summary": {
+    "status": "clean",
+    "source_kind": "filesystem",
+    "validation_mode": "record_contract_plus_licensed_managed_e2e",
+    "endpoints_total": 0,
+    "endpoints_validated": 0,
+    "endpoints_mismatched": 0,
+    "endpoints_missing_spec": 0,
+    "record_mode_tests_passed": 18,
+    "record_mode_tests_skipped": 5,
+    "managed_update_status": "COMPLETED",
+    "rows": 200767,
+    "min_date": "2008.01.01",
+    "max_date": "2023.12.30",
+    "initialization_seconds": 68.1
+  },
+  "notes": [
+    "KX KDB HDB is a filesystem source and makes no HTTP requests.",
+    "Record mode exercises the deterministic temporary HDB contract.",
+    "Licensed managed validation exercises the production PyKX/KDB-X path."
+  ]
+}
