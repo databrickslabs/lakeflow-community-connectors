@@ -1,23 +1,27 @@
 # Lakeflow MongoDB Community Connector
 
+**Instalación en minutos:** [QUICKSTART.md](QUICKSTART.md) — clonar, CLI, conexión UC y pipeline **solo con un YAML**.
+
+**Playbook para IA / cliente:** [AI_INGESTION_PLAYBOOK.md](AI_INGESTION_PLAYBOOK.md) — la IA pregunta solo los valores dinámicos y crea el pipeline.
+
 This documentation provides setup instructions and reference information for the MongoDB source connector.
 
-The Lakeflow MongoDB Connector extracts data from MongoDB (including MongoDB Atlas) collections and loads it into Databricks. It supports **snapshot** (full-refresh) ingestion and, per collection, **CDC** (incremental) ingestion driven by a monotonic cursor field.
+The Lakeflow MongoDB Connector extracts data from MongoDB (including MongoDB Atlas) collections and loads it into Databricks. Every collection is ingested through **change streams**: the first trigger dumps existing documents, then later triggers watch the oplog for inserts, updates, replaces and deletes. Each document is stored as **VARIANT**.
 
 ## Features
 
 - **Automatic collection discovery**: Every user collection in the configured database is exposed as an ingestible table.
-- **Schema-stable envelope**: Each document is emitted as `_id` and a VARIANT `document`, so heterogeneous collections keep a stable Spark schema.
-- **Nested data preservation**: MongoDB arrays and nested objects remain queryable inside `document`. BSON-only types such as `ObjectId`, `Decimal128`, dates and binary data use MongoDB Extended JSON (Relaxed mode) representations.
-- **Snapshot or incremental (CDC)**: Choose per collection. Snapshot is the default; setting `cursor_field` switches a collection to incremental reads.
-- **Atlas ready**: Uses the official PyMongo driver with SRV connection strings.
+- **Schema-stable envelope**: Each document is emitted as `_id`, `document` (VARIANT) and `event_time`, so heterogeneous collections keep a stable Spark schema.
+- **BSON preservation**: Documents are serialised as MongoDB Extended JSON (Relaxed mode) and stored as VARIANT, preserving BSON types such as `ObjectId`, `Decimal128`, dates and binary data.
+- **Change-stream CDC with deletes**: `cdc_with_deletes` on every collection. Inserts, updates and replaces are emitted even when `_id` does not change; deletes are applied from a separate flow.
+- **Atlas ready**: Uses the official PyMongo driver with SRV connection strings. Requires a replica set or Atlas cluster.
 
 
 
 ## Prerequisites
 
-- A MongoDB deployment (self-managed or MongoDB Atlas).
-- A database user with read access to the target database.
+- A MongoDB replica set or MongoDB Atlas cluster (standalone `mongod` is not supported).
+- A database user with `find` and `changeStream` on the target database.
 - Network access from Databricks to the MongoDB cluster. For Atlas, add the appropriate IP access list entry (or private endpoint) so Databricks can connect.
 
 
@@ -36,18 +40,13 @@ The Lakeflow MongoDB Connector extracts data from MongoDB (including MongoDB Atl
 
 
 
-
 ### Table Options
 
 
-| Option                  | Required | Description                                                                                                                                                   | Default     |
-| ----------------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------- |
-| `batch_size`            | No       | Number of documents PyMongo fetches per network round-trip. `0` uses the driver default.                                                                      | `0`         |
-| `cursor_field`          | No       | Top-level document field used as the incremental cursor. When set, the collection is ingested in **CDC** mode; otherwise it is a snapshot.                    | (unset)     |
-| `cursor_type`           | No       | Type of the cursor field: `timestamp` (BSON date) or `objectid` (`ObjectId`, e.g. `_id`).                                                                     | `timestamp` |
-| `max_records_per_batch` | No       | Maximum documents returned per incremental read (microbatch size). CDC only.                                                                                  | `1000`      |
-| `start_timestamp`       | No       | Lower bound for the first CDC read when no offset exists yet. For `timestamp` cursors use an ISO-8601 value; for `objectid` cursors an `ObjectId` hex string. | (unset)     |
-
+| Option                  | Required | Description                                                                                              | Default |
+| ----------------------- | -------- | -------------------------------------------------------------------------------------------------------- | ------- |
+| `batch_size`            | No       | Number of documents PyMongo fetches per network round-trip. `0` uses the driver default.                 | `0`     |
+| `max_records_per_batch` | No       | Maximum documents or change events returned per incremental read (microbatch size).                      | `1000`  |
 
 
 
@@ -67,46 +66,40 @@ For MongoDB Atlas:
 Each collection produces rows with the following schema:
 
 
-| Column           | Type                | Description                                                                                                                                                              |
-| ---------------- | ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `_id`            | string              | The document's `_id` rendered as a stable string.                                                                                                                        |
-| `document`       | variant             | The full document as VARIANT. Arrays and nested objects remain native; BSON-only scalar types use MongoDB Extended JSON representations.                                |
-| `<cursor_field>` | timestamp or string | CDC only: the cursor field surfaced as its own typed column (`timestamp` for `cursor_type=timestamp`, `string` for `objectid`). Omitted when the cursor is `_id` itself. |
+| Column       | Type      | Description                                                                                          |
+| ------------ | --------- | ---------------------------------------------------------------------------------------------------- |
+| `_id`        | string    | The document's `_id` rendered as a stable string.                                                    |
+| `document`   | variant   | The full document as VARIANT (from MongoDB Extended JSON, Relaxed mode). Null on delete rows.        |
+| `event_time` | timestamp | `clusterTime` of the oplog event, used as `sequence_by` for SCD2. Bootstrap rows use connector init. |
 
 
-The primary key is always `_id`.
+The primary key is always `_id`. The ingestion type is always `cdc_with_deletes`.
 
-Access individual fields with VARIANT path expressions, for example
-`document:name` or `document:tags`. Traverse array fields with VARIANT
-functions such as `variant_explode`.
+Query nested fields with VARIANT accessors, for example `document:name` or `document:_id:$oid`.
 
-## Ingestion Modes
+## Ingestion
 
 
+Leave this spec in place and schedule the pipeline. The first trigger dumps the collection; later triggers only watch. A ready-to-run SDP notebook is [sample-ingest-change-stream.py](sample-ingest-change-stream.py).
 
-### Snapshot (default)
+```json
+"table_configuration": {
+  "scd_type": "SCD_TYPE_2"
+}
+```
 
-Without `cursor_field`, the ingestion type is `snapshot`: the full collection is read on every trigger and the destination table is fully refreshed.
+Behaviour:
 
-### CDC (incremental)
-
-Set `cursor_field` (and `cursor_type` if the field is not a timestamp) to ingest a collection incrementally. Each trigger reads only documents whose cursor value is greater than the last checkpoint, ordered ascending, in microbatches of `max_records_per_batch`. Rows are upserted by `_id`.
-
-Requirements and behaviour:
-
-- **Monotonic cursor**: the field must only increase over time (e.g. an `updated_at` timestamp bumped on every write, or an `ObjectId` such as `_id`). A non-monotonic field will skip data.
-- **Index required**: create an index on the cursor field. The connector sorts by it, and MongoDB aborts in-memory sorts larger than 32 MB without an index.
-- **Cursor type must match the BSON type** stored in the documents. A `timestamp` cursor will not match a field stored as a string.
-- **Deletes are not tracked** in this version.
-- Documents that lack the cursor field are not ingested in CDC mode.
-- Data written after a trigger starts is picked up by the next trigger.
-
+- **First run (bootstrap):** open `watch()`, capture a resume token, then scan the collection in `_id` pages of `max_records_per_batch`. Dump rows use `event_time` = connector init time so later oplog events sort after them in SCD2.
+- **Later runs:** offset is `{"resume_token": "<Extended JSON>"}` and only the oplog is read.
+- Bootstrap offset (while paging): `{"phase": "bootstrap", "resume_token": "...", "snapshot_id": "<_id Extended JSON>"}`.
+- `event_time` (from `clusterTime` on stream events) is the sequencing column for `apply_changes`.
+- Events with `clusterTime` after connector init are left for the next trigger (AvailableNow).
+- Invalidating events (`drop`, `rename`, `invalidate`) and stale resume tokens fail the pipeline; full-refresh to recover.
+- Delete rows contain `_id` and `event_time` only (`document` is null). Pre-images are not required. Deletes are not part of the dump.
 
 
 ## Limitations
 
-- No delete tracking (no `cdc_with_deletes` / change streams yet).
-- Snapshot mode reads the full collection on every trigger.
-- Nested fields are not flattened into columns; they remain inside the `document` VARIANT.
-- The connector requires a Databricks Runtime with Spark `VariantType` support.
-
+- Change streams require a replica set / Atlas and only see events still in the oplog window after bootstrap.
+- Nested fields are not flattened into columns; they remain inside `document`.

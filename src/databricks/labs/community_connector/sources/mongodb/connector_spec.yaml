@@ -19,4 +19,4 @@ connection:
       description: >
         Name of the MongoDB database to read collections from.
 
-external_options_allowlist: "batch_size,cursor_field,cursor_type,max_records_per_batch,start_timestamp"
+external_options_allowlist: "batch_size,max_records_per_batch"
