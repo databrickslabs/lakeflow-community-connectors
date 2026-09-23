@@ -85,7 +85,13 @@ class PiWebApiClient:
                 self.base_url = scheme_host.rstrip("/")
 
         self.session = requests.Session()
-        self.session.headers.update({"Accept": "application/json"})
+        # PI Web API rejects POST /piwebapi/batch with 403 when CSRF defense is
+        # enabled (EnableCSRFDefense=true, the default on many installs) unless the
+        # request identifies itself as an XHR. Sending X-Requested-With on every
+        # call keeps the batch endpoints working without disabling server security.
+        self.session.headers.update(
+            {"Accept": "application/json", "X-Requested-With": "XMLHttpRequest"}
+        )
         self.verify_ssl = as_bool(options.get("verify_ssl"), default=True)
         self._auth_resolved = False
 
