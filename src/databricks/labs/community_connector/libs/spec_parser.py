@@ -19,6 +19,7 @@ SCD_TYPE = "scd_type"
 PRIMARY_KEYS = "primary_keys"
 SEQUENCE_BY = "sequence_by"
 CLUSTER_BY = "cluster_by"
+TRACK_HISTORY_COLUMN_LIST = "track_history_column_list"
 
 # Valid SCD type values
 SCD_TYPE_1 = "SCD_TYPE_1"
@@ -187,7 +188,8 @@ class SpecParser:
 
         Returns:
             A dictionary mapping each source table name to its configuration.
-            Each configuration excludes special keys: scd_type, primary_keys, sequence_by.
+            Each configuration excludes special keys: scd_type, primary_keys, sequence_by,
+            cluster_by, track_history_column_list.
         """
         return {
             table_name: self.get_table_configuration(table_name)
@@ -198,13 +200,20 @@ class SpecParser:
         """
         Return the configuration for a specific table.
 
-        Excludes special keys: scd_type, primary_keys, sequence_by.
+        Excludes special keys: scd_type, primary_keys, sequence_by, cluster_by,
+        track_history_column_list.
         Use dedicated methods to retrieve these values.
 
         Returns:
             A dictionary containing the table configuration without special keys.
         """
-        special_keys = {SCD_TYPE, PRIMARY_KEYS, SEQUENCE_BY, CLUSTER_BY}
+        special_keys = {
+            SCD_TYPE,
+            PRIMARY_KEYS,
+            SEQUENCE_BY,
+            CLUSTER_BY,
+            TRACK_HISTORY_COLUMN_LIST,
+        }
         for obj in self._model.objects:
             if obj.table.source_table == table_name:
                 config = obj.table.table_configuration or {}
@@ -324,6 +333,45 @@ class SpecParser:
         if "," in stripped:
             return [item.strip() for item in stripped.split(",") if item.strip()]
         return [stripped]
+
+    def get_track_history_column_list(self, table_name: str) -> Optional[List[str]]:
+        """Return AUTO CDC Type 2 history columns for a specific table.
+
+        When set, ``apply_changes`` compares only these columns to decide
+        whether to open a new SCD2 version. Destination-side only; not
+        forwarded to the source connector.
+
+        Args:
+            table_name: The name of the table.
+
+        Returns:
+            A list of column names, or None if not specified. Accepts a JSON
+            array string, a comma-separated string, a plain string (single
+            column), or a list in the spec.
+        """
+        value: Any = None
+        for obj in self._model.objects:
+            if obj.table.source_table == table_name:
+                value = (obj.table.table_configuration or {}).get(TRACK_HISTORY_COLUMN_LIST)
+                break
+
+        if value is None:
+            return None
+        if isinstance(value, list):
+            parsed = [str(v) for v in value]
+        elif not isinstance(value, str):
+            parsed = [str(value)]
+        else:
+            stripped = value.strip()
+            if not stripped:
+                return None
+            if stripped.startswith("["):
+                parsed = [str(v) for v in json.loads(stripped)]
+            elif "," in stripped:
+                parsed = [item.strip() for item in stripped.split(",") if item.strip()]
+            else:
+                parsed = [stripped]
+        return parsed or None
 
     def get_full_destination_table_name(self, table_name: str) -> str:
         """

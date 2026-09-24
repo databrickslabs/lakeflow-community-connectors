@@ -71,8 +71,7 @@ def _decode_list_of_str_option(option_name: str, value: str | None) -> list[str]
         ) from e
     if not isinstance(decoded, list) or not all(isinstance(s, str) for s in decoded):
         raise ValueError(
-            f"option '{option_name}' must be a JSON-encoded list[str]; "
-            f"got: {decoded!r}"
+            f"option '{option_name}' must be a JSON-encoded list[str]; got: {decoded!r}"
         )
     return decoded
 
@@ -85,13 +84,10 @@ def _decode_dict_option(option_name: str, value: str | None) -> dict:
         decoded = json.loads(value)
     except json.JSONDecodeError as e:
         raise ValueError(
-            f"option '{option_name}' must be a JSON-encoded dict; "
-            f"got non-JSON value: {value!r}"
+            f"option '{option_name}' must be a JSON-encoded dict; got non-JSON value: {value!r}"
         ) from e
     if not isinstance(decoded, dict):
-        raise ValueError(
-            f"option '{option_name}' must be a JSON-encoded dict; got: {decoded!r}"
-        )
+        raise ValueError(f"option '{option_name}' must be a JSON-encoded dict; got: {decoded!r}")
     return decoded
 
 
@@ -122,9 +118,7 @@ class LakeflowStreamReader(SimpleDataSourceStreamReader, SupportsTriggerAvailabl
     def read(self, start: dict) -> (Iterator[tuple], dict):
         is_delete_flow = self.options.get(IS_DELETE_FLOW) == "true"
         # Strip delete flow options before passing to connector
-        table_options = {
-            k: v for k, v in self.options.items() if k != IS_DELETE_FLOW
-        }
+        table_options = {k: v for k, v in self.options.items() if k != IS_DELETE_FLOW}
 
         if is_delete_flow:
             records, offset = self.lakeflow_connect.read_table_deletes(
@@ -188,9 +182,7 @@ class LakeflowPartitionedStreamReader(DataSourceStreamReader, SupportsTriggerAva
                 f"got {type(limit).__name__}. Micro-batch sizing must be controlled "
                 f"by the connector implementation (table_options), not the engine."
             )
-        return self.lakeflow_connect.latest_offset(
-            self.table_name, self.table_options, start
-        )
+        return self.lakeflow_connect.latest_offset(self.table_name, self.table_options, start)
 
     def partitions(self, start: dict, end: dict):
         partition_descs = self.lakeflow_connect.get_partitions(
@@ -251,12 +243,10 @@ class LakeflowBatchReader(DataSourceReader):
         return map(lambda x: parse_value(x, self.schema), records)
 
     def _read_table_metadata(self):
-        table_names = _decode_list_of_str_option(
-            TABLE_NAME_LIST, self.options.get(TABLE_NAME_LIST)
-        ) or []
-        table_configs = _decode_dict_option(
-            TABLE_CONFIGS, self.options.get(TABLE_CONFIGS)
+        table_names = (
+            _decode_list_of_str_option(TABLE_NAME_LIST, self.options.get(TABLE_NAME_LIST)) or []
         )
+        table_configs = _decode_dict_option(TABLE_CONFIGS, self.options.get(TABLE_CONFIGS))
         all_records = []
         # Preserve caller-supplied table order — caller controls it.
         for table in table_names:
@@ -270,9 +260,7 @@ class LakeflowBatchReader(DataSourceReader):
         # Connectors without SupportsNamespaces are flat — no rows.
         if not isinstance(self.lakeflow_connect, SupportsNamespaces):
             return []
-        prefix = _decode_list_of_str_option(
-            NAMESPACE_PREFIX, self.options.get(NAMESPACE_PREFIX)
-        )
+        prefix = _decode_list_of_str_option(NAMESPACE_PREFIX, self.options.get(NAMESPACE_PREFIX))
         namespaces = self.lakeflow_connect.list_namespaces(prefix)
         # Sort framework-side for deterministic output regardless of
         # connector iteration order.
@@ -289,14 +277,9 @@ class LakeflowBatchReader(DataSourceReader):
                     f"(use '[]' for root-level tables; walk the tree via "
                     f"'{NAMESPACES_TABLE}' to enumerate every namespace)."
                 )
-            namespace = _decode_list_of_str_option(
-                NAMESPACE, self.options[NAMESPACE]
-            )
+            namespace = _decode_list_of_str_option(NAMESPACE, self.options[NAMESPACE])
             tables = self.lakeflow_connect.list_tables_in_namespace(namespace)
-            return [
-                {"namespace": namespace, TABLE_NAME: tn}
-                for tn in sorted(tables)
-            ]
+            return [{"namespace": namespace, TABLE_NAME: tn} for tn in sorted(tables)]
         # Flat connector path. Reject a stray `namespace` option — the
         # caller probably mistook this connector for namespace-aware and
         # silently ignoring the option would mask the bug.
@@ -307,8 +290,7 @@ class LakeflowBatchReader(DataSourceReader):
                 f"or use a namespace-aware connector."
             )
         return [
-            {"namespace": [], TABLE_NAME: tn}
-            for tn in sorted(self.lakeflow_connect.list_tables())
+            {"namespace": [], TABLE_NAME: tn} for tn in sorted(self.lakeflow_connect.list_tables())
         ]
 
 
@@ -374,6 +356,7 @@ class LakeflowSource(DataSource):
                     StructField("primary_keys", ArrayType(StringType()), True),
                     StructField("cursor_field", StringType(), True),
                     StructField("ingestion_type", StringType(), True),
+                    StructField("track_history_columns", ArrayType(StringType()), True),
                 ]
             )
         if table == NAMESPACES_TABLE:

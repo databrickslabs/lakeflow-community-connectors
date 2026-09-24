@@ -794,9 +794,7 @@ class TestDestinationTable:
             call_kwargs = mock_sdp.apply_changes.call_args[1]
             assert call_kwargs["target"] == "`my_catalog`.`my_schema`.`my_users`"
 
-    def test_destination_table_defaults_to_source_table(
-        self, mock_spark, base_metadata
-    ):
+    def test_destination_table_defaults_to_source_table(self, mock_spark, base_metadata):
         """Test that destination table defaults to source table name when not specified."""
         spec = {
             "connection_name": "test_connection",
@@ -967,6 +965,40 @@ class TestGetTableMetadataOptions:
         assert call_args[0] == "tableConfigs"
         passed_configs = json.loads(call_args[1])
         assert passed_configs == {"users": {}}
+
+    def test_get_table_metadata_copies_track_history_columns(self):
+        """Connector metadata track_history_columns is forwarded on SCD2."""
+        mock_spark = MagicMock()
+        mock_row = MagicMock()
+        mock_row.__getitem__ = lambda self, key: {
+            "tableName": "users",
+            "primary_keys": ["id"],
+            "cursor_field": "updated_at",
+            "ingestion_type": "cdc",
+            "track_history_columns": ["document_hash"],
+        }.get(key)
+        mock_df = MagicMock()
+        mock_df.collect.return_value = [mock_row]
+        read_chain = mock_spark.read.format.return_value.option.return_value.option.return_value
+        read_chain.option.return_value.option.return_value.load.return_value = mock_df
+
+        spec = {
+            "connection_name": "test_connection",
+            "objects": [
+                {
+                    "table": {
+                        "source_table": "users",
+                        "table_configuration": {"scd_type": "SCD_TYPE_2"},
+                    }
+                },
+            ],
+        }
+
+        ingest(mock_spark, spec)
+
+        kwargs = mock_sdp.apply_changes.call_args[1]
+        assert kwargs["stored_as_scd_type"] == "2"
+        assert kwargs["track_history_column_list"] == ["document_hash"]
 
 
 class TestTableConfigFiltering:
@@ -1322,3 +1354,234 @@ class TestClusterBy:
             passed_options = options_call.call_args[1]
             assert passed_options == {"regular_option": "value"}
             assert "cluster_by" not in passed_options
+
+
+class TestTrackHistoryColumnList:
+    """AUTO CDC Type 2 history columns: spec override, connector metadata, SCD1 skip."""
+
+    def test_scd1_does_not_pass_track_history_even_when_metadata_has_it(
+        self, mock_spark, base_metadata
+    ):
+        metadata = {
+            **base_metadata,
+            "users": {
+                **base_metadata["users"],
+                "track_history_columns": ["document_hash"],
+            },
+        }
+        spec = {
+            "connection_name": "test_connection",
+            "objects": [
+                {
+                    "table": {
+                        "source_table": "users",
+                        "table_configuration": {"scd_type": "SCD_TYPE_1"},
+                    }
+                }
+            ],
+        }
+
+        with patch(
+            "databricks.labs.community_connector.pipeline.ingestion_pipeline._get_table_metadata",
+            return_value=metadata,
+        ):
+            ingest(mock_spark, spec)
+
+            kwargs = mock_sdp.apply_changes.call_args[1]
+            assert kwargs["stored_as_scd_type"] == "1"
+            assert "track_history_column_list" not in kwargs
+
+    def test_scd2_passes_track_history_from_connector_metadata(self, mock_spark, base_metadata):
+        metadata = {
+            **base_metadata,
+            "users": {
+                **base_metadata["users"],
+                "track_history_columns": ["document_hash"],
+            },
+        }
+        spec = {
+            "connection_name": "test_connection",
+            "objects": [
+                {
+                    "table": {
+                        "source_table": "users",
+                        "table_configuration": {"scd_type": "SCD_TYPE_2"},
+                    }
+                }
+            ],
+        }
+
+        with patch(
+            "databricks.labs.community_connector.pipeline.ingestion_pipeline._get_table_metadata",
+            return_value=metadata,
+        ):
+            ingest(mock_spark, spec)
+
+            kwargs = mock_sdp.apply_changes.call_args[1]
+            assert kwargs["stored_as_scd_type"] == "2"
+            assert kwargs["track_history_column_list"] == ["document_hash"]
+
+    def test_scd2_without_history_list_keeps_default_kwargs(self, mock_spark, base_metadata):
+        spec = {
+            "connection_name": "test_connection",
+            "objects": [
+                {
+                    "table": {
+                        "source_table": "users",
+                        "table_configuration": {"scd_type": "SCD_TYPE_2"},
+                    }
+                }
+            ],
+        }
+
+        with patch(
+            "databricks.labs.community_connector.pipeline.ingestion_pipeline._get_table_metadata",
+            return_value=base_metadata,
+        ):
+            ingest(mock_spark, spec)
+
+            kwargs = mock_sdp.apply_changes.call_args[1]
+            assert kwargs["stored_as_scd_type"] == "2"
+            assert "track_history_column_list" not in kwargs
+
+    def test_spec_overrides_connector_metadata(self, mock_spark, base_metadata):
+        metadata = {
+            **base_metadata,
+            "users": {
+                **base_metadata["users"],
+                "track_history_columns": ["document_hash"],
+            },
+        }
+        spec = {
+            "connection_name": "test_connection",
+            "objects": [
+                {
+                    "table": {
+                        "source_table": "users",
+                        "table_configuration": {
+                            "scd_type": "SCD_TYPE_2",
+                            "track_history_column_list": ["custom_hash"],
+                        },
+                    }
+                }
+            ],
+        }
+
+        with patch(
+            "databricks.labs.community_connector.pipeline.ingestion_pipeline._get_table_metadata",
+            return_value=metadata,
+        ):
+            ingest(mock_spark, spec)
+
+            kwargs = mock_sdp.apply_changes.call_args[1]
+            assert kwargs["track_history_column_list"] == ["custom_hash"]
+
+    def test_cdc_with_deletes_scd2_passes_history_on_both_flows(self, mock_spark, base_metadata):
+        metadata = {
+            **base_metadata,
+            "contacts": {
+                **base_metadata["contacts"],
+                "track_history_columns": ["document_hash"],
+            },
+        }
+        spec = {
+            "connection_name": "test_connection",
+            "objects": [
+                {
+                    "table": {
+                        "source_table": "contacts",
+                        "table_configuration": {"scd_type": "SCD_TYPE_2"},
+                    }
+                }
+            ],
+        }
+
+        with patch(
+            "databricks.labs.community_connector.pipeline.ingestion_pipeline._get_table_metadata",
+            return_value=metadata,
+        ):
+            ingest(mock_spark, spec)
+
+            assert mock_sdp.apply_changes.call_count == 2
+            for call in mock_sdp.apply_changes.call_args_list:
+                kwargs = call[1]
+                assert kwargs["stored_as_scd_type"] == "2"
+                assert kwargs["track_history_column_list"] == ["document_hash"]
+
+    def test_snapshot_scd2_passes_track_history(self, mock_spark, base_metadata):
+        metadata = {
+            **base_metadata,
+            "orders": {
+                **base_metadata["orders"],
+                "track_history_columns": ["document_hash"],
+            },
+        }
+        spec = {
+            "connection_name": "test_connection",
+            "objects": [
+                {
+                    "table": {
+                        "source_table": "orders",
+                        "table_configuration": {"scd_type": "SCD_TYPE_2"},
+                    }
+                }
+            ],
+        }
+
+        with patch(
+            "databricks.labs.community_connector.pipeline.ingestion_pipeline._get_table_metadata",
+            return_value=metadata,
+        ):
+            ingest(mock_spark, spec)
+
+            kwargs = mock_sdp.apply_changes_from_snapshot.call_args[1]
+            assert kwargs["stored_as_scd_type"] == "2"
+            assert kwargs["track_history_column_list"] == ["document_hash"]
+
+    def test_track_history_is_stripped_from_source_options(self, base_metadata):
+        captured_view_funcs = []
+
+        def capture_view(name):
+            def decorator(f):
+                captured_view_funcs.append((name, f))
+                return f
+
+            return decorator
+
+        mock_sdp.view = MagicMock(side_effect=capture_view)
+
+        mock_spark = MagicMock()
+
+        spec = {
+            "connection_name": "test_connection",
+            "objects": [
+                {
+                    "table": {
+                        "source_table": "users",
+                        "table_configuration": {
+                            "scd_type": "SCD_TYPE_2",
+                            "track_history_column_list": ["document_hash"],
+                            "regular_option": "value",
+                        },
+                    }
+                }
+            ],
+        }
+
+        with patch(
+            "databricks.labs.community_connector.pipeline.ingestion_pipeline._get_table_metadata",
+            return_value=base_metadata,
+        ):
+            ingest(mock_spark, spec)
+
+            assert len(captured_view_funcs) == 1
+            _, view_func = captured_view_funcs[0]
+            view_func()
+
+            stream_chain = mock_spark.readStream.format.return_value.option.return_value
+            options_call = stream_chain.option.return_value.options
+            options_call.assert_called_once()
+            passed_options = options_call.call_args[1]
+            assert passed_options == {"regular_option": "value"}
+            assert "track_history_column_list" not in passed_options
+            assert "scd_type" not in passed_options

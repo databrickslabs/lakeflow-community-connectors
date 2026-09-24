@@ -278,6 +278,74 @@ def test_get_cluster_by_returns_none_when_not_specified():
     assert parser.get_cluster_by("unknown_table") is None
 
 
+@pytest.mark.parametrize(
+    "value,expected",
+    [
+        (["document_hash"], ["document_hash"]),
+        ("document_hash", ["document_hash"]),
+        ("document_hash,status", ["document_hash", "status"]),
+        (" document_hash , status ", ["document_hash", "status"]),
+        ('["document_hash"]', ["document_hash"]),
+    ],
+)
+def test_get_track_history_column_list_accepts_list_or_string(value, expected):
+    """track_history_column_list accepts list, string, CSV, or JSON-array string."""
+    spec = {
+        "connection_name": "test_conn",
+        "objects": [
+            {
+                "table": {
+                    "source_table": "test_table",
+                    "table_configuration": {"track_history_column_list": value},
+                }
+            },
+        ],
+    }
+    parser = SpecParser(spec)
+    assert parser.get_track_history_column_list("test_table") == expected
+
+
+def test_get_track_history_column_list_returns_none_when_not_specified():
+    spec = {
+        "connection_name": "test_conn",
+        "objects": [
+            {"table": {"source_table": "t1"}},
+            {
+                "table": {
+                    "source_table": "t2",
+                    "table_configuration": {"some_option": "v"},
+                }
+            },
+        ],
+    }
+    parser = SpecParser(spec)
+    assert parser.get_track_history_column_list("t1") is None
+    assert parser.get_track_history_column_list("t2") is None
+    assert parser.get_track_history_column_list("unknown_table") is None
+
+
+def test_track_history_column_list_is_stripped_from_table_configuration():
+    """track_history_column_list is destination-side and must not go to the source."""
+    spec = {
+        "connection_name": "test_conn",
+        "objects": [
+            {
+                "table": {
+                    "source_table": "test_table",
+                    "table_configuration": {
+                        "track_history_column_list": ["document_hash"],
+                        "some_option": "value",
+                    },
+                }
+            },
+        ],
+    }
+    parser = SpecParser(spec)
+    config = parser.get_table_configuration("test_table")
+    assert "track_history_column_list" not in config
+    assert config == {"some_option": "value"}
+
+
 def test_scd_type_validation_case_insensitive():
     """Test that SCD type is case-insensitive and normalized to uppercase."""
     spec = {

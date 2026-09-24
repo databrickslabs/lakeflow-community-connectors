@@ -10,6 +10,7 @@ real MongoDB / Atlas cluster by supplying credentials via
       pytest tests/unit/sources/mongodb/ -v
 """
 
+import hashlib
 from datetime import datetime, timezone
 from unittest.mock import MagicMock
 
@@ -17,7 +18,7 @@ import pytest
 from bson import ObjectId, json_util
 from bson.timestamp import Timestamp
 from pymongo.errors import OperationFailure
-from pyspark.sql.types import TimestampType, VariantType
+from pyspark.sql.types import StringType, TimestampType, VariantType
 
 from databricks.labs.community_connector.sources.mongodb.mongodb import (
     MongoDBLakeflowConnect,
@@ -156,13 +157,16 @@ class TestMongoDBChangeStream:
         assert metadata["ingestion_type"] == "cdc_with_deletes"
         assert metadata["primary_keys"] == ["_id"]
         assert metadata["cursor_field"] == "event_time"
+        assert metadata["track_history_columns"] == ["document_hash"]
 
         schema = connector.get_table_schema(_TABLE, _EMPTY_OPTS)
         names = schema.fieldNames()
-        assert names == ["_id", "document", "event_time"]
+        assert names == ["_id", "document", "event_time", "document_hash"]
         assert isinstance(schema["document"].dataType, VariantType)
         assert schema["document"].nullable is True
         assert isinstance(schema["event_time"].dataType, TimestampType)
+        assert isinstance(schema["document_hash"].dataType, StringType)
+        assert schema["document_hash"].nullable is True
 
     def test_removed_options_are_rejected(self):
         connector, _ = _connector()
@@ -184,6 +188,8 @@ class TestMongoDBChangeStream:
         assert rows[0]["_id"] == str(_OID)
         assert "updated" in rows[0]["document"]
         assert rows[0]["event_time"] is not None
+        assert rows[0]["document_hash"] is not None
+        assert len(rows[0]["document_hash"]) == 64
         assert offset == {"resume_token": _token_json(1)}
         collection.watch.assert_called_once()
         collection.find.assert_not_called()
@@ -203,6 +209,7 @@ class TestMongoDBChangeStream:
         assert len(rows) == 1
         assert rows[0]["_id"] == str(_OID)
         assert rows[0].get("document") is None
+        assert rows[0].get("document_hash") is None
         assert rows[0]["event_time"] is not None
         assert offset == {"resume_token": _token_json(2)}
         collection.find.assert_not_called()
@@ -269,6 +276,21 @@ class TestMongoDBChangeStream:
         with pytest.raises(ValueError, match="replica set"):
             connector.read_table(_TABLE, {}, _EMPTY_OPTS)
 
+    def test_document_hash_is_stable_for_same_bson(self):
+        connector, _ = _connector()
+        doc = {"_id": _OID, "name": "same", "n": 1}
+        first = connector._document_to_record(doc, _INIT)
+        later = connector._document_to_record(doc, datetime(2026, 7, 1, tzinfo=timezone.utc))
+        payload = json_util.dumps(doc, json_options=json_util.RELAXED_JSON_OPTIONS)
+        expected = hashlib.sha256(payload.encode("utf-8")).hexdigest()
+        assert first["document"] == payload
+        assert first["document_hash"] == expected
+        assert later["document_hash"] == expected
+        assert (
+            first["document_hash"]
+            != connector._document_to_record({"_id": _OID, "name": "other"}, _INIT)["document_hash"]
+        )
+
 
 class TestMongoDBChangeStreamBootstrap:
     def test_first_read_captures_token_then_dumps(self):
@@ -301,6 +323,7 @@ class TestMongoDBChangeStreamBootstrap:
         assert [r["_id"] for r in rows] == [str(oid_a), str(oid_b)]
         assert all("name" in r["document"] for r in rows)
         assert all(r["event_time"] == _INIT for r in rows)
+        assert all(r["document_hash"] for r in rows)
         assert offset == {"resume_token": _token_json(0)}
         assert "phase" not in offset
         assert order[0] == "watch"

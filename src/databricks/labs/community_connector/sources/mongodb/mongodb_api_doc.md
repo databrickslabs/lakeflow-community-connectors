@@ -61,7 +61,8 @@ are not supported.
 ## Schema and BSON handling
 
 - Envelope schema: `_id STRING`, `document VARIANT` (nullable),
-  `event_time TIMESTAMP`.
+  `event_time TIMESTAMP`, `document_hash STRING` (nullable SHA-256 of
+  the Relaxed Extended JSON payload; used as AUTO CDC Type 2 history).
 - `_id` is rendered with `str()` — for `ObjectId` this yields the 24-char
   hex string.
 - The full document is serialised with `bson.json_util.dumps` using
@@ -79,4 +80,6 @@ are not supported.
 - Change streams require a replica set / Atlas and only cover events
   still in the oplog after the first-run dump.
 - No nested-field flattening; nested data stays inside `document`.
+- VARIANT `document` is not comparable in AUTO CDC Type 2; use
+  `document_hash` via `track_history_column_list`.
 - No server-side projection; bootstrap scans the entire collection.

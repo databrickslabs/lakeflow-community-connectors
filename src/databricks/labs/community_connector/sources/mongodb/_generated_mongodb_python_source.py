@@ -13,13 +13,10 @@ from typing import (
     Iterator,
     Optional,
     Sequence,
+    TYPE_CHECKING,
 )
 import json
 
-from bson import json_util
-from bson.timestamp import Timestamp
-from pymongo import ASCENDING, MongoClient
-from pymongo.errors import OperationFailure, PyMongoError
 from pyspark.sql import Row
 from pyspark.sql.datasource import (
     DataSource,
@@ -49,6 +46,7 @@ from pyspark.sql.types import (
     VariantVal,
 )
 import base64
+import hashlib
 
 
 def register_lakeflow_source(spark):
@@ -600,6 +598,11 @@ def register_lakeflow_source(spark):
     # src/databricks/labs/community_connector/sources/mongodb/mongodb.py
     ########################################################
 
+    if TYPE_CHECKING:
+        from pymongo import MongoClient
+
+    # MongoDB stores internal collections under the ``system.*`` prefix; they
+    # are not user data and must not be surfaced as ingestible tables.
     _SYSTEM_COLLECTION_PREFIX = "system."
 
     # Connection timeouts (milliseconds). Always bounded so a misconfigured
@@ -612,6 +615,7 @@ def register_lakeflow_source(spark):
 
     _ID_FIELD = "_id"
     _DOCUMENT_FIELD = "document"
+    _DOCUMENT_HASH_FIELD = "document_hash"
     _EVENT_TIME_FIELD = "event_time"
     _RESUME_TOKEN_KEY = "resume_token"
     _PHASE_KEY = "phase"
@@ -666,7 +670,7 @@ def register_lakeflow_source(spark):
             # Trigger.AvailableNow.
             self._init_dt = datetime.now(timezone.utc)
 
-        def _client(self) -> MongoClient:
+        def _client(self) -> "MongoClient":
             """Create a new MongoClient.
 
             A fresh client is created per call rather than cached on the
@@ -675,6 +679,8 @@ def register_lakeflow_source(spark):
             sockets) is not picklable. Callers own the returned client's
             lifecycle and must close it.
             """
+            from pymongo import MongoClient
+
             return MongoClient(
                 self._connection_uri,
                 serverSelectionTimeoutMS=_SERVER_SELECTION_TIMEOUT_MS,
@@ -703,6 +709,7 @@ def register_lakeflow_source(spark):
                     StructField(_ID_FIELD, StringType(), False),
                     StructField(_DOCUMENT_FIELD, VariantType(), True),
                     StructField(_EVENT_TIME_FIELD, TimestampType(), False),
+                    StructField(_DOCUMENT_HASH_FIELD, StringType(), True),
                 ]
             )
 
@@ -714,6 +721,7 @@ def register_lakeflow_source(spark):
                 "primary_keys": [_ID_FIELD],
                 "cursor_field": _EVENT_TIME_FIELD,
                 "ingestion_type": "cdc_with_deletes",
+                "track_history_columns": [_DOCUMENT_HASH_FIELD],
             }
 
         def read_table(
@@ -752,6 +760,8 @@ def register_lakeflow_source(spark):
             lets AvailableNow terminate instead of blocking forever on
             ``watch()``.
             """
+            from pymongo.errors import OperationFailure, PyMongoError
+
             start_offset = start_offset or {}
             if self._is_bootstrap(start_offset, for_deletes):
                 return self._bootstrap_change_stream(table_name, start_offset, table_options)
@@ -845,6 +855,9 @@ def register_lakeflow_source(spark):
             The dump runs after this so updates during the scan are still in
             the oplog and are replayed once the offset becomes streaming-only.
             """
+            from bson.timestamp import Timestamp
+            from pymongo.errors import OperationFailure, PyMongoError
+
             watch_kwargs = {
                 "pipeline": [{"$match": {"operationType": {"$in": _UPSERT_OPERATION_TYPES}}}],
                 "max_await_time_ms": _CHANGE_STREAM_MAX_AWAIT_MS,
@@ -886,7 +899,7 @@ def register_lakeflow_source(spark):
             query: dict = {}
             if snapshot_id:
                 query = {_ID_FIELD: {"$gt": self._str_to_resume_token(snapshot_id)}}
-            db_cursor = collection.find(query).sort(_ID_FIELD, ASCENDING).limit(max_records)
+            db_cursor = collection.find(query).sort(_ID_FIELD, 1).limit(max_records)
             if batch_size:
                 db_cursor = db_cursor.batch_size(batch_size)
             records: list[dict] = []
@@ -947,6 +960,7 @@ def register_lakeflow_source(spark):
                     _ID_FIELD: str(key[_ID_FIELD]),
                     _DOCUMENT_FIELD: None,
                     _EVENT_TIME_FIELD: event_time,
+                    _DOCUMENT_HASH_FIELD: None,
                 }
             document = event.get("fullDocument")
             if not document:
@@ -955,21 +969,28 @@ def register_lakeflow_source(spark):
 
         def _document_to_record(self, document: dict, event_time: datetime) -> dict:
             """Convert a BSON document into an envelope record."""
+            from bson import json_util
+
             if _ID_FIELD not in document:
                 raise ValueError("Encountered a document without an '_id' field")
             # ``JSONOptions`` instances are not picklable, so the Relaxed options
             # are reached through the module at call time rather than bound to a
             # module-level constant that Spark would serialise with the connector.
             # The framework converts this Extended JSON string to VARIANT via
-            # ``VariantVal.parseJson``.
+            # ``VariantVal.parseJson``. ``document_hash`` is the comparable
+            # stand-in for SCD Type 2 (VARIANT cannot be compared with ``<=>``).
+            payload = json_util.dumps(document, json_options=json_util.RELAXED_JSON_OPTIONS)
             return {
                 _ID_FIELD: str(document[_ID_FIELD]),
-                _DOCUMENT_FIELD: json_util.dumps(document, json_options=json_util.RELAXED_JSON_OPTIONS),
+                _DOCUMENT_FIELD: payload,
                 _EVENT_TIME_FIELD: event_time,
+                _DOCUMENT_HASH_FIELD: hashlib.sha256(payload.encode("utf-8")).hexdigest(),
             }
 
-        def _change_stream_start_timestamp(self) -> Timestamp:
+        def _change_stream_start_timestamp(self):
             """BSON Timestamp for the first watch when no resume token exists."""
+            from bson.timestamp import Timestamp
+
             dt = self._init_dt
             if dt.tzinfo is None:
                 dt = dt.replace(tzinfo=timezone.utc)
@@ -978,6 +999,8 @@ def register_lakeflow_source(spark):
         @staticmethod
         def _cluster_time_to_datetime(value) -> Optional[datetime]:
             """Convert a change-event ``clusterTime`` to UTC datetime."""
+            from bson.timestamp import Timestamp
+
             if value is None:
                 return None
             if isinstance(value, datetime):
@@ -991,18 +1014,22 @@ def register_lakeflow_source(spark):
         @staticmethod
         def _token_to_str(token) -> str:
             """Serialise a resume token as Extended JSON."""
+            from bson import json_util
+
             return json_util.dumps(token, json_options=json_util.RELAXED_JSON_OPTIONS)
 
         @staticmethod
         def _str_to_resume_token(value: str):
             """Parse a checkpointed resume token back to BSON."""
+            from bson import json_util
+
             try:
                 return json_util.loads(value, json_options=json_util.RELAXED_JSON_OPTIONS)
             except (TypeError, ValueError) as exc:
                 raise ValueError(f"Invalid change-stream resume token: {value!r}") from exc
 
         @staticmethod
-        def _watch_failure(exc: OperationFailure) -> ValueError:
+        def _watch_failure(exc: Exception) -> ValueError:
             """Map a failed ``watch()`` to an actionable ValueError."""
             message = str(exc)
             if "replica set" in message.lower() or getattr(exc, "code", None) == 40573:
@@ -1025,8 +1052,9 @@ def register_lakeflow_source(spark):
                 "MongoDB table options "
                 + ", ".join(repr(name) for name in present)
                 + " are no longer supported. Every collection is ingested via "
-                "change streams into `_id`, `document` (VARIANT), and "
-                "`event_time`. Remove the option(s) from table_configuration."
+                "change streams into `_id`, `document` (VARIANT), "
+                "`event_time`, and `document_hash`. Remove the option(s) "
+                "from table_configuration."
             )
 
         @staticmethod
@@ -1099,8 +1127,7 @@ def register_lakeflow_source(spark):
             ) from e
         if not isinstance(decoded, list) or not all(isinstance(s, str) for s in decoded):
             raise ValueError(
-                f"option '{option_name}' must be a JSON-encoded list[str]; "
-                f"got: {decoded!r}"
+                f"option '{option_name}' must be a JSON-encoded list[str]; got: {decoded!r}"
             )
         return decoded
 
@@ -1113,13 +1140,10 @@ def register_lakeflow_source(spark):
             decoded = json.loads(value)
         except json.JSONDecodeError as e:
             raise ValueError(
-                f"option '{option_name}' must be a JSON-encoded dict; "
-                f"got non-JSON value: {value!r}"
+                f"option '{option_name}' must be a JSON-encoded dict; got non-JSON value: {value!r}"
             ) from e
         if not isinstance(decoded, dict):
-            raise ValueError(
-                f"option '{option_name}' must be a JSON-encoded dict; got: {decoded!r}"
-            )
+            raise ValueError(f"option '{option_name}' must be a JSON-encoded dict; got: {decoded!r}")
         return decoded
 
 
@@ -1150,9 +1174,7 @@ def register_lakeflow_source(spark):
         def read(self, start: dict) -> (Iterator[tuple], dict):
             is_delete_flow = self.options.get(IS_DELETE_FLOW) == "true"
             # Strip delete flow options before passing to connector
-            table_options = {
-                k: v for k, v in self.options.items() if k != IS_DELETE_FLOW
-            }
+            table_options = {k: v for k, v in self.options.items() if k != IS_DELETE_FLOW}
 
             if is_delete_flow:
                 records, offset = self.lakeflow_connect.read_table_deletes(
@@ -1216,9 +1238,7 @@ def register_lakeflow_source(spark):
                     f"got {type(limit).__name__}. Micro-batch sizing must be controlled "
                     f"by the connector implementation (table_options), not the engine."
                 )
-            return self.lakeflow_connect.latest_offset(
-                self.table_name, self.table_options, start
-            )
+            return self.lakeflow_connect.latest_offset(self.table_name, self.table_options, start)
 
         def partitions(self, start: dict, end: dict):
             partition_descs = self.lakeflow_connect.get_partitions(
@@ -1279,12 +1299,10 @@ def register_lakeflow_source(spark):
             return map(lambda x: parse_value(x, self.schema), records)
 
         def _read_table_metadata(self):
-            table_names = _decode_list_of_str_option(
-                TABLE_NAME_LIST, self.options.get(TABLE_NAME_LIST)
-            ) or []
-            table_configs = _decode_dict_option(
-                TABLE_CONFIGS, self.options.get(TABLE_CONFIGS)
+            table_names = (
+                _decode_list_of_str_option(TABLE_NAME_LIST, self.options.get(TABLE_NAME_LIST)) or []
             )
+            table_configs = _decode_dict_option(TABLE_CONFIGS, self.options.get(TABLE_CONFIGS))
             all_records = []
             # Preserve caller-supplied table order — caller controls it.
             for table in table_names:
@@ -1298,9 +1316,7 @@ def register_lakeflow_source(spark):
             # Connectors without SupportsNamespaces are flat — no rows.
             if not isinstance(self.lakeflow_connect, SupportsNamespaces):
                 return []
-            prefix = _decode_list_of_str_option(
-                NAMESPACE_PREFIX, self.options.get(NAMESPACE_PREFIX)
-            )
+            prefix = _decode_list_of_str_option(NAMESPACE_PREFIX, self.options.get(NAMESPACE_PREFIX))
             namespaces = self.lakeflow_connect.list_namespaces(prefix)
             # Sort framework-side for deterministic output regardless of
             # connector iteration order.
@@ -1317,14 +1333,9 @@ def register_lakeflow_source(spark):
                         f"(use '[]' for root-level tables; walk the tree via "
                         f"'{NAMESPACES_TABLE}' to enumerate every namespace)."
                     )
-                namespace = _decode_list_of_str_option(
-                    NAMESPACE, self.options[NAMESPACE]
-                )
+                namespace = _decode_list_of_str_option(NAMESPACE, self.options[NAMESPACE])
                 tables = self.lakeflow_connect.list_tables_in_namespace(namespace)
-                return [
-                    {"namespace": namespace, TABLE_NAME: tn}
-                    for tn in sorted(tables)
-                ]
+                return [{"namespace": namespace, TABLE_NAME: tn} for tn in sorted(tables)]
             # Flat connector path. Reject a stray `namespace` option — the
             # caller probably mistook this connector for namespace-aware and
             # silently ignoring the option would mask the bug.
@@ -1335,8 +1346,7 @@ def register_lakeflow_source(spark):
                     f"or use a namespace-aware connector."
                 )
             return [
-                {"namespace": [], TABLE_NAME: tn}
-                for tn in sorted(self.lakeflow_connect.list_tables())
+                {"namespace": [], TABLE_NAME: tn} for tn in sorted(self.lakeflow_connect.list_tables())
             ]
 
 
@@ -1402,6 +1412,7 @@ def register_lakeflow_source(spark):
                         StructField("primary_keys", ArrayType(StringType()), True),
                         StructField("cursor_field", StringType(), True),
                         StructField("ingestion_type", StringType(), True),
+                        StructField("track_history_columns", ArrayType(StringType()), True),
                     ]
                 )
             if table == NAMESPACES_TABLE:

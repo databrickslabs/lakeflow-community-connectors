@@ -20,6 +20,18 @@ class SdpTableConfig:  # pylint: disable=too-many-instance-attributes
     scd_type: str
     with_deletes: bool = False
     cluster_by: Optional[List[str]] = field(default=None)
+    track_history_column_list: Optional[List[str]] = field(default=None)
+
+
+def _track_history_kwargs(config: SdpTableConfig) -> dict:
+    """Kwargs for AUTO CDC Type 2 history comparison, if configured.
+
+    Type 1 ignores this list. Type 2 without a list keeps the default
+    (compare every non-key column), which fails when a payload is VARIANT.
+    """
+    if config.scd_type == "2" and config.track_history_column_list:
+        return {"track_history_column_list": config.track_history_column_list}
+    return {}
 
 
 def _create_streaming_table(config: SdpTableConfig) -> None:
@@ -35,9 +47,7 @@ def _build_view_name(source_table: str, flow_type: str) -> str:
     return f"source_{source_table}_{flow_type}"
 
 
-def _create_cdc_table(
-    spark, connection_name: str, config: SdpTableConfig
-) -> None:
+def _create_cdc_table(spark, connection_name: str, config: SdpTableConfig) -> None:
     """Create CDC table using streaming and apply_changes"""
 
     @sdp.view(name=config.view_name)
@@ -57,6 +67,7 @@ def _create_cdc_table(
         keys=config.primary_keys,
         sequence_by=col(config.sequence_by),
         stored_as_scd_type=config.scd_type,
+        **_track_history_kwargs(config),
     )
 
     if config.with_deletes:
@@ -81,6 +92,7 @@ def _create_cdc_table(
             stored_as_scd_type=config.scd_type,
             apply_as_deletes=expr("true"),
             name=delete_view_name + "_flow",
+            **_track_history_kwargs(config),
         )
 
 
@@ -103,6 +115,7 @@ def _create_snapshot_table(spark, connection_name: str, config: SdpTableConfig) 
         source=config.view_name,
         keys=config.primary_keys,
         stored_as_scd_type=config.scd_type,
+        **_track_history_kwargs(config),
     )
 
 
@@ -147,6 +160,12 @@ def _get_table_metadata(
             table_metadata["cursor_field"] = row["cursor_field"]
         if row["ingestion_type"] is not None:
             table_metadata["ingestion_type"] = row["ingestion_type"]
+        try:
+            track_history = row["track_history_columns"]
+        except (KeyError, ValueError, IndexError):
+            track_history = None
+        if track_history:
+            table_metadata["track_history_columns"] = list(track_history)
         metadata[row["tableName"]] = table_metadata
     return metadata
 
@@ -176,6 +195,9 @@ def ingest(spark, pipeline_spec: dict) -> None:
         primary_keys = spec.get_primary_keys(table) or primary_keys
         sequence_by = spec.get_sequence_by(table) or cursor_field
         cluster_by = spec.get_cluster_by(table)
+        track_history_column_list = spec.get_track_history_column_list(table)
+        if track_history_column_list is None:
+            track_history_column_list = metadata[table].get("track_history_columns")
         scd_type_raw = spec.get_scd_type(table)
         if scd_type_raw == "APPEND_ONLY":
             ingestion_type = "append"
@@ -199,14 +221,11 @@ def ingest(spark, pipeline_spec: dict) -> None:
             scd_type=scd_type,
             with_deletes=(ingestion_type == "cdc_with_deletes"),
             cluster_by=cluster_by,
+            track_history_column_list=track_history_column_list,
         )
 
         if ingestion_type in ("cdc", "cdc_with_deletes"):
-            _create_cdc_table(
-                spark,
-                connection_name,
-                config
-            )
+            _create_cdc_table(spark, connection_name, config)
         elif ingestion_type == "snapshot":
             _create_snapshot_table(spark, connection_name, config)
         elif ingestion_type == "append":

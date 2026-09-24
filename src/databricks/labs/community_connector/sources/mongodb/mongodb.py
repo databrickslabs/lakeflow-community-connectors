@@ -7,7 +7,9 @@ Each document is emitted through a stable envelope schema:
   Extended JSON (Relaxed mode) so BSON types such as ObjectId,
   Decimal128, dates and binary data are preserved.
 - ``event_time``: ``clusterTime`` of the oplog event (connector init
-  time for bootstrap rows), used as the sequencing key for SCD2.
+  time for bootstrap rows), used as ``sequence_by``.
+- ``document_hash``: SHA-256 of the Relaxed Extended JSON payload.
+  AUTO CDC Type 2 tracks this column instead of VARIANT ``document``.
 
 This keeps the Spark schema stable regardless of how heterogeneous the
 documents in a collection are, which is the common case in MongoDB.
@@ -20,6 +22,7 @@ returned from ``read_table_deletes``. Requires a replica set or Atlas
 cluster.
 """
 
+import hashlib
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Iterator, Optional
 
@@ -50,6 +53,7 @@ _DEFAULT_MAX_RECORDS_PER_BATCH = 1000
 
 _ID_FIELD = "_id"
 _DOCUMENT_FIELD = "document"
+_DOCUMENT_HASH_FIELD = "document_hash"
 _EVENT_TIME_FIELD = "event_time"
 _RESUME_TOKEN_KEY = "resume_token"
 _PHASE_KEY = "phase"
@@ -143,6 +147,7 @@ class MongoDBLakeflowConnect(LakeflowConnect):
                 StructField(_ID_FIELD, StringType(), False),
                 StructField(_DOCUMENT_FIELD, VariantType(), True),
                 StructField(_EVENT_TIME_FIELD, TimestampType(), False),
+                StructField(_DOCUMENT_HASH_FIELD, StringType(), True),
             ]
         )
 
@@ -154,6 +159,7 @@ class MongoDBLakeflowConnect(LakeflowConnect):
             "primary_keys": [_ID_FIELD],
             "cursor_field": _EVENT_TIME_FIELD,
             "ingestion_type": "cdc_with_deletes",
+            "track_history_columns": [_DOCUMENT_HASH_FIELD],
         }
 
     def read_table(
@@ -392,6 +398,7 @@ class MongoDBLakeflowConnect(LakeflowConnect):
                 _ID_FIELD: str(key[_ID_FIELD]),
                 _DOCUMENT_FIELD: None,
                 _EVENT_TIME_FIELD: event_time,
+                _DOCUMENT_HASH_FIELD: None,
             }
         document = event.get("fullDocument")
         if not document:
@@ -408,11 +415,14 @@ class MongoDBLakeflowConnect(LakeflowConnect):
         # are reached through the module at call time rather than bound to a
         # module-level constant that Spark would serialise with the connector.
         # The framework converts this Extended JSON string to VARIANT via
-        # ``VariantVal.parseJson``.
+        # ``VariantVal.parseJson``. ``document_hash`` is the comparable
+        # stand-in for SCD Type 2 (VARIANT cannot be compared with ``<=>``).
+        payload = json_util.dumps(document, json_options=json_util.RELAXED_JSON_OPTIONS)
         return {
             _ID_FIELD: str(document[_ID_FIELD]),
-            _DOCUMENT_FIELD: json_util.dumps(document, json_options=json_util.RELAXED_JSON_OPTIONS),
+            _DOCUMENT_FIELD: payload,
             _EVENT_TIME_FIELD: event_time,
+            _DOCUMENT_HASH_FIELD: hashlib.sha256(payload.encode("utf-8")).hexdigest(),
         }
 
     def _change_stream_start_timestamp(self):
@@ -480,8 +490,9 @@ class MongoDBLakeflowConnect(LakeflowConnect):
             "MongoDB table options "
             + ", ".join(repr(name) for name in present)
             + " are no longer supported. Every collection is ingested via "
-            "change streams into `_id`, `document` (VARIANT), and "
-            "`event_time`. Remove the option(s) from table_configuration."
+            "change streams into `_id`, `document` (VARIANT), "
+            "`event_time`, and `document_hash`. Remove the option(s) "
+            "from table_configuration."
         )
 
     @staticmethod
