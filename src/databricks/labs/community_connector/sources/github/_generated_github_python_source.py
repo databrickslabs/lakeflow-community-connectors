@@ -1609,12 +1609,18 @@ def register_lakeflow_source(spark):
             max_updated_at: str | None = None
 
             for issue in raw_issues:
+                updated_at = issue.get("updated_at")
+
+                # Skip rows at or below the stored cursor so a no-new-rows batch is
+                # empty and the offset advances.
+                if cursor and isinstance(updated_at, str) and updated_at <= cursor:
+                    continue
+
                 record: dict[str, Any] = dict(issue)
                 record["repository_owner"] = owner
                 record["repository_name"] = repo
                 records.append(record)
 
-                updated_at = record.get("updated_at")
                 if isinstance(updated_at, str):
                     if max_updated_at is None or updated_at > max_updated_at:
                         max_updated_at = updated_at
@@ -1723,12 +1729,19 @@ def register_lakeflow_source(spark):
             max_updated_at: str | None = None
 
             for pr in raw_prs:
+                updated_at = pr.get("updated_at")
+
+                # GET /pulls ignores `since`, so filter client-side: skip rows at or
+                # below the stored cursor so a no-new-rows batch is empty and the
+                # offset advances.
+                if cursor and isinstance(updated_at, str) and updated_at <= cursor:
+                    continue
+
                 record: dict[str, Any] = dict(pr)
                 record["repository_owner"] = owner
                 record["repository_name"] = repo
                 records.append(record)
 
-                updated_at = record.get("updated_at")
                 if isinstance(updated_at, str):
                     if max_updated_at is None or updated_at > max_updated_at:
                         max_updated_at = updated_at
@@ -1771,12 +1784,18 @@ def register_lakeflow_source(spark):
             max_updated_at: str | None = None
 
             for comment in raw_comments:
+                updated_at = comment.get("updated_at")
+
+                # Skip rows at or below the stored cursor so a no-new-rows batch is
+                # empty and the offset advances.
+                if cursor and isinstance(updated_at, str) and updated_at <= cursor:
+                    continue
+
                 record: dict[str, Any] = dict(comment)
                 record["repository_owner"] = owner
                 record["repository_name"] = repo
                 records.append(record)
 
-                updated_at = record.get("updated_at")
                 if isinstance(updated_at, str):
                     if max_updated_at is None or updated_at > max_updated_at:
                         max_updated_at = updated_at
@@ -2165,6 +2184,12 @@ def register_lakeflow_source(spark):
             max_records = pagination.max_records_per_batch
             records: list[dict[str, Any]] = []
 
+            # Append table with no per-record cursor: emit the full set once at a
+            # sentinel offset, then return empty so the stream terminates without
+            # re-emitting.
+            if start_offset and start_offset.get("cursor"):
+                return iter([]), start_offset
+
             def _fetch_reviews_for_pull(pull_number: int) -> None:
                 """Fetch reviews for a single pull request and append to records."""
                 url = f"{self.base_url}/repos/{owner}/{repo}/pulls/{pull_number}/reviews"
@@ -2191,7 +2216,8 @@ def register_lakeflow_source(spark):
                     ) from exc
 
                 _fetch_reviews_for_pull(pull_number_int)
-                return iter(records), {}
+                next_offset = {"cursor": self._init_time} if records else (start_offset or {})
+                return iter(records), next_offset
 
             pr_state = table_options.get("state", "all")
             url = f"{self.base_url}/repos/{owner}/{repo}/pulls"
@@ -2206,7 +2232,8 @@ def register_lakeflow_source(spark):
                 if isinstance(number, int):
                     _fetch_reviews_for_pull(number)
 
-            return iter(records), {}
+            next_offset = {"cursor": self._init_time} if records else (start_offset or {})
+            return iter(records), next_offset
 
         # ------------------------------------------------------------------
         # repository_files (source code contents)
