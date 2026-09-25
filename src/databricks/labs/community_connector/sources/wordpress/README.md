@@ -94,6 +94,8 @@ The connector defines the ingestion mode, primary key, and (where applicable) in
 - **`categories` / `tags` / `users` (`snapshot`)**: Terms and users have **no date/modified field at all**, so each sync does a full page-through. These are typically small.
 - **`taxonomies` (`snapshot`)**: A metadata dictionary keyed by taxonomy slug (`category`, `post_tag`, plus any custom taxonomies). The connector flattens `{slug: {...}}` into rows, promoting the dict key to a `slug` column (the primary key). Effectively static per site.
 
+**Timezone handling (`gmt_offset`):** the incremental cursor is tracked from the UTC `_gmt` fields, but WordPress's `after` / `before` / `modified_after` / `modified_before` filters compare against the **site-local** `post_date` / `post_modified` / `comment_date` columns. To keep query windows aligned on non-UTC sites, the connector reads the site's `gmt_offset` from `GET /wp-json/` at startup and shifts the query bounds into local wall-clock time (a UTC site needs no shift). `gmt_offset` is a fixed numeric offset that does **not** track daylight saving time, so a site on a DST-observing timezone can still be off by up to an hour for records near a DST transition — apply a small `lookback_seconds` to absorb this.
+
 ### Schema highlights
 
 Schemas are static per WordPress core and are defined by the connector. Only `context=view` (unauthenticated-safe) fields are modeled. **Edit-only** fields (`raw` bodies, `password`, user PII, comment `author_email` / `author_ip`), HATEOAS `_links`, and the free-form `meta` object are intentionally omitted because their shapes are install-specific.

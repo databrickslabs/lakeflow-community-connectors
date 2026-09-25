@@ -30,6 +30,9 @@ FATAL_STATUS_CODES = {401, 403}
 INVALID_PAGE_SUFFIX = "invalid_page_number"
 
 TS_FMT = "%Y-%m-%dT%H:%M:%SZ"
+# Site-local, timezone-naive format used for the REST date-query bounds (see
+# ``to_local_query_bound``).  Deliberately carries no ``Z`` suffix.
+LOCAL_TS_FMT = "%Y-%m-%dT%H:%M:%S"
 
 
 class WordPressError(RuntimeError):
@@ -200,3 +203,54 @@ def add_seconds(value: str, seconds: int) -> str:
     if dt is None:
         raise ValueError(f"{value!r} is not a valid ISO 8601 timestamp")
     return (dt + timedelta(seconds=seconds)).astimezone(timezone.utc).strftime(TS_FMT)
+
+
+# --------------------------------------------------------------------------- #
+# Site-local timezone handling
+# --------------------------------------------------------------------------- #
+#
+# WordPress's ``after`` / ``before`` / ``modified_after`` / ``modified_before``
+# REST filters compare against the *site-local* ``post_date`` / ``post_modified``
+# / ``comment_date`` columns, not their ``_gmt`` counterparts.  The connector
+# tracks its cursor from the ``_gmt`` (UTC) fields, so the query bounds must be
+# converted to the site's local wall-clock time before they are sent, or the
+# window is skewed by the site's UTC offset on non-UTC installs.
+
+
+def to_local_query_bound(utc_value: str, offset_seconds: int) -> str:
+    """Convert a UTC cursor bound to a site-local, timezone-naive ISO string.
+
+    Shifts ``utc_value`` by ``offset_seconds`` (the site's ``gmt_offset`` in
+    seconds) and emits it without a ``Z`` suffix.  A timezone-naive value is
+    interpreted in the site's local time by the REST date query, which is what
+    the local ``post_date`` / ``post_modified`` columns are stored in.
+    """
+    dt = parse_ts(utc_value)
+    if dt is None:
+        raise ValueError(f"{utc_value!r} is not a valid ISO 8601 timestamp")
+    return (dt + timedelta(seconds=offset_seconds)).strftime(LOCAL_TS_FMT)
+
+
+def fetch_gmt_offset_seconds(
+    session: requests.Session, wp_json_root_url: str, timeout: int = 30
+) -> int:
+    """Read the site's UTC offset (in whole seconds) from the WP REST index.
+
+    ``GET /wp-json/`` exposes a top-level ``gmt_offset`` (hours, possibly
+    fractional).  Returns the offset in seconds, or ``0`` when the value is
+    absent, unparseable, or the request fails — a UTC site needs no shift, and
+    ``0`` is a safe no-op default that preserves the connector's prior behavior.
+    """
+    try:
+        response = session.get(wp_json_root_url, timeout=timeout)
+        if response.status_code != 200:
+            return 0
+        body = response.json()
+    except (requests.RequestException, ValueError):
+        return 0
+    if not isinstance(body, dict):
+        return 0
+    try:
+        return int(round(float(body.get("gmt_offset")) * 3600))
+    except (TypeError, ValueError):
+        return 0

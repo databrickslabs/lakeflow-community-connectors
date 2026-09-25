@@ -25,3 +25,11 @@ class TestWordPressConnector(LakeflowConnectTests, SupportsPartitionedStreamTest
         "username": "simulator-user",
         "application_password": "simu lato rfak epas",
     }
+
+    def test_gmt_offset_resolved_to_zero_in_simulate_mode(self):
+        """The simulator serves ``GET /wp-json/`` with ``gmt_offset: 0``.
+
+        Also guards the wiring: a missing ``/wp-json/`` endpoint spec would make
+        the connector's init-time fetch raise and fail setup_class.
+        """
+        assert self.connector._gmt_offset_seconds == 0

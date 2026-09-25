@@ -30,6 +30,17 @@ and the upper bound is made inclusive at second precision by querying
 ``before = until + 1s``.  This guarantees every record falls in exactly one
 window — no gaps, no cross-partition duplicates.
 
+Timezone handling
+-----------------
+The cursor is tracked from the ``_gmt`` (UTC) fields, but WordPress's date
+filters (``after`` / ``before`` / ``modified_after`` / ``modified_before``)
+compare against the *site-local* ``post_date`` / ``post_modified`` /
+``comment_date`` columns.  The connector reads the site's ``gmt_offset`` from
+``GET /wp-json/`` at init and shifts the query bounds into local wall-clock
+time so ranges are not skewed on non-UTC installs.  ``gmt_offset`` is a fixed
+numeric offset (it does not track DST), so a site on a DST-observing named
+timezone may still be off by an hour for records near a DST transition.
+
 Snapshot tables have no incremental filter, so they fall back to
 ``read_table`` via ``is_partitioned() == False``.
 """
@@ -54,11 +65,13 @@ from databricks.labs.community_connector.sources.wordpress.wordpress_utils impor
     WordPressError,
     add_seconds,
     build_session,
+    fetch_gmt_offset_seconds,
     normalize_ts,
     now_utc_iso,
     paginate,
     parse_ts,
     request_with_retry,
+    to_local_query_bound,
 )
 
 # Lower bound used when neither a prior offset nor a user-supplied
@@ -109,10 +122,18 @@ class WordPressLakeflowConnect(LakeflowConnect, SupportsPartitionedStream):
         if root.endswith("/wp-json"):
             root = root[: -len("/wp-json")]
         self._api_base = f"{root}/wp-json/wp/v2"
+        self._wp_json_root = f"{root}/wp-json/"
 
         self._username = username
         self._application_password = application_password
         self._session = build_session(username, application_password)
+
+        # WordPress filters date ranges against the site-local columns, so the
+        # UTC cursor bounds are shifted by the site's gmt_offset before every
+        # query (see read_partition).  Resolved once on the driver and carried
+        # to executors as plain state.  Defaults to 0 (UTC / no shift) when the
+        # REST index is unreachable or omits the field.
+        self._gmt_offset_seconds = fetch_gmt_offset_seconds(self._session, self._wp_json_root)
 
         # Freeze the upper bound at init time so latest_offset returns a stable
         # value across every micro-batch in a single Trigger.AvailableNow run.
@@ -280,8 +301,16 @@ class WordPressLakeflowConnect(LakeflowConnect, SupportsPartitionedStream):
             "orderby": cfg["sort_field"],
             "order": "asc",
         }
-        params[cfg["after_param"]] = partition["since"]
-        params[cfg["before_param"]] = add_seconds(partition["until"], 1)
+        since = partition["since"]
+        before = add_seconds(partition["until"], 1)
+        # On a non-UTC site, WordPress compares these params against the
+        # site-local date columns, so shift the UTC bounds into local wall-clock
+        # time.  A UTC site (offset 0) keeps the exact ``...Z`` bounds as before.
+        if self._gmt_offset_seconds:
+            since = to_local_query_bound(since, self._gmt_offset_seconds)
+            before = to_local_query_bound(before, self._gmt_offset_seconds)
+        params[cfg["after_param"]] = since
+        params[cfg["before_param"]] = before
 
         per_page = self._int_option(table_options, "per_page", DEFAULT_PER_PAGE)
         per_page = max(1, min(per_page, MAX_PER_PAGE))

@@ -16,6 +16,16 @@
 #     exclude them so the AvailableNow termination test converges.
 
 endpoints:
+  # ---- REST index (site metadata; connector reads gmt_offset at init) ----
+  # Single-object response, not paginated. The connector shifts its UTC query
+  # bounds into site-local time by this offset; the simulator corpus pins it to
+  # 0 (UTC), so simulate-mode bounds stay identical to the pre-offset behavior.
+  - path: "/wp-json/"
+    method: GET
+    corpus: wp_root
+    response:
+      single_entity: true
+
   # ---- posts (cdc, cursor modified_gmt) ----
   - path: "/wp-json/wp/v2/posts"
     method: GET

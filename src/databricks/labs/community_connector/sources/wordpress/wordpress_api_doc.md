@@ -373,14 +373,17 @@ privileges beyond plain `read`.
 | `comments` | `after`, `before` (ISO 8601, filters on `date_gmt`) | `date_gmt` | No `modified_after` equivalent exists for comments (see Known Quirks). |
 | `categories`, `tags`, `users`, `taxonomies`, `types`, `statuses` | none | — | No incremental filter available; full page-through every sync. |
 
-By default `modified_after`/`after` are compared against the **site's local
-time** unless the value is explicitly UTC and the site is configured to
-treat it as such — to avoid ambiguity, always pass **`_gmt`-equivalent UTC
-timestamps** and use `orderby=modified&order=asc` (or `orderby=date` for
-comments) so date-boundary records aren't skipped. Apply a small lookback
-window (e.g. a few minutes to an hour) on the stored cursor to absorb clock
-skew / DST edge cases, consistent with Airbyte's own `lookback_window`
-config for this API.
+`modified_after`/`modified_before`/`after`/`before` are compared against the
+**site-local** `post_date`/`post_modified`/`comment_date` columns, **not** the
+`_gmt` columns. The connector tracks its cursor from the `_gmt` (UTC) fields,
+so it reads the site's `gmt_offset` from `GET /wp-json/` at startup and shifts
+each query bound into site-local wall-clock time (emitted timezone-naive, e.g.
+`2026-06-01T17:00:00`) before sending it; a UTC site (`gmt_offset: 0`) is sent
+unchanged. Reads use `orderby=modified&order=asc` (or `orderby=date` for
+comments) so date-boundary records aren't skipped. `gmt_offset` is a fixed
+offset that does not track DST, so apply a small `lookback_seconds` on the
+stored cursor to absorb DST edge cases / clock skew, consistent with Airbyte's
+own `lookback_window` config for this API.
 
 By default, `status` defaults to `publish` for `posts`/`pages` (i.e.
 draft/private/scheduled content is invisible unless the caller is
