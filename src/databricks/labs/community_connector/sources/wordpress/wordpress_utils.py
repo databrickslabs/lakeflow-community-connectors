@@ -240,13 +240,17 @@ def fetch_gmt_offset_seconds(
     fractional).  Returns the offset in seconds, or ``0`` when the value is
     absent, unparseable, or the request fails — a UTC site needs no shift, and
     ``0`` is a safe no-op default that preserves the connector's prior behavior.
+
+    The fetch goes through ``request_with_retry`` so a transient 5xx/429 blip
+    is retried rather than immediately collapsing to ``0`` (which would skew
+    every query window on a non-UTC site for that run).
     """
     try:
-        response = session.get(wp_json_root_url, timeout=timeout)
+        response = request_with_retry(session, wp_json_root_url, params=None, timeout=timeout)
         if response.status_code != 200:
             return 0
         body = response.json()
-    except (requests.RequestException, ValueError):
+    except (WordPressError, requests.RequestException, ValueError):
         return 0
     if not isinstance(body, dict):
         return 0

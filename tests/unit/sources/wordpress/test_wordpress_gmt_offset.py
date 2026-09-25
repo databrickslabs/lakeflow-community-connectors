@@ -94,7 +94,8 @@ def test_fetch_gmt_offset_seconds_zero_when_field_missing():
 
 
 def test_fetch_gmt_offset_seconds_zero_on_non_200():
-    session = _FakeSession(_FakeResponse(503, None))
+    # 404 is non-retriable, so request_with_retry returns it immediately.
+    session = _FakeSession(_FakeResponse(404, None))
     assert fetch_gmt_offset_seconds(session, "https://example.com/wp-json/") == 0
 
 
@@ -164,3 +165,54 @@ def test_read_partition_keeps_utc_bounds_when_offset_zero(monkeypatch):
     # UTC site: exact ``...Z`` bounds preserved (unchanged from prior behavior).
     assert captured["params"]["after"] == "2026-06-01T00:00:00Z"
     assert captured["params"]["before"] == "2026-06-02T00:00:01Z"
+
+
+# --------------------------------------------------------------------------- #
+# lookback_seconds gating (only cdc tables, never append comments)
+# --------------------------------------------------------------------------- #
+
+
+def _connector_offset_zero(monkeypatch):
+    monkeypatch.setattr(wp_module, "fetch_gmt_offset_seconds", lambda *a, **k: 0)
+    return WordPressLakeflowConnect(CONFIG)
+
+
+def test_lookback_applied_to_cdc_posts(monkeypatch):
+    conn = _connector_offset_zero(monkeypatch)
+    parts = conn.get_partitions(
+        "posts",
+        {"lookback_seconds": "3600", "num_partitions": "1"},
+        start_offset={"cursor": "2026-06-01T12:00:00Z"},
+        end_offset={"cursor": "2026-06-02T12:00:00Z"},
+    )
+    # cdc + merge on PK => lookback widens the lower bound by 1h.
+    assert parts[0]["since"] == "2026-06-01T11:00:00Z"
+
+
+def test_lookback_not_applied_to_append_comments(monkeypatch):
+    conn = _connector_offset_zero(monkeypatch)
+    parts = conn.get_partitions(
+        "comments",
+        {"lookback_seconds": "3600", "num_partitions": "1"},
+        start_offset={"cursor": "2026-06-01T12:00:00Z"},
+        end_offset={"cursor": "2026-06-02T12:00:00Z"},
+    )
+    # append + no merge => lookback would duplicate rows, so it is skipped.
+    assert parts[0]["since"] == "2026-06-01T12:00:00Z"
+
+
+# --------------------------------------------------------------------------- #
+# fail-fast validation of table options
+# --------------------------------------------------------------------------- #
+
+
+def test_resolve_start_rejects_invalid_timestamp(monkeypatch):
+    conn = _connector_offset_zero(monkeypatch)
+    with pytest.raises(ValueError):
+        conn.get_partitions("posts", {"start_timestamp": "2026-13-01"})
+
+
+def test_int_option_rejects_malformed_value(monkeypatch):
+    conn = _connector_offset_zero(monkeypatch)
+    with pytest.raises(ValueError):
+        conn.get_partitions("posts", {"num_partitions": "eight"})

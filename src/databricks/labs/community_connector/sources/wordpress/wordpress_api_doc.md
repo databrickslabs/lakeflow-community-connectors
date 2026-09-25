@@ -383,7 +383,9 @@ unchanged. Reads use `orderby=modified&order=asc` (or `orderby=date` for
 comments) so date-boundary records aren't skipped. `gmt_offset` is a fixed
 offset that does not track DST, so apply a small `lookback_seconds` on the
 stored cursor to absorb DST edge cases / clock skew, consistent with Airbyte's
-own `lookback_window` config for this API.
+own `lookback_window` config for this API. `lookback_seconds` is honored for
+the `cdc` tables only (merge on the primary key makes re-reads idempotent); it
+is skipped for append-only `comments`, where a lookback would duplicate rows.
 
 By default, `status` defaults to `publish` for `posts`/`pages` (i.e.
 draft/private/scheduled content is invisible unless the caller is

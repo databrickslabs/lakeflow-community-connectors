@@ -1129,13 +1129,17 @@ def register_lakeflow_source(spark):
         fractional).  Returns the offset in seconds, or ``0`` when the value is
         absent, unparseable, or the request fails — a UTC site needs no shift, and
         ``0`` is a safe no-op default that preserves the connector's prior behavior.
+
+        The fetch goes through ``request_with_retry`` so a transient 5xx/429 blip
+        is retried rather than immediately collapsing to ``0`` (which would skew
+        every query window on a non-UTC site for that run).
         """
         try:
-            response = session.get(wp_json_root_url, timeout=timeout)
+            response = request_with_retry(session, wp_json_root_url, params=None, timeout=timeout)
             if response.status_code != 200:
                 return 0
             body = response.json()
-        except (requests.RequestException, ValueError):
+        except (WordPressError, requests.RequestException, ValueError):
             return 0
         if not isinstance(body, dict):
             return 0
@@ -1325,10 +1329,17 @@ def register_lakeflow_source(spark):
                 end_cursor = self._init_time
 
             # Apply the lookback only once, at the lower bound of the range, to
-            # catch records edited during a prior window.  The stored cursor is
-            # never widened by this.
+            # re-read records edited during a prior window.  The stored cursor is
+            # never widened by this.  Only ``cdc`` tables benefit: they merge on the
+            # primary key, so re-reading is idempotent.  ``comments`` is append-only
+            # with no modified cursor and no merge, so a lookback there would just
+            # duplicate rows — skip it.
             lookback = self._int_option(table_options, "lookback_seconds", DEFAULT_LOOKBACK_SECONDS)
-            if lookback > 0 and start_cursor != DEFAULT_START_TIMESTAMP:
+            if (
+                TABLE_CONFIG[table_name]["ingestion"] == "cdc"
+                and lookback > 0
+                and start_cursor != DEFAULT_START_TIMESTAMP
+            ):
                 start_cursor = add_seconds(start_cursor, -lookback)
 
             start_dt = parse_ts(start_cursor)
@@ -1456,10 +1467,22 @@ def register_lakeflow_source(spark):
             return max(DEFAULT_NUM_PARTITIONS, min(MAX_AUTO_PARTITIONS, by_span))
 
         def _resolve_start(self, table_options: dict[str, str]) -> str:
-            """Starting cursor for the first micro-batch of a partitioned table."""
+            """Starting cursor for the first micro-batch of a partitioned table.
+
+            A user-supplied ``start_timestamp`` must be a valid ISO 8601 value; an
+            unparseable one is rejected rather than silently falling back to the
+            epoch default, which would trigger an unintended full backfill.
+            """
             start = table_options.get("start_timestamp")
-            normalized = normalize_ts(start) if start else None
-            return normalized or DEFAULT_START_TIMESTAMP
+            if not start:
+                return DEFAULT_START_TIMESTAMP
+            normalized = normalize_ts(start)
+            if normalized is None:
+                raise ValueError(
+                    f"Invalid 'start_timestamp' {start!r}: expected an ISO 8601 "
+                    "timestamp (e.g. 2026-01-01T00:00:00Z)."
+                )
+            return normalized
 
         def _validate_table(self, table_name: str) -> None:
             if table_name not in TABLE_CONFIG:
@@ -1467,13 +1490,18 @@ def register_lakeflow_source(spark):
 
         @staticmethod
         def _int_option(table_options: dict[str, str], key: str, default: int) -> int:
+            """Parse an integer table option, or fail fast on a malformed value.
+
+            An absent option takes the default; a present-but-unparseable value is
+            a configuration error and is rejected rather than silently ignored.
+            """
             raw = table_options.get(key)
             if raw is None:
                 return default
             try:
                 return int(raw)
-            except (TypeError, ValueError):
-                return default
+            except (TypeError, ValueError) as exc:
+                raise ValueError(f"Invalid integer for option {key!r}: {raw!r}.") from exc
 
 
     ########################################################
