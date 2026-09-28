@@ -15,7 +15,7 @@ it does not require a running q process.
 | Ingestion | Append-only |
 | Streaming offset | Latest completed HDB date partition |
 | Parallelism | One Spark partition per `(date, symbol)` |
-| Schema | Inferred from KDB metadata through PyKX |
+| Schema | Inferred from the first date partition's splayed metadata through PyKX |
 | Serverless Lakeflow | Validated |
 
 Snapshot ingestion, date-only task partitioning, and paths that are not
@@ -97,6 +97,10 @@ OPTIONS (
 Do not place bearer tokens or license contents directly in source control or
 pipeline specifications.
 
+For a commercial `k4.lic` license supplied through `kdbx_license_b64` or
+secrets, also set `kdbx_license_kind 'k4'`. A license read through
+`kdbx_license_file_path` uses its file name (`k4.lic` or `kc.lic`).
+
 The online bootstrap downloads the installer directly from KX into a
 process-local temporary directory, executes it there, and removes the
 temporary directory afterward. The connector does not persist, cache, upload,
@@ -104,6 +108,34 @@ or re-serve the installer to another customer or workspace. It has no
 Databricks-held KX credential or license and never falls back to one. Missing
 or incomplete customer bootstrap credentials produce an error or use the
 customer-provided preinstalled runtime path.
+
+## Security boundaries
+
+- HDB location, license, and KDB-X/PyKX bootstrap settings are read only from
+  the Unity Catalog connection. Pipeline table configuration can set only the
+  table options listed below.
+- Table, column, and date names from the HDB are passed to q as arguments,
+  never as q source. The connector opens individual splayed partitions and
+  never loads the HDB root as a q database, so q scripts stored in the HDB are
+  not executed.
+- Symbolic links inside the HDB root (date partitions, table directories,
+  column files, `sym`) are rejected. Column names must be single path
+  components.
+- The installer bearer token is passed to `curl` on standard input, not on the
+  command line. A base64 license that must be materialized locally is written
+  to an owner-only (`0600`) file in an owner-only (`0700`) directory; the
+  license is never exported as an environment variable. Subprocesses do not
+  inherit `KDB_LICENSE_B64`/`KDB_K4LICENSE_B64` or any environment value equal
+  to a connector secret, and subprocess errors are redacted.
+- `install_kdb.sh` accepts the license only as a command-line argument
+  (`--b64lic`/`--k4b64lic`), so the base64 license is visible to processes
+  running as the same user in the same container while the installer runs.
+  Use a preinstalled runtime to avoid this exposure.
+- The online installer URL tracks KX's latest release and the default PyKX
+  package spec resolves from the configured package index. For reproducible,
+  reviewed runtimes, stage an offline bundle and set `pykx_install_spec` to a
+  vetted wheel. Offline bundle members with absolute paths, `..` components,
+  or symbolic links are rejected before extraction.
 
 ## Connection parameters
 
@@ -113,7 +145,8 @@ customer-provided preinstalled runtime path.
 | `license_volume_path` | Yes | KX license/runtime working directory |
 | `kdbx_install_mode` | No | `auto` (default), `offline`, or `online` |
 | `kdbx_offline_bundle_path` | No | Explicit KDB-X air-gapped bundle; use `l64arm-bundle.zip` on current serverless ARM64 and `l64-bundle.zip` on x86_64 |
-| `kdbx_license_file_path` | No | Existing license file or directory |
+| `kdbx_license_file_path` | No | Existing license file or directory; `k4.lic` selects a commercial k4 license |
+| `kdbx_license_kind` | No | `k4` (commercial `k4.lic`) or `kc` (`kc.lic`); defaults to the license file name, otherwise `kc` |
 | `kdbx_install_bearer_token` | No | Secret-backed installer token |
 | `kdbx_license_b64` | No | Secret-backed base64 license |
 | `kdbx_secret_scope` | No | Legacy secret-scope lookup |
@@ -131,7 +164,6 @@ customer-provided preinstalled runtime path.
 | `ingestion_mode` | `append` | Only `append` is supported |
 | `partition_strategy` | `date_sym` | Only `date_sym` is supported |
 | `sym_column` | `sym` | Physical enumerated symbol column |
-| `partition_conversion_mode` | `pandas` | `pandas`, `arrow_pandas`, or `arrow_direct` |
 
 Example table selection:
 
@@ -165,13 +197,25 @@ Example table selection:
 
 ## Read model
 
-1. The driver discovers selected dates and loads the root symbol enumeration.
+1. The driver lists date directories by name and loads the root symbol
+   enumeration.
 2. `get_partitions()` emits JSON-serializable
-   `{date_partition, sym, sym_index}` descriptors.
-3. Each executor filters the configured symbol column by integer enumeration
-   index.
-4. Splayed columns are read in 10,000-row slices and converted to Spark rows.
+   `{date_partition, sym, sym_index}` descriptors. `sym_index` is the
+   symbol's position in the root `sym` file, including the empty symbol.
+3. Each executor loads the root `sym` domain and filters the configured symbol
+   column by integer enumeration index.
+4. Matching rows are read in slices of at most 10,000 rows; the last slice
+   reads only the remaining rows. Records are emitted as Python dictionaries.
 5. A committed date offset prevents completed HDB dates from being read again.
+
+## Limitations
+
+- The schema comes from the first selected date partition. Columns that exist
+  only in later partitions are not ingested.
+- Every selected date is paired with every symbol in the root `sym` file, so
+  very large symbol files create many empty tasks.
+- Directory listings are reused for up to five minutes per Python worker.
+- Segmented HDBs (`par.txt`) are not supported.
 
 See `kx_kdb_api_doc.md` for the complete source, schema, offset, and runtime
 contract.

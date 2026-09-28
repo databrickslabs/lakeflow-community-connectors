@@ -42,10 +42,11 @@ layout can be discovered and ingested.
 children. `discovery_sample_dates` can limit the number of dates inspected
 during discovery.
 
-`get_table_schema()` inspects the first selected partition with PyKX. KDB
-types are mapped to Spark scalar types. A string `date` column is added when
-the physical table does not already contain one. Duplicate column names are
-removed case-insensitively.
+`get_table_schema()` reads `meta` of the first selected splayed partition
+with PyKX. The HDB root is never loaded as a q database. KDB types are mapped
+to Spark scalar types. A string `date` column is added when the physical table
+does not already contain one. Duplicate column names are removed
+case-insensitively. Column names must be single path components.
 
 Common mappings include:
 
@@ -57,9 +58,13 @@ Common mappings include:
 | long | `LongType` |
 | real | `FloatType` |
 | float | `DoubleType` |
-| char/symbol | `StringType` |
-| timestamp/datetime | `TimestampType` |
-| date/time/month/minute/second | `StringType` |
+| char, string, symbol | `StringType` |
+| timestamp/datetime | `TimestampType` (microsecond precision) |
+| timespan | `LongType` (nanoseconds) |
+| date/month/minute/second/time | `StringType` in q format, such as `2024.01.31` or `09:30:00.123` |
+
+Null q values become Spark nulls. The empty symbol is ingested as an empty
+string.
 
 ## Ingestion contract
 
@@ -95,12 +100,21 @@ date and symbol:
 }
 ```
 
-Executors filter the table's symbol column by integer enumeration index. The
-physical symbol column defaults to `sym` and can be changed per table with
-`sym_column`. The root enumeration file remains `sym`.
+`sym_index` is the symbol's position in the root `sym` file. The empty
+symbol and symbols containing `/` keep their positions.
 
-Splayed columns are read in 10,000-row chunks so a single active symbol does
-not require the whole date partition to fit in Python memory.
+Executors load the root `sym` domain, then filter the table's symbol column by
+integer enumeration index. The physical symbol column defaults to `sym` and
+can be changed per table with `sym_column`. The root enumeration file remains
+`sym`.
+
+Matching rows are read in chunks of at most 10,000 rows so a single active
+symbol does not require the whole date partition to fit in Python memory. The
+last chunk reads exactly the remaining rows. `read_partition()` yields one
+Python `dict` per row, keyed by the schema column names.
+
+Symbolic links inside the HDB root are rejected for date partitions, table
+directories, column files, and `sym`.
 
 ## Connection parameters
 
@@ -110,7 +124,8 @@ not require the whole date partition to fit in Python memory.
 | `license_volume_path` | Yes | Directory used for `QLIC` and KDB-X runtime files |
 | `kdbx_install_mode` | No | `auto`, `offline`, or `online` |
 | `kdbx_offline_bundle_path` | No | Explicit KDB-X bundle: `l64arm-bundle.zip` for current serverless ARM64, `l64-bundle.zip` for x86_64 |
-| `kdbx_license_file_path` | No | Existing KX license file or directory |
+| `kdbx_license_file_path` | No | Existing KX license file or directory; `k4.lic` selects a commercial k4 license |
+| `kdbx_license_kind` | No | `k4` or `kc`; selects `--k4b64lic`/`k4.lic` or `--b64lic`/`kc.lic`; defaults to the license file name, otherwise `kc` |
 | `kdbx_install_bearer_token` | No | Secret-valued online installer token |
 | `kdbx_license_b64` | No | Secret-valued base64 KX license |
 | `kdbx_secret_scope` | No | Legacy Databricks secret-scope lookup |
@@ -122,6 +137,10 @@ not require the whole date partition to fit in Python memory.
 Direct bearer-token and base64-license values must be supplied through
 secret-backed Unity Catalog connection options. They must never appear in a
 pipeline specification or logs.
+
+Connection parameters are read only from connection-level options. The
+`tableConfigs` payload passed to the metadata reader never overrides them, and
+per-table options are limited to `external_options_allowlist`.
 
 ## Bootstrap isolation
 
@@ -135,6 +154,23 @@ does not upload or re-serve it to another customer or workspace. It contains
 no shared or Databricks-held KX credential or license, and there is no fallback
 to one.
 
+Secret handling:
+
+- `curl -q --config -` receives the bearer token on standard input.
+- `install_kdb.sh` accepts the license only as an argument, so the base64
+  license is visible to same-user processes in the container while the
+  installer runs. A preinstalled runtime avoids this exposure.
+- A materialized license file is `0600` inside a `0700` directory. The license
+  is not exported as `KDB_LICENSE_B64`.
+- Child processes do not inherit KDB license variables or values equal to a
+  connector secret. Subprocess error output is redacted.
+- Offline bundles are copied to a process-local cache keyed by source path,
+  size, and modification time. Members with absolute paths, `..` components,
+  or symbolic links are rejected.
+- The default installer URL tracks KX's latest release. Stage an offline
+  bundle and set `pykx_install_spec` to a vetted wheel for reproducible
+  runtimes.
+
 ## Table options
 
 | Option | Default | Purpose |
@@ -143,7 +179,6 @@ to one.
 | `end_date` | Last available date | Inclusive upper discovery filter |
 | `ingestion_mode` | `append` | Must remain `append` |
 | `partition_strategy` | `date_sym` | Must remain `date_sym` |
-| `partition_conversion_mode` | `pandas` | `pandas`, `arrow_pandas`, or `arrow_direct` |
 | `sym_column` | `sym` | Physical enumerated column used for symbol filtering |
 
 ## Runtime requirements
