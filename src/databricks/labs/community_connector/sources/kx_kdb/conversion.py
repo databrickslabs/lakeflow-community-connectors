@@ -1,29 +1,8 @@
-"""Shared PyKX result conversion helpers for KX HDB reads."""
+"""Normalize PyKX column slices into Spark-compatible Python records."""
 
 from __future__ import annotations
 
-from typing import Iterator, List, Union
-
-from databricks.labs.community_connector.sources.kx_kdb.conversion_metrics import (
-    ConversionMode,
-    record_conversion_path,
-)
-
-DEFAULT_PARTITION_CONVERSION_MODE = "pandas"
-PARTITION_CONVERSION_MODES = frozenset(
-    {"pandas", "arrow_pandas", "arrow_direct"}
-)
-Record = Union[dict, tuple]
-
-
-def normalize_conversion_mode(conversion_mode: str) -> ConversionMode:
-    normalized = str(conversion_mode or DEFAULT_PARTITION_CONVERSION_MODE).strip().lower()
-    if normalized not in PARTITION_CONVERSION_MODES:
-        raise ValueError(
-            f"Unsupported partition_conversion_mode {conversion_mode!r}. "
-            f"Expected one of {sorted(PARTITION_CONVERSION_MODES)}."
-        )
-    return normalized  # type: ignore[return-value]
+from typing import Iterator, List
 
 
 def normalize_partition_frame(
@@ -31,9 +10,8 @@ def normalize_partition_frame(
     date_partition: str,
     column_names: List[str],
     column_defs: List[dict],
-    include_row_id: bool,
-    row_id_start: int = 0,
 ):
+    """Align a column slice with the inferred schema and coerce value types."""
     import pandas as pd
 
     frame.columns = [str(column) for column in frame.columns]
@@ -89,42 +67,14 @@ def normalize_partition_frame(
         else:
             aligned[column_name] = None
 
-    if include_row_id:
-        aligned["__row_id"] = [
-            f"{date_partition}:{row_id_start + row_index}"
-            for row_index in range(len(aligned.index))
-        ]
-
     return aligned
 
 
-def iter_records(frame, *, conversion_mode: ConversionMode) -> Iterator[Record]:
-    if conversion_mode == "arrow_direct":
-        yield from _iter_tuples(frame)
-        return
-    yield from _iter_dict_records(frame)
-
-
-def result_to_frame(result, *, conversion_mode: ConversionMode):
-    import pandas as pd
-
-    if conversion_mode == "arrow_pandas":
-        frame, path = _result_to_pandas_via_arrow(result, allow_pd_fallback=False)
-    else:
-        frame, path = _result_to_pandas_via_arrow(result, allow_pd_fallback=True)
-    record_conversion_path(path)
-    if not isinstance(frame, pd.DataFrame):
-        frame = pd.DataFrame(frame)
-    return frame
-
-
-def result_len(result) -> int:
-    if result is None:
-        return 0
-    try:
-        return int(len(result))
-    except Exception:
-        return 0
+def iter_records(frame) -> Iterator[dict]:
+    """Yield one ``{column: value}`` dict per row, as the framework parser expects."""
+    columns = list(frame.columns)
+    for row in frame.itertuples(index=False, name=None):
+        yield {columns[col_index]: _to_python(value) for col_index, value in enumerate(row)}
 
 
 def _coerce_to_expected_type(series, spark_type: str):
@@ -136,11 +86,7 @@ def _coerce_to_expected_type(series, spark_type: str):
     if "timestamp" in normalized_type:
         return pd.to_datetime(series, errors="coerce").dt.floor("us")
     if "boolean" in normalized_type:
-        return series.map(
-            lambda value: None
-            if pd.isna(value)
-            else str(value).strip().lower() in {"1", "true", "t", "yes", "y"}
-        )
+        return series.map(_to_bool)
     if any(type_name in normalized_type for type_name in ("short", "integer", "long")):
         return pd.to_numeric(series, errors="coerce").astype("Int64")
     if any(type_name in normalized_type for type_name in ("float", "double")):
@@ -148,15 +94,17 @@ def _coerce_to_expected_type(series, spark_type: str):
     return series
 
 
-def _iter_dict_records(frame) -> Iterator[dict]:
-    columns = list(frame.columns)
-    for row in frame.itertuples(index=False, name=None):
-        yield {columns[col_index]: _to_python(value) for col_index, value in enumerate(row)}
+def _to_bool(value):
+    import numpy as np
+    import pandas as pd
 
-
-def _iter_tuples(frame) -> Iterator[tuple]:
-    for row in frame.itertuples(index=False, name=None):
-        yield tuple(_to_python(value) for value in row)
+    if pd.isna(value):
+        return None
+    if isinstance(value, (bool, np.bool_)):
+        return bool(value)
+    if isinstance(value, (int, float, np.number)):
+        return value != 0
+    return str(value).strip().lower() in {"1", "1.0", "true", "t", "yes", "y"}
 
 
 def _to_python(value):
@@ -180,15 +128,3 @@ def _to_python(value):
         except Exception:
             pass
     return value
-
-
-def _result_to_pandas_via_arrow(result, *, allow_pd_fallback: bool):
-    try:
-        return result.pa(raw=True).to_pandas(timestamp_as_object=False), "pa_raw"
-    except Exception:
-        try:
-            return result.pa().to_pandas(timestamp_as_object=False), "pa"
-        except Exception:
-            if not allow_pd_fallback:
-                raise
-            return result.pd(), "pd_fallback"

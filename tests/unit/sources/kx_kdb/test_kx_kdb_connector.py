@@ -1,6 +1,5 @@
 """Tests for the KX KDB Lakeflow connector class."""
 
-import json
 from pathlib import Path
 
 import pytest
@@ -30,10 +29,9 @@ def _connector(tmp_path):
 
 def _patch_symbols(monkeypatch, symbols=None):
     symbols = symbols or ["a", "b"]
-    indices = {symbol: index for index, symbol in enumerate(symbols)}
     monkeypatch.setattr(
-        "databricks.labs.community_connector.sources.kx_kdb.kx_kdb.load_sym_enumeration_with_indices",
-        lambda *_: (symbols, indices),
+        "databricks.labs.community_connector.sources.kx_kdb.kx_kdb.load_sym_enumeration",
+        lambda *_: symbols,
     )
 
 
@@ -192,7 +190,7 @@ def test_read_partition_routes_date_sym_descriptor(monkeypatch, tmp_path):
         connector.read_partition(
             "trades",
             {"date_partition": "2024.01.01", "sym": "a", "sym_index": 0},
-            {"partition_strategy": "date_sym", "partition_conversion_mode": "arrow_direct"},
+            {"partition_strategy": "date_sym"},
         )
     )
 
@@ -201,7 +199,6 @@ def test_read_partition_routes_date_sym_descriptor(monkeypatch, tmp_path):
     assert captured["date_partition"] == "2024.01.01"
     assert captured["symbol"] == "a"
     assert captured["sym_index"] == 0
-    assert captured["conversion_mode"] == "arrow_direct"
     assert captured["sym_column"] == "sym"
 
 
@@ -246,27 +243,3 @@ def test_connector_normalizes_license_file_path(tmp_path):
         }
     )
     assert connector.license_path == "/Volumes/main/rkh/rbc_kx/key"
-
-
-def test_connector_uses_table_configs_for_metadata_reader_required_options(tmp_path):
-    hdb_root = _build_hdb(tmp_path)
-    table_configs = {
-        "trades": {
-            "hdb_root_path": str(hdb_root),
-            "license_volume_path": "/Volumes/main/default/keys",
-            "start_date": "2024.01.01",
-        }
-    }
-
-    connector = KxKdbLakeflowConnect(
-        {
-            "tableName": "_lakeflow_metadata",
-            "tableNameList": "trades",
-            "tableConfigs": json.dumps(table_configs),
-            "hdb_root_path": "/stale/hdb",
-            "license_volume_path": "/stale/license",
-        }
-    )
-
-    assert connector.hdb_root_path == str(hdb_root)
-    assert connector.license_path == "/Volumes/main/default/keys"

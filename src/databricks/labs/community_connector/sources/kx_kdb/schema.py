@@ -2,17 +2,24 @@
 
 from __future__ import annotations
 
-import json
 import logging
-from typing import List, Optional
+from typing import List
 
-from databricks.labs.community_connector.sources.kx_kdb.filesystem import hdb_child_path
+from databricks.labs.community_connector.sources.kx_kdb.filesystem import (
+    hdb_child_path,
+    validate_hdb_name,
+)
 from databricks.labs.community_connector.sources.kx_kdb.runtime import (
     PyKxRuntimeConfig,
     prepare_pykx,
 )
+from databricks.labs.community_connector.sources.kx_kdb.sym_reader import _ensure_sym_domain
 
 logger = logging.getLogger(__name__)
+
+# Reads one splayed partition directly. Loading the whole HDB would also run
+# any q scripts stored in the HDB root.
+_SPLAYED_META_Q = "{[p] m:0!meta get hsym p; (string m`c; m`t)}"
 
 Q_META_TYPE_TO_SPARK = {
     "b": "BooleanType",
@@ -32,7 +39,6 @@ Q_META_TYPE_TO_SPARK = {
     "v": "StringType",
     "t": "StringType",
     "g": "StringType",
-    " ": "StringType",
     "C": "StringType",
 }
 
@@ -82,25 +88,64 @@ def infer_schema_from_partition(
     date_partition: str,
     runtime_config: PyKxRuntimeConfig,
 ) -> List[dict]:
-    """Infer column definitions from a single KDB partition."""
+    """Infer column definitions from one splayed KDB date partition."""
+    table_path = hdb_child_path(hdb_root_path, date_partition, kdb_table_name)
     kx = prepare_pykx(runtime_config)
-    columns = _try_infer_via_db_query(kx, hdb_root_path, kdb_table_name)
-    if columns is None:
-        columns = _try_infer_via_get_partition(
-            kx, hdb_root_path, kdb_table_name, date_partition
-        )
-    if columns is None:
-        columns = _try_infer_via_splayed_column_files(
-            kx, hdb_root_path, kdb_table_name, date_partition
-        )
-
-    if columns is None:
+    try:
+        _ensure_sym_domain(kx, hdb_root_path)
+        meta = kx.q(_SPLAYED_META_Q, f"{table_path}/")
+    except Exception as exc:
         raise RuntimeError(
-            f"Could not infer schema for {kdb_table_name} from "
-            f"{_partition_table_path(hdb_root_path, kdb_table_name, date_partition)}"
-        )
+            f"Could not infer schema for {kdb_table_name} from {table_path}: "
+            f"{type(exc).__name__}: {exc}"
+        ) from exc
 
-    return _with_date_column(columns)
+    return _with_date_column(_meta_columns(meta))
+
+
+def _meta_columns(meta) -> List[dict]:
+    value = _to_py(meta)
+    try:
+        raw_names, raw_types = value
+    except (TypeError, ValueError):
+        raise RuntimeError("KDB meta returned an unexpected shape.") from None
+
+    names = [_text(item) for item in _to_py(raw_names)]
+    types = _type_chars(_to_py(raw_types))
+    if len(names) != len(types):
+        raise RuntimeError(
+            f"KDB meta returned {len(names)} column names and {len(types)} type codes."
+        )
+    return [
+        {
+            "name": validate_hdb_name(name, "column name"),
+            "spark_type": _map_meta_type_char(type_char),
+        }
+        for name, type_char in zip(names, types)
+    ]
+
+
+def _to_py(value):
+    if hasattr(value, "py"):
+        try:
+            return value.py()
+        except Exception:
+            return value
+    return value
+
+
+def _text(value) -> str:
+    if isinstance(value, (bytes, bytearray)):
+        return value.decode("utf-8")
+    return str(value)
+
+
+def _type_chars(value) -> list[str]:
+    if isinstance(value, (bytes, bytearray)):
+        return list(value.decode("latin1"))
+    if isinstance(value, str):
+        return list(value)
+    return [_text(item) for item in value]
 
 
 def _with_date_column(columns: List[dict]) -> List[dict]:
@@ -110,117 +155,6 @@ def _with_date_column(columns: List[dict]) -> List[dict]:
         result.append({"name": "date", "spark_type": "StringType"})
     result.extend(columns)
     return _dedupe_column_defs(result)
-
-
-def _try_infer_via_splayed_column_files(
-    kx,
-    hdb_root_path: str,
-    table_name: str,
-    date_partition: str,
-) -> Optional[List[dict]]:
-    """Infer schema from a splayed table directory without opening the full HDB."""
-    try:
-        table_path = _partition_table_path(hdb_root_path, table_name, date_partition)
-        columns = []
-        for column_name in _column_names_from_splayed_d(kx, table_path):
-            columns.append(
-                {
-                    "name": column_name,
-                    "spark_type": _infer_column_file_type(
-                        kx, hdb_child_path(table_path, column_name)
-                    ),
-                }
-            )
-        return columns if columns else None
-    except Exception as exc:
-        logger.debug("Splayed file schema inference failed for %s: %s", table_name, exc)
-        return None
-
-
-def _column_names_from_splayed_d(kx, table_path: str) -> list[str]:
-    result = kx.q("{[p] get hsym p}", hdb_child_path(table_path, ".d"))
-    return _q_list_to_strings(result)
-
-
-def _infer_column_file_type(kx, column_path: str) -> str:
-    type_chars = _q_list_to_strings(kx.q("{[p] string .Q.ty type get hsym p}", column_path))
-    return _map_meta_type_char(type_chars[0] if type_chars else "")
-
-
-def _q_list_to_strings(value) -> list[str]:
-    if hasattr(value, "py"):
-        try:
-            value = value.py()
-        except Exception:
-            pass
-    if hasattr(value, "tolist"):
-        try:
-            value = value.tolist()
-        except Exception:
-            pass
-    if isinstance(value, (str, bytes)):
-        values = [value]
-    else:
-        values = list(value)
-    result = []
-    for item in values:
-        text = item.decode("utf-8") if isinstance(item, bytes) else str(item)
-        text = text.strip().strip("`")
-        if text:
-            result.append(text)
-    return result
-
-
-def _columns_from_meta(kx, table_expr: str) -> Optional[List[dict]]:
-    names = _q_list_to_strings(kx.q(f"string (0!meta {table_expr})`c"))
-    type_chars = _q_list_to_strings(kx.q(f"string (0!meta {table_expr})`t"))
-    if not names:
-        return None
-    return [
-        {
-            "name": names[index],
-            "spark_type": _map_meta_type_char(type_chars[index] if index < len(type_chars) else ""),
-        }
-        for index in range(len(names))
-    ]
-
-
-def _try_infer_via_db_query(kx, hdb_root_path: str, table_name: str) -> Optional[List[dict]]:
-    try:
-        kx.DB(path=hdb_root_path)
-        return _columns_from_meta(kx, table_name)
-    except Exception as exc:
-        logger.debug("DB schema inference failed for %s: %s", table_name, exc)
-        return None
-
-
-def _try_infer_via_get_partition(
-    kx,
-    hdb_root_path: str,
-    table_name: str,
-    date_partition: str,
-) -> Optional[List[dict]]:
-    try:
-        partition_path = _partition_table_path(hdb_root_path, table_name, date_partition)
-        kx.q("{[p] __lakeflow_schema_tmp: get hsym p}", partition_path)
-        columns = _columns_from_meta(kx, "__lakeflow_schema_tmp")
-
-        try:
-            kx.q("delete __lakeflow_schema_tmp from `.")
-        except Exception:
-            pass
-        return columns if columns else None
-    except Exception as exc:
-        logger.debug("Partition schema inference failed for %s: %s", table_name, exc)
-        return None
-
-
-def _partition_table_path(
-    hdb_root_path: str,
-    table_name: str,
-    date_partition: str,
-) -> str:
-    return hdb_child_path(hdb_root_path, date_partition, table_name)
 
 
 def columns_to_spark_schema(columns: List[dict]):
@@ -259,11 +193,3 @@ def columns_to_spark_schema(columns: List[dict]):
             )
         )
     return StructType(fields)
-
-
-def serialize_columns(columns: List[dict]) -> str:
-    return json.dumps(columns)
-
-
-def deserialize_columns(columns_json: str) -> List[dict]:
-    return json.loads(columns_json)

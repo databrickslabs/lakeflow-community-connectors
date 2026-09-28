@@ -8,21 +8,19 @@
 from __future__ import annotations
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import date, datetime
 from decimal import Decimal
 from itertools import chain
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import (
     Any,
     Callable,
     Iterable,
     Iterator,
     List,
-    Literal,
-    Optional,
     Sequence,
-    Union,
 )
+import dataclasses
 import json
 import os
 import re
@@ -58,10 +56,13 @@ from pyspark.sql.types import (
     VariantVal,
 )
 import base64
+import gc
+import hashlib
 import importlib
 import logging
 import platform
 import shutil
+import stat
 import subprocess
 import tempfile
 import threading
@@ -614,109 +615,16 @@ def register_lakeflow_source(spark):
 
 
     ########################################################
-    # src/databricks/labs/community_connector/sources/kx_kdb/conversion_metrics.py
-    ########################################################
-
-    logger = logging.getLogger(__name__)
-
-    ConversionPath = Literal["pa_raw", "pa", "pd_fallback"]
-    ConversionMode = Literal["pandas", "arrow_pandas", "arrow_direct"]
-
-
-    class _PicklableLock:
-        """Process-local lock that can travel with the merged connector class."""
-
-        def __init__(self):
-            self._lock = threading.Lock()
-
-        def __enter__(self):
-            return self._lock.__enter__()
-
-        def __exit__(self, *exc_info):
-            return self._lock.__exit__(*exc_info)
-
-        def __getstate__(self):
-            return {}
-
-        def __setstate__(self, _state):
-            self._lock = threading.Lock()
-
-
-    _PATH_LOCK = _PicklableLock()
-    _PATH_COUNTS: dict[ConversionPath, int] = {
-        "pa_raw": 0,
-        "pa": 0,
-        "pd_fallback": 0,
-    }
-
-
-    def reset_conversion_path_counts() -> None:
-        with _PATH_LOCK:
-            for key in _PATH_COUNTS:
-                _PATH_COUNTS[key] = 0
-
-
-    def get_conversion_path_counts() -> dict[str, int]:
-        with _PATH_LOCK:
-            return dict(_PATH_COUNTS)
-
-
-    def record_conversion_path(path: ConversionPath) -> None:
-        with _PATH_LOCK:
-            _PATH_COUNTS[path] += 1
-
-
-    def log_conversion_path_summary(
-        *,
-        date_partition: str,
-        conversion_mode: str,
-        rows_emitted: int,
-    ) -> None:
-        counts = get_conversion_path_counts()
-        total_conversions = sum(counts.values())
-        logger.info(
-            "KX conversion summary date=%s mode=%s rows=%s pykx_paths=%s "
-            "(pa_raw=%s pa=%s pd_fallback=%s total_pages=%s)",
-            date_partition,
-            conversion_mode,
-            rows_emitted,
-            counts,
-            counts["pa_raw"],
-            counts["pa"],
-            counts["pd_fallback"],
-            total_conversions,
-        )
-
-
-    ########################################################
     # src/databricks/labs/community_connector/sources/kx_kdb/conversion.py
     ########################################################
-
-    DEFAULT_PARTITION_CONVERSION_MODE = "pandas"
-    PARTITION_CONVERSION_MODES = frozenset(
-        {"pandas", "arrow_pandas", "arrow_direct"}
-    )
-    Record = Union[dict, tuple]
-
-
-    def normalize_conversion_mode(conversion_mode: str) -> ConversionMode:
-        normalized = str(conversion_mode or DEFAULT_PARTITION_CONVERSION_MODE).strip().lower()
-        if normalized not in PARTITION_CONVERSION_MODES:
-            raise ValueError(
-                f"Unsupported partition_conversion_mode {conversion_mode!r}. "
-                f"Expected one of {sorted(PARTITION_CONVERSION_MODES)}."
-            )
-        return normalized  # type: ignore[return-value]
-
 
     def normalize_partition_frame(
         frame,
         date_partition: str,
         column_names: List[str],
         column_defs: List[dict],
-        include_row_id: bool,
-        row_id_start: int = 0,
     ):
+        """Align a column slice with the inferred schema and coerce value types."""
         import pandas as pd
 
         frame.columns = [str(column) for column in frame.columns]
@@ -772,42 +680,14 @@ def register_lakeflow_source(spark):
             else:
                 aligned[column_name] = None
 
-        if include_row_id:
-            aligned["__row_id"] = [
-                f"{date_partition}:{row_id_start + row_index}"
-                for row_index in range(len(aligned.index))
-            ]
-
         return aligned
 
 
-    def iter_records(frame, *, conversion_mode: ConversionMode) -> Iterator[Record]:
-        if conversion_mode == "arrow_direct":
-            yield from _iter_tuples(frame)
-            return
-        yield from _iter_dict_records(frame)
-
-
-    def result_to_frame(result, *, conversion_mode: ConversionMode):
-        import pandas as pd
-
-        if conversion_mode == "arrow_pandas":
-            frame, path = _result_to_pandas_via_arrow(result, allow_pd_fallback=False)
-        else:
-            frame, path = _result_to_pandas_via_arrow(result, allow_pd_fallback=True)
-        record_conversion_path(path)
-        if not isinstance(frame, pd.DataFrame):
-            frame = pd.DataFrame(frame)
-        return frame
-
-
-    def result_len(result) -> int:
-        if result is None:
-            return 0
-        try:
-            return int(len(result))
-        except Exception:
-            return 0
+    def iter_records(frame) -> Iterator[dict]:
+        """Yield one ``{column: value}`` dict per row, as the framework parser expects."""
+        columns = list(frame.columns)
+        for row in frame.itertuples(index=False, name=None):
+            yield {columns[col_index]: _to_python(value) for col_index, value in enumerate(row)}
 
 
     def _coerce_to_expected_type(series, spark_type: str):
@@ -819,11 +699,7 @@ def register_lakeflow_source(spark):
         if "timestamp" in normalized_type:
             return pd.to_datetime(series, errors="coerce").dt.floor("us")
         if "boolean" in normalized_type:
-            return series.map(
-                lambda value: None
-                if pd.isna(value)
-                else str(value).strip().lower() in {"1", "true", "t", "yes", "y"}
-            )
+            return series.map(_to_bool)
         if any(type_name in normalized_type for type_name in ("short", "integer", "long")):
             return pd.to_numeric(series, errors="coerce").astype("Int64")
         if any(type_name in normalized_type for type_name in ("float", "double")):
@@ -831,15 +707,17 @@ def register_lakeflow_source(spark):
         return series
 
 
-    def _iter_dict_records(frame) -> Iterator[dict]:
-        columns = list(frame.columns)
-        for row in frame.itertuples(index=False, name=None):
-            yield {columns[col_index]: _to_python(value) for col_index, value in enumerate(row)}
+    def _to_bool(value):
+        import numpy as np
+        import pandas as pd
 
-
-    def _iter_tuples(frame) -> Iterator[tuple]:
-        for row in frame.itertuples(index=False, name=None):
-            yield tuple(_to_python(value) for value in row)
+        if pd.isna(value):
+            return None
+        if isinstance(value, (bool, np.bool_)):
+            return bool(value)
+        if isinstance(value, (int, float, np.number)):
+            return value != 0
+        return str(value).strip().lower() in {"1", "1.0", "true", "t", "yes", "y"}
 
 
     def _to_python(value):
@@ -865,24 +743,19 @@ def register_lakeflow_source(spark):
         return value
 
 
-    def _result_to_pandas_via_arrow(result, *, allow_pd_fallback: bool):
-        try:
-            return result.pa(raw=True).to_pandas(timestamp_as_object=False), "pa_raw"
-        except Exception:
-            try:
-                return result.pa().to_pandas(timestamp_as_object=False), "pa"
-            except Exception:
-                if not allow_pd_fallback:
-                    raise
-                return result.pd(), "pd_fallback"
-
-
     ########################################################
     # src/databricks/labs/community_connector/sources/kx_kdb/filesystem.py
     ########################################################
 
     DATE_PARTITION_RE = re.compile(r"^\d{4}\.\d{2}\.\d{2}$")
-    _DISCOVERY_CACHE_TTL_SECONDS = 3600
+    _DATE_INPUT_PATTERNS = (
+        re.compile(r"^(\d{4})\.(\d{2})\.(\d{2})$"),
+        re.compile(r"^(\d{4})-(\d{2})-(\d{2})$"),
+        re.compile(r"^(\d{4})/(\d{2})/(\d{2})$"),
+    )
+    _UNSAFE_NAME_CHARS = re.compile(r"[/\\\x00-\x1f\x7f]")
+    # Bounds how long a long-lived Python worker can reuse a directory listing.
+    _DISCOVERY_CACHE_TTL_SECONDS = 300
 
     logger = logging.getLogger(__name__)
 
@@ -1047,13 +920,23 @@ def register_lakeflow_source(spark):
     _DISCOVERY_CACHE = _DiscoveryCache()
 
 
+    def validate_hdb_name(name: str, label: str) -> str:
+        """Return ``name`` if it is a single safe path component below the HDB root."""
+        text = str(name)
+        if not text or text in {".", ".."} or _UNSAFE_NAME_CHARS.search(text):
+            raise ValueError(
+                f"Unsafe {label} {text!r}: expected a single path component without "
+                "separators or control characters."
+            )
+        return text
+
+
     def hdb_child_path(root_path: str, *parts: str) -> str:
-        """Build a child path below a FUSE-mounted HDB root."""
+        """Build a child path below a FUSE-mounted HDB root from validated components."""
         result = str(root_path or "").strip().rstrip("/")
         for part in parts:
-            value = str(part or "").strip().strip("/")
-            if value:
-                result = f"{result}/{value}" if result else value
+            value = validate_hdb_name(part, "HDB path component")
+            result = f"{result}/{value}" if result else value
         return result
 
 
@@ -1064,13 +947,39 @@ def register_lakeflow_source(spark):
         value = str(raw_value).strip()
         if not value:
             return None
-        if DATE_PARTITION_RE.match(value):
-            return value
-        if re.match(r"^\d{4}-\d{2}-\d{2}$", value):
-            return value.replace("-", ".")
-        if re.match(r"^\d{4}/\d{2}/\d{2}$", value):
-            return value.replace("/", ".")
-        return value
+        parsed = _parse_date(value)
+        if parsed is None:
+            raise ValueError(
+                f"Invalid KDB partition date {value!r}; expected YYYY.MM.DD, YYYY-MM-DD, "
+                "or YYYY/MM/DD."
+            )
+        return parsed
+
+
+    def _parse_date(value: str) -> str | None:
+        for pattern in _DATE_INPUT_PATTERNS:
+            match = pattern.match(value)
+            if match is None:
+                continue
+            year, month, day = (int(part) for part in match.groups())
+            try:
+                date(year, month, day)
+            except ValueError:
+                return None
+            return f"{year:04d}.{month:02d}.{day:02d}"
+        return None
+
+
+    def _is_partition_name(name: str) -> bool:
+        return bool(DATE_PARTITION_RE.match(name)) and _parse_date(name) == name
+
+
+    def _reject_symlink(entry: os.DirEntry, label: str) -> None:
+        if entry.is_symlink():
+            raise ValueError(
+                f"HDB {label} {entry.path} is a symbolic link; symlinked HDB content is not "
+                "supported."
+            )
 
 
     def _scan_date_partitions(root_path: str) -> list[str]:
@@ -1079,12 +988,17 @@ def register_lakeflow_source(spark):
                 f"HDB root path must be a FUSE/local directory, not a URI: {root_path}"
             )
 
+        # Name and d_type checks only: FUSE listings return entry types, while a
+        # per-entry stat on UC Volumes costs tens of milliseconds.
+        date_partitions = []
         try:
-            date_partitions = [
-                entry.name
-                for entry in os.scandir(root_path)
-                if DATE_PARTITION_RE.match(entry.name)
-            ]
+            with os.scandir(root_path) as scanned:
+                for entry in scanned:
+                    if not _is_partition_name(entry.name):
+                        continue
+                    _reject_symlink(entry, "date partition")
+                    if entry.is_dir(follow_symlinks=False):
+                        date_partitions.append(entry.name)
         except FileNotFoundError:
             raise FileNotFoundError(f"HDB root path does not exist: {root_path}") from None
         except NotADirectoryError:
@@ -1093,16 +1007,16 @@ def register_lakeflow_source(spark):
 
 
     def _scan_child_directories(parent_path: str) -> list[str]:
+        children = []
         try:
-            return [
-                entry.name
-                for entry in os.scandir(parent_path)
-                if entry.is_dir(follow_symlinks=False)
-            ]
-        except FileNotFoundError:
+            with os.scandir(parent_path) as scanned:
+                for entry in scanned:
+                    _reject_symlink(entry, "table directory")
+                    if entry.is_dir(follow_symlinks=False):
+                        children.append(entry.name)
+        except (FileNotFoundError, NotADirectoryError):
             return []
-        except NotADirectoryError:
-            return []
+        return children
 
 
     def _table_directory_exists(root_path: str, date_partition: str, actual_name: str) -> bool:
@@ -1150,33 +1064,6 @@ def register_lakeflow_source(spark):
         )
 
 
-    def _find_actual_table_name(
-        root_path: str,
-        date_partitions: tuple[str, ...],
-        table_name: str,
-    ) -> str:
-        actual_name, _, _ = _find_table_boundaries(root_path, date_partitions, table_name)
-        return actual_name
-
-
-    def _scan_date_directories(root_path: str) -> list[Path]:
-        return [
-            Path(hdb_child_path(root_path, partition))
-            for partition in _scan_date_partitions(root_path)
-        ]
-
-
-    def _date_partitions(root_path: str) -> list[str]:
-        return list(_DISCOVERY_CACHE.date_partitions(root_path))
-
-
-    def _date_directories(root_path: str) -> list[Path]:
-        return [
-            Path(hdb_child_path(root_path, partition))
-            for partition in _date_partitions(root_path)
-        ]
-
-
     def clear_discovery_cache() -> None:
         """Clear process-shared discovery metadata, primarily for tests."""
         _DISCOVERY_CACHE.clear()
@@ -1184,7 +1071,7 @@ def register_lakeflow_source(spark):
 
     def list_date_partitions(root_path: str) -> list[str]:
         """List all date partitions found under an HDB root path."""
-        return _date_partitions(root_path)
+        return list(_DISCOVERY_CACHE.date_partitions(root_path))
 
 
     def discover_tables(root_path: str, sample_dates: int = 0) -> list[str]:
@@ -1230,6 +1117,44 @@ def register_lakeflow_source(spark):
 
     logger = logging.getLogger(__name__)
 
+
+    class _PicklableLock:
+        """Process-local lock that can travel with the merged connector class."""
+
+        def __init__(self):
+            self._lock = threading.Lock()
+
+        def __enter__(self):
+            return self._lock.__enter__()
+
+        def __exit__(self, *exc_info):
+            return self._lock.__exit__(*exc_info)
+
+        def __getstate__(self):
+            return {}
+
+        def __setstate__(self, _state):
+            self._lock = threading.Lock()
+
+
+    class _ProcessLocalDict(dict):
+        """Process-local cache that serializes as empty with the merged connector class.
+
+        The merged source ships module state to executors by value; a cache filled
+        on the driver must not make an executor skip its own q or runtime setup.
+        """
+
+        def __reduce__(self):
+            return (type(self), ())
+
+
+    class _ProcessLocalSet(set):
+        """Process-local set that serializes as empty with the merged connector class."""
+
+        def __reduce__(self):
+            return (type(self), ())
+
+
     DEFAULT_KDBX_INSTALLER_URL = (
         "https://portal.dl.kx.com/assets/raw/kdb-x/install_kdb/~latest~/install_kdb.sh"
     )
@@ -1243,16 +1168,24 @@ def register_lakeflow_source(spark):
     KDBX_INSTALL_BEARER_TOKEN_OPTION = "kdbx_install_bearer_token"
     KDBX_LICENSE_B64_OPTION = "kdbx_license_b64"
     KDBX_LICENSE_FILE_PATH_OPTION = "kdbx_license_file_path"
+    KDBX_LICENSE_KIND_OPTION = "kdbx_license_kind"
     KDBX_OFFLINE_BUNDLE_PATH_OPTION = "kdbx_offline_bundle_path"
     KDBX_INSTALL_MODE_OPTION = "kdbx_install_mode"
     PYKX_INSTALL_SPEC_OPTION = "pykx_install_spec"
 
     _RUNTIME_LOCK = _PicklableLock()
-    _PREPARED_RUNTIME_KEYS: set[tuple[str, int, int]] = set()
-    _RUNTIME_HOME_CACHE: dict[str, Path] = {}
-    _LOCAL_BUNDLE_DIR_CACHE: dict[str, Path] = {}
+    _PREPARED_RUNTIME_KEYS: set[str] = _ProcessLocalSet()
+    _RUNTIME_HOME_CACHE: dict[str, Path] = _ProcessLocalDict()
+    _LOCAL_BUNDLE_DIR_CACHE: dict[str, Path] = _ProcessLocalDict()
     _RUNTIME_HOME_OVERRIDE_ENV = "KDBX_RUNTIME_HOME"
     _LICENSE_FILE_NAMES = ("kc.lic", "k4.lic", "kx.lic")
+    _LICENSE_KIND_FILE_NAMES = {"kc": "kc.lic", "k4": "k4.lic"}
+    # install_kdb.sh writes kc.lic for --b64lic and k4.lic for --k4b64lic.
+    _INSTALLER_LICENSE_FLAGS = {"kc.lic": "--b64lic", "k4.lic": "--k4b64lic"}
+    _LICENSE_ENV_VARS = frozenset({"KDB_LICENSE_B64", "KDB_K4LICENSE_B64"})
+    # RFC 6750 b64token characters; anything else could break the curl config syntax.
+    _BEARER_TOKEN_RE = re.compile(r"^[A-Za-z0-9\-._~+/]+=*$")
+    _REDACTED = "[REDACTED]"
 
 
     @dataclass(frozen=True)
@@ -1260,11 +1193,12 @@ def register_lakeflow_source(spark):
         """Runtime configuration required to initialize PyKX safely."""
 
         license_directory: str
-        installer_bearer_token: str | None = None
-        license_b64: str | None = None
+        installer_bearer_token: str | None = dataclasses.field(default=None, repr=False)
+        license_b64: str | None = dataclasses.field(default=None, repr=False)
         installer_url: str = DEFAULT_KDBX_INSTALLER_URL
         offline_bundle_path: str | None = None
         pykx_install_spec: str | None = None
+        license_file_name: str = "kc.lic"
 
         @property
         def uses_installer(self) -> bool:
@@ -1275,6 +1209,11 @@ def register_lakeflow_source(spark):
         @property
         def uses_offline_bundle(self) -> bool:
             return bool(self.offline_bundle_path and self.license_b64)
+
+        @property
+        def secrets(self) -> tuple[str, ...]:
+            values = (self.installer_bearer_token, self.license_b64)
+            return tuple(value for value in values if value)
 
 
     def normalize_license_directory(value: str) -> str:
@@ -1303,23 +1242,32 @@ def register_lakeflow_source(spark):
         explicit_bundle_path = str(options.get(KDBX_OFFLINE_BUNDLE_PATH_OPTION, "")).strip()
         pykx_install_spec = _option(options, PYKX_INSTALL_SPEC_OPTION)
         install_mode = _install_mode(options)
+        license_kind = _license_kind(options)
 
         direct_install_token = str(options.get(KDBX_INSTALL_BEARER_TOKEN_OPTION, "")).strip()
         direct_license_option = str(options.get(KDBX_LICENSE_B64_OPTION, "")).strip()
         license_file_b64 = ""
+        detected_license_name = None
         if not direct_license_option:
-            license_file_b64 = _read_license_file_b64(
+            license_file_b64, detected_license_name = _read_license_file(
                 str(options.get(KDBX_LICENSE_FILE_PATH_OPTION, "")).strip()
             )
         direct_license_b64 = direct_license_option or license_file_b64
+        license_file_name = _license_file_name(license_kind, detected_license_name)
 
-        if direct_license_b64 and explicit_bundle_path and install_mode != "online":
+        def _config(**values) -> PyKxRuntimeConfig:
             return PyKxRuntimeConfig(
                 license_directory=license_directory,
+                pykx_install_spec=pykx_install_spec,
+                license_file_name=license_file_name,
+                **values,
+            )
+
+        if direct_license_b64 and explicit_bundle_path and install_mode != "online":
+            return _config(
                 installer_bearer_token=direct_install_token or None,
                 license_b64=direct_license_b64,
                 offline_bundle_path=explicit_bundle_path,
-                pykx_install_spec=pykx_install_spec,
             )
 
         direct_supplied = [bool(direct_install_token), bool(direct_license_option)]
@@ -1330,11 +1278,9 @@ def register_lakeflow_source(spark):
                 "when using direct connection options."
             )
         if all(direct_supplied):
-            config = PyKxRuntimeConfig(
-                license_directory=license_directory,
+            config = _config(
                 installer_bearer_token=direct_install_token,
                 license_b64=direct_license_b64,
-                pykx_install_spec=pykx_install_spec,
             )
             return config if install_mode == "online" else _maybe_offline(config, explicit_bundle_path)
 
@@ -1344,14 +1290,7 @@ def register_lakeflow_source(spark):
                     f"{KDBX_INSTALL_MODE_OPTION}='online' requires an installer bearer token "
                     "and license b64, not only a license file."
                 )
-            return _maybe_offline(
-                PyKxRuntimeConfig(
-                    license_directory=license_directory,
-                    license_b64=license_file_b64,
-                    pykx_install_spec=pykx_install_spec,
-                ),
-                explicit_bundle_path,
-            )
+            return _maybe_offline(_config(license_b64=license_file_b64), explicit_bundle_path)
 
         secret_scope = str(options.get(KDBX_SECRET_SCOPE_OPTION, "")).strip()
         install_token_key = str(options.get(KDBX_INSTALL_BEARER_SECRET_KEY_OPTION, "")).strip()
@@ -1367,10 +1306,7 @@ def register_lakeflow_source(spark):
             )
 
         if not all(supplied):
-            return PyKxRuntimeConfig(
-                license_directory=license_directory,
-                pykx_install_spec=pykx_install_spec,
-            )
+            return _config()
 
         resolver = secret_resolver or _resolve_databricks_secret
         installer_bearer_token = resolver(secret_scope, install_token_key).strip()
@@ -1381,12 +1317,7 @@ def register_lakeflow_source(spark):
                 "secret scope and secret keys."
             )
 
-        config = PyKxRuntimeConfig(
-            license_directory=license_directory,
-            installer_bearer_token=installer_bearer_token,
-            license_b64=license_b64,
-            pykx_install_spec=pykx_install_spec,
-        )
+        config = _config(installer_bearer_token=installer_bearer_token, license_b64=license_b64)
         return config if install_mode == "online" else _maybe_offline(config, explicit_bundle_path)
 
 
@@ -1406,19 +1337,41 @@ def register_lakeflow_source(spark):
         return mode
 
 
-    def _read_license_file_b64(path: str) -> str:
+    def _license_kind(options: dict[str, str]) -> str | None:
+        value = str(options.get(KDBX_LICENSE_KIND_OPTION, "")).strip().lower()
+        if not value:
+            return None
+        if value not in _LICENSE_KIND_FILE_NAMES:
+            raise ValueError(
+                f"Unsupported {KDBX_LICENSE_KIND_OPTION} {value!r}. Expected 'k4' for a "
+                "commercial k4.lic license or 'kc' for a kc.lic license."
+            )
+        return value
+
+
+    def _license_file_name(license_kind: str | None, detected_name: str | None) -> str:
+        if license_kind:
+            return _LICENSE_KIND_FILE_NAMES[license_kind]
+        if detected_name == "k4.lic":
+            return "k4.lic"
+        return "kc.lic"
+
+
+    def _read_license_file(path: str) -> tuple[str, str | None]:
+        """Return the base64 license and its file name when it is a known license name."""
         if not path:
-            return ""
+            return "", None
         candidate = Path(path)
         if candidate.is_dir():
             for file_name in _LICENSE_FILE_NAMES:
                 license_file = candidate / file_name
                 if license_file.is_file():
-                    return base64.b64encode(license_file.read_bytes()).decode("ascii")
-            return ""
+                    return base64.b64encode(license_file.read_bytes()).decode("ascii"), file_name
+            return "", None
         if candidate.is_file():
-            return base64.b64encode(candidate.read_bytes()).decode("ascii")
-        return ""
+            name = candidate.name if candidate.name in _LICENSE_FILE_NAMES else None
+            return base64.b64encode(candidate.read_bytes()).decode("ascii"), name
+        return "", None
 
 
     def _maybe_offline(config: PyKxRuntimeConfig, explicit_bundle_path: str) -> PyKxRuntimeConfig:
@@ -1437,13 +1390,7 @@ def register_lakeflow_source(spark):
         )
         if not bundle_path:
             return config
-        return PyKxRuntimeConfig(
-            license_directory=config.license_directory,
-            installer_bearer_token=config.installer_bearer_token,
-            license_b64=config.license_b64,
-            offline_bundle_path=bundle_path,
-            pykx_install_spec=config.pykx_install_spec,
-        )
+        return dataclasses.replace(config, offline_bundle_path=bundle_path)
 
 
     def _probe_offline_bundle(license_directory: str) -> str | None:
@@ -1496,13 +1443,26 @@ def register_lakeflow_source(spark):
         return (DEFAULT_OFFLINE_BUNDLE_NAME,)
 
 
+    def _runtime_key(config: PyKxRuntimeConfig) -> str:
+        """Return a digest identifying one bootstrap configuration without keeping secrets."""
+        digest = hashlib.sha256()
+        for value in (
+            config.license_directory,
+            config.installer_bearer_token or "",
+            config.license_b64 or "",
+            config.license_file_name,
+            config.offline_bundle_path or "",
+            config.pykx_install_spec or "",
+            config.installer_url,
+        ):
+            digest.update(value.encode("utf-8"))
+            digest.update(b"\0")
+        return digest.hexdigest()
+
+
     def prepare_pykx(config: PyKxRuntimeConfig):
         """Install/configure KDB-X and import PyKX after license setup."""
-        runtime_key = (
-            config.license_directory,
-            len(config.installer_bearer_token or ""),
-            len(config.license_b64 or ""),
-        )
+        runtime_key = _runtime_key(config)
 
         with _RUNTIME_LOCK:
             if config.uses_installer and runtime_key not in _PREPARED_RUNTIME_KEYS:
@@ -1574,83 +1534,155 @@ def register_lakeflow_source(spark):
             _install_kdbx_online(config)
 
 
-    def _install_kdbx_online(config: PyKxRuntimeConfig) -> None:
+    def _prepare_runtime_home() -> Path:
         runtime_home = _runtime_home_directory()
         runtime_home.mkdir(parents=True, exist_ok=True)
         # The KDB-X installer auto-selects "$HOME/.kx" as the install location and
-        # aborts in non-interactive mode if it cannot create that directory. On
-        # serverless executors with read-only or restricted /tmp, pre-creating it
-        # here avoids the "Cannot create directory" failure surfaced from
-        # install_kdb.sh.
+        # aborts in non-interactive mode if it cannot create that directory.
         (runtime_home / ".kx").mkdir(parents=True, exist_ok=True)
+        return runtime_home
+
+
+    def _install_kdbx_online(config: PyKxRuntimeConfig) -> None:
+        token = _validated_bearer_token(config.installer_bearer_token)
+        runtime_home = _prepare_runtime_home()
 
         with tempfile.TemporaryDirectory() as tmpdir:
             installer_path = Path(tmpdir) / "install_kdb.sh"
-            download = subprocess.run(
-                [
-                    "curl",
-                    "-sSLO",
-                    "--fail-with-body",
-                    "--oauth2-bearer",
-                    config.installer_bearer_token or "",
-                    config.installer_url,
-                ],
-                cwd=tmpdir,
-                capture_output=True,
-                text=True,
+            # `-q` must come first so ~/.curlrc is ignored; the token travels on stdin.
+            download = _run_subprocess(
+                ["curl", "-q", "--config", "-"],
+                config=config,
+                label="KDB-X installer download",
                 timeout=180,
+                input=_curl_config(config.installer_url, token, installer_path),
+                cwd=tmpdir,
+                env=_child_process_env(config),
             )
             if download.returncode != 0:
+                stderr_tail = _command_tail(download.stderr, secrets=config.secrets)
                 raise RuntimeError(
-                    "KDB-X installer download failed with rc="
-                    f"{download.returncode}: {_command_tail(download.stderr)}"
+                    f"KDB-X installer download failed with rc={download.returncode}: {stderr_tail}"
                 )
+            _run_installer(config, installer_path, runtime_home, cwd=tmpdir, offline=False)
 
-            install_env = {
-                **os.environ,
-                "HOME": str(runtime_home),
-                # Override any inherited TERM (e.g. "unknown" on serverless DLT
-                # analyzers) so the installer's tput calls don't blow up.
-                "TERM": "dumb",
-            }
-            install = subprocess.run(
-                [
-                    "bash",
-                    str(installer_path),
-                    "-y",
-                    "--b64lic",
-                    config.license_b64 or "",
-                ],
-                cwd=tmpdir,
-                env=install_env,
-                capture_output=True,
-                text=True,
-                timeout=1200,
+
+    def _validated_bearer_token(token: str | None) -> str:
+        value = str(token or "")
+        if not _BEARER_TOKEN_RE.match(value):
+            raise ValueError(
+                "KDB-X installer bearer token contains unsupported characters; expected an "
+                "RFC 6750 bearer token."
             )
-            if install.returncode != 0:
-                raise RuntimeError(
-                    "install_kdb.sh failed with rc="
-                    f"{install.returncode}. stdout tail: {_command_tail(install.stdout)}. "
-                    f"stderr tail: {_command_tail(install.stderr)}"
-                )
+        return value
+
+
+    def _curl_config(url: str, token: str, output_path: Path) -> str:
+        lines = (
+            "silent",
+            "show-error",
+            "location",
+            "fail-with-body",
+            f'oauth2-bearer = "{token}"',
+            f'url = "{_curl_quote(url)}"',
+            f'output = "{_curl_quote(str(output_path))}"',
+        )
+        return "\n".join(lines) + "\n"
+
+
+    def _curl_quote(value: str) -> str:
+        return value.replace("\\", "\\\\").replace('"', '\\"')
+
+
+    def _run_installer(
+        config: PyKxRuntimeConfig,
+        installer_path: Path,
+        runtime_home: Path,
+        *,
+        cwd: str,
+        offline: bool,
+    ) -> None:
+        args = ["bash", str(installer_path)]
+        if offline:
+            args.append("--offline")
+        # Without `-y` the script falls into interactive mode and hangs on its
+        # first prompt. install_kdb.sh accepts the license only as an argument.
+        args.append("-y")
+        args.extend(_installer_license_args(config))
+        label = "install_kdb.sh --offline" if offline else "install_kdb.sh"
+        install = _run_subprocess(
+            args,
+            config=config,
+            label=label,
+            timeout=1200,
+            cwd=cwd,
+            # TERM overrides values such as "unknown" that break tput in the script.
+            env=_child_process_env(config, HOME=str(runtime_home), TERM="dumb"),
+        )
+        if install.returncode != 0:
+            raise RuntimeError(
+                f"{label} failed with rc={install.returncode}. stdout tail: "
+                f"{_command_tail(install.stdout, secrets=config.secrets)}. stderr tail: "
+                f"{_command_tail(install.stderr, secrets=config.secrets)}"
+            )
+
+
+    def _run_subprocess(
+        args: list[str],
+        *,
+        config: PyKxRuntimeConfig,
+        label: str,
+        timeout: int,
+        **kwargs,
+    ) -> subprocess.CompletedProcess:
+        """Run a bootstrap command without an interactive stdin or secret-bearing errors."""
+        if "input" not in kwargs:
+            # install_kdb.sh prompts for missing optional bundle components even
+            # with -y; an inherited open stdin would block it until the timeout.
+            kwargs["stdin"] = subprocess.DEVNULL
+        try:
+            return subprocess.run(
+                args, capture_output=True, text=True, timeout=timeout, **kwargs
+            )
+        except subprocess.TimeoutExpired as exc:
+            # TimeoutExpired's message repeats argv, which includes the license.
+            raise RuntimeError(
+                f"{label} timed out after {timeout} seconds. stdout tail: "
+                f"{_command_tail(_decode(exc.stdout), secrets=config.secrets)}. stderr tail: "
+                f"{_command_tail(_decode(exc.stderr), secrets=config.secrets)}"
+            ) from None
+
+
+    def _decode(value) -> str:
+        if isinstance(value, bytes):
+            return value.decode("utf-8", "replace")
+        return str(value or "")
+
+
+    def _installer_license_args(config: PyKxRuntimeConfig) -> list[str]:
+        flag = _INSTALLER_LICENSE_FLAGS.get(config.license_file_name, "--b64lic")
+        return [flag, config.license_b64 or ""]
+
+
+    def _child_process_env(config: PyKxRuntimeConfig, **overrides: str) -> dict[str, str]:
+        """Return the parent environment without KDB license variables or secret values."""
+        secrets = set(config.secrets)
+        env = {
+            key: value
+            for key, value in os.environ.items()
+            if key not in _LICENSE_ENV_VARS and value not in secrets
+        }
+        env.update(overrides)
+        return env
 
 
     def _install_kdbx_offline(config: PyKxRuntimeConfig) -> None:
         """Install KDB-X from a pre-staged offline bundle (no network access)."""
-        runtime_home = _runtime_home_directory()
-        runtime_home.mkdir(parents=True, exist_ok=True)
-        (runtime_home / ".kx").mkdir(parents=True, exist_ok=True)
-
+        runtime_home = _prepare_runtime_home()
         bundle_path = _localize_offline_bundle(config.offline_bundle_path or "")
 
         with tempfile.TemporaryDirectory() as tmpdir:
-            try:
-                with zipfile.ZipFile(bundle_path) as zf:
-                    zf.extractall(tmpdir)
-            except zipfile.BadZipFile as exc:
-                raise RuntimeError(
-                    f"Offline KDB-X bundle at {str(bundle_path)!r} is not a valid zip."
-                ) from exc
+            _extract_offline_bundle(bundle_path, Path(tmpdir))
 
             installer_path = Path(tmpdir) / "install_kdb.sh"
             if not installer_path.is_file():
@@ -1659,35 +1691,33 @@ def register_lakeflow_source(spark):
                     "install_kdb.sh."
                 )
             installer_path.chmod(0o755)
+            _run_installer(config, installer_path, runtime_home, cwd=tmpdir, offline=True)
 
-            install_env = {
-                **os.environ,
-                "HOME": str(runtime_home),
-                "TERM": "dumb",
-            }
-            install = subprocess.run(
-                [
-                    "bash",
-                    str(installer_path),
-                    "--offline",
-                    # Without `-y` the script falls into interactive mode and hangs
-                    # on its first prompt, eventually triggering ``TimeoutExpired``.
-                    "-y",
-                    "--b64lic",
-                    config.license_b64 or "",
-                ],
-                cwd=tmpdir,
-                env=install_env,
-                capture_output=True,
-                text=True,
-                timeout=1200,
-            )
-            if install.returncode != 0:
-                raise RuntimeError(
-                    "install_kdb.sh --offline failed with rc="
-                    f"{install.returncode}. stdout tail: {_command_tail(install.stdout)}. "
-                    f"stderr tail: {_command_tail(install.stderr)}"
-                )
+
+    def _extract_offline_bundle(bundle_path: Path, target: Path) -> None:
+        try:
+            with zipfile.ZipFile(bundle_path) as archive:
+                members = archive.infolist()
+                for member in members:
+                    if not _is_safe_bundle_member(member):
+                        raise RuntimeError(
+                            f"Offline KDB-X bundle at {str(bundle_path)!r} contains an unsafe "
+                            f"member {member.filename!r}."
+                        )
+                archive.extractall(target, members)
+        except zipfile.BadZipFile as exc:
+            raise RuntimeError(
+                f"Offline KDB-X bundle at {str(bundle_path)!r} is not a valid zip."
+            ) from exc
+
+
+    def _is_safe_bundle_member(member: zipfile.ZipInfo) -> bool:
+        name = member.filename
+        if not name or "\\" in name or name.startswith("/"):
+            return False
+        if ".." in PurePosixPath(name).parts:
+            return False
+        return not stat.S_ISLNK(member.external_attr >> 16)
 
 
     def _ensure_pykx_package(config: PyKxRuntimeConfig) -> None:
@@ -1707,25 +1737,25 @@ def register_lakeflow_source(spark):
         if not _is_wheel_or_path(spec):
             command.append("--pre")
         command.append(spec)
-        pip_env = dict(os.environ)
+        pip_env = _child_process_env(config)
         # Spark workers inherit a PYTHONPATH containing JAR paths. Pip scans every
         # entry as a possible distribution and can fail with PermissionError on
         # protected Databricks JARs. The isolated interpreter and clean path keep
         # the fallback install confined to ``target``.
         pip_env.pop("PYTHONPATH", None)
         pip_env.pop("PYTHONHOME", None)
-        pip_install = subprocess.run(
+        pip_install = _run_subprocess(
             command,
-            capture_output=True,
-            text=True,
+            config=config,
+            label=f"PyKX package install {spec!r}",
             timeout=1200,
             env=pip_env,
         )
         if pip_install.returncode != 0:
             raise RuntimeError(
                 f"Failed to install PyKX package {spec!r}. stdout tail: "
-                f"{_command_tail(pip_install.stdout)}. stderr tail: "
-                f"{_command_tail(pip_install.stderr)}"
+                f"{_command_tail(pip_install.stdout, secrets=config.secrets)}. stderr tail: "
+                f"{_command_tail(pip_install.stderr, secrets=config.secrets)}"
             )
         if target not in sys.path:
             sys.path.insert(0, target)
@@ -1748,7 +1778,7 @@ def register_lakeflow_source(spark):
             raise RuntimeError("Offline KDB-X install bundle path is empty.")
 
         local_dir = _local_bundle_directory()
-        local_path = local_dir / Path(source).name
+        local_path = local_dir / _bundle_cache_name(source)
         if _path_is_file(local_path):
             return local_path
 
@@ -1774,6 +1804,18 @@ def register_lakeflow_source(spark):
             f"source status: {_bundle_path_status((Path(source),))}. "
             f"dbutils attempts: {'; '.join(errors) if errors else 'none'}"
         )
+
+
+    def _bundle_cache_name(source: str) -> str:
+        """Name the local copy after the source path and, when visible, its size and mtime."""
+        key = source
+        try:
+            info = os.stat(source)
+            key = f"{source}\0{info.st_size}\0{info.st_mtime_ns}"
+        except OSError:
+            pass
+        digest = hashlib.sha256(key.encode("utf-8")).hexdigest()[:16]
+        return f"{digest}-{Path(source).name}"
 
 
     def _local_bundle_directory() -> Path:
@@ -1832,16 +1874,27 @@ def register_lakeflow_source(spark):
                     return str(license_dir)
 
         if config.license_b64:
-            target = _runtime_home_directory() / "qlic"
-            target.mkdir(parents=True, exist_ok=True)
-            (target / "kc.lic").write_bytes(base64.b64decode(config.license_b64))
-            return str(target)
+            return str(_materialize_license(config))
 
         if license_dir:
             return str(license_dir)
         target = _runtime_home_directory() / "qlic"
         target.mkdir(parents=True, exist_ok=True)
         return str(target)
+
+
+    def _materialize_license(config: PyKxRuntimeConfig) -> Path:
+        """Write the decoded license to an owner-only file under the runtime home."""
+        target = _runtime_home_directory() / "qlic"
+        target.mkdir(mode=0o700, parents=True, exist_ok=True)
+        os.chmod(target, 0o700)
+        license_path = target / config.license_file_name
+        flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC | getattr(os, "O_NOFOLLOW", 0)
+        descriptor = os.open(license_path, flags, 0o600)
+        with os.fdopen(descriptor, "wb") as handle:
+            handle.write(base64.b64decode(config.license_b64 or ""))
+        os.chmod(license_path, 0o600)
+        return target
 
 
     def _apply_pykx_environment(config: PyKxRuntimeConfig) -> None:
@@ -1851,8 +1904,6 @@ def register_lakeflow_source(spark):
         os.environ["HOME"] = str(runtime_home)
         os.environ["QLIC"] = str(target)
         os.environ["PYKX_LICENSED"] = "true"
-        if config.license_b64:
-            os.environ["KDB_LICENSE_B64"] = config.license_b64
         kx_bin = runtime_home / ".kx" / "bin"
         existing_path = os.environ.get("PATH", "")
         if kx_bin.exists():
@@ -1868,8 +1919,12 @@ def register_lakeflow_source(spark):
             return False
 
 
-    def _command_tail(value: str, limit: int = 1200) -> str:
-        text = str(value or "").strip()
+    def _command_tail(value: str, limit: int = 1200, *, secrets: tuple[str, ...] = ()) -> str:
+        text = str(value or "")
+        for secret in secrets:
+            if secret:
+                text = text.replace(secret, _REDACTED)
+        text = text.strip()
         if len(text) <= limit:
             return text
         return text[-limit:]
@@ -1900,10 +1955,387 @@ def register_lakeflow_source(spark):
 
 
     ########################################################
+    # src/databricks/labs/community_connector/sources/kx_kdb/sym_reader.py
+    ########################################################
+
+    logger = logging.getLogger(__name__)
+
+    # Keep each date×sym slice chunk small enough for serverless Python memory limits.
+    _ROW_CHUNK_SIZE = 10_000
+
+    _LOAD_SYM_DOMAIN_Q = "{[p] `sym set get hsym p}"
+    _READ_SYM_FILE_Q = "{[p] get hsym p}"
+    # Enumerations do not compare with longs once the sym domain is loaded.
+    _SYMBOL_ROWS_Q = "{[sympath; symi] `chunk_idx set where symi=`long$get hsym sympath}"
+    _SYMBOL_ROW_COUNT_Q = "count chunk_idx"
+    _CHUNK_INDICES_Q = "{[row_off; m] chunk_idx[row_off+til m]}"
+    # q lambdas do not capture outer locals, so ``idx`` is projected explicitly.
+    # Timespans (16h) become nanosecond longs because Python timedelta drops
+    # sub-microsecond precision. Month, date, minute, second, and time columns
+    # (13h, 14h, 17h-19h) become q-formatted strings with nulls as generic null.
+    _READ_COLUMNS_Q = (
+        "{[column_paths; idx] {[idx; p] v: (get hsym p) idx; "
+        "$[16h=type v; `long$v; (type v) in 13 14 17 18 19h; "
+        "{$[null x; (::); string x]} each v; v]}[idx] each column_paths}"
+    )
+
+    _SYM_DOMAIN_LOCK = _PicklableLock()
+    _LOADED_SYM_DOMAIN: dict[str, tuple[int, int]] = _ProcessLocalDict()
+
+
+    def _sym_file_path(hdb_root_path: str) -> str:
+        return hdb_child_path(hdb_root_path, "sym")
+
+
+    def _sym_file_signature(sym_file: str) -> tuple[int, int]:
+        try:
+            info = os.lstat(sym_file)
+        except FileNotFoundError:
+            raise FileNotFoundError(f"HDB sym file does not exist: {sym_file}") from None
+        if stat.S_ISLNK(info.st_mode):
+            raise ValueError(
+                f"HDB sym file {sym_file} is a symbolic link; symlinked HDB content is not "
+                "supported."
+            )
+        if not stat.S_ISREG(info.st_mode):
+            raise ValueError(f"HDB sym file {sym_file} is not a regular file.")
+        return info.st_size, info.st_mtime_ns
+
+
+    def _ensure_sym_domain(kx, hdb_root_path: str) -> str:
+        """Load the root ``sym`` domain so enumerated columns decode to symbols."""
+        sym_file = _sym_file_path(hdb_root_path)
+        signature = _sym_file_signature(sym_file)
+        with _SYM_DOMAIN_LOCK:
+            if _LOADED_SYM_DOMAIN.get(sym_file) != signature:
+                kx.q(_LOAD_SYM_DOMAIN_Q, sym_file)
+                _LOADED_SYM_DOMAIN.clear()
+                _LOADED_SYM_DOMAIN[sym_file] = signature
+        return sym_file
+
+
+    def load_sym_enumeration(hdb_root_path: str, runtime_config: PyKxRuntimeConfig) -> list[str]:
+        """Return the HDB sym enumeration; list positions are KDB enum indices."""
+        kx = prepare_pykx(runtime_config)
+        sym_file = _ensure_sym_domain(kx, hdb_root_path)
+        return _symbols_to_strings(kx.q(_READ_SYM_FILE_Q, sym_file))
+
+
+    def _symbols_to_strings(value) -> list[str]:
+        if hasattr(value, "py"):
+            try:
+                value = value.py()
+            except Exception:
+                pass
+        if hasattr(value, "tolist"):
+            try:
+                value = value.tolist()
+            except Exception:
+                pass
+        if isinstance(value, (str, bytes)):
+            values: Iterable = [value]
+        else:
+            try:
+                values = list(value)
+            except TypeError:
+                values = [value]
+        return [_symbol_text(item) for item in values]
+
+
+    def _symbol_text(value) -> str:
+        if value is None:
+            return ""
+        if isinstance(value, bytes):
+            return value.decode("utf-8")
+        return str(value)
+
+
+    def _chunk_slices(row_count: int, chunk_size: int) -> Iterator[tuple[int, int]]:
+        """Yield ``(offset, size)`` pairs that cover exactly ``row_count`` rows."""
+        for offset in range(0, max(int(row_count), 0), chunk_size):
+            yield offset, min(chunk_size, row_count - offset)
+
+
+    def read_kdb_date_sym_records(
+        *,
+        hdb_root_path: str,
+        kdb_table_name: str,
+        date_partition: str,
+        symbol: str,
+        sym_index: int,
+        runtime_config: PyKxRuntimeConfig,
+        column_defs: List[dict],
+        sym_column: str = "sym",
+    ) -> Iterator[dict]:
+        """Read one HDB date partition filtered to a single symbol."""
+        sym_column = validate_hdb_name(sym_column, "sym_column")
+        if sym_index < 0:
+            return
+
+        column_names = [column["name"] for column in column_defs]
+        existing_columns = _existing_partition_columns(
+            hdb_root_path, date_partition, kdb_table_name, column_names
+        )
+        physical_sym_column = next(
+            (column for column in existing_columns if column.lower() == sym_column.lower()),
+            None,
+        )
+        partition_path = hdb_child_path(hdb_root_path, date_partition, kdb_table_name)
+        if physical_sym_column is None:
+            logger.warning(
+                "Skipping %s because required sym column %r is missing.",
+                partition_path,
+                sym_column,
+            )
+            return
+
+        kx = prepare_pykx(runtime_config)
+        _ensure_sym_domain(kx, hdb_root_path)
+        column_paths = [hdb_child_path(partition_path, column) for column in existing_columns]
+        sym_path = hdb_child_path(partition_path, physical_sym_column)
+        _prepare_symbol_row_indices(kx, sym_path, sym_index)
+        row_count = _symbol_row_count(kx)
+
+        try:
+            for offset, size in _chunk_slices(row_count, _ROW_CHUNK_SIZE):
+                frame = _read_symbol_chunk(kx, column_paths, existing_columns, offset, size)
+                if frame is None or len(frame.index) == 0:
+                    continue
+
+                if physical_sym_column in frame.columns:
+                    frame[physical_sym_column] = frame[physical_sym_column].map(_symbol_text)
+                elif sym_column in column_names:
+                    frame[sym_column] = symbol
+
+                normalized = normalize_partition_frame(
+                    frame=frame,
+                    date_partition=date_partition,
+                    column_names=column_names,
+                    column_defs=column_defs,
+                )
+                yield from iter_records(normalized)
+
+                del frame, normalized
+                gc.collect()
+        finally:
+            gc.collect()
+
+
+    def _existing_partition_columns(
+        hdb_root_path: str,
+        date_partition: str,
+        kdb_table_name: str,
+        column_names: list[str],
+    ) -> list[str]:
+        """Return requested column files that are regular files inside the partition."""
+        date_path = hdb_child_path(hdb_root_path, date_partition)
+        table_entry = _find_entry(date_path, kdb_table_name)
+        if table_entry is None:
+            return []
+        if table_entry.is_symlink():
+            raise ValueError(
+                f"HDB table directory {table_entry.path} is a symbolic link; "
+                "symlinked HDB content is not supported."
+            )
+        if not table_entry.is_dir(follow_symlinks=False):
+            return []
+
+        with os.scandir(table_entry.path) as scanned:
+            entries = {entry.name: entry for entry in scanned}
+        existing = []
+        for column_name in column_names:
+            if column_name == "date":
+                continue
+            entry = entries.get(column_name)
+            if entry is None:
+                logger.debug("Missing KDB column file: %s/%s", table_entry.path, column_name)
+                continue
+            if entry.is_symlink():
+                raise ValueError(
+                    f"HDB column file {entry.path} is a symbolic link; "
+                    "symlinked HDB content is not supported."
+                )
+            if entry.is_file(follow_symlinks=False):
+                existing.append(column_name)
+        return existing
+
+
+    def _find_entry(parent_path: str, name: str):
+        try:
+            with os.scandir(parent_path) as scanned:
+                for entry in scanned:
+                    if entry.name == name:
+                        return entry
+        except (FileNotFoundError, NotADirectoryError):
+            return None
+        return None
+
+
+    def _prepare_symbol_row_indices(kx, sym_path: str, sym_index: int) -> None:
+        """Materialize row indices for one sym value in the q session."""
+        kx.q(_SYMBOL_ROWS_Q, sym_path, int(sym_index))
+
+
+    def _symbol_row_count(kx) -> int:
+        return _scalar_int(kx.q(_SYMBOL_ROW_COUNT_Q))
+
+
+    def _scalar_int(value) -> int:
+        if hasattr(value, "py"):
+            try:
+                value = value.py()
+            except Exception:
+                pass
+        if hasattr(value, "item"):
+            try:
+                value = value.item()
+            except Exception:
+                pass
+        return int(value)
+
+
+    def _read_symbol_chunk(
+        kx, column_paths: list[str], columns: list[str], row_off: int, size: int
+    ):
+        """Read exactly ``size`` rows of the current symbol starting at ``row_off``."""
+        row_indices = kx.q(_CHUNK_INDICES_Q, int(row_off), int(size))
+        if _is_empty_collection(row_indices):
+            return None
+        vectors = kx.q(_READ_COLUMNS_Q, column_paths, row_indices)
+        return _column_vectors_to_frame(columns, vectors)
+
+
+    def _is_empty_collection(value) -> bool:
+        if value is None:
+            return True
+        try:
+            return len(value) == 0
+        except TypeError:
+            return False
+
+
+    def _column_vectors_to_frame(columns: list[str], vectors):
+        import pandas as pd
+
+        if vectors is None:
+            return pd.DataFrame()
+
+        raw_vectors = vectors
+        if hasattr(raw_vectors, "py"):
+            try:
+                raw_vectors = raw_vectors.py()
+            except Exception:
+                pass
+
+        try:
+            items = list(raw_vectors)
+        except TypeError:
+            items = [raw_vectors]
+
+        if not items:
+            return pd.DataFrame()
+        if len(items) != len(columns):
+            raise RuntimeError(
+                f"KDB returned {len(items)} column vectors for {len(columns)} requested columns."
+            )
+
+        series_by_name = {}
+        for column_name, vector in zip(columns, items):
+            series_by_name[column_name] = _vector_to_values(vector)
+
+        return pd.DataFrame(series_by_name)
+
+
+    def _vector_to_values(vector):
+        import pandas as pd
+
+        if hasattr(vector, "py"):
+            try:
+                vector = vector.py()
+            except Exception:
+                pass
+        if hasattr(vector, "pd"):
+            try:
+                vector = vector.pd()
+            except Exception:
+                pass
+        if hasattr(vector, "tolist"):
+            try:
+                vector = vector.tolist()
+            except Exception:
+                pass
+
+        if isinstance(vector, pd.Series):
+            return [_plain_python_value(value) for value in vector.tolist()]
+        if isinstance(vector, pd.Index):
+            return [_plain_python_value(value) for value in vector.tolist()]
+        if isinstance(vector, (bytes, bytearray)):
+            # A q char vector (type c) converts to one bytes object; each byte is a row.
+            return list(bytes(vector).decode("latin-1"))
+        if isinstance(vector, str):
+            return [vector]
+        try:
+            return [_plain_python_value(value) for value in list(vector)]
+        except TypeError:
+            return [_plain_python_value(vector)]
+
+
+    def _plain_python_value(value):
+        from datetime import date, datetime, time
+        from decimal import Decimal
+
+        import pandas as pd
+
+        if hasattr(value, "py"):
+            try:
+                converted = value.py()
+                if converted is not value:
+                    value = converted
+            except Exception:
+                pass
+        if hasattr(value, "tolist"):
+            try:
+                converted = value.tolist()
+                if converted is not value:
+                    value = converted
+            except Exception:
+                pass
+        if hasattr(value, "item"):
+            try:
+                converted = value.item()
+                if converted is not value:
+                    value = converted
+            except Exception:
+                pass
+        if isinstance(value, list):
+            return [_plain_python_value(item) for item in value]
+        if isinstance(value, tuple):
+            return tuple(_plain_python_value(item) for item in value)
+        if value is None or value is pd.NaT:
+            return None
+        if isinstance(value, (bytes, bytearray)):
+            # q strings (nested char columns) arrive as bytes; the schema maps them to strings.
+            return bytes(value).decode("utf-8", "replace")
+        if isinstance(value, (str, bool, int, float, Decimal, date, datetime, time)):
+            return value
+        if (type(value).__module__ or "").startswith("pykx"):
+            raise TypeError(
+                f"KDB column data contains an unconverted PyKX {type(value).__name__} value."
+            )
+        # Do not let pandas see foreign wrapper objects. Pandas may call their
+        # __array__ implementation and recurse indefinitely.
+        return str(value)
+
+
+    ########################################################
     # src/databricks/labs/community_connector/sources/kx_kdb/schema.py
     ########################################################
 
     logger = logging.getLogger(__name__)
+
+    # Reads one splayed partition directly. Loading the whole HDB would also run
+    # any q scripts stored in the HDB root.
+    _SPLAYED_META_Q = "{[p] m:0!meta get hsym p; (string m`c; m`t)}"
 
     Q_META_TYPE_TO_SPARK = {
         "b": "BooleanType",
@@ -1923,7 +2355,6 @@ def register_lakeflow_source(spark):
         "v": "StringType",
         "t": "StringType",
         "g": "StringType",
-        " ": "StringType",
         "C": "StringType",
     }
 
@@ -1973,25 +2404,64 @@ def register_lakeflow_source(spark):
         date_partition: str,
         runtime_config: PyKxRuntimeConfig,
     ) -> List[dict]:
-        """Infer column definitions from a single KDB partition."""
+        """Infer column definitions from one splayed KDB date partition."""
+        table_path = hdb_child_path(hdb_root_path, date_partition, kdb_table_name)
         kx = prepare_pykx(runtime_config)
-        columns = _try_infer_via_db_query(kx, hdb_root_path, kdb_table_name)
-        if columns is None:
-            columns = _try_infer_via_get_partition(
-                kx, hdb_root_path, kdb_table_name, date_partition
-            )
-        if columns is None:
-            columns = _try_infer_via_splayed_column_files(
-                kx, hdb_root_path, kdb_table_name, date_partition
-            )
-
-        if columns is None:
+        try:
+            _ensure_sym_domain(kx, hdb_root_path)
+            meta = kx.q(_SPLAYED_META_Q, f"{table_path}/")
+        except Exception as exc:
             raise RuntimeError(
-                f"Could not infer schema for {kdb_table_name} from "
-                f"{_partition_table_path(hdb_root_path, kdb_table_name, date_partition)}"
-            )
+                f"Could not infer schema for {kdb_table_name} from {table_path}: "
+                f"{type(exc).__name__}: {exc}"
+            ) from exc
 
-        return _with_date_column(columns)
+        return _with_date_column(_meta_columns(meta))
+
+
+    def _meta_columns(meta) -> List[dict]:
+        value = _to_py(meta)
+        try:
+            raw_names, raw_types = value
+        except (TypeError, ValueError):
+            raise RuntimeError("KDB meta returned an unexpected shape.") from None
+
+        names = [_text(item) for item in _to_py(raw_names)]
+        types = _type_chars(_to_py(raw_types))
+        if len(names) != len(types):
+            raise RuntimeError(
+                f"KDB meta returned {len(names)} column names and {len(types)} type codes."
+            )
+        return [
+            {
+                "name": validate_hdb_name(name, "column name"),
+                "spark_type": _map_meta_type_char(type_char),
+            }
+            for name, type_char in zip(names, types)
+        ]
+
+
+    def _to_py(value):
+        if hasattr(value, "py"):
+            try:
+                return value.py()
+            except Exception:
+                return value
+        return value
+
+
+    def _text(value) -> str:
+        if isinstance(value, (bytes, bytearray)):
+            return value.decode("utf-8")
+        return str(value)
+
+
+    def _type_chars(value) -> list[str]:
+        if isinstance(value, (bytes, bytearray)):
+            return list(value.decode("latin1"))
+        if isinstance(value, str):
+            return list(value)
+        return [_text(item) for item in value]
 
 
     def _with_date_column(columns: List[dict]) -> List[dict]:
@@ -2001,117 +2471,6 @@ def register_lakeflow_source(spark):
             result.append({"name": "date", "spark_type": "StringType"})
         result.extend(columns)
         return _dedupe_column_defs(result)
-
-
-    def _try_infer_via_splayed_column_files(
-        kx,
-        hdb_root_path: str,
-        table_name: str,
-        date_partition: str,
-    ) -> Optional[List[dict]]:
-        """Infer schema from a splayed table directory without opening the full HDB."""
-        try:
-            table_path = _partition_table_path(hdb_root_path, table_name, date_partition)
-            columns = []
-            for column_name in _column_names_from_splayed_d(kx, table_path):
-                columns.append(
-                    {
-                        "name": column_name,
-                        "spark_type": _infer_column_file_type(
-                            kx, hdb_child_path(table_path, column_name)
-                        ),
-                    }
-                )
-            return columns if columns else None
-        except Exception as exc:
-            logger.debug("Splayed file schema inference failed for %s: %s", table_name, exc)
-            return None
-
-
-    def _column_names_from_splayed_d(kx, table_path: str) -> list[str]:
-        result = kx.q("{[p] get hsym p}", hdb_child_path(table_path, ".d"))
-        return _q_list_to_strings(result)
-
-
-    def _infer_column_file_type(kx, column_path: str) -> str:
-        type_chars = _q_list_to_strings(kx.q("{[p] string .Q.ty type get hsym p}", column_path))
-        return _map_meta_type_char(type_chars[0] if type_chars else "")
-
-
-    def _q_list_to_strings(value) -> list[str]:
-        if hasattr(value, "py"):
-            try:
-                value = value.py()
-            except Exception:
-                pass
-        if hasattr(value, "tolist"):
-            try:
-                value = value.tolist()
-            except Exception:
-                pass
-        if isinstance(value, (str, bytes)):
-            values = [value]
-        else:
-            values = list(value)
-        result = []
-        for item in values:
-            text = item.decode("utf-8") if isinstance(item, bytes) else str(item)
-            text = text.strip().strip("`")
-            if text:
-                result.append(text)
-        return result
-
-
-    def _columns_from_meta(kx, table_expr: str) -> Optional[List[dict]]:
-        names = _q_list_to_strings(kx.q(f"string (0!meta {table_expr})`c"))
-        type_chars = _q_list_to_strings(kx.q(f"string (0!meta {table_expr})`t"))
-        if not names:
-            return None
-        return [
-            {
-                "name": names[index],
-                "spark_type": _map_meta_type_char(type_chars[index] if index < len(type_chars) else ""),
-            }
-            for index in range(len(names))
-        ]
-
-
-    def _try_infer_via_db_query(kx, hdb_root_path: str, table_name: str) -> Optional[List[dict]]:
-        try:
-            kx.DB(path=hdb_root_path)
-            return _columns_from_meta(kx, table_name)
-        except Exception as exc:
-            logger.debug("DB schema inference failed for %s: %s", table_name, exc)
-            return None
-
-
-    def _try_infer_via_get_partition(
-        kx,
-        hdb_root_path: str,
-        table_name: str,
-        date_partition: str,
-    ) -> Optional[List[dict]]:
-        try:
-            partition_path = _partition_table_path(hdb_root_path, table_name, date_partition)
-            kx.q("{[p] __lakeflow_schema_tmp: get hsym p}", partition_path)
-            columns = _columns_from_meta(kx, "__lakeflow_schema_tmp")
-
-            try:
-                kx.q("delete __lakeflow_schema_tmp from `.")
-            except Exception:
-                pass
-            return columns if columns else None
-        except Exception as exc:
-            logger.debug("Partition schema inference failed for %s: %s", table_name, exc)
-            return None
-
-
-    def _partition_table_path(
-        hdb_root_path: str,
-        table_name: str,
-        date_partition: str,
-    ) -> str:
-        return hdb_child_path(hdb_root_path, date_partition, table_name)
 
 
     def columns_to_spark_schema(columns: List[dict]):
@@ -2152,421 +2511,6 @@ def register_lakeflow_source(spark):
         return StructType(fields)
 
 
-    def serialize_columns(columns: List[dict]) -> str:
-        return json.dumps(columns)
-
-
-    def deserialize_columns(columns_json: str) -> List[dict]:
-        return json.loads(columns_json)
-
-
-    ########################################################
-    # src/databricks/labs/community_connector/sources/kx_kdb/sym_reader.py
-    ########################################################
-
-    logger = logging.getLogger(__name__)
-
-    # Keep each date×sym slice chunk small enough for serverless Python memory limits.
-    _ROW_CHUNK_SIZE = 10_000
-
-
-    def _partition_path(hdb_root_path: str, date_partition: str, kdb_table_name: str) -> str:
-        return hdb_child_path(hdb_root_path, date_partition, kdb_table_name)
-
-
-    def _sym_file_path(hdb_root_path: str) -> str:
-        return hdb_child_path(hdb_root_path, "sym")
-
-
-    def _load_sym_into_q(kx, sym_file: str) -> None:
-        """Load the root sym enumeration into the q session."""
-        try:
-            kx.q("{[p] `sym set get hsym p}", sym_file)
-        except Exception:
-            kx.q("sym: get `:", sym_file)
-
-
-    def _ensure_sym_loaded(kx, hdb_root_path: str) -> str:
-        sym_file = _sym_file_path(hdb_root_path)
-        _load_sym_into_q(kx, sym_file)
-        return sym_file
-
-
-    def load_sym_enumeration(hdb_root_path: str, runtime_config: PyKxRuntimeConfig) -> list[str]:
-        """Load the HDB sym enumeration once on the driver."""
-        symbols, _ = load_sym_enumeration_with_indices(hdb_root_path, runtime_config)
-        return symbols
-
-
-    def load_sym_enumeration_with_indices(
-        hdb_root_path: str, runtime_config: PyKxRuntimeConfig
-    ) -> tuple[list[str], dict[str, int]]:
-        """Return sym strings and their KDB enumeration indices."""
-        kx = prepare_pykx(runtime_config)
-        sym_file = _ensure_sym_loaded(kx, hdb_root_path)
-        try:
-            sym_values = kx.q("{[p] get hsym p}", sym_file)
-        except Exception:
-            sym_values = kx.q("get `:", sym_file)
-        symbols = _symbols_to_strings(sym_values)
-        indices = {symbol: index for index, symbol in enumerate(symbols)}
-        return symbols, indices
-
-
-    def _symbols_to_strings(value) -> list[str]:
-        if hasattr(value, "py"):
-            try:
-                value = value.py()
-            except Exception:
-                pass
-        if hasattr(value, "tolist"):
-            try:
-                value = value.tolist()
-            except Exception:
-                pass
-        if isinstance(value, (str, bytes)):
-            values: Iterable = [value]
-        else:
-            try:
-                values = list(value)
-            except TypeError:
-                values = [value]
-
-        symbols = []
-        for item in values:
-            text = _symbol_text(item)
-            if text:
-                symbols.append(text)
-        return symbols
-
-
-    def _symbol_text(value) -> str:
-        text = value.decode("utf-8") if isinstance(value, bytes) else str(value)
-        text = text.strip().strip("`")
-        while text.endswith("/"):
-            text = text[:-1]
-        if "/" in text:
-            text = text.rsplit("/", 1)[-1]
-        return text
-
-
-    def read_kdb_date_sym_records(
-        *,
-        hdb_root_path: str,
-        kdb_table_name: str,
-        date_partition: str,
-        symbol: str,
-        sym_index: int,
-        runtime_config: PyKxRuntimeConfig,
-        column_defs: List[dict],
-        sym_column: str = "sym",
-        conversion_mode: str = DEFAULT_PARTITION_CONVERSION_MODE,
-    ) -> Iterator[Record]:
-        """Read one HDB date partition filtered to a single symbol."""
-        import gc
-
-        mode = normalize_conversion_mode(conversion_mode)
-        kx = prepare_pykx(runtime_config)
-
-        column_names = [column["name"] for column in column_defs]
-        sym_column = sym_column.strip()
-        if not sym_column:
-            raise ValueError("sym_column must be a non-empty KDB partition column name")
-
-        try:
-            if sym_index < 0:
-                return
-
-            partition_path = _partition_path(hdb_root_path, date_partition, kdb_table_name)
-            existing_columns = _existing_partition_columns(partition_path, column_names)
-            if sym_column.lower() not in {column.lower() for column in existing_columns}:
-                logger.warning(
-                    "Skipping %s because required sym column %r is missing.",
-                    partition_path,
-                    sym_column,
-                )
-                return
-
-            column_paths = [f"{partition_path}/{column_name}" for column_name in existing_columns]
-            sym_path = f"{partition_path}/{sym_column}"
-            _prepare_symbol_row_indices(kx, sym_path, sym_index)
-            row_count = _symbol_row_count(kx)
-            if row_count <= 0:
-                return
-
-            for offset in range(0, row_count, _ROW_CHUNK_SIZE):
-                frame = _read_symbol_chunk(
-                    kx,
-                    column_paths,
-                    existing_columns,
-                    offset,
-                    _ROW_CHUNK_SIZE,
-                )
-                if frame is None or len(frame.index) == 0:
-                    continue
-
-                import pandas as pd
-
-                if sym_column in frame.columns:
-                    key_series = frame[sym_column]
-                    if isinstance(key_series, pd.DataFrame):
-                        key_series = key_series.iloc[:, 0]
-                    frame[sym_column] = key_series.astype(str)
-                elif sym_column in column_names:
-                    frame[sym_column] = symbol
-
-                normalized = normalize_partition_frame(
-                    frame=frame,
-                    date_partition=date_partition,
-                    column_names=column_names,
-                    column_defs=column_defs,
-                    include_row_id=False,
-                    row_id_start=offset,
-                )
-                yield from iter_records(normalized, conversion_mode=mode)
-
-                del frame, normalized
-                gc.collect()
-        finally:
-            gc.collect()
-
-
-    def _existing_partition_columns(partition_path: str, column_names: list[str]) -> list[str]:
-        """Return requested physical column files that exist in a splayed partition."""
-        base = Path(partition_path)
-        existing = []
-        for column_name in column_names:
-            if column_name == "date":
-                continue
-            if (base / column_name).is_file():
-                existing.append(column_name)
-            else:
-                logger.debug("Missing KDB column file: %s", base / column_name)
-        return existing
-
-
-    def _prepare_symbol_row_indices(kx, sym_path: str, sym_index: int) -> None:
-        """Materialize row indices for one sym value in the q session."""
-        kx.q(
-            "{[sympath; symi] `chunk_idx set where (get hsym sympath)=symi}",
-            sym_path,
-            int(sym_index),
-        )
-
-
-    def _symbol_row_count(kx) -> int:
-        return _scalar_int(kx.q("count chunk_idx"))
-
-
-    def _scalar_int(value) -> int:
-        if hasattr(value, "py"):
-            try:
-                value = value.py()
-            except Exception:
-                pass
-        if hasattr(value, "item"):
-            try:
-                value = value.item()
-            except Exception:
-                pass
-        return int(value)
-
-
-    def _read_symbol_chunk(
-        kx,
-        column_paths: list[str],
-        columns: list[str],
-        row_off: int,
-        nrows: int,
-    ):
-        """Read one row slice for a symbol without materializing all indices in Python."""
-        row_indices = kx.q(
-            "{[row_off; nrows] "
-            "m: nrows & (count chunk_idx - row_off); "
-            "$[m<=0; `long$(); chunk_idx[row_off+til m]]}",
-            int(row_off),
-            int(nrows),
-        )
-        if _is_empty_collection(row_indices):
-            return None
-        return _read_columns_for_indices(kx, column_paths, columns, row_indices)
-
-
-    def _symbol_row_indices(kx, sym_path: str, sym_index: int):
-        """Return row indices for one sym enumeration value within a partition sym column."""
-        return kx.q(
-            "{[sympath; symi] where (get hsym sympath)=symi}",
-            sym_path,
-            int(sym_index),
-        )
-
-
-    def _index_values(indices) -> list[int]:
-        if indices is None:
-            return []
-
-        raw = indices
-        if hasattr(raw, "py"):
-            try:
-                raw = raw.py()
-            except Exception:
-                pass
-        if hasattr(raw, "tolist"):
-            try:
-                raw = raw.tolist()
-            except Exception:
-                pass
-
-        if isinstance(raw, (str, bytes)):
-            return [int(raw)]
-
-        try:
-            values = list(raw)
-        except TypeError:
-            return [_scalar_int(raw)]
-
-        flattened: list[int] = []
-        for value in values:
-            if isinstance(value, (list, tuple)):
-                flattened.extend(_index_values(value))
-            else:
-                flattened.append(_scalar_int(value))
-        return flattened
-
-
-    def _is_empty_collection(value) -> bool:
-        if value is None:
-            return True
-        try:
-            return len(value) == 0
-        except TypeError:
-            return False
-
-
-    def _read_columns_for_indices(kx, column_paths: list[str], columns: list[str], indices):
-        """Read selected rows from existing splayed column files."""
-        if _is_empty_collection(indices):
-            return None
-        vectors = kx.q(
-            "{[column_paths; idx] {[p; idx] (get hsym p) idx} each column_paths}",
-            column_paths,
-            indices,
-        )
-        return _column_vectors_to_frame(columns, vectors)
-
-
-    def _read_existing_columns_for_symbol(
-        kx,
-        partition_path: str,
-        columns: list[str],
-        sym_index: int,
-    ):
-        """Read all rows for one sym index from existing splayed column files."""
-        column_paths = [f"{partition_path}/{column_name}" for column_name in columns]
-        sym_path = f"{partition_path}/sym"
-        _prepare_symbol_row_indices(kx, sym_path, sym_index)
-        return _read_symbol_chunk(kx, column_paths, columns, 0, _symbol_row_count(kx))
-
-
-    def _column_vectors_to_frame(columns: list[str], vectors):
-        import pandas as pd
-
-        if vectors is None:
-            return pd.DataFrame()
-
-        raw_vectors = vectors
-        if hasattr(raw_vectors, "py"):
-            try:
-                raw_vectors = raw_vectors.py()
-            except Exception:
-                pass
-
-        try:
-            items = list(raw_vectors)
-        except TypeError:
-            items = [raw_vectors]
-
-        if not items:
-            return pd.DataFrame()
-
-        series_by_name = {}
-        for column_name, vector in zip(columns, items):
-            series_by_name[column_name] = _vector_to_values(vector)
-
-        return pd.DataFrame(series_by_name)
-
-
-    def _vector_to_values(vector):
-        import pandas as pd
-
-        if hasattr(vector, "py"):
-            try:
-                vector = vector.py()
-            except Exception:
-                pass
-        if hasattr(vector, "pd"):
-            try:
-                vector = vector.pd()
-            except Exception:
-                pass
-        if hasattr(vector, "tolist"):
-            try:
-                vector = vector.tolist()
-            except Exception:
-                pass
-
-        if isinstance(vector, pd.Series):
-            return [_plain_python_value(value) for value in vector.tolist()]
-        if isinstance(vector, pd.Index):
-            return [_plain_python_value(value) for value in vector.tolist()]
-        if isinstance(vector, (str, bytes)):
-            return [vector]
-        try:
-            return [_plain_python_value(value) for value in list(vector)]
-        except TypeError:
-            return [_plain_python_value(vector)]
-
-
-    def _plain_python_value(value):
-        from datetime import date, datetime, time
-        from decimal import Decimal
-
-        import pandas as pd
-
-        if hasattr(value, "py"):
-            try:
-                converted = value.py()
-                if converted is not value:
-                    value = converted
-            except Exception:
-                pass
-        if hasattr(value, "tolist"):
-            try:
-                converted = value.tolist()
-                if converted is not value:
-                    value = converted
-            except Exception:
-                pass
-        if hasattr(value, "item"):
-            try:
-                converted = value.item()
-                if converted is not value:
-                    value = converted
-            except Exception:
-                pass
-        if isinstance(value, list):
-            return [_plain_python_value(item) for item in value]
-        if isinstance(value, tuple):
-            return tuple(_plain_python_value(item) for item in value)
-        if value is None or value is pd.NaT:
-            return None
-        if isinstance(value, (str, bytes, bool, int, float, Decimal, date, datetime, time)):
-            return value
-        # Do not let pandas see PyKX/foreign wrapper objects. Pandas may call
-        # their __array__ implementation and recurse indefinitely.
-        return str(value)
-
-
     ########################################################
     # src/databricks/labs/community_connector/sources/kx_kdb/kx_kdb.py
     ########################################################
@@ -2575,10 +2519,14 @@ def register_lakeflow_source(spark):
 
 
     class KxKdbLakeflowConnect(LakeflowConnect, SupportsPartitionedStream):
-        """Read immutable KDB HDB date partitions through the Lakeflow connector APIs."""
+        """Read immutable KDB HDB date partitions through the Lakeflow connector APIs.
+
+        Connection options (HDB root, license, KDB-X/PyKX bootstrap) are read only
+        from the connection-level ``options``. Per-table ``table_options`` are
+        limited to the keys in ``external_options_allowlist``.
+        """
 
         def __init__(self, options: dict[str, str]) -> None:
-            options = self._with_table_config_defaults(options)
             super().__init__(options)
             self.hdb_root_path = self._required_absolute_path_option("hdb_root_path")
             self.license_path = self._required_absolute_path_option("license_volume_path")
@@ -2591,24 +2539,7 @@ def register_lakeflow_source(spark):
             self._column_cache: dict[tuple[str, str], list[dict]] = {}
             self._table_dir_cache: dict[str, str] = {}
             self._partition_cache: dict[tuple[str, str | None, str | None], list[str]] = {}
-            self._sym_cache: tuple[list[str], dict[str, int]] | None = None
-
-        def _with_table_config_defaults(self, options: dict[str, str]) -> dict[str, str]:
-            """Let pipeline tableConfigs override connection-level defaults."""
-            raw_configs = options.get("tableConfigs")
-            if not raw_configs:
-                return options
-            try:
-                configs = json.loads(raw_configs)
-            except Exception:
-                return options
-            if not isinstance(configs, dict):
-                return options
-
-            for config in configs.values():
-                if isinstance(config, dict):
-                    return {**options, **config}
-            return options
+            self._sym_cache: list[str] | None = None
 
         def list_tables(self) -> list[str]:
             return discover_tables(self.hdb_root_path, self.discovery_sample_dates)
@@ -2694,12 +2625,11 @@ def register_lakeflow_source(spark):
                 )
                 return []
 
-            symbols, sym_indices = self._symbols_with_indices()
+            symbols = self._symbols()
             descriptors = [
-                {"date_partition": partition, "sym": symbol, "sym_index": sym_indices[symbol]}
+                {"date_partition": partition, "sym": symbol, "sym_index": sym_index}
                 for partition in selected
-                for symbol in symbols
-                if symbol in sym_indices
+                for sym_index, symbol in enumerate(symbols)
             ]
             logger.info(
                 "KX KDB partition plan table=%s strategy=%s dates=%s symbols=%s tasks=%s",
@@ -2728,6 +2658,7 @@ def register_lakeflow_source(spark):
                     "expected a date_sym descriptor with 'sym' and 'sym_index'."
                 )
 
+            sym_column = self._sym_column(table_options)
             actual_table_name = self._actual_table_name(table_name)
             return read_kdb_date_sym_records(
                 hdb_root_path=self.hdb_root_path,
@@ -2737,8 +2668,7 @@ def register_lakeflow_source(spark):
                 sym_index=int(partition.get("sym_index", -1)),
                 runtime_config=self.runtime_config,
                 column_defs=self._column_defs(table_name, table_options),
-                sym_column=self._sym_column(table_options),
-                conversion_mode=self._partition_conversion_mode(table_options),
+                sym_column=sym_column,
             )
 
         def _required_option(self, key: str) -> str:
@@ -2778,26 +2708,13 @@ def register_lakeflow_source(spark):
             self._ingestion_mode(table_options)
             return strategy
 
-        def _partition_conversion_mode(self, table_options: dict[str, str]) -> str:
-            value = str(
-                table_options.get(
-                    "partition_conversion_mode", DEFAULT_PARTITION_CONVERSION_MODE
-                )
-            ).strip()
-            return value or DEFAULT_PARTITION_CONVERSION_MODE
-
         def _sym_column(self, table_options: dict[str, str]) -> str:
             value = str(table_options.get("sym_column", "sym")).strip()
-            if not value:
-                raise ValueError("sym_column must be a non-empty KDB partition column name")
-            return value
+            return validate_hdb_name(value, "sym_column")
 
-        def _symbols_with_indices(self) -> tuple[list[str], dict[str, int]]:
+        def _symbols(self) -> list[str]:
             if self._sym_cache is None:
-                self._sym_cache = load_sym_enumeration_with_indices(
-                    self.hdb_root_path,
-                    self.runtime_config,
-                )
+                self._sym_cache = load_sym_enumeration(self.hdb_root_path, self.runtime_config)
             return self._sym_cache
 
         def _actual_table_name(self, table_name: str) -> str:

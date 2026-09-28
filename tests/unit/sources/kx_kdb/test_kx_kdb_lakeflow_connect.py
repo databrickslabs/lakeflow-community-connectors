@@ -115,8 +115,8 @@ class TestKxKdbConnector(LakeflowConnectTests, SupportsPartitionedStreamTests):
         cls._patches = [
             patch(
                 "databricks.labs.community_connector.sources.kx_kdb.kx_kdb."
-                "load_sym_enumeration_with_indices",
-                return_value=(["AAPL", "MSFT"], {"AAPL": 0, "MSFT": 1}),
+                "load_sym_enumeration",
+                return_value=["AAPL", "MSFT"],
             ),
             patch(
                 "databricks.labs.community_connector.sources.kx_kdb.kx_kdb."

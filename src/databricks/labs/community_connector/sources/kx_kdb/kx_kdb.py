@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import logging
 from itertools import chain
 from pathlib import Path
@@ -14,14 +13,12 @@ from databricks.labs.community_connector.interface import (
     LakeflowConnect,
     SupportsPartitionedStream,
 )
-from databricks.labs.community_connector.sources.kx_kdb.conversion import (
-    DEFAULT_PARTITION_CONVERSION_MODE,
-)
 from databricks.labs.community_connector.sources.kx_kdb.filesystem import (
     discover_table_partitions,
     discover_tables,
     normalize_partition_date,
     resolve_table_directory_name,
+    validate_hdb_name,
 )
 from databricks.labs.community_connector.sources.kx_kdb.runtime import (
     build_runtime_config,
@@ -31,7 +28,7 @@ from databricks.labs.community_connector.sources.kx_kdb.schema import (
     infer_schema_from_partition,
 )
 from databricks.labs.community_connector.sources.kx_kdb.sym_reader import (
-    load_sym_enumeration_with_indices,
+    load_sym_enumeration,
     read_kdb_date_sym_records,
 )
 
@@ -39,10 +36,14 @@ logger = logging.getLogger(__name__)
 
 
 class KxKdbLakeflowConnect(LakeflowConnect, SupportsPartitionedStream):
-    """Read immutable KDB HDB date partitions through the Lakeflow connector APIs."""
+    """Read immutable KDB HDB date partitions through the Lakeflow connector APIs.
+
+    Connection options (HDB root, license, KDB-X/PyKX bootstrap) are read only
+    from the connection-level ``options``. Per-table ``table_options`` are
+    limited to the keys in ``external_options_allowlist``.
+    """
 
     def __init__(self, options: dict[str, str]) -> None:
-        options = self._with_table_config_defaults(options)
         super().__init__(options)
         self.hdb_root_path = self._required_absolute_path_option("hdb_root_path")
         self.license_path = self._required_absolute_path_option("license_volume_path")
@@ -55,24 +56,7 @@ class KxKdbLakeflowConnect(LakeflowConnect, SupportsPartitionedStream):
         self._column_cache: dict[tuple[str, str], list[dict]] = {}
         self._table_dir_cache: dict[str, str] = {}
         self._partition_cache: dict[tuple[str, str | None, str | None], list[str]] = {}
-        self._sym_cache: tuple[list[str], dict[str, int]] | None = None
-
-    def _with_table_config_defaults(self, options: dict[str, str]) -> dict[str, str]:
-        """Let pipeline tableConfigs override connection-level defaults."""
-        raw_configs = options.get("tableConfigs")
-        if not raw_configs:
-            return options
-        try:
-            configs = json.loads(raw_configs)
-        except Exception:
-            return options
-        if not isinstance(configs, dict):
-            return options
-
-        for config in configs.values():
-            if isinstance(config, dict):
-                return {**options, **config}
-        return options
+        self._sym_cache: list[str] | None = None
 
     def list_tables(self) -> list[str]:
         return discover_tables(self.hdb_root_path, self.discovery_sample_dates)
@@ -158,12 +142,11 @@ class KxKdbLakeflowConnect(LakeflowConnect, SupportsPartitionedStream):
             )
             return []
 
-        symbols, sym_indices = self._symbols_with_indices()
+        symbols = self._symbols()
         descriptors = [
-            {"date_partition": partition, "sym": symbol, "sym_index": sym_indices[symbol]}
+            {"date_partition": partition, "sym": symbol, "sym_index": sym_index}
             for partition in selected
-            for symbol in symbols
-            if symbol in sym_indices
+            for sym_index, symbol in enumerate(symbols)
         ]
         logger.info(
             "KX KDB partition plan table=%s strategy=%s dates=%s symbols=%s tasks=%s",
@@ -192,6 +175,7 @@ class KxKdbLakeflowConnect(LakeflowConnect, SupportsPartitionedStream):
                 "expected a date_sym descriptor with 'sym' and 'sym_index'."
             )
 
+        sym_column = self._sym_column(table_options)
         actual_table_name = self._actual_table_name(table_name)
         return read_kdb_date_sym_records(
             hdb_root_path=self.hdb_root_path,
@@ -201,8 +185,7 @@ class KxKdbLakeflowConnect(LakeflowConnect, SupportsPartitionedStream):
             sym_index=int(partition.get("sym_index", -1)),
             runtime_config=self.runtime_config,
             column_defs=self._column_defs(table_name, table_options),
-            sym_column=self._sym_column(table_options),
-            conversion_mode=self._partition_conversion_mode(table_options),
+            sym_column=sym_column,
         )
 
     def _required_option(self, key: str) -> str:
@@ -242,26 +225,13 @@ class KxKdbLakeflowConnect(LakeflowConnect, SupportsPartitionedStream):
         self._ingestion_mode(table_options)
         return strategy
 
-    def _partition_conversion_mode(self, table_options: dict[str, str]) -> str:
-        value = str(
-            table_options.get(
-                "partition_conversion_mode", DEFAULT_PARTITION_CONVERSION_MODE
-            )
-        ).strip()
-        return value or DEFAULT_PARTITION_CONVERSION_MODE
-
     def _sym_column(self, table_options: dict[str, str]) -> str:
         value = str(table_options.get("sym_column", "sym")).strip()
-        if not value:
-            raise ValueError("sym_column must be a non-empty KDB partition column name")
-        return value
+        return validate_hdb_name(value, "sym_column")
 
-    def _symbols_with_indices(self) -> tuple[list[str], dict[str, int]]:
+    def _symbols(self) -> list[str]:
         if self._sym_cache is None:
-            self._sym_cache = load_sym_enumeration_with_indices(
-                self.hdb_root_path,
-                self.runtime_config,
-            )
+            self._sym_cache = load_sym_enumeration(self.hdb_root_path, self.runtime_config)
         return self._sym_cache
 
     def _actual_table_name(self, table_name: str) -> str:

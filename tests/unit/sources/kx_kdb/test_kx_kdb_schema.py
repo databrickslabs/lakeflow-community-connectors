@@ -1,14 +1,22 @@
 """Tests for KDB schema inference helpers."""
 
+import pytest
+
+from databricks.labs.community_connector.sources.kx_kdb import sym_reader
 from databricks.labs.community_connector.sources.kx_kdb.runtime import PyKxRuntimeConfig
 from databricks.labs.community_connector.sources.kx_kdb.schema import (
     _dedupe_column_defs,
     _map_meta_type_char,
     columns_to_spark_schema,
-    deserialize_columns,
     infer_schema_from_partition,
-    serialize_columns,
 )
+
+
+@pytest.fixture(autouse=True)
+def _reset_sym_domain():
+    sym_reader._LOADED_SYM_DOMAIN.clear()
+    yield
+    sym_reader._LOADED_SYM_DOMAIN.clear()
 
 
 def test_map_meta_type_char_uses_connector_safe_mappings():
@@ -19,6 +27,7 @@ def test_map_meta_type_char_uses_connector_safe_mappings():
     assert _map_meta_type_char("d") == "StringType"
     assert _map_meta_type_char("p") == "TimestampType"
     assert _map_meta_type_char("n") == "LongType"
+    assert _map_meta_type_char(" ") == "StringType"
 
 
 def test_dedupe_column_defs_is_case_insensitive():
@@ -47,120 +56,91 @@ def test_columns_to_spark_schema_builds_struct_type():
     assert str(schema["event_ts"].dataType) == "TimestampType()"
 
 
-def test_serialize_columns_roundtrips():
-    columns = [{"name": "price", "spark_type": "DoubleType"}]
-    assert deserialize_columns(serialize_columns(columns)) == columns
+class _MetaKx:
+    def __init__(self, meta):
+        self.meta = meta
+        self.calls = []
+
+    def q(self, query, *args):
+        self.calls.append((query, args))
+        if query == "{[p] `sym set get hsym p}":
+            return None
+        if query == "{[p] m:0!meta get hsym p; (string m`c; m`t)}":
+            return self.meta
+        raise AssertionError(f"unexpected query: {query!r}")
 
 
-def test_infer_schema_uses_fuse_partition_path(monkeypatch):
-    class _FakeKx:
-        def __init__(self):
-            self.queries = []
+def _hdb(tmp_path):
+    (tmp_path / "sym").write_bytes(b"stub")
+    (tmp_path / "2024.01.01" / "TRADES").mkdir(parents=True)
+    return tmp_path
 
-        def DB(self, path):
-            raise RuntimeError(f"no DB for {path}")
 
-        def q(self, query, *args):
-            self.queries.append((query, args))
-            if query == "{[p] __lakeflow_schema_tmp: get hsym p}":
-                return None
-            if query == "string (0!meta __lakeflow_schema_tmp)`c":
-                return ["sym", "price"]
-            if query == "string (0!meta __lakeflow_schema_tmp)`t":
-                return ["s", "f"]
-            if query == "delete __lakeflow_schema_tmp from `.":
-                return None
-            raise AssertionError(f"unexpected query: {query!r}")
-
-    fake_kx = _FakeKx()
+def test_infer_schema_reads_splayed_partition_meta(monkeypatch, tmp_path):
+    root = _hdb(tmp_path)
+    fake_kx = _MetaKx([[b"sym", b"time", b"price", b"size"], b"spfj"])
     monkeypatch.setattr(
         "databricks.labs.community_connector.sources.kx_kdb.schema.prepare_pykx",
         lambda _: fake_kx,
     )
+
     columns = infer_schema_from_partition(
-        hdb_root_path="/Volumes/main/rkh/rbc_kx/kdb_format",
+        hdb_root_path=str(root),
         kdb_table_name="TRADES",
         date_partition="2024.01.01",
         runtime_config=PyKxRuntimeConfig(license_directory="/tmp/lic"),
     )
 
-    assert fake_kx.queries[0] == (
-        "{[p] __lakeflow_schema_tmp: get hsym p}",
-        ("/Volumes/main/rkh/rbc_kx/kdb_format/2024.01.01/TRADES",),
-    )
+    assert fake_kx.calls == [
+        ("{[p] `sym set get hsym p}", (f"{root}/sym",)),
+        (
+            "{[p] m:0!meta get hsym p; (string m`c; m`t)}",
+            (f"{root}/2024.01.01/TRADES/",),
+        ),
+    ]
     assert columns == [
         {"name": "date", "spark_type": "StringType"},
         {"name": "sym", "spark_type": "StringType"},
+        {"name": "time", "spark_type": "TimestampType"},
         {"name": "price", "spark_type": "DoubleType"},
+        {"name": "size", "spark_type": "LongType"},
     ]
 
 
-def test_infer_schema_falls_back_to_splayed_column_files(monkeypatch):
-    class _FakeKx:
-        def __init__(self):
-            self.queries = []
-
-        def DB(self, path):
-            raise RuntimeError(f"no DB for {path}")
-
-        def q(self, query, *args):
-            self.queries.append((query, args))
-            if query == "{[p] __lakeflow_schema_tmp: get hsym p}":
-                raise RuntimeError("cannot load table")
-            if query == "{[p] get hsym p}":
-                return ["sym", "price"]
-            if query == "{[p] string .Q.ty type get hsym p}":
-                return {
-                    "/Volumes/main/rkh/rbc_kx/kdb_format/2024.01.01/TRADES/sym": "s",
-                    "/Volumes/main/rkh/rbc_kx/kdb_format/2024.01.01/TRADES/price": "f",
-                }[args[0]]
-            raise AssertionError(f"unexpected query: {query!r}")
-
-    fake_kx = _FakeKx()
+def test_infer_schema_rejects_misaligned_meta(monkeypatch, tmp_path):
+    root = _hdb(tmp_path)
     monkeypatch.setattr(
         "databricks.labs.community_connector.sources.kx_kdb.schema.prepare_pykx",
-        lambda _: fake_kx,
-    )
-    columns = infer_schema_from_partition(
-        hdb_root_path="/Volumes/main/rkh/rbc_kx/kdb_format",
-        kdb_table_name="TRADES",
-        date_partition="2024.01.01",
-        runtime_config=PyKxRuntimeConfig(license_directory="/tmp/lic"),
+        lambda _: _MetaKx([["sym", "price"], "s"]),
     )
 
-    assert fake_kx.queries[1] == (
-        "{[p] get hsym p}",
-        ("/Volumes/main/rkh/rbc_kx/kdb_format/2024.01.01/TRADES/.d",),
-    )
-    assert columns == [
-        {"name": "date", "spark_type": "StringType"},
-        {"name": "sym", "spark_type": "StringType"},
-        {"name": "price", "spark_type": "DoubleType"},
-    ]
+    with pytest.raises(RuntimeError, match="2 column names and 1 type codes"):
+        infer_schema_from_partition(
+            hdb_root_path=str(root),
+            kdb_table_name="TRADES",
+            date_partition="2024.01.01",
+            runtime_config=PyKxRuntimeConfig(license_directory="/tmp/lic"),
+        )
 
 
-def test_infer_schema_reports_fuse_partition_path(monkeypatch):
+def test_infer_schema_reports_partition_path(monkeypatch, tmp_path):
+    root = _hdb(tmp_path)
+
     class _FailingKx:
-        def DB(self, path):
-            raise RuntimeError(f"missing db: {path}")
-
         def q(self, query, *args):
-            raise RuntimeError(f"missing path: {args[0]}")
+            if "meta" in query:
+                raise RuntimeError("nyi")
+            return None
 
     monkeypatch.setattr(
         "databricks.labs.community_connector.sources.kx_kdb.schema.prepare_pykx",
         lambda _: _FailingKx(),
     )
 
-    try:
+    with pytest.raises(RuntimeError, match=f"{root}/2024.01.01/TRADES"):
         infer_schema_from_partition(
-            hdb_root_path="/Volumes/main/rkh/rbc_kx/kdb_format",
+            hdb_root_path=str(root),
             kdb_table_name="TRADES",
             date_partition="2024.01.01",
             runtime_config=PyKxRuntimeConfig(license_directory="/tmp/lic"),
         )
-    except RuntimeError as exc:
-        message = str(exc)
-        assert "/Volumes/main/rkh/rbc_kx/kdb_format/2024.01.01/TRADES" in message
-    else:
-        raise AssertionError("expected schema inference failure")

@@ -59,16 +59,16 @@ def test_discover_table_partitions_respects_date_filters(tmp_path):
     ) == ["2024.01.02", "2024.01.03"]
 
 
-def test_discovery_uses_strict_date_names_without_requiring_directory_type(tmp_path):
+def test_discovery_uses_strict_date_names_and_listing_entry_types(tmp_path):
     hdb_root = _build_hdb(tmp_path)
     (hdb_root / "2024.01.04").write_text("date-like marker")
+    (hdb_root / "2024.13.45").mkdir()
     (hdb_root / "not-a-date" / "TRADES").mkdir(parents=True)
 
     assert filesystem._scan_date_partitions(str(hdb_root)) == [
         "2024.01.01",
         "2024.01.02",
         "2024.01.03",
-        "2024.01.04",
     ]
 
 

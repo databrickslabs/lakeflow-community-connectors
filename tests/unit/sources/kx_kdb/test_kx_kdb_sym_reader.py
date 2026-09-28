@@ -37,7 +37,7 @@ class _FakeKx:
 
     def q(self, query, *args):
         self.calls.append((query, args))
-        if "`chunk_idx set where (get hsym sympath)=symi" in query:
+        if query == "{[sympath; symi] `chunk_idx set where symi=`long$get hsym sympath}":
             return None
         if query == "count chunk_idx":
             return 1
@@ -55,6 +55,7 @@ class _FakeKx:
 
 
 def test_date_sym_reader_ignores_missing_optional_column_files(monkeypatch, tmp_path):
+    (tmp_path / "sym").write_text("stub")
     partition = tmp_path / "2024.01.01" / "TRADES"
     partition.mkdir(parents=True)
     for column_name in ("sym", "time", "price"):
@@ -96,6 +97,7 @@ def test_date_sym_reader_ignores_missing_optional_column_files(monkeypatch, tmp_
 
 
 def test_date_sym_reader_uses_custom_sym_column(monkeypatch, tmp_path):
+    (tmp_path / "sym").write_text("stub")
     partition = tmp_path / "2024.01.01" / "TRADES"
     partition.mkdir(parents=True)
     for column_name in ("optionId", "time", "price"):
@@ -103,7 +105,7 @@ def test_date_sym_reader_uses_custom_sym_column(monkeypatch, tmp_path):
 
     class _FakeKx:
         def q(self, query, *args):
-            if "`chunk_idx set where (get hsym sympath)=symi" in query:
+            if query == "{[sympath; symi] `chunk_idx set where symi=`long$get hsym sympath}":
                 assert args[0].endswith("/optionId")
                 return None
             if query == "count chunk_idx":
@@ -150,7 +152,9 @@ def test_date_sym_reader_uses_custom_sym_column(monkeypatch, tmp_path):
             "price": 1.23,
         }
     ]
-def test_load_sym_enumeration_with_indices_supports_fuse_roots(monkeypatch):
+def test_load_sym_enumeration_supports_fuse_roots(monkeypatch, tmp_path):
+    (tmp_path / "sym").write_text("stub")
+    sym_path = f"{tmp_path}/sym"
     calls = []
 
     class _FakeKx:
@@ -159,38 +163,28 @@ def test_load_sym_enumeration_with_indices_supports_fuse_roots(monkeypatch):
             if query == "{[p] `sym set get hsym p}":
                 return None
             if query == "{[p] get hsym p}":
-                assert args == ("/Volumes/main/rkh/rbc_kx/kdb_format/sym",)
+                assert args == (sym_path,)
                 return ["a", "b"]
             raise AssertionError(f"unexpected query: {query!r}")
 
     monkeypatch.setattr(sym_reader, "prepare_pykx", lambda _: _FakeKx())
 
-    symbols, indices = sym_reader.load_sym_enumeration_with_indices(
-        "/Volumes/main/rkh/rbc_kx/kdb_format",
+    symbols = sym_reader.load_sym_enumeration(
+        str(tmp_path),
         PyKxRuntimeConfig(license_directory="/tmp/lic"),
     )
 
     assert symbols == ["a", "b"]
-    assert indices == {"a": 0, "b": 1}
-    assert calls[0] == (
-        "{[p] `sym set get hsym p}",
-        ("/Volumes/main/rkh/rbc_kx/kdb_format/sym",),
-    )
+    assert calls[0] == ("{[p] `sym set get hsym p}", (sym_path,))
 
 
-def test_read_existing_columns_builds_frame_in_python_for_reserved_names():
+def test_read_symbol_chunk_builds_frame_in_python_for_reserved_names():
     """Column vectors are assembled in Python, not via q table ops."""
-    from databricks.labs.community_connector.sources.kx_kdb.sym_reader import (
-        _read_existing_columns_for_symbol,
-    )
 
     class _FakeKx:
         def q(self, query, *args):
-            if "`chunk_idx set where (get hsym sympath)=symi" in query:
-                return None
-            if query == "count chunk_idx":
-                return 1
             if "chunk_idx[row_off+til m]" in query:
+                assert args == (0, 1)
                 return [0]
             if "each column_paths" in query:
                 assert args[0] == [
@@ -200,20 +194,15 @@ def test_read_existing_columns_builds_frame_in_python_for_reserved_names():
                 return [["AAPL"], ["T"]]
             raise AssertionError(f"unexpected query: {query!r}")
 
-    frame = _read_existing_columns_for_symbol(
+    frame = sym_reader._read_symbol_chunk(
         _FakeKx(),
-        "/tmp/hdb/2024.01.01/TRADES",
+        ["/tmp/hdb/2024.01.01/TRADES/sym", "/tmp/hdb/2024.01.01/TRADES/type"],
         ["sym", "type"],
         0,
+        1,
     )
 
     assert frame.to_dict(orient="list") == {"sym": ["AAPL"], "type": ["T"]}
-
-
-def test_index_values_flattens_nested_lists():
-    from databricks.labs.community_connector.sources.kx_kdb.sym_reader import _index_values
-
-    assert _index_values([[1, 2], 3]) == [1, 2, 3]
 
 
 def test_column_vectors_to_frame_wraps_single_row_scalars():

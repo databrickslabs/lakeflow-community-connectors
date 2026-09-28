@@ -42,7 +42,8 @@ connection:
       required: false
       description: >
         Secret key name inside `kdbx_secret_scope` that stores the base64
-        license string passed to `install_kdb.sh --b64lic`.
+        license string passed to `install_kdb.sh` (`--k4b64lic` for k4.lic,
+        `--b64lic` for kc.lic).
 
     - name: kdbx_install_bearer_token
       type: string
@@ -69,6 +70,16 @@ connection:
         Optional FUSE path to the customer's commercial KX license file or license
         directory. When set, the connector reads the license at runtime and uses it
         for KDB-X bootstrap without storing the base64 license in the pipeline spec.
+        A file named k4.lic is treated as a commercial k4 license.
+
+    - name: kdbx_license_kind
+      type: string
+      required: false
+      description: >
+        License file type for KDB-X bootstrap: `k4` for a commercial k4.lic license
+        or `kc` for a kc.lic license. Defaults to the file name found through
+        `kdbx_license_file_path`, otherwise `kc`. Set `k4` when supplying a
+        commercial license through `kdbx_license_b64` or secrets.
 
     - name: kdbx_offline_bundle_path
       type: string
@@ -103,4 +114,4 @@ connection:
         Optional PyKX package spec or wheel path used only when PyKX is not
         already available in the Lakeflow pipeline environment.
 
-external_options_allowlist: "start_date,end_date,ingestion_mode,partition_strategy,partition_conversion_mode,sym_column"
+external_options_allowlist: "start_date,end_date,ingestion_mode,partition_strategy,sym_column"

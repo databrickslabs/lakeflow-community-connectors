@@ -304,7 +304,9 @@ def _patch_runtime_home(monkeypatch, runtime_home: Path) -> None:
     monkeypatch.setattr(runtime_mod, "_runtime_home_directory", lambda: runtime_home)
 
 
-def test_apply_pykx_environment_sets_core_env_vars_and_license_b64(monkeypatch, tmp_path):
+def test_apply_pykx_environment_sets_core_env_vars_without_exporting_license(
+    monkeypatch, tmp_path
+):
     license_dir = tmp_path / "license"
     license_dir.mkdir()
     runtime_home = tmp_path / "home"
@@ -325,7 +327,7 @@ def test_apply_pykx_environment_sets_core_env_vars_and_license_b64(monkeypatch, 
     assert os.environ["HOME"] == str(runtime_home)
     assert os.environ["QLIC"] == str(runtime_home / "qlic")
     assert os.environ["PYKX_LICENSED"] == "true"
-    assert os.environ["KDB_LICENSE_B64"] == base64.b64encode(b"license").decode("ascii")
+    assert "KDB_LICENSE_B64" not in os.environ
     assert (runtime_home / "qlic" / "kc.lic").read_bytes() == b"license"
     assert chdir_calls == []
 
@@ -478,11 +480,7 @@ def test_prepare_pykx_installer_flow_runs_install_and_pip_when_pykx_missing(monk
     assert state["install_calls"] == [config]
     assert state["ensure_calls"] == [config]
     assert state["apply_calls"] == [config]
-    assert (
-        "/tmp/lic",
-        len("token"),
-        len("lic-b64"),
-    ) in runtime_mod._PREPARED_RUNTIME_KEYS
+    assert runtime_mod._PREPARED_RUNTIME_KEYS == {runtime_mod._runtime_key(config)}
 
 
 def test_prepare_pykx_installer_flow_is_idempotent_for_same_runtime_key(monkeypatch):
@@ -545,10 +543,9 @@ def test_install_kdbx_invokes_curl_then_bash_with_expected_args(monkeypatch, tmp
     assert len(recorder.calls) == 2
 
     curl_call = recorder.calls[0]
-    assert curl_call["args"][0] == "curl"
-    assert "--oauth2-bearer" in curl_call["args"]
-    assert curl_call["args"][curl_call["args"].index("--oauth2-bearer") + 1] == "bearer-tok"
-    assert curl_call["args"][-1] == config.installer_url
+    assert curl_call["args"] == ["curl", "-q", "--config", "-"]
+    assert 'oauth2-bearer = "bearer-tok"' in curl_call["input"]
+    assert f'url = "{config.installer_url}"' in curl_call["input"]
     assert curl_call.get("timeout") == 180
 
     install_call = recorder.calls[1]
@@ -571,8 +568,8 @@ def test_install_kdbx_raises_when_curl_fails(monkeypatch, tmp_path):
 
     config = PyKxRuntimeConfig(
         license_directory=str(tmp_path / "lic"),
-        installer_bearer_token="t",
-        license_b64="l",
+        installer_bearer_token="bearer-token-value",
+        license_b64="bGljZW5zZS12YWx1ZQ==",
     )
 
     with pytest.raises(RuntimeError, match="installer download failed.*curl boom"):
@@ -593,8 +590,8 @@ def test_install_kdbx_raises_when_installer_script_fails(monkeypatch, tmp_path):
 
     config = PyKxRuntimeConfig(
         license_directory=str(tmp_path / "lic"),
-        installer_bearer_token="t",
-        license_b64="l",
+        installer_bearer_token="bearer-token-value",
+        license_b64="bGljZW5zZS12YWx1ZQ==",
     )
 
     with pytest.raises(RuntimeError, match="install_kdb.sh failed.*stdout-trail.*stderr-trail"):
@@ -1107,7 +1104,9 @@ def test_localize_offline_bundle_copies_volume_path_to_temp(monkeypatch, tmp_pat
 
     localized = runtime_mod._localize_offline_bundle(str(source))
 
-    assert localized == tmp_path / f"kdbx-bundles-{os.getpid()}-abc123" / "l64-bundle.zip"
+    assert localized.parent == tmp_path / f"kdbx-bundles-{os.getpid()}-abc123"
+    assert localized.name == runtime_mod._bundle_cache_name(str(source))
+    assert localized.name.endswith("-l64-bundle.zip")
     assert localized.is_file()
 
 

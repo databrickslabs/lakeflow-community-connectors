@@ -8,10 +8,17 @@ import re
 import threading
 import time
 from dataclasses import dataclass
-from pathlib import Path
+from datetime import date
 
 DATE_PARTITION_RE = re.compile(r"^\d{4}\.\d{2}\.\d{2}$")
-_DISCOVERY_CACHE_TTL_SECONDS = 3600
+_DATE_INPUT_PATTERNS = (
+    re.compile(r"^(\d{4})\.(\d{2})\.(\d{2})$"),
+    re.compile(r"^(\d{4})-(\d{2})-(\d{2})$"),
+    re.compile(r"^(\d{4})/(\d{2})/(\d{2})$"),
+)
+_UNSAFE_NAME_CHARS = re.compile(r"[/\\\x00-\x1f\x7f]")
+# Bounds how long a long-lived Python worker can reuse a directory listing.
+_DISCOVERY_CACHE_TTL_SECONDS = 300
 
 logger = logging.getLogger(__name__)
 
@@ -176,13 +183,23 @@ class _DiscoveryCache:
 _DISCOVERY_CACHE = _DiscoveryCache()
 
 
+def validate_hdb_name(name: str, label: str) -> str:
+    """Return ``name`` if it is a single safe path component below the HDB root."""
+    text = str(name)
+    if not text or text in {".", ".."} or _UNSAFE_NAME_CHARS.search(text):
+        raise ValueError(
+            f"Unsafe {label} {text!r}: expected a single path component without "
+            "separators or control characters."
+        )
+    return text
+
+
 def hdb_child_path(root_path: str, *parts: str) -> str:
-    """Build a child path below a FUSE-mounted HDB root."""
+    """Build a child path below a FUSE-mounted HDB root from validated components."""
     result = str(root_path or "").strip().rstrip("/")
     for part in parts:
-        value = str(part or "").strip().strip("/")
-        if value:
-            result = f"{result}/{value}" if result else value
+        value = validate_hdb_name(part, "HDB path component")
+        result = f"{result}/{value}" if result else value
     return result
 
 
@@ -193,13 +210,39 @@ def normalize_partition_date(raw_value: str | None) -> str | None:
     value = str(raw_value).strip()
     if not value:
         return None
-    if DATE_PARTITION_RE.match(value):
-        return value
-    if re.match(r"^\d{4}-\d{2}-\d{2}$", value):
-        return value.replace("-", ".")
-    if re.match(r"^\d{4}/\d{2}/\d{2}$", value):
-        return value.replace("/", ".")
-    return value
+    parsed = _parse_date(value)
+    if parsed is None:
+        raise ValueError(
+            f"Invalid KDB partition date {value!r}; expected YYYY.MM.DD, YYYY-MM-DD, "
+            "or YYYY/MM/DD."
+        )
+    return parsed
+
+
+def _parse_date(value: str) -> str | None:
+    for pattern in _DATE_INPUT_PATTERNS:
+        match = pattern.match(value)
+        if match is None:
+            continue
+        year, month, day = (int(part) for part in match.groups())
+        try:
+            date(year, month, day)
+        except ValueError:
+            return None
+        return f"{year:04d}.{month:02d}.{day:02d}"
+    return None
+
+
+def _is_partition_name(name: str) -> bool:
+    return bool(DATE_PARTITION_RE.match(name)) and _parse_date(name) == name
+
+
+def _reject_symlink(entry: os.DirEntry, label: str) -> None:
+    if entry.is_symlink():
+        raise ValueError(
+            f"HDB {label} {entry.path} is a symbolic link; symlinked HDB content is not "
+            "supported."
+        )
 
 
 def _scan_date_partitions(root_path: str) -> list[str]:
@@ -208,12 +251,17 @@ def _scan_date_partitions(root_path: str) -> list[str]:
             f"HDB root path must be a FUSE/local directory, not a URI: {root_path}"
         )
 
+    # Name and d_type checks only: FUSE listings return entry types, while a
+    # per-entry stat on UC Volumes costs tens of milliseconds.
+    date_partitions = []
     try:
-        date_partitions = [
-            entry.name
-            for entry in os.scandir(root_path)
-            if DATE_PARTITION_RE.match(entry.name)
-        ]
+        with os.scandir(root_path) as scanned:
+            for entry in scanned:
+                if not _is_partition_name(entry.name):
+                    continue
+                _reject_symlink(entry, "date partition")
+                if entry.is_dir(follow_symlinks=False):
+                    date_partitions.append(entry.name)
     except FileNotFoundError:
         raise FileNotFoundError(f"HDB root path does not exist: {root_path}") from None
     except NotADirectoryError:
@@ -222,16 +270,16 @@ def _scan_date_partitions(root_path: str) -> list[str]:
 
 
 def _scan_child_directories(parent_path: str) -> list[str]:
+    children = []
     try:
-        return [
-            entry.name
-            for entry in os.scandir(parent_path)
-            if entry.is_dir(follow_symlinks=False)
-        ]
-    except FileNotFoundError:
+        with os.scandir(parent_path) as scanned:
+            for entry in scanned:
+                _reject_symlink(entry, "table directory")
+                if entry.is_dir(follow_symlinks=False):
+                    children.append(entry.name)
+    except (FileNotFoundError, NotADirectoryError):
         return []
-    except NotADirectoryError:
-        return []
+    return children
 
 
 def _table_directory_exists(root_path: str, date_partition: str, actual_name: str) -> bool:
@@ -279,33 +327,6 @@ def _candidate_table_partitions(
     )
 
 
-def _find_actual_table_name(
-    root_path: str,
-    date_partitions: tuple[str, ...],
-    table_name: str,
-) -> str:
-    actual_name, _, _ = _find_table_boundaries(root_path, date_partitions, table_name)
-    return actual_name
-
-
-def _scan_date_directories(root_path: str) -> list[Path]:
-    return [
-        Path(hdb_child_path(root_path, partition))
-        for partition in _scan_date_partitions(root_path)
-    ]
-
-
-def _date_partitions(root_path: str) -> list[str]:
-    return list(_DISCOVERY_CACHE.date_partitions(root_path))
-
-
-def _date_directories(root_path: str) -> list[Path]:
-    return [
-        Path(hdb_child_path(root_path, partition))
-        for partition in _date_partitions(root_path)
-    ]
-
-
 def clear_discovery_cache() -> None:
     """Clear process-shared discovery metadata, primarily for tests."""
     _DISCOVERY_CACHE.clear()
@@ -313,7 +334,7 @@ def clear_discovery_cache() -> None:
 
 def list_date_partitions(root_path: str) -> list[str]:
     """List all date partitions found under an HDB root path."""
-    return _date_partitions(root_path)
+    return list(_DISCOVERY_CACHE.date_partitions(root_path))
 
 
 def discover_tables(root_path: str, sample_dates: int = 0) -> list[str]:
