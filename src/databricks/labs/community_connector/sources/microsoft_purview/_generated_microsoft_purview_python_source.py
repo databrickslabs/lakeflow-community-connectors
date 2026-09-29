@@ -1135,13 +1135,13 @@ def register_lakeflow_source(spark):
 
             Applies, per record:
               * strict ``> since`` filtering (skip records at or below the watermark)
-                so a resumed run never re-emits the boundary record. This is required
-                by the ``SimpleDataSourceStreamReader`` contract: a non-empty batch
-                must advance the end offset past the start, so a boundary record
-                (cursor == since) cannot be returned without advancing the offset.
-                (``systemData.lastModifiedAt`` has sub-second, 100-ns precision, so
-                distinct records effectively never share a cursor value — there is no
-                "same-timestamp record lost" concern to trade off against.), and
+                so a resumed run never re-emits the boundary record — required by the
+                ``SimpleDataSourceStreamReader`` contract that a non-empty batch must
+                advance the end offset past the start (a boundary record, cursor ==
+                since, cannot be returned without advancing the offset).
+                ``systemData.lastModifiedAt`` has sub-second (100-ns) precision, so
+                distinct records effectively never share a cursor value and nothing is
+                lost by the strict skip; and
               * an init-time upper cap (skip records modified after
                 ``self._init_ts``) so Trigger.AvailableNow terminates.
 
