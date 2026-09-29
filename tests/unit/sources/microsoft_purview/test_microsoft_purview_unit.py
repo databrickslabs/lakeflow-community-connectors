@@ -8,8 +8,8 @@ this file targets the pieces that harness does not fully drive:
 * auth / connection configuration (token precedence, required options),
 * the ``nextLink`` pagination helper (all three endpoints share it),
 * retry + non-200 error handling,
-* the client-side incremental cursor engine (inclusive ``>= since`` boundary so
-  same-second records aren't lost, the
+* the client-side incremental cursor engine (strict ``> since`` boundary so a
+  non-empty batch always advances the offset, the
   init-time upper cap, and convergence when no forward progress is made),
 * record shaping (``purview_tenant_id`` stamping, contacts normalization).
 """
@@ -240,16 +240,16 @@ class TestRetryAndErrors:
 
 
 class TestIncrementalEngine:
-    def test_inclusive_boundary_reemits_same_second_records(self):
-        """The cursor (systemData.lastModifiedAt) is second-granular, so records
-        can share the watermark second. The boundary is inclusive (``>= since``):
-        a record at exactly ``since`` is re-emitted rather than dropped, so a
-        same-second record arriving after the watermark reached that second is
-        not lost. Re-emitted boundary rows are deduped downstream by the CDC
-        primary-key upsert."""
+    def test_strict_boundary_does_not_reemit_and_offset_advances(self):
+        """Strict ``> since``: the boundary record (cursor == since) is NOT
+        re-emitted, so a non-empty batch always advances the end offset past the
+        start. Re-emitting the boundary while keeping the offset would violate the
+        SimpleDataSourceStreamReader contract (SIMPLE_STREAM_READER_OFFSET_DID_NOT_
+        ADVANCE). ``lastModifiedAt`` has sub-second (100-ns) precision, so distinct
+        records don't share a cursor value — nothing is lost by the strict skip."""
         conn = _connector()
         arrival = [
-            _rec("a", "2026-01-01T00:00:00+00:00"),  # == since -> re-emitted (inclusive)
+            _rec("a", "2026-01-01T00:00:00+00:00"),  # == since -> skipped (strict)
             _rec("b", "2026-02-01T00:00:00+00:00"),  # > since -> emitted
         ]
         records, end_offset = _drain(
@@ -259,24 +259,30 @@ class TestIncrementalEngine:
                 transform=lambda r: r,
             )
         )
-        assert [r["id"] for r in records] == ["a", "b"]
+        assert [r["id"] for r in records] == ["b"]
+        # Non-empty batch -> offset advanced past start (contract).
         assert end_offset == {"cursor": "2026-02-01T00:00:00+00:00"}
+        assert end_offset != {"cursor": "2026-01-01T00:00:00+00:00"}
 
-    def test_records_strictly_older_than_since_are_skipped(self):
-        """Only strictly-older records are filtered; the boundary second stays."""
+    def test_only_boundary_records_yields_empty_batch_and_converges(self):
+        """When the only matching records are AT the watermark (cursor == since),
+        strict `>` skips them all -> empty batch + unchanged offset, which
+        converges cleanly (an empty batch may keep the same offset; a non-empty
+        one may not)."""
         conn = _connector()
         arrival = [
             _rec("old", "2025-12-31T23:59:59+00:00"),  # < since -> skipped
-            _rec("edge", "2026-01-01T00:00:00+00:00"),  # == since -> re-emitted
+            _rec("edge", "2026-01-01T00:00:00+00:00"),  # == since -> skipped (strict)
         ]
-        records, _ = _drain(
+        records, end_offset = _drain(
             conn._incremental_from_iter(
                 iter(arrival),
                 start_offset={"cursor": "2026-01-01T00:00:00+00:00"},
                 transform=lambda r: r,
             )
         )
-        assert [r["id"] for r in records] == ["edge"]
+        assert records == []
+        assert end_offset == {"cursor": "2026-01-01T00:00:00+00:00"}
 
     def test_init_ts_cap_skips_records_modified_after_start(self):
         conn = _connector()
