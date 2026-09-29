@@ -7,6 +7,7 @@ from typing import List
 
 from databricks.labs.community_connector.sources.kx_kdb.filesystem import (
     hdb_child_path,
+    scan_partition_table,
     validate_hdb_name,
 )
 from databricks.labs.community_connector.sources.kx_kdb.runtime import (
@@ -21,10 +22,11 @@ logger = logging.getLogger(__name__)
 # any q scripts stored in the HDB root.
 _SPLAYED_META_Q = "{[p] m:0!meta get hsym p; (string m`c; m`t)}"
 
+# The framework record parser has no ShortType, so bytes and shorts widen to int.
 Q_META_TYPE_TO_SPARK = {
     "b": "BooleanType",
-    "x": "ShortType",
-    "h": "ShortType",
+    "x": "IntegerType",
+    "h": "IntegerType",
     "i": "IntegerType",
     "j": "LongType",
     "e": "FloatType",
@@ -56,9 +58,10 @@ def _dedupe_column_defs(columns: List[dict]) -> List[dict]:
             logger.warning("Dropping duplicate inferred column: %s", name)
             continue
         seen.add(lowered)
-        deduped.append(
-            {"name": name, "spark_type": str(column.get("spark_type", "StringType"))}
-        )
+        column_def = {"name": name, "spark_type": str(column.get("spark_type", "StringType"))}
+        if column.get("q_type") is not None:
+            column_def["q_type"] = column["q_type"]
+        deduped.append(column_def)
     return deduped
 
 
@@ -90,6 +93,10 @@ def infer_schema_from_partition(
 ) -> List[dict]:
     """Infer column definitions from one splayed KDB date partition."""
     table_path = hdb_child_path(hdb_root_path, date_partition, kdb_table_name)
+    if scan_partition_table(hdb_root_path, date_partition, kdb_table_name) is None:
+        raise RuntimeError(
+            f"Could not infer schema for {kdb_table_name}: {table_path} is missing"
+        )
     kx = prepare_pykx(runtime_config)
     try:
         _ensure_sym_domain(kx, hdb_root_path)
@@ -120,6 +127,7 @@ def _meta_columns(meta) -> List[dict]:
         {
             "name": validate_hdb_name(name, "column name"),
             "spark_type": _map_meta_type_char(type_char),
+            "q_type": _clean_type_char(type_char),
         }
         for name, type_char in zip(names, types)
     ]

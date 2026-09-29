@@ -103,7 +103,6 @@ def _read_records(tmp_path, monkeypatch, fake_kx, **overrides):
         "hdb_root_path": str(tmp_path),
         "kdb_table_name": "TRADES",
         "date_partition": "2024.01.01",
-        "symbol": "AAPL",
         "sym_index": 1,
         "runtime_config": PyKxRuntimeConfig(license_directory="/tmp/lic"),
         "column_defs": [
@@ -234,7 +233,7 @@ def test_sym_enumeration_keeps_empty_and_slash_symbols_positional(monkeypatch, t
         def q(self, query, *args):
             if query == "{[p] `sym set get hsym p}":
                 return None
-            if query == "{[p] get hsym p}":
+            if query == "sym":
                 return ["", "DBRX", "AMZ", "BRK/B", "BRK/A"]
             raise AssertionError(f"unexpected q query: {query!r}")
 
@@ -248,11 +247,16 @@ def test_sym_enumeration_keeps_empty_and_slash_symbols_positional(monkeypatch, t
 
 
 def test_partition_descriptors_use_kdb_enumeration_positions(monkeypatch, tmp_path):
+    (tmp_path / "sym").write_bytes(b"stub")
     for date in ("2024.01.01", "2024.01.02"):
         (tmp_path / date / "TRADES").mkdir(parents=True)
     monkeypatch.setattr(
         "databricks.labs.community_connector.sources.kx_kdb.kx_kdb.load_sym_enumeration",
         lambda *_: ["", "DBRX", "AMZ", "BRK/B"],
+    )
+    monkeypatch.setattr(
+        "databricks.labs.community_connector.sources.kx_kdb.kx_kdb.infer_schema_from_partition",
+        lambda **_: [{"name": "sym", "spark_type": "StringType", "q_type": "s"}],
     )
     connector = KxKdbLakeflowConnect(
         {"hdb_root_path": str(tmp_path), "license_volume_path": "/tmp/lic"}
@@ -267,6 +271,7 @@ def test_partition_descriptors_use_kdb_enumeration_positions(monkeypatch, tmp_pa
         {"date_partition": "2024.01.02", "sym": "DBRX", "sym_index": 1},
         {"date_partition": "2024.01.02", "sym": "AMZ", "sym_index": 2},
         {"date_partition": "2024.01.02", "sym": "BRK/B", "sym_index": 3},
+        {"date_partition": "2024.01.02", "sym": None, "sym_index": None, "sym_count": 4},
     ]
 
 
@@ -359,7 +364,10 @@ def test_read_partition_ignores_connection_keys_in_table_options(monkeypatch, tm
     captured = {}
     monkeypatch.setattr(
         "databricks.labs.community_connector.sources.kx_kdb.kx_kdb.infer_schema_from_partition",
-        lambda **_: [{"name": "date", "spark_type": "StringType"}],
+        lambda **_: [
+            {"name": "date", "spark_type": "StringType"},
+            {"name": "sym", "spark_type": "StringType", "q_type": "s"},
+        ],
     )
 
     def _fake_reader(**kwargs):
@@ -657,7 +665,7 @@ def test_installer_timeout_does_not_leak_license_from_argv(monkeypatch, tmp_path
 
     assert _LICENSE_B64 not in str(excinfo.value)
     assert excinfo.value.__cause__ is None
-    assert excinfo.value.__suppress_context__
+    assert excinfo.value.__context__ is None
 
 
 def test_runtime_config_repr_hides_secrets(tmp_path):
@@ -809,3 +817,243 @@ def test_unknown_license_kind_is_rejected():
                 "kdbx_license_kind": "personal",
             }
         )
+
+
+# ---------------------------------------------------------------------------
+# Review follow-ups
+# ---------------------------------------------------------------------------
+
+
+def _connector_with_schema(monkeypatch, tmp_path, columns, symbols=("AAPL", "MSFT")):
+    (tmp_path / "sym").write_bytes(b"stub")
+    for date in ("2024.01.01", "2024.01.02"):
+        (tmp_path / date / "TRADES").mkdir(parents=True, exist_ok=True)
+    monkeypatch.setattr(
+        "databricks.labs.community_connector.sources.kx_kdb.kx_kdb.load_sym_enumeration",
+        lambda *_: list(symbols),
+    )
+    monkeypatch.setattr(
+        "databricks.labs.community_connector.sources.kx_kdb.kx_kdb.infer_schema_from_partition",
+        lambda **_: columns,
+    )
+    return KxKdbLakeflowConnect({"hdb_root_path": str(tmp_path), "license_volume_path": "/tmp/lic"})
+
+
+def test_unmatched_symbol_rows_are_read_by_index_range(monkeypatch, tmp_path):
+    _make_partition(tmp_path, "2024.01.01", "TRADES")
+
+    class _UnmatchedKx(_ChunkKx):
+        def q(self, query, *args):
+            if query == sym_reader._UNMATCHED_ROWS_Q:
+                self.queries.append(query)
+                self.unmatched_args = args
+                return None
+            return super().q(query, *args)
+
+    fake_kx = _UnmatchedKx(row_count=2)
+    records = _read_records(tmp_path, monkeypatch, fake_kx, sym_index=None, sym_count=11)
+
+    assert fake_kx.unmatched_args == (f"{tmp_path}/2024.01.01/TRADES/sym", 11)
+    assert len(records) == 2
+    assert not any("chunk_idx set where symi=" in query for query in fake_kx.queries)
+
+
+def test_unmatched_symbol_read_requires_symbol_count(tmp_path):
+    with pytest.raises(ValueError, match="sym_count"):
+        list(
+            sym_reader.read_kdb_date_sym_records(
+                hdb_root_path=str(tmp_path),
+                kdb_table_name="TRADES",
+                date_partition="2024.01.01",
+                sym_index=None,
+                runtime_config=PyKxRuntimeConfig(license_directory="/tmp/lic"),
+                column_defs=[],
+            )
+        )
+
+
+def test_sym_column_must_be_an_enumerated_symbol_column(monkeypatch, tmp_path):
+    connector = _connector_with_schema(
+        monkeypatch,
+        tmp_path,
+        [
+            {"name": "sym", "spark_type": "StringType", "q_type": "s"},
+            {"name": "price", "spark_type": "DoubleType", "q_type": "f"},
+        ],
+    )
+
+    with pytest.raises(ValueError, match="not a column"):
+        connector.get_partitions("trades", {"sym_column": "ticker"})
+    with pytest.raises(ValueError, match="enumerated symbol column"):
+        connector.get_partitions("trades", {"sym_column": "price"})
+
+
+def test_byte_and_short_columns_widen_to_integers_the_parser_accepts():
+    from pyspark.sql.types import IntegerType
+
+    from databricks.labs.community_connector.sources.kx_kdb.schema import _map_meta_type_char
+
+    assert _map_meta_type_char("x") == "IntegerType"
+    assert _map_meta_type_char("h") == "IntegerType"
+    assert parse_value(5, IntegerType()) == 5
+
+
+def test_q_integer_nulls_and_infinities_keep_exact_values():
+    class _LongVector:
+        t = 7
+
+        def py(self, raw=False):
+            assert raw is True
+            return [1, -(2**63), 2**63 - 1, 2**53 + 1]
+
+    frame = sym_reader._column_vectors_to_frame(["size"], [_LongVector()])
+    records = list(
+        conversion.iter_records(
+            conversion.normalize_partition_frame(
+                frame=frame,
+                date_partition="2024.01.01",
+                column_names=["size"],
+                column_defs=[{"name": "size", "spark_type": "LongType"}],
+            )
+        )
+    )
+
+    assert [record["size"] for record in records] == [1, None, 2**63 - 1, 2**53 + 1]
+
+
+def test_column_vectors_are_converted_one_by_one_to_keep_q_types():
+    class _LongVector:
+        t = 7
+
+        def py(self, raw=False):
+            return [2**63 - 1] if raw else [float("inf")]
+
+    class _QList:
+        def __iter__(self):
+            return iter([_LongVector()])
+
+        def py(self):
+            raise AssertionError("the outer q list must not be converted as a whole")
+
+    frame = sym_reader._column_vectors_to_frame(["big"], _QList())
+
+    assert frame["big"].tolist() == [2**63 - 1]
+
+
+def test_pandas_na_becomes_none_not_text():
+    import pandas as pd
+
+    assert sym_reader._plain_python_value(pd.NA) is None
+
+
+def test_symlinked_nested_column_companion_file_is_rejected(monkeypatch, tmp_path):
+    partition = _make_partition(tmp_path, "2024.01.01", "TRADES", columns=("sym", "note"))
+    secret = tmp_path / "secret.bin"
+    secret.write_bytes(b"secret")
+    (partition / "note#").symlink_to(secret)
+
+    with pytest.raises(ValueError, match="symbolic link"):
+        _read_records(tmp_path, monkeypatch, _ChunkKx(row_count=1))
+
+
+def test_schema_inference_rejects_symlinked_table_content(monkeypatch, tmp_path):
+    partition = _make_partition(tmp_path, "2024.01.01", "TRADES")
+    (tmp_path / "sym").write_bytes(b"stub")
+    (partition / ".d").symlink_to(tmp_path / "sym")
+    monkeypatch.setattr(
+        "databricks.labs.community_connector.sources.kx_kdb.schema.prepare_pykx",
+        lambda _: pytest.fail("q must not open symlinked table content"),
+    )
+
+    with pytest.raises(ValueError, match="symbolic link"):
+        infer_schema_from_partition(
+            hdb_root_path=str(tmp_path),
+            kdb_table_name="TRADES",
+            date_partition="2024.01.01",
+            runtime_config=PyKxRuntimeConfig(license_directory="/tmp/lic"),
+        )
+
+
+def test_latest_offset_sees_new_dates_after_discovery_ttl(monkeypatch, tmp_path):
+    connector = _connector_with_schema(
+        monkeypatch, tmp_path, [{"name": "sym", "spark_type": "StringType", "q_type": "s"}]
+    )
+    assert connector.latest_offset("trades", {}) == {"date_partition": "2024.01.02"}
+
+    (tmp_path / "2024.01.03" / "TRADES").mkdir(parents=True)
+    monkeypatch.setattr(filesystem, "_DISCOVERY_CACHE_TTL_SECONDS", 0)
+
+    assert connector.latest_offset("trades", {}) == {"date_partition": "2024.01.03"}
+
+
+def test_symbols_reload_when_the_sym_file_changes(monkeypatch, tmp_path):
+    connector = _connector_with_schema(
+        monkeypatch, tmp_path, [{"name": "sym", "spark_type": "StringType", "q_type": "s"}]
+    )
+    loads = []
+    monkeypatch.setattr(
+        "databricks.labs.community_connector.sources.kx_kdb.kx_kdb.load_sym_enumeration",
+        lambda *_: loads.append(1) or ["A"] * len(loads),
+    )
+
+    assert connector._symbols() == ["A"]
+    assert connector._symbols() == ["A"]
+    (tmp_path / "sym").write_bytes(b"stub-appended")
+    assert connector._symbols() == ["A", "A"]
+    assert len(loads) == 2
+
+
+def test_schema_uses_first_selected_date_that_contains_the_table(monkeypatch, tmp_path):
+    (tmp_path / "sym").write_bytes(b"stub")
+    (tmp_path / "2024.01.01" / "TRADES").mkdir(parents=True)
+    (tmp_path / "2024.01.02").mkdir()
+    (tmp_path / "2024.01.03" / "TRADES").mkdir(parents=True)
+    seen = []
+    monkeypatch.setattr(
+        "databricks.labs.community_connector.sources.kx_kdb.kx_kdb.infer_schema_from_partition",
+        lambda **kwargs: seen.append(kwargs["date_partition"])
+        or [{"name": "sym", "spark_type": "StringType", "q_type": "s"}],
+    )
+    connector = KxKdbLakeflowConnect(
+        {"hdb_root_path": str(tmp_path), "license_volume_path": "/tmp/lic"}
+    )
+
+    connector.get_table_schema("trades", {"start_date": "2024.01.02"})
+
+    assert seen == ["2024.01.03"]
+
+
+def test_absent_table_partition_yields_nothing_without_warning(monkeypatch, tmp_path, caplog):
+    (tmp_path / "sym").write_bytes(b"stub")
+    (tmp_path / "2024.01.01").mkdir()
+    monkeypatch.setattr(sym_reader, "prepare_pykx", lambda _: pytest.fail("no q for absent table"))
+
+    with caplog.at_level("WARNING"):
+        records = _read_records(tmp_path, monkeypatch, _ChunkKx(row_count=1))
+
+    assert records == []
+    assert not caplog.records
+
+
+def test_bearer_token_with_trailing_newline_is_rejected(monkeypatch, tmp_path):
+    monkeypatch.setattr(runtime_mod, "_runtime_home_directory", lambda: tmp_path / "home")
+    monkeypatch.setattr(runtime_mod.subprocess, "run", _Recorder([]))
+
+    with pytest.raises(ValueError, match="bearer token"):
+        runtime_mod._install_kdbx(_online_config(tmp_path, installer_bearer_token="abc\n"))
+
+
+def test_installer_environment_is_allowlisted(monkeypatch, tmp_path):
+    monkeypatch.setattr(runtime_mod, "_runtime_home_directory", lambda: tmp_path / "home")
+    monkeypatch.setenv("DATABRICKS_TOKEN", "workspace-token")
+    monkeypatch.setenv("HTTPS_PROXY", "http://proxy:3128")
+    recorder = _Recorder([(0, "", ""), (0, "", "")])
+    monkeypatch.setattr(runtime_mod.subprocess, "run", recorder)
+
+    runtime_mod._install_kdbx(_online_config(tmp_path))
+
+    install_env = recorder.calls[1]["env"]
+    assert "DATABRICKS_TOKEN" not in install_env
+    assert install_env["HTTPS_PROXY"] == "http://proxy:3128"
+    assert install_env["HOME"] == str(tmp_path / "home")
+    assert install_env["TERM"] == "dumb"

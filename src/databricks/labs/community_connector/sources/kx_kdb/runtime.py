@@ -92,6 +92,28 @@ _LICENSE_ENV_VARS = frozenset({"KDB_LICENSE_B64", "KDB_K4LICENSE_B64"})
 # RFC 6750 b64token characters; anything else could break the curl config syntax.
 _BEARER_TOKEN_RE = re.compile(r"^[A-Za-z0-9\-._~+/]+=*$")
 _REDACTED = "[REDACTED]"
+# install_kdb.sh comes from KX's latest release; it gets only what it needs.
+_INSTALLER_ENV_ALLOWLIST = frozenset(
+    {
+        "PATH",
+        "LANG",
+        "LC_ALL",
+        "LC_CTYPE",
+        "TMPDIR",
+        "USER",
+        "LOGNAME",
+        "SHELL",
+        "HTTP_PROXY",
+        "HTTPS_PROXY",
+        "NO_PROXY",
+        "http_proxy",
+        "https_proxy",
+        "no_proxy",
+        "SSL_CERT_FILE",
+        "SSL_CERT_DIR",
+        "CURL_CA_BUNDLE",
+    }
+)
 
 
 @dataclass(frozen=True)
@@ -475,7 +497,7 @@ def _install_kdbx_online(config: PyKxRuntimeConfig) -> None:
 
 def _validated_bearer_token(token: str | None) -> str:
     value = str(token or "")
-    if not _BEARER_TOKEN_RE.match(value):
+    if not _BEARER_TOKEN_RE.fullmatch(value):
         raise ValueError(
             "KDB-X installer bearer token contains unsupported characters; expected an "
             "RFC 6750 bearer token."
@@ -522,8 +544,7 @@ def _run_installer(
         label=label,
         timeout=1200,
         cwd=cwd,
-        # TERM overrides values such as "unknown" that break tput in the script.
-        env=_child_process_env(config, HOME=str(runtime_home), TERM="dumb"),
+        env=_installer_env(runtime_home),
     )
     if install.returncode != 0:
         raise RuntimeError(
@@ -548,15 +569,22 @@ def _run_subprocess(
         kwargs["stdin"] = subprocess.DEVNULL
     try:
         return subprocess.run(
-            args, capture_output=True, text=True, timeout=timeout, **kwargs
+            args,
+            capture_output=True,
+            text=True,
+            errors="replace",
+            timeout=timeout,
+            **kwargs,
         )
     except subprocess.TimeoutExpired as exc:
-        # TimeoutExpired's message repeats argv, which includes the license.
-        raise RuntimeError(
-            f"{label} timed out after {timeout} seconds. stdout tail: "
-            f"{_command_tail(_decode(exc.stdout), secrets=config.secrets)}. stderr tail: "
-            f"{_command_tail(_decode(exc.stderr), secrets=config.secrets)}"
-        ) from None
+        # TimeoutExpired repeats argv, which includes the license; raise
+        # outside this block so the new error keeps no reference to it.
+        timed_out = (_decode(exc.stdout), _decode(exc.stderr))
+    raise RuntimeError(
+        f"{label} timed out after {timeout} seconds. stdout tail: "
+        f"{_command_tail(timed_out[0], secrets=config.secrets)}. stderr tail: "
+        f"{_command_tail(timed_out[1], secrets=config.secrets)}"
+    )
 
 
 def _decode(value) -> str:
@@ -568,6 +596,13 @@ def _decode(value) -> str:
 def _installer_license_args(config: PyKxRuntimeConfig) -> list[str]:
     flag = _INSTALLER_LICENSE_FLAGS.get(config.license_file_name, "--b64lic")
     return [flag, config.license_b64 or ""]
+
+
+def _installer_env(runtime_home: Path) -> dict[str, str]:
+    env = {key: value for key, value in os.environ.items() if key in _INSTALLER_ENV_ALLOWLIST}
+    # TERM overrides values such as "unknown" that break tput in the script.
+    env.update({"HOME": str(runtime_home), "TERM": "dumb"})
+    return env
 
 
 def _child_process_env(config: PyKxRuntimeConfig, **overrides: str) -> dict[str, str]:
@@ -687,11 +722,14 @@ def _localize_offline_bundle(bundle_path: str) -> Path:
     local_path = local_dir / _bundle_cache_name(source)
     if _path_is_file(local_path):
         return local_path
+    # Copy to a temporary name first so an interrupted copy is never reused.
+    partial_path = local_path.with_name(f"{local_path.name}.partial")
 
     try:
         source_path = Path(source)
         if _path_is_file(source_path):
-            shutil.copyfile(source_path, local_path)
+            shutil.copyfile(source_path, partial_path)
+            os.replace(partial_path, local_path)
             return local_path
     except Exception as exc:
         logger.debug("Direct copy of KDB-X bundle failed: %s", exc)
@@ -699,8 +737,9 @@ def _localize_offline_bundle(bundle_path: str) -> Path:
     errors = []
     for src_uri in _dbutils_source_uris(source):
         try:
-            _copy_with_dbutils(src_uri, f"file:{local_path}")
-            if _path_is_file(local_path):
+            _copy_with_dbutils(src_uri, f"file:{partial_path}")
+            if _path_is_file(partial_path):
+                os.replace(partial_path, local_path)
                 return local_path
         except Exception as exc:
             errors.append(f"{src_uri}: {exc}")
@@ -795,12 +834,25 @@ def _materialize_license(config: PyKxRuntimeConfig) -> Path:
     target.mkdir(mode=0o700, parents=True, exist_ok=True)
     os.chmod(target, 0o700)
     license_path = target / config.license_file_name
+    content = base64.b64decode(config.license_b64 or "")
+    if _owner_only_file_with_content(license_path, content):
+        return target
     flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC | getattr(os, "O_NOFOLLOW", 0)
     descriptor = os.open(license_path, flags, 0o600)
     with os.fdopen(descriptor, "wb") as handle:
-        handle.write(base64.b64decode(config.license_b64 or ""))
+        handle.write(content)
     os.chmod(license_path, 0o600)
     return target
+
+
+def _owner_only_file_with_content(path: Path, content: bytes) -> bool:
+    try:
+        info = os.lstat(path)
+    except FileNotFoundError:
+        return False
+    if not stat.S_ISREG(info.st_mode) or stat.S_IMODE(info.st_mode) != 0o600:
+        return False
+    return info.st_size == len(content) and path.read_bytes() == content
 
 
 def _apply_pykx_environment(config: PyKxRuntimeConfig) -> None:

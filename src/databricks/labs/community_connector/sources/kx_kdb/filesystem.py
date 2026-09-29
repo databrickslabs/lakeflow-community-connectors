@@ -75,7 +75,7 @@ class _DiscoveryCache:
         with self._lock:
             cached = self._roots.get(normalized_root)
             if cached is not None and self._is_fresh(cached.created_at):
-                logger.warning(
+                logger.info(
                     "KX_DISCOVERY event=root_dates_cache_hit dates=%s",
                     len(cached.date_partitions),
                 )
@@ -88,7 +88,7 @@ class _DiscoveryCache:
                 root_path=normalized_root,
                 date_partitions=date_partitions,
             )
-            logger.warning(
+            logger.info(
                 "KX_DISCOVERY event=root_dates_build duration_ms=%s dates=%s",
                 round((time.perf_counter() - started) * 1000),
                 len(date_partitions),
@@ -105,7 +105,7 @@ class _DiscoveryCache:
         with self._lock:
             cached = self._tables.get(key)
             if cached is not None and self._is_fresh(cached.created_at):
-                logger.warning(
+                logger.info(
                     "KX_DISCOVERY event=table_cache_hit table=%s partitions=%s",
                     normalized_table,
                     len(cached.partitions),
@@ -132,7 +132,7 @@ class _DiscoveryCache:
                 partitions=partitions,
             )
             self._tables[key] = discovered
-            logger.warning(
+            logger.info(
                 "KX_DISCOVERY event=table_build duration_ms=%s table=%s "
                 "partitions=%s first=%s latest=%s",
                 round((time.perf_counter() - started) * 1000),
@@ -150,7 +150,7 @@ class _DiscoveryCache:
         with self._lock:
             cached = self._table_lists.get(key)
             if cached is not None and self._is_fresh(cached.created_at):
-                logger.warning(
+                logger.info(
                     "KX_DISCOVERY event=table_list_cache_hit tables=%s",
                     len(cached.tables),
                 )
@@ -172,7 +172,7 @@ class _DiscoveryCache:
                 created_at=time.monotonic(),
                 tables=tables,
             )
-            logger.warning(
+            logger.info(
                 "KX_DISCOVERY event=table_list_build duration_ms=%s tables=%s",
                 round((time.perf_counter() - started) * 1000),
                 len(tables),
@@ -286,6 +286,33 @@ def _table_directory_exists(root_path: str, date_partition: str, actual_name: st
     return actual_name in _scan_child_directories(hdb_child_path(root_path, date_partition))
 
 
+def scan_partition_table(
+    root_path: str, date_partition: str, table_name: str
+) -> dict[str, os.DirEntry] | None:
+    """Return the entries of one splayed table partition, or None if it is absent.
+
+    Every entry, including ``.d`` and nested-column companion files such as
+    ``col#``, must be a real file or directory rather than a symbolic link.
+    """
+    date_path = hdb_child_path(root_path, date_partition)
+    table_path = hdb_child_path(date_path, table_name)
+    try:
+        with os.scandir(date_path) as scanned:
+            table_entry = next((entry for entry in scanned if entry.name == table_name), None)
+    except (FileNotFoundError, NotADirectoryError):
+        return None
+    if table_entry is None:
+        return None
+    _reject_symlink(table_entry, "table directory")
+    if not table_entry.is_dir(follow_symlinks=False):
+        return None
+    with os.scandir(table_path) as scanned:
+        entries = {entry.name: entry for entry in scanned}
+    for entry in entries.values():
+        _reject_symlink(entry, "column file")
+    return entries
+
+
 def _find_table_boundaries(
     root_path: str,
     date_partitions: tuple[str, ...],
@@ -342,18 +369,17 @@ def discover_tables(root_path: str, sample_dates: int = 0) -> list[str]:
     return list(_DISCOVERY_CACHE.list_tables(root_path, sample_dates))
 
 
-def resolve_table_directory_name(
-    root_path: str,
-    table_name: str,
-    sample_dates: int = 0,
-) -> str:
+def resolve_table_directory_name(root_path: str, table_name: str) -> str:
     """Resolve a logical table name to the actual directory name on disk."""
     target = str(table_name).strip().lower()
     if not target:
         raise ValueError("table_name must be non-empty")
-
-    del sample_dates
     return _DISCOVERY_CACHE.table(root_path, target).actual_name
+
+
+def table_partition_exists(root_path: str, date_partition: str, table_name: str) -> bool:
+    """Return whether ``table_name`` has a directory under ``date_partition``."""
+    return _table_directory_exists(root_path, date_partition, table_name)
 
 
 def discover_table_partitions(

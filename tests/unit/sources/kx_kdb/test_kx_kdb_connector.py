@@ -12,6 +12,7 @@ from databricks.labs.community_connector.sources.kx_kdb.kx_kdb import KxKdbLakef
 
 
 def _build_hdb(tmp_path):
+    (tmp_path / "sym").write_bytes(b"stub")
     (tmp_path / "2024.01.01" / "TRADES").mkdir(parents=True)
     (tmp_path / "2024.01.02" / "TRADES").mkdir(parents=True)
     (tmp_path / "2024.01.03" / "TRADES").mkdir(parents=True)
@@ -33,6 +34,17 @@ def _patch_symbols(monkeypatch, symbols=None):
         "databricks.labs.community_connector.sources.kx_kdb.kx_kdb.load_sym_enumeration",
         lambda *_: symbols,
     )
+    monkeypatch.setattr(
+        "databricks.labs.community_connector.sources.kx_kdb.kx_kdb.infer_schema_from_partition",
+        lambda **_: [
+            {"name": "date", "spark_type": "StringType"},
+            {"name": "sym", "spark_type": "StringType", "q_type": "s"},
+        ],
+    )
+
+
+def _unmatched(date, count=2):
+    return {"date_partition": date, "sym": None, "sym_index": None, "sym_count": count}
 
 
 def test_generated_data_source_class_is_cloudpickle_serializable():
@@ -97,8 +109,10 @@ def test_get_partitions_defaults_to_date_sym_incremental_range(monkeypatch, tmp_
     assert partitions == [
         {"date_partition": "2024.01.02", "sym": "a", "sym_index": 0},
         {"date_partition": "2024.01.02", "sym": "b", "sym_index": 1},
+        _unmatched("2024.01.02"),
         {"date_partition": "2024.01.03", "sym": "a", "sym_index": 0},
         {"date_partition": "2024.01.03", "sym": "b", "sym_index": 1},
+        _unmatched("2024.01.03"),
     ]
 
 
@@ -116,6 +130,7 @@ def test_get_partitions_date_sym_expands_dates_and_symbols(monkeypatch, tmp_path
     assert partitions == [
         {"date_partition": "2024.01.02", "sym": "a", "sym_index": 0},
         {"date_partition": "2024.01.02", "sym": "b", "sym_index": 1},
+        _unmatched("2024.01.02"),
     ]
 
 
@@ -197,8 +212,8 @@ def test_read_partition_routes_date_sym_descriptor(monkeypatch, tmp_path):
     assert records == [{"date": "2024.01.01", "sym": "a", "price": 1.23}]
     assert captured["kdb_table_name"] == "TRADES"
     assert captured["date_partition"] == "2024.01.01"
-    assert captured["symbol"] == "a"
     assert captured["sym_index"] == 0
+    assert captured["sym_count"] is None
     assert captured["sym_column"] == "sym"
 
 

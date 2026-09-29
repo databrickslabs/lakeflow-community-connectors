@@ -18,6 +18,7 @@ from databricks.labs.community_connector.sources.kx_kdb.filesystem import (
     discover_tables,
     normalize_partition_date,
     resolve_table_directory_name,
+    table_partition_exists,
     validate_hdb_name,
 )
 from databricks.labs.community_connector.sources.kx_kdb.runtime import (
@@ -30,6 +31,7 @@ from databricks.labs.community_connector.sources.kx_kdb.schema import (
 from databricks.labs.community_connector.sources.kx_kdb.sym_reader import (
     load_sym_enumeration,
     read_kdb_date_sym_records,
+    sym_file_signature,
 )
 
 logger = logging.getLogger(__name__)
@@ -46,7 +48,7 @@ class KxKdbLakeflowConnect(LakeflowConnect, SupportsPartitionedStream):
     def __init__(self, options: dict[str, str]) -> None:
         super().__init__(options)
         self.hdb_root_path = self._required_absolute_path_option("hdb_root_path")
-        self.license_path = self._required_absolute_path_option("license_volume_path")
+        self._required_absolute_path_option("license_volume_path")
         # Resolve any KDB-X bootstrap secrets on the driver so the resulting
         # runtime config can travel with the serialized connector object.
         self.runtime_config = build_runtime_config(self.options)
@@ -55,8 +57,7 @@ class KxKdbLakeflowConnect(LakeflowConnect, SupportsPartitionedStream):
         self._schema_cache: dict[tuple[str, str], StructType] = {}
         self._column_cache: dict[tuple[str, str], list[dict]] = {}
         self._table_dir_cache: dict[str, str] = {}
-        self._partition_cache: dict[tuple[str, str | None, str | None], list[str]] = {}
-        self._sym_cache: list[str] | None = None
+        self._sym_cache: tuple[tuple[int, int], list[str]] | None = None
 
     def list_tables(self) -> list[str]:
         return discover_tables(self.hdb_root_path, self.discovery_sample_dates)
@@ -142,12 +143,23 @@ class KxKdbLakeflowConnect(LakeflowConnect, SupportsPartitionedStream):
             )
             return []
 
+        self._sym_column(table_name, table_options)
         symbols = self._symbols()
-        descriptors = [
-            {"date_partition": partition, "sym": symbol, "sym_index": sym_index}
-            for partition in selected
-            for sym_index, symbol in enumerate(symbols)
-        ]
+        descriptors = []
+        for partition in selected:
+            descriptors.extend(
+                {"date_partition": partition, "sym": symbol, "sym_index": sym_index}
+                for sym_index, symbol in enumerate(symbols)
+            )
+            # Rows whose enumeration index is null or beyond the sym file.
+            descriptors.append(
+                {
+                    "date_partition": partition,
+                    "sym": None,
+                    "sym_index": None,
+                    "sym_count": len(symbols),
+                }
+            )
         logger.info(
             "KX KDB partition plan table=%s strategy=%s dates=%s symbols=%s tasks=%s",
             table_name,
@@ -175,14 +187,16 @@ class KxKdbLakeflowConnect(LakeflowConnect, SupportsPartitionedStream):
                 "expected a date_sym descriptor with 'sym' and 'sym_index'."
             )
 
-        sym_column = self._sym_column(table_options)
+        sym_column = self._sym_column(table_name, table_options)
         actual_table_name = self._actual_table_name(table_name)
+        sym_index = partition.get("sym_index")
+        sym_count = partition.get("sym_count")
         return read_kdb_date_sym_records(
             hdb_root_path=self.hdb_root_path,
             kdb_table_name=actual_table_name,
             date_partition=date_partition,
-            symbol=str(partition.get("sym", "")),
-            sym_index=int(partition.get("sym_index", -1)),
+            sym_index=None if sym_index is None else int(sym_index),
+            sym_count=None if sym_count is None else int(sym_count),
             runtime_config=self.runtime_config,
             column_defs=self._column_defs(table_name, table_options),
             sym_column=sym_column,
@@ -225,39 +239,53 @@ class KxKdbLakeflowConnect(LakeflowConnect, SupportsPartitionedStream):
         self._ingestion_mode(table_options)
         return strategy
 
-    def _sym_column(self, table_options: dict[str, str]) -> str:
-        value = str(table_options.get("sym_column", "sym")).strip()
-        return validate_hdb_name(value, "sym_column")
+    def _sym_column(self, table_name: str, table_options: dict[str, str]) -> str:
+        value = validate_hdb_name(
+            str(table_options.get("sym_column", "sym")).strip(), "sym_column"
+        )
+        column = next(
+            (
+                column
+                for column in self._column_defs(table_name, table_options)
+                if column["name"].lower() == value.lower()
+            ),
+            None,
+        )
+        if column is None:
+            raise ValueError(f"sym_column {value!r} is not a column of table {table_name!r}")
+        if column.get("q_type", "s") != "s":
+            raise ValueError(
+                f"sym_column {value!r} must be an enumerated symbol column; "
+                f"found q type {column.get('q_type')!r}"
+            )
+        return value
 
     def _symbols(self) -> list[str]:
-        if self._sym_cache is None:
-            self._sym_cache = load_sym_enumeration(self.hdb_root_path, self.runtime_config)
-        return self._sym_cache
+        signature = sym_file_signature(self.hdb_root_path)
+        if self._sym_cache is None or self._sym_cache[0] != signature:
+            symbols = load_sym_enumeration(self.hdb_root_path, self.runtime_config)
+            self._sym_cache = (signature, symbols)
+        return self._sym_cache[1]
 
     def _actual_table_name(self, table_name: str) -> str:
         cache_key = table_name.lower()
         if cache_key not in self._table_dir_cache:
             self._table_dir_cache[cache_key] = resolve_table_directory_name(
-                self.hdb_root_path,
-                table_name,
-                self.discovery_sample_dates,
+                self.hdb_root_path, table_name
             )
         return self._table_dir_cache[cache_key]
 
     def _available_partitions(
         self, table_name: str, table_options: dict[str, str]
     ) -> list[str]:
-        start_date = normalize_partition_date(table_options.get("start_date"))
-        end_date = normalize_partition_date(table_options.get("end_date"))
-        cache_key = (table_name.lower(), start_date, end_date)
-        if cache_key not in self._partition_cache:
-            self._partition_cache[cache_key] = discover_table_partitions(
-                root_path=self.hdb_root_path,
-                table_name=table_name,
-                start_date=start_date,
-                end_date=end_date,
-            )
-        return self._partition_cache[cache_key]
+        # Discovery results are cached per process with a bounded TTL, so a
+        # long-lived stream reader still sees new date partitions.
+        return discover_table_partitions(
+            root_path=self.hdb_root_path,
+            table_name=table_name,
+            start_date=normalize_partition_date(table_options.get("start_date")),
+            end_date=normalize_partition_date(table_options.get("end_date")),
+        )
 
     def _column_defs(self, table_name: str, table_options: dict[str, str]) -> list[dict]:
         cache_key = (table_name.lower(), self._ingestion_mode(table_options))
@@ -270,10 +298,20 @@ class KxKdbLakeflowConnect(LakeflowConnect, SupportsPartitionedStream):
                 f"No partitions found for table {table_name!r} under {self.hdb_root_path}"
             )
 
+        actual_table_name = self._actual_table_name(table_name)
+        # Interior dates of a sparse table may not contain the table directory.
+        schema_partition = next(
+            (
+                partition
+                for partition in partitions
+                if table_partition_exists(self.hdb_root_path, partition, actual_table_name)
+            ),
+            partitions[0],
+        )
         columns = infer_schema_from_partition(
             hdb_root_path=self.hdb_root_path,
-            kdb_table_name=self._actual_table_name(table_name),
-            date_partition=partitions[0],
+            kdb_table_name=actual_table_name,
+            date_partition=schema_partition,
             runtime_config=self.runtime_config,
         )
 

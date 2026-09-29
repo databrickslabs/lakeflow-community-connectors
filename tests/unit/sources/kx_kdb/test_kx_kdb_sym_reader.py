@@ -72,7 +72,6 @@ def test_date_sym_reader_ignores_missing_optional_column_files(monkeypatch, tmp_
             hdb_root_path=str(tmp_path),
             kdb_table_name="TRADES",
             date_partition="2024.01.01",
-            symbol="AAPL",
             sym_index=0,
             runtime_config=PyKxRuntimeConfig(license_directory="/tmp/lic"),
             column_defs=[
@@ -131,7 +130,6 @@ def test_date_sym_reader_uses_custom_sym_column(monkeypatch, tmp_path):
             hdb_root_path=str(tmp_path),
             kdb_table_name="TRADES",
             date_partition="2024.01.01",
-            symbol="OPT1",
             sym_index=0,
             sym_column="optionId",
             runtime_config=PyKxRuntimeConfig(license_directory="/tmp/lic"),
@@ -162,8 +160,7 @@ def test_load_sym_enumeration_supports_fuse_roots(monkeypatch, tmp_path):
             calls.append((query, args))
             if query == "{[p] `sym set get hsym p}":
                 return None
-            if query == "{[p] get hsym p}":
-                assert args == (sym_path,)
+            if query == "sym":
                 return ["a", "b"]
             raise AssertionError(f"unexpected query: {query!r}")
 

@@ -153,7 +153,9 @@ class TestKxKdbConnector(LakeflowConnectTests, SupportsPartitionedStreamTests):
     def _read_records(cls, **kwargs):
         table = kwargs["kdb_table_name"].upper()
         date = kwargs["date_partition"]
-        symbol = kwargs["symbol"]
+        if kwargs["sym_index"] is None:
+            return iter([])
+        symbol = ["AAPL", "MSFT"][kwargs["sym_index"]]
         return iter(
             [
                 {key: value for key, value in row.items() if key != "table"}

@@ -14,6 +14,7 @@ from databricks.labs.community_connector.sources.kx_kdb.conversion import (
 )
 from databricks.labs.community_connector.sources.kx_kdb.filesystem import (
     hdb_child_path,
+    scan_partition_table,
     validate_hdb_name,
 )
 from databricks.labs.community_connector.sources.kx_kdb.runtime import (
@@ -29,9 +30,13 @@ logger = logging.getLogger(__name__)
 _ROW_CHUNK_SIZE = 10_000
 
 _LOAD_SYM_DOMAIN_Q = "{[p] `sym set get hsym p}"
-_READ_SYM_FILE_Q = "{[p] get hsym p}"
+_SYM_DOMAIN_Q = "sym"
 # Enumerations do not compare with longs once the sym domain is loaded.
 _SYMBOL_ROWS_Q = "{[sympath; symi] `chunk_idx set where symi=`long$get hsym sympath}"
+# Rows whose enumeration index is null or beyond the root sym file.
+_UNMATCHED_ROWS_Q = (
+    "{[sympath; n] `chunk_idx set where not (`long$get hsym sympath) within (0; n-1)}"
+)
 _SYMBOL_ROW_COUNT_Q = "count chunk_idx"
 _CHUNK_INDICES_Q = "{[row_off; m] chunk_idx[row_off+til m]}"
 # q lambdas do not capture outer locals, so ``idx`` is projected explicitly.
@@ -82,8 +87,13 @@ def _ensure_sym_domain(kx, hdb_root_path: str) -> str:
 def load_sym_enumeration(hdb_root_path: str, runtime_config: PyKxRuntimeConfig) -> list[str]:
     """Return the HDB sym enumeration; list positions are KDB enum indices."""
     kx = prepare_pykx(runtime_config)
-    sym_file = _ensure_sym_domain(kx, hdb_root_path)
-    return _symbols_to_strings(kx.q(_READ_SYM_FILE_Q, sym_file))
+    _ensure_sym_domain(kx, hdb_root_path)
+    return _symbols_to_strings(kx.q(_SYM_DOMAIN_Q))
+
+
+def sym_file_signature(hdb_root_path: str) -> tuple[int, int]:
+    """Return ``(size, mtime_ns)`` of the root sym file."""
+    return _sym_file_signature(_sym_file_path(hdb_root_path))
 
 
 def _symbols_to_strings(value) -> list[str]:
@@ -126,26 +136,39 @@ def read_kdb_date_sym_records(
     hdb_root_path: str,
     kdb_table_name: str,
     date_partition: str,
-    symbol: str,
-    sym_index: int,
+    sym_index: int | None,
     runtime_config: PyKxRuntimeConfig,
     column_defs: List[dict],
     sym_column: str = "sym",
+    sym_count: int | None = None,
 ) -> Iterator[dict]:
-    """Read one HDB date partition filtered to a single symbol."""
+    """Read one HDB date partition filtered to one symbol enumeration index.
+
+    ``sym_index=None`` selects the rows whose index is null or not below
+    ``sym_count``, the number of symbols in the root sym file.
+    """
     sym_column = validate_hdb_name(sym_column, "sym_column")
-    if sym_index < 0:
+    if sym_index is None and sym_count is None:
+        raise ValueError("sym_count is required to read unmatched symbol rows")
+    if sym_index is not None and sym_index < 0:
+        return
+
+    entries = scan_partition_table(hdb_root_path, date_partition, kdb_table_name)
+    partition_path = hdb_child_path(hdb_root_path, date_partition, kdb_table_name)
+    if entries is None:
+        logger.debug("Table partition %s is absent.", partition_path)
         return
 
     column_names = [column["name"] for column in column_defs]
-    existing_columns = _existing_partition_columns(
-        hdb_root_path, date_partition, kdb_table_name, column_names
-    )
+    existing_columns = [
+        name
+        for name in column_names
+        if name != "date" and name in entries and entries[name].is_file(follow_symlinks=False)
+    ]
     physical_sym_column = next(
         (column for column in existing_columns if column.lower() == sym_column.lower()),
         None,
     )
-    partition_path = hdb_child_path(hdb_root_path, date_partition, kdb_table_name)
     if physical_sym_column is None:
         logger.warning(
             "Skipping %s because required sym column %r is missing.",
@@ -158,7 +181,10 @@ def read_kdb_date_sym_records(
     _ensure_sym_domain(kx, hdb_root_path)
     column_paths = [hdb_child_path(partition_path, column) for column in existing_columns]
     sym_path = hdb_child_path(partition_path, physical_sym_column)
-    _prepare_symbol_row_indices(kx, sym_path, sym_index)
+    if sym_index is None:
+        kx.q(_UNMATCHED_ROWS_Q, sym_path, int(sym_count))
+    else:
+        _prepare_symbol_row_indices(kx, sym_path, sym_index)
     row_count = _symbol_row_count(kx)
 
     try:
@@ -166,12 +192,7 @@ def read_kdb_date_sym_records(
             frame = _read_symbol_chunk(kx, column_paths, existing_columns, offset, size)
             if frame is None or len(frame.index) == 0:
                 continue
-
-            if physical_sym_column in frame.columns:
-                frame[physical_sym_column] = frame[physical_sym_column].map(_symbol_text)
-            elif sym_column in column_names:
-                frame[sym_column] = symbol
-
+            frame[physical_sym_column] = frame[physical_sym_column].map(_symbol_text)
             normalized = normalize_partition_frame(
                 frame=frame,
                 date_partition=date_partition,
@@ -184,56 +205,6 @@ def read_kdb_date_sym_records(
             gc.collect()
     finally:
         gc.collect()
-
-
-def _existing_partition_columns(
-    hdb_root_path: str,
-    date_partition: str,
-    kdb_table_name: str,
-    column_names: list[str],
-) -> list[str]:
-    """Return requested column files that are regular files inside the partition."""
-    date_path = hdb_child_path(hdb_root_path, date_partition)
-    table_entry = _find_entry(date_path, kdb_table_name)
-    if table_entry is None:
-        return []
-    if table_entry.is_symlink():
-        raise ValueError(
-            f"HDB table directory {table_entry.path} is a symbolic link; "
-            "symlinked HDB content is not supported."
-        )
-    if not table_entry.is_dir(follow_symlinks=False):
-        return []
-
-    with os.scandir(table_entry.path) as scanned:
-        entries = {entry.name: entry for entry in scanned}
-    existing = []
-    for column_name in column_names:
-        if column_name == "date":
-            continue
-        entry = entries.get(column_name)
-        if entry is None:
-            logger.debug("Missing KDB column file: %s/%s", table_entry.path, column_name)
-            continue
-        if entry.is_symlink():
-            raise ValueError(
-                f"HDB column file {entry.path} is a symbolic link; "
-                "symlinked HDB content is not supported."
-            )
-        if entry.is_file(follow_symlinks=False):
-            existing.append(column_name)
-    return existing
-
-
-def _find_entry(parent_path: str, name: str):
-    try:
-        with os.scandir(parent_path) as scanned:
-            for entry in scanned:
-                if entry.name == name:
-                    return entry
-    except (FileNotFoundError, NotADirectoryError):
-        return None
-    return None
 
 
 def _prepare_symbol_row_indices(kx, sym_path: str, sym_index: int) -> None:
@@ -285,17 +256,16 @@ def _column_vectors_to_frame(columns: list[str], vectors):
     if vectors is None:
         return pd.DataFrame()
 
-    raw_vectors = vectors
-    if hasattr(raw_vectors, "py"):
-        try:
-            raw_vectors = raw_vectors.py()
-        except Exception:
-            pass
-
+    # Iterate the q list itself so each column vector keeps its q type for
+    # raw integer conversion; converting the whole list first loses it.
     try:
-        items = list(raw_vectors)
+        items = list(vectors)
     except TypeError:
-        items = [raw_vectors]
+        raw_vectors = vectors.py() if hasattr(vectors, "py") else vectors
+        try:
+            items = list(raw_vectors)
+        except TypeError:
+            items = [raw_vectors]
 
     if not items:
         return pd.DataFrame()
@@ -304,16 +274,43 @@ def _column_vectors_to_frame(columns: list[str], vectors):
             f"KDB returned {len(items)} column vectors for {len(columns)} requested columns."
         )
 
-    series_by_name = {}
-    for column_name, vector in zip(columns, items):
-        series_by_name[column_name] = _vector_to_values(vector)
-
+    # Object dtype stops pandas from turning ints with nulls into float64,
+    # which would round longs above 2**53; conversion applies schema types.
+    series_by_name = {
+        column_name: pd.Series(_vector_to_values(vector), dtype=object)
+        for column_name, vector in zip(columns, items)
+    }
     return pd.DataFrame(series_by_name)
+
+
+_Q_INTEGER_NULLS = {5: -(2**15), 6: -(2**31), 7: -(2**63)}
+
+
+def _raw_integer_values(vector):
+    """Return q byte/short/int/long values as Python ints with q nulls as None.
+
+    Raw conversion keeps q infinities (0W) as their integer values instead of
+    floats and avoids pandas NA handling.
+    """
+    q_type = getattr(vector, "t", None)
+    if q_type not in (4, 5, 6, 7):
+        return None
+    try:
+        values = vector.py(raw=True)
+    except TypeError:
+        return None
+    if isinstance(values, (bytes, bytearray)):
+        return list(values)
+    null = _Q_INTEGER_NULLS.get(q_type)
+    return [None if value == null else int(value) for value in values]
 
 
 def _vector_to_values(vector):
     import pandas as pd
 
+    raw_integers = _raw_integer_values(vector)
+    if raw_integers is not None:
+        return raw_integers
     if hasattr(vector, "py"):
         try:
             vector = vector.py()
@@ -376,7 +373,7 @@ def _plain_python_value(value):
         return [_plain_python_value(item) for item in value]
     if isinstance(value, tuple):
         return tuple(_plain_python_value(item) for item in value)
-    if value is None or value is pd.NaT:
+    if value is None or value is pd.NaT or value is pd.NA:
         return None
     if isinstance(value, (bytes, bytearray)):
         # q strings (nested char columns) arrive as bytes; the schema maps them to strings.

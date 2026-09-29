@@ -100,10 +100,10 @@ def test_infer_schema_reads_splayed_partition_meta(monkeypatch, tmp_path):
     ]
     assert columns == [
         {"name": "date", "spark_type": "StringType"},
-        {"name": "sym", "spark_type": "StringType"},
-        {"name": "time", "spark_type": "TimestampType"},
-        {"name": "price", "spark_type": "DoubleType"},
-        {"name": "size", "spark_type": "LongType"},
+        {"name": "sym", "spark_type": "StringType", "q_type": "s"},
+        {"name": "time", "spark_type": "TimestampType", "q_type": "p"},
+        {"name": "price", "spark_type": "DoubleType", "q_type": "f"},
+        {"name": "size", "spark_type": "LongType", "q_type": "j"},
     ]
 
 

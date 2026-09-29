@@ -1130,7 +1130,8 @@ def test_localize_offline_bundle_falls_back_to_dbutils(monkeypatch, tmp_path):
     localized = runtime_mod._localize_offline_bundle(source)
 
     assert localized.is_file()
-    assert copied[0] == (f"file:{source}", f"file:{localized}")
+    assert copied[0] == (f"file:{source}", f"file:{localized}.partial")
+    assert not Path(f"{localized}.partial").exists()
 
 
 def test_install_kdbx_offline_raises_when_bundle_missing(monkeypatch, tmp_path):
