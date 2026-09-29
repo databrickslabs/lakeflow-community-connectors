@@ -257,12 +257,14 @@ class MicrosoftPurviewLakeflowConnect(LakeflowConnect):
         """Apply the client-side incremental cursor over a record iterator.
 
         Applies, per record:
-          * inclusive ``>= since`` filtering (skip only strictly-older records)
-            so same-second records straddling a run boundary are not lost — the
-            cursor is second-granular, so a strict ``>`` would permanently drop a
-            record sharing the watermark second that arrives after the watermark
-            reached it; boundary rows are re-emitted and deduped by the CDC
-            primary-key upsert, and
+          * strict ``> since`` filtering (skip records at or below the watermark)
+            so a resumed run never re-emits the boundary record — required by the
+            ``SimpleDataSourceStreamReader`` contract that a non-empty batch must
+            advance the end offset past the start (a boundary record, cursor ==
+            since, cannot be returned without advancing the offset).
+            ``systemData.lastModifiedAt`` has sub-second (100-ns) precision, so
+            distinct records effectively never share a cursor value and nothing is
+            lost by the strict skip; and
           * an init-time upper cap (skip records modified after
             ``self._init_ts``) so Trigger.AvailableNow terminates.
 
@@ -285,40 +287,67 @@ class MicrosoftPurviewLakeflowConnect(LakeflowConnect):
         """
         start_offset = start_offset or {}
         since = start_offset.get("cursor")
+        # Compare as parsed datetimes, NOT lexicographically: the cursor and
+        # _init_ts can use different ISO spellings (Purview emits 'Z' with 7-digit
+        # fractional seconds; datetime.isoformat() emits '+00:00' with 6), and a
+        # string compare of mismatched spellings is wrong at the boundary.
+        since_dt = self._parse_ts(since)
+        init_dt = self._parse_ts(self._init_ts)
 
         # Already caught up to init time — nothing new can be emitted.
-        if since is not None and since >= self._init_ts:
+        if since_dt is not None and init_dt is not None and since_dt >= init_dt:
             return iter([]), start_offset
 
         records: list[dict[str, Any]] = []
-        max_seen = since
+        max_seen: str | None = since
+        max_seen_dt = since_dt
         for raw in record_iter:
             cursor = self._record_cursor(raw)
-            # Inclusive `>=` boundary (skip only strictly-older records). The
-            # cursor's smallest unit is a *second* (systemData.lastModifiedAt),
-            # so several records can share the exact boundary value. A strict `>`
-            # would permanently drop any same-second record that lands after a
-            # prior run already advanced the watermark to that second. Re-emitting
-            # the boundary second each run is safe: CDC upserts on the primary key
-            # (`id`), so re-read boundary rows are deduped, not duplicated. The
-            # cost is bounded (only rows at exactly the max second) and the offset
-            # still cannot advance past `_init_ts`, so triggers converge.
-            if since is not None and cursor is not None and cursor < since:
+            cursor_dt = self._parse_ts(cursor)
+            # Strict `>` boundary: skip records at or below the watermark so a
+            # resumed run never re-emits the boundary record. The
+            # SimpleDataSourceStreamReader contract requires a non-empty batch to
+            # advance the end offset; re-emitting a boundary record (cursor ==
+            # since) without advancing aborts the pipeline
+            # (SIMPLE_STREAM_READER_OFFSET_DID_NOT_ADVANCE). Safe against
+            # same-timestamp loss: systemData.lastModifiedAt has sub-second
+            # (100-ns) precision, so distinct records don't share a value.
+            if since_dt is not None and cursor_dt is not None and cursor_dt <= since_dt:
                 continue
             # Init-time cap: skip records modified after the connector started.
-            if cursor is not None and cursor > self._init_ts:
+            if cursor_dt is not None and init_dt is not None and cursor_dt > init_dt:
                 continue
 
             records.append(transform(raw))
-            if cursor is not None and (max_seen is None or cursor > max_seen):
-                max_seen = cursor
+            if cursor_dt is not None and (max_seen_dt is None or cursor_dt > max_seen_dt):
+                max_seen, max_seen_dt = cursor, cursor_dt
 
-        if not records or max_seen is None or max_seen == since:
-            # No forward progress — return the offset unchanged so the
-            # framework sees end_offset == start_offset and terminates.
-            return iter(records), start_offset
+        # Contract guard: a non-empty batch MUST advance the offset. If no emitted
+        # record advanced the cursor — an empty batch, or only records with an
+        # absent/unparseable cursor (anomalous on a lastModifiedAt-CDC source) —
+        # converge with an EMPTY batch and the unchanged offset rather than
+        # returning records against a stale offset (which aborts the pipeline).
+        if max_seen_dt is None or max_seen == since:
+            return iter([]), start_offset
 
         return iter(records), {"cursor": max_seen}
+
+    @staticmethod
+    def _parse_ts(value: str | None) -> "datetime | None":
+        """Parse an ISO-8601 timestamp to an aware ``datetime`` for comparison.
+
+        Handles both the Purview spelling (trailing ``Z``, up to 7 fractional
+        digits) and Python's ``datetime.isoformat()`` spelling (``+00:00``, 6
+        digits). Comparing parsed datetimes avoids the lexicographic hazard of
+        comparing those two spellings as strings. Returns ``None`` for an
+        absent/blank/unparseable value so it is treated as uncomparable.
+        """
+        if not isinstance(value, str) or not value:
+            return None
+        try:
+            return datetime.fromisoformat(value.replace("Z", "+00:00"))
+        except ValueError:
+            return None
 
     @staticmethod
     def _record_cursor(raw: dict[str, Any]) -> str | None:
