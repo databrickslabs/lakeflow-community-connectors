@@ -1,0 +1,155 @@
+# Maxio / SaaSOptics REST API v1.0.
+#
+# Base URL pattern: https://{server_subdomain}.saasoptics.com/{account_name}/api/v1.0/
+#
+# Pagination is DRF-style: ``{"count": N, "next": <url>|null, "previous": ..., "results": [...]}``.
+# The connector follows the ``next`` URL until it is null. In simulate mode we
+# emit ``next: null`` so the connector terminates after a single page per
+# endpoint, exercising the wrapper-extraction and termination logic without
+# requiring multi-page pagination semantics.
+#
+# Endpoints covered:
+#   * ``customers/``, ``items/``, ``invoices/``, ``contracts/``, ``transactions/``
+#     — top-level collection resources used by the connector's read_table.
+#   * ``transactions/{transaction_id}/revenue_entries/`` — sub-resource
+#     enumerated per-transaction by ``_read_revenue_entries``.
+#
+# The cdc tables (customers/items/invoices/contracts/transactions) declare a
+# ``synthesize_future_records`` directive so the simulator can inject records
+# whose cursor is past wall-clock now(). The connector caps its returned
+# cursor at the init-time snapshot — termination tests detect a missing cap
+# as non-convergence.
+
+endpoints:
+  - path: "/{account_name}/api/v1.0/customers/"
+    method: GET
+    corpus: customers
+    response:
+      pagination_style: none
+      wrapper:
+        records_key: results
+        extras:
+          count: 0
+          next: null
+          previous: null
+    params:
+      page_size:        {role: per_page, default: 100, max: 500}
+      modified__gte:    {role: filter, field: modified, op: gte}
+      modified__lte:    {role: filter, field: modified, op: lte}
+    synthesize_future_records:
+      cursor_field: modified
+      count: 3
+
+  - path: "/{account_name}/api/v1.0/items/"
+    method: GET
+    corpus: items
+    response:
+      pagination_style: none
+      wrapper:
+        records_key: results
+        extras:
+          count: 0
+          next: null
+          previous: null
+    params:
+      page_size:        {role: per_page, default: 100, max: 500}
+      modified__gte:    {role: filter, field: modified, op: gte}
+      modified__lte:    {role: filter, field: modified, op: lte}
+    synthesize_future_records:
+      cursor_field: modified
+      count: 3
+
+  - path: "/{account_name}/api/v1.0/invoices/"
+    method: GET
+    corpus: invoices
+    response:
+      pagination_style: none
+      wrapper:
+        records_key: results
+        extras:
+          count: 0
+          next: null
+          previous: null
+    params:
+      page_size:                    {role: per_page, default: 100, max: 500}
+      auditentry__modified__gte:    {role: filter, field: auditentry.modified, op: gte}
+      auditentry__modified__lte:    {role: filter, field: auditentry.modified, op: lte}
+    synthesize_future_records:
+      cursor_field: auditentry.modified
+      count: 3
+
+  - path: "/{account_name}/api/v1.0/contracts/"
+    method: GET
+    corpus: contracts
+    response:
+      pagination_style: none
+      wrapper:
+        records_key: results
+        extras:
+          count: 0
+          next: null
+          previous: null
+    params:
+      page_size:        {role: per_page, default: 100, max: 500}
+      modified__gte:    {role: filter, field: modified, op: gte}
+      modified__lte:    {role: filter, field: modified, op: lte}
+    synthesize_future_records:
+      cursor_field: modified
+      count: 3
+
+  - path: "/{account_name}/api/v1.0/transactions/"
+    method: GET
+    corpus: transactions
+    response:
+      pagination_style: none
+      wrapper:
+        records_key: results
+        extras:
+          count: 0
+          next: null
+          previous: null
+    params:
+      page_size:                    {role: per_page, default: 100, max: 500}
+      auditentry__modified__gte:    {role: filter, field: auditentry.modified, op: gte}
+      auditentry__modified__lte:    {role: filter, field: auditentry.modified, op: lte}
+    synthesize_future_records:
+      cursor_field: auditentry.modified
+      count: 3
+
+  # Top-level revenue_entries endpoint, confirmed-present during live
+  # validation against a real SaaSOptics tenant. Supports ``modified__gte``
+  # filtering; the connector uses this as the primary cdc read path.
+  - path: "/{account_name}/api/v1.0/revenue_entries/"
+    method: GET
+    corpus: revenue_entries
+    response:
+      pagination_style: none
+      wrapper:
+        records_key: results
+        extras:
+          count: 0
+          next: null
+          previous: null
+    params:
+      page_size:        {role: per_page, default: 100, max: 500}
+      modified__gte:    {role: filter, field: modified, op: gte}
+      modified__lte:    {role: filter, field: modified, op: lte}
+    synthesize_future_records:
+      cursor_field: modified
+      count: 3
+
+  # Legacy sub-resource path; left in the spec so simulate-mode tests of the
+  # fallback ``_read_revenue_entries_sub_resource`` would still match.
+  - path: "/{account_name}/api/v1.0/transactions/{transaction_id}/revenue_entries/"
+    method: GET
+    corpus: revenue_entries
+    response:
+      pagination_style: none
+      wrapper:
+        records_key: results
+        extras:
+          count: 0
+          next: null
+          previous: null
+    params:
+      page_size: {role: per_page, default: 100, max: 500}

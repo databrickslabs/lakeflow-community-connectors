@@ -1,0 +1,12 @@
+{
+  "connection_name": "maxio_dev",
+  "objects": [
+    { "table": { "source_table": "customers" } },
+    { "table": { "source_table": "items" } },
+    { "table": { "source_table": "invoices" } },
+    { "table": { "source_table": "invoices_line_items" } },
+    { "table": { "source_table": "contracts" } },
+    { "table": { "source_table": "transactions" } },
+    { "table": { "source_table": "revenue_entries" } }
+  ]
+}
