@@ -118,8 +118,9 @@ customer-provided preinstalled runtime path.
   never as q source. The connector opens individual splayed partitions and
   never loads the HDB root as a q database, so q scripts stored in the HDB are
   not executed.
-- Symbolic links inside the HDB root (date partitions, table directories,
-  column files, `sym`) are rejected. Column names must be single path
+- Symbolic links inside the HDB root are rejected: date partitions, table
+  directories, every file in a table partition (including `.d` and
+  nested-column companion files), and `sym`. Column names must be single path
   components.
 - The installer bearer token is passed to `curl` on standard input, not on the
   command line. A base64 license that must be materialized locally is written
@@ -128,9 +129,10 @@ customer-provided preinstalled runtime path.
   inherit `KDB_LICENSE_B64`/`KDB_K4LICENSE_B64` or any environment value equal
   to a connector secret, and subprocess errors are redacted.
 - `install_kdb.sh` accepts the license only as a command-line argument
-  (`--b64lic`/`--k4b64lic`), so the base64 license is visible to processes
-  running as the same user in the same container while the installer runs.
-  Use a preinstalled runtime to avoid this exposure.
+  (`--b64lic`/`--k4b64lic`), so the base64 license is visible to other
+  processes in the same container while the installer runs. Use a
+  preinstalled runtime to avoid this exposure. The installer receives only
+  locale, proxy, and certificate environment variables.
 - The online installer URL tracks KX's latest release and the default PyKX
   package spec resolves from the configured package index. For reproducible,
   reviewed runtimes, stage an offline bundle and set `pykx_install_spec` to a
@@ -163,7 +165,7 @@ customer-provided preinstalled runtime path.
 | `end_date` | Last date | Inclusive partition filter |
 | `ingestion_mode` | `append` | Only `append` is supported |
 | `partition_strategy` | `date_sym` | Only `date_sym` is supported |
-| `sym_column` | `sym` | Physical enumerated symbol column |
+| `sym_column` | `sym` | Enumerated symbol column used to split each date; must be a symbol column of the table |
 
 Example table selection:
 
@@ -202,6 +204,9 @@ Example table selection:
 2. `get_partitions()` emits JSON-serializable
    `{date_partition, sym, sym_index}` descriptors. `sym_index` is the
    symbol's position in the root `sym` file, including the empty symbol.
+   One more descriptor per date (`sym_index: null`) reads rows whose symbol
+   index is null or beyond the end of the `sym` file; those rows are ingested
+   with an empty `sym`.
 3. Each executor loads the root `sym` domain and filters the configured symbol
    column by integer enumeration index.
 4. Matching rows are read in slices of at most 10,000 rows; the last slice
@@ -212,8 +217,9 @@ Example table selection:
 
 - The schema comes from the first selected date partition. Columns that exist
   only in later partitions are not ingested.
-- Every selected date is paired with every symbol in the root `sym` file, so
-  very large symbol files create many empty tasks.
+- Every selected date is paired with every symbol in the root `sym` file, and
+  each task scans that date's symbol column. Work per date grows with the
+  number of symbols, so very large symbol files create many empty tasks.
 - Directory listings are reused for up to five minutes per Python worker.
 - Segmented HDBs (`par.txt`) are not supported.
 

@@ -53,8 +53,7 @@ Common mappings include:
 | KDB type | Spark type |
 | --- | --- |
 | boolean | `BooleanType` |
-| short | `ShortType` |
-| int | `IntegerType` |
+| byte, short, int | `IntegerType` |
 | long | `LongType` |
 | real | `FloatType` |
 | float | `DoubleType` |
@@ -63,8 +62,10 @@ Common mappings include:
 | timespan | `LongType` (nanoseconds) |
 | date/month/minute/second/time | `StringType` in q format, such as `2024.01.31` or `09:30:00.123` |
 
-Null q values become Spark nulls. The empty symbol is ingested as an empty
-string.
+Null integer, float, timestamp, and temporal values become Spark nulls. q
+integer infinities (`0W`) keep their integer value. The null symbol is
+ingested as an empty string; null chars and null GUIDs keep their q values
+(a space and the all-zero GUID).
 
 ## Ingestion contract
 
@@ -101,7 +102,12 @@ date and symbol:
 ```
 
 `sym_index` is the symbol's position in the root `sym` file. The empty
-symbol and symbols containing `/` keep their positions.
+symbol and symbols containing `/` keep their positions. Each date also gets
+one descriptor with `sym_index: null` and `sym_count` (the number of symbols
+in the root `sym` file). It reads the rows whose enumeration index is null or
+not below `sym_count`; those rows are ingested with an empty `sym`.
+
+`sym_column` must name an enumerated symbol column of the table.
 
 Executors load the root `sym` domain, then filter the table's symbol column by
 integer enumeration index. The physical symbol column defaults to `sym` and
@@ -114,7 +120,8 @@ last chunk reads exactly the remaining rows. `read_partition()` yields one
 Python `dict` per row, keyed by the schema column names.
 
 Symbolic links inside the HDB root are rejected for date partitions, table
-directories, column files, and `sym`.
+directories, every file in a table partition (including `.d` and
+nested-column companion files), and `sym`.
 
 ## Connection parameters
 
@@ -158,8 +165,9 @@ Secret handling:
 
 - `curl -q --config -` receives the bearer token on standard input.
 - `install_kdb.sh` accepts the license only as an argument, so the base64
-  license is visible to same-user processes in the container while the
-  installer runs. A preinstalled runtime avoids this exposure.
+  license is visible to other processes in the container while the installer
+  runs. A preinstalled runtime avoids this exposure. The installer receives
+  only locale, proxy, and certificate environment variables.
 - A materialized license file is `0600` inside a `0700` directory. The license
   is not exported as `KDB_LICENSE_B64`.
 - Child processes do not inherit KDB license variables or values equal to a
