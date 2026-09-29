@@ -284,6 +284,34 @@ class TestIncrementalEngine:
         assert records == []
         assert end_offset == {"cursor": "2026-01-01T00:00:00+00:00"}
 
+    def test_null_cursor_only_batch_converges_with_empty(self):
+        """A batch whose only records have no cursor can't advance the offset;
+        returning them non-empty against an unchanged offset would violate the
+        SimpleDataSourceStreamReader contract, so the engine converges with an
+        EMPTY batch instead. (Null-cursor records don't occur in normal Purview
+        data — systemData.lastModifiedAt is always present.)"""
+        conn = _connector()
+        arrival = [_rec("n1", None), _rec("n2", None)]
+        records, end_offset = _drain(
+            conn._incremental_from_iter(iter(arrival), {}, transform=lambda r: r)
+        )
+        assert records == []
+        assert end_offset == {}
+
+    def test_z_and_offset_suffix_cursors_compare_by_datetime_not_string(self):
+        """_init_ts uses '+00:00' but Purview cursors use 'Z'; comparison must be
+        by parsed datetime, not lexicographic. A whole-second 'Z' cursor 0.5s
+        BEFORE init must NOT be capped — lexicographically 'Z'(0x5A) > '.'(0x2E),
+        which would wrongly cap it, but by datetime it is correctly < init."""
+        conn = _connector()
+        conn._init_ts = "2026-09-29T15:30:00.500000+00:00"  # datetime.isoformat spelling
+        arrival = [_rec("before", "2026-09-29T15:30:00Z")]  # 0.5s before init, Purview 'Z'
+        records, end_offset = _drain(
+            conn._incremental_from_iter(iter(arrival), {}, transform=lambda r: r)
+        )
+        assert [r["id"] for r in records] == ["before"]  # emitted, not spuriously capped
+        assert end_offset == {"cursor": "2026-09-29T15:30:00Z"}
+
     def test_init_ts_cap_skips_records_modified_after_start(self):
         conn = _connector()
         conn._init_ts = "2026-06-01T00:00:00+00:00"

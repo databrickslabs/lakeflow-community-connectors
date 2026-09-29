@@ -287,41 +287,67 @@ class MicrosoftPurviewLakeflowConnect(LakeflowConnect):
         """
         start_offset = start_offset or {}
         since = start_offset.get("cursor")
+        # Compare as parsed datetimes, NOT lexicographically: the cursor and
+        # _init_ts can use different ISO spellings (Purview emits 'Z' with 7-digit
+        # fractional seconds; datetime.isoformat() emits '+00:00' with 6), and a
+        # string compare of mismatched spellings is wrong at the boundary.
+        since_dt = self._parse_ts(since)
+        init_dt = self._parse_ts(self._init_ts)
 
         # Already caught up to init time — nothing new can be emitted.
-        if since is not None and since >= self._init_ts:
+        if since_dt is not None and init_dt is not None and since_dt >= init_dt:
             return iter([]), start_offset
 
         records: list[dict[str, Any]] = []
-        max_seen = since
+        max_seen: str | None = since
+        max_seen_dt = since_dt
         for raw in record_iter:
             cursor = self._record_cursor(raw)
+            cursor_dt = self._parse_ts(cursor)
             # Strict `>` boundary: skip records at or below the watermark so a
-            # resumed run never re-emits the boundary record. This is required by
-            # the SimpleDataSourceStreamReader contract — a non-empty batch MUST
-            # advance the end offset past the start; re-emitting a boundary record
-            # (cursor == since) would return records without advancing the offset
-            # and the pipeline aborts (SIMPLE_STREAM_READER_OFFSET_DID_NOT_ADVANCE).
-            # This is safe against the "same-timestamp record lost" concern because
-            # systemData.lastModifiedAt carries sub-second (100-ns) precision (e.g.
-            # 2026-09-22T20:32:33.4438881Z), so distinct records effectively never
-            # share an exact cursor value.
-            if since is not None and cursor is not None and cursor <= since:
+            # resumed run never re-emits the boundary record. The
+            # SimpleDataSourceStreamReader contract requires a non-empty batch to
+            # advance the end offset; re-emitting a boundary record (cursor ==
+            # since) without advancing aborts the pipeline
+            # (SIMPLE_STREAM_READER_OFFSET_DID_NOT_ADVANCE). Safe against
+            # same-timestamp loss: systemData.lastModifiedAt has sub-second
+            # (100-ns) precision, so distinct records don't share a value.
+            if since_dt is not None and cursor_dt is not None and cursor_dt <= since_dt:
                 continue
             # Init-time cap: skip records modified after the connector started.
-            if cursor is not None and cursor > self._init_ts:
+            if cursor_dt is not None and init_dt is not None and cursor_dt > init_dt:
                 continue
 
             records.append(transform(raw))
-            if cursor is not None and (max_seen is None or cursor > max_seen):
-                max_seen = cursor
+            if cursor_dt is not None and (max_seen_dt is None or cursor_dt > max_seen_dt):
+                max_seen, max_seen_dt = cursor, cursor_dt
 
-        if not records or max_seen is None or max_seen == since:
-            # No forward progress — return the offset unchanged so the
-            # framework sees end_offset == start_offset and terminates.
-            return iter(records), start_offset
+        # Contract guard: a non-empty batch MUST advance the offset. If no emitted
+        # record advanced the cursor — an empty batch, or only records with an
+        # absent/unparseable cursor (anomalous on a lastModifiedAt-CDC source) —
+        # converge with an EMPTY batch and the unchanged offset rather than
+        # returning records against a stale offset (which aborts the pipeline).
+        if max_seen_dt is None or max_seen == since:
+            return iter([]), start_offset
 
         return iter(records), {"cursor": max_seen}
+
+    @staticmethod
+    def _parse_ts(value: str | None) -> "datetime | None":
+        """Parse an ISO-8601 timestamp to an aware ``datetime`` for comparison.
+
+        Handles both the Purview spelling (trailing ``Z``, up to 7 fractional
+        digits) and Python's ``datetime.isoformat()`` spelling (``+00:00``, 6
+        digits). Comparing parsed datetimes avoids the lexicographic hazard of
+        comparing those two spellings as strings. Returns ``None`` for an
+        absent/blank/unparseable value so it is treated as uncomparable.
+        """
+        if not isinstance(value, str) or not value:
+            return None
+        try:
+            return datetime.fromisoformat(value.replace("Z", "+00:00"))
+        except ValueError:
+            return None
 
     @staticmethod
     def _record_cursor(raw: dict[str, Any]) -> str | None:
