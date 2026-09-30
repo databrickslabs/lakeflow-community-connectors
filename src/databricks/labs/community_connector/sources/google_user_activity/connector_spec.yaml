@@ -1,0 +1,43 @@
+# Google Workspace Reports API User Activity Community Connector Spec
+#
+# This connector ingests Google Workspace administrative activity logs from the
+# Google Workspace Reports API. It uses the Unity Catalog COMMUNITY connection
+# with OAuth 2.0 authorization-code flow for authentication.
+#
+# The connector reads from:
+#   /admin/reports/v1/activity/users/{userKey}/applications/{applicationName}
+#
+# Applications: admin, login, saml, user_accounts, groups, groups_enterprise
+
+display_name: Google User Activity
+
+connection:
+  # OAuth 2.0 authorization-code flow (u2m: single authorized user)
+  # The UC COMMUNITY connection owns the OAuth dance and injects access_token
+  # at runtime. The connector treats the token as opaque (no refresh, no secret).
+  oauth:
+    flow: u2m
+    pkce: false
+    scopes: https://www.googleapis.com/auth/admin.reports.audit.readonly
+    authorization_url: https://accounts.google.com/o/oauth2/v2/auth
+    token_url: https://oauth2.googleapis.com/token
+    extra_auth_params:
+      access_type: offline
+      prompt: consent
+
+  # Connection parameters (optional: for domain-wide delegation)
+  parameters:
+    - name: impersonated_admin_email
+      type: string
+      required: false
+      secret: false
+      description: >
+        Optional email address of a Google Workspace admin to impersonate using
+        domain-wide delegation. If not provided, uses the authorized user's
+        delegated admin privileges (if available). Required for service account
+        configurations with domain-wide delegation enabled.
+      example: "admin@example.com"
+
+# External options allowlist for table-specific filtering
+# These options are passed via table_configuration in the pipeline spec
+external_options_allowlist: "user_key,applications,start_time,end_time,max_results"
