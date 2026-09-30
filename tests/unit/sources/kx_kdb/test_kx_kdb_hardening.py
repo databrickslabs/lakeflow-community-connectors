@@ -350,7 +350,7 @@ def test_table_configs_cannot_replace_connection_or_bootstrap_options(tmp_path):
 
     assert connector.hdb_root_path == str(tmp_path)
     assert connector.runtime_config.license_directory == "/tmp/lic"
-    assert connector.runtime_config.pykx_install_spec is None
+    assert not hasattr(connector.runtime_config, "pykx_install_spec")
     assert connector.runtime_config.offline_bundle_path is None
     assert connector.runtime_config.license_b64 is None
     assert connector.runtime_config.installer_bearer_token is None
@@ -388,7 +388,7 @@ def test_read_partition_ignores_connection_keys_in_table_options(monkeypatch, tm
     )
 
     assert captured["hdb_root_path"] == str(tmp_path)
-    assert captured["runtime_config"].pykx_install_spec is None
+    assert captured["runtime_config"].offline_bundle_path is None
 
 
 @pytest.mark.parametrize("sym_column", ["../other", "a/b", "..", "x\x00y", "a\nb"])
@@ -1057,3 +1057,63 @@ def test_installer_environment_is_allowlisted(monkeypatch, tmp_path):
     assert install_env["HTTPS_PROXY"] == "http://proxy:3128"
     assert install_env["HOME"] == str(tmp_path / "home")
     assert install_env["TERM"] == "dumb"
+
+
+# ---------------------------------------------------------------------------
+# Options merged from pipeline table configuration (managed ingestion path)
+# ---------------------------------------------------------------------------
+
+
+def _merged_options(tmp_path, **table_options):
+    (tmp_path / "hdb" / "2024.01.01" / "TRADES").mkdir(parents=True, exist_ok=True)
+    keys = tmp_path / "vol" / "keys"
+    keys.mkdir(parents=True, exist_ok=True)
+    (keys / "kc.lic").write_bytes(b"license")
+    return {
+        "hdb_root_path": str(tmp_path / "hdb"),
+        "license_volume_path": str(keys),
+        "kdbx_license_file_path": str(keys / "kc.lic"),
+        **table_options,
+    }
+
+
+def test_pipeline_supplied_package_spec_is_ignored(monkeypatch, tmp_path):
+    connector = KxKdbLakeflowConnect(
+        _merged_options(tmp_path, pykx_install_spec=str(tmp_path / "evil.whl"))
+    )
+    monkeypatch.setattr(runtime_mod, "_runtime_home_directory", lambda: tmp_path / "home")
+    recorder = _Recorder([(0, "", "")])
+    monkeypatch.setattr(runtime_mod.subprocess, "run", recorder)
+
+    runtime_mod._ensure_pykx_package(connector.runtime_config)
+
+    assert all("evil.whl" not in arg for arg in recorder.calls[0]["args"])
+    assert recorder.calls[0]["args"][-1] == runtime_mod.PYKX_PIP_SPEC
+
+
+@pytest.mark.parametrize("option", ["kdbx_offline_bundle_path", "kdbx_license_file_path"])
+def test_pipeline_supplied_bootstrap_files_outside_license_volume_are_rejected(tmp_path, option):
+    outside = tmp_path / "attacker" / "file.zip"
+
+    with pytest.raises(ValueError, match=option):
+        KxKdbLakeflowConnect(_merged_options(tmp_path, **{option: str(outside)}))
+
+
+@pytest.mark.parametrize(
+    ("path", "allowed"),
+    [
+        ("/Volumes/main/kx/files/kdbx/l64arm-bundle.zip", True),
+        ("dbfs:/Volumes/main/kx/files/kdbx/l64arm-bundle.zip", True),
+        ("/Volumes/main/kx/files/keys/kc.lic", True),
+        ("/Volumes/main/kx/other/l64arm-bundle.zip", False),
+        ("/Volumes/main/kx/files/../other/bundle.zip", False),
+        ("relative/bundle.zip", False),
+    ],
+)
+def test_bootstrap_files_must_share_the_license_volume(path, allowed):
+    license_directory = "/Volumes/main/kx/files/keys"
+    if allowed:
+        assert runtime_mod._within_license_volume(path, license_directory, "opt") == path
+    else:
+        with pytest.raises(ValueError, match="opt"):
+            runtime_mod._within_license_volume(path, license_directory, "opt")

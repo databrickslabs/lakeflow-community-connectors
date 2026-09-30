@@ -68,8 +68,9 @@ connection:
       required: false
       description: >
         Optional FUSE path to the customer's commercial KX license file or license
-        directory. When set, the connector reads the license at runtime and uses it
-        for KDB-X bootstrap without storing the base64 license in the pipeline spec.
+        directory, in the same Unity Catalog Volume as license_volume_path. The
+        connector reads the license at runtime and uses it for KDB-X bootstrap
+        without storing the base64 license in the pipeline spec.
         A file named k4.lic is treated as a commercial k4 license.
 
     - name: kdbx_license_kind
@@ -85,7 +86,8 @@ connection:
       type: string
       required: false
       description: >
-        Optional UC volume path to a pre-built KDB-X air-gapped bundle. Use
+        Optional path to a pre-built KDB-X air-gapped bundle, in the same Unity
+        Catalog Volume as license_volume_path. Use
         l64arm-bundle.zip for ARM64 runtimes (including current Lakeflow
         serverless) and l64-bundle.zip for x86_64. When set or when a matching
         bundle is found near <license_volume_path>, the connector installs
@@ -106,12 +108,5 @@ connection:
       description: >
         Optional limit for table discovery. Set to 0 or omit to scan all date
         partitions when listing tables.
-
-    - name: pykx_install_spec
-      type: string
-      required: false
-      description: >
-        Optional PyKX package spec or wheel path used only when PyKX is not
-        already available in the Lakeflow pipeline environment.
 
 external_options_allowlist: "start_date,end_date,ingestion_mode,partition_strategy,sym_column"

@@ -627,21 +627,15 @@ def test_ensure_pykx_package_invokes_pip_install(monkeypatch):
     assert os.environ["PYTHONPATH"].split(os.pathsep)[0] == "/tmp/kx-runtime-test/pykx_pkgs"
 
 
-def test_ensure_pykx_package_uses_configured_wheel_without_pre(monkeypatch):
+def test_ensure_pykx_package_always_installs_the_pinned_spec(monkeypatch):
     recorder = _SubprocessRecorder([(0, "Successfully installed pykx", "")])
     monkeypatch.setattr(runtime_mod.subprocess, "run", recorder)
-    _patch_runtime_home(monkeypatch, Path("/tmp/kx-runtime-wheel"))
+    _patch_runtime_home(monkeypatch, Path("/tmp/kx-runtime-pinned"))
 
-    runtime_mod._ensure_pykx_package(
-        PyKxRuntimeConfig(
-            license_directory="/tmp/lic",
-            pykx_install_spec="/Volumes/wheels/pykx.whl",
-        )
-    )
+    runtime_mod._ensure_pykx_package(PyKxRuntimeConfig(license_directory="/tmp/lic"))
 
     args = recorder.calls[0]["args"]
-    assert "--pre" not in args
-    assert "/Volumes/wheels/pykx.whl" in args
+    assert args[-2:] == ["--pre", PYKX_PIP_SPEC]
 
 
 def test_ensure_pykx_package_raises_on_pip_failure(monkeypatch):

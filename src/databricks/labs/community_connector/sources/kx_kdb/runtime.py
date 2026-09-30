@@ -77,7 +77,6 @@ KDBX_LICENSE_FILE_PATH_OPTION = "kdbx_license_file_path"
 KDBX_LICENSE_KIND_OPTION = "kdbx_license_kind"
 KDBX_OFFLINE_BUNDLE_PATH_OPTION = "kdbx_offline_bundle_path"
 KDBX_INSTALL_MODE_OPTION = "kdbx_install_mode"
-PYKX_INSTALL_SPEC_OPTION = "pykx_install_spec"
 
 _RUNTIME_LOCK = _PicklableLock()
 _PREPARED_RUNTIME_KEYS: set[str] = _ProcessLocalSet()
@@ -125,7 +124,6 @@ class PyKxRuntimeConfig:
     license_b64: str | None = dataclasses.field(default=None, repr=False)
     installer_url: str = DEFAULT_KDBX_INSTALLER_URL
     offline_bundle_path: str | None = None
-    pykx_install_spec: str | None = None
     license_file_name: str = "kc.lic"
 
     @property
@@ -167,8 +165,11 @@ def build_runtime_config(
       3. Legacy "license folder + preinstalled PyKX" mode otherwise.
     """
     license_directory = normalize_license_directory(str(options.get("license_volume_path", "")))
-    explicit_bundle_path = str(options.get(KDBX_OFFLINE_BUNDLE_PATH_OPTION, "")).strip()
-    pykx_install_spec = _option(options, PYKX_INSTALL_SPEC_OPTION)
+    explicit_bundle_path = _within_license_volume(
+        str(options.get(KDBX_OFFLINE_BUNDLE_PATH_OPTION, "")).strip(),
+        license_directory,
+        KDBX_OFFLINE_BUNDLE_PATH_OPTION,
+    )
     install_mode = _install_mode(options)
     license_kind = _license_kind(options)
 
@@ -178,7 +179,11 @@ def build_runtime_config(
     detected_license_name = None
     if not direct_license_option:
         license_file_b64, detected_license_name = _read_license_file(
-            str(options.get(KDBX_LICENSE_FILE_PATH_OPTION, "")).strip()
+            _within_license_volume(
+                str(options.get(KDBX_LICENSE_FILE_PATH_OPTION, "")).strip(),
+                license_directory,
+                KDBX_LICENSE_FILE_PATH_OPTION,
+            )
         )
     direct_license_b64 = direct_license_option or license_file_b64
     license_file_name = _license_file_name(license_kind, detected_license_name)
@@ -186,7 +191,6 @@ def build_runtime_config(
     def _config(**values) -> PyKxRuntimeConfig:
         return PyKxRuntimeConfig(
             license_directory=license_directory,
-            pykx_install_spec=pykx_install_spec,
             license_file_name=license_file_name,
             **values,
         )
@@ -249,9 +253,37 @@ def build_runtime_config(
     return config if install_mode == "online" else _maybe_offline(config, explicit_bundle_path)
 
 
-def _option(options: dict[str, str], key: str) -> str | None:
-    value = str(options.get(key, "")).strip()
-    return value or None
+def _within_license_volume(path: str, license_directory: str, option: str) -> str:
+    """Require a bootstrap file to sit in the license directory's UC Volume.
+
+    Pipeline table options can supply keys that the connection leaves unset,
+    so bootstrap files are limited to the Volume the connection owner chose
+    for ``license_volume_path``.
+    """
+    if not path:
+        return path
+    root = _license_volume_root(license_directory)
+    candidate = PurePosixPath(path.removeprefix("dbfs:"))
+    if (
+        root is None
+        or not candidate.is_absolute()
+        or ".." in candidate.parts
+        or not (candidate == root or root in candidate.parents)
+    ):
+        raise ValueError(
+            f"{option} must be inside {root or 'the license_volume_path Volume'}, the "
+            "Unity Catalog Volume of license_volume_path."
+        )
+    return path
+
+
+def _license_volume_root(license_directory: str) -> PurePosixPath | None:
+    if not license_directory or license_directory == ".":
+        return None
+    directory = PurePosixPath(license_directory)
+    if len(directory.parts) >= 5 and directory.parts[1] == "Volumes":
+        return PurePosixPath(*directory.parts[:5])
+    return directory.parent
 
 
 def _install_mode(options: dict[str, str]) -> str:
@@ -380,7 +412,6 @@ def _runtime_key(config: PyKxRuntimeConfig) -> str:
         config.license_b64 or "",
         config.license_file_name,
         config.offline_bundle_path or "",
-        config.pykx_install_spec or "",
         config.installer_url,
     ):
         digest.update(value.encode("utf-8"))
@@ -662,7 +693,7 @@ def _is_safe_bundle_member(member: zipfile.ZipInfo) -> bool:
 
 
 def _ensure_pykx_package(config: PyKxRuntimeConfig) -> None:
-    spec = config.pykx_install_spec or PYKX_PIP_SPEC
+    spec = PYKX_PIP_SPEC
     target = str(_runtime_home_directory() / "pykx_pkgs")
     command = [
         sys.executable,
@@ -675,9 +706,7 @@ def _ensure_pykx_package(config: PyKxRuntimeConfig) -> None:
         "--target",
         target,
     ]
-    if not _is_wheel_or_path(spec):
-        command.append("--pre")
-    command.append(spec)
+    command.extend(["--pre", spec])
     pip_env = _child_process_env(config)
     # Spark workers inherit a PYTHONPATH containing JAR paths. Pip scans every
     # entry as a possible distribution and can fail with PermissionError on
@@ -705,11 +734,6 @@ def _ensure_pykx_package(config: PyKxRuntimeConfig) -> None:
         os.environ["PYTHONPATH"] = (
             f"{target}{os.pathsep}{existing_pythonpath}" if existing_pythonpath else target
         )
-
-
-def _is_wheel_or_path(spec: str) -> bool:
-    normalized = str(spec or "").strip()
-    return normalized.endswith(".whl") or "/" in normalized or normalized.startswith("dbfs:")
 
 
 def _localize_offline_bundle(bundle_path: str) -> Path:

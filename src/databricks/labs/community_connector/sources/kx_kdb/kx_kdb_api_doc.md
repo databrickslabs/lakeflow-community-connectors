@@ -130,15 +130,14 @@ nested-column companion files), and `sym`.
 | `hdb_root_path` | Yes | Absolute FUSE path containing `sym` and date directories |
 | `license_volume_path` | Yes | Directory used for `QLIC` and KDB-X runtime files |
 | `kdbx_install_mode` | No | `auto`, `offline`, or `online` |
-| `kdbx_offline_bundle_path` | No | Explicit KDB-X bundle: `l64arm-bundle.zip` for current serverless ARM64, `l64-bundle.zip` for x86_64 |
-| `kdbx_license_file_path` | No | Existing KX license file or directory; `k4.lic` selects a commercial k4 license |
+| `kdbx_offline_bundle_path` | No | Explicit KDB-X bundle in the license Volume: `l64arm-bundle.zip` for current serverless ARM64, `l64-bundle.zip` for x86_64 |
+| `kdbx_license_file_path` | No | KX license file or directory in the license Volume; `k4.lic` selects a commercial k4 license |
 | `kdbx_license_kind` | No | `k4` or `kc`; selects `--k4b64lic`/`k4.lic` or `--b64lic`/`kc.lic`; defaults to the license file name, otherwise `kc` |
 | `kdbx_install_bearer_token` | No | Secret-valued online installer token |
 | `kdbx_license_b64` | No | Secret-valued base64 KX license |
 | `kdbx_secret_scope` | No | Legacy Databricks secret-scope lookup |
 | `kdbx_install_bearer_secret_key` | No | Legacy installer-token secret key |
 | `kdbx_license_b64_secret_key` | No | Legacy license secret key |
-| `pykx_install_spec` | No | PyKX wheel path or package spec when not preinstalled |
 | `discovery_sample_dates` | No | Date count used for table discovery; `0` scans all |
 
 Direct bearer-token and base64-license values must be supplied through
@@ -175,9 +174,12 @@ Secret handling:
 - Offline bundles are copied to a process-local cache keyed by source path,
   size, and modification time. Members with absolute paths, `..` components,
   or symbolic links are rejected.
-- The default installer URL tracks KX's latest release. Stage an offline
-  bundle and set `pykx_install_spec` to a vetted wheel for reproducible
-  runtimes.
+- The default installer URL tracks KX's latest release. If PyKX is missing,
+  only the pinned `pykx==4.0.0b5` is installed. Add PyKX to the pipeline
+  environment and stage an offline bundle for reproducible runtimes.
+- Pipeline table configuration can supply options the connection leaves
+  unset. `kdbx_offline_bundle_path` and `kdbx_license_file_path` must
+  therefore be in the same Unity Catalog Volume as `license_volume_path`.
 
 ## Table options
 

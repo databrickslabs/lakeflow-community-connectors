@@ -25,7 +25,7 @@ visible to every executor are not supported.
 
 - A Unity Catalog Volume containing the HDB.
 - `READ VOLUME` for the Lakeflow pipeline identity.
-- PyKX in the pipeline environment, or a configured PyKX wheel/package spec.
+- PyKX in the pipeline environment (`pykx==4.0.0b5`).
 - A customer-provided commercial KX license that permits third-party-cloud use.
 - KDB-X already available, staged as an offline bundle, or installable with a
   secret-backed KX installer token.
@@ -133,11 +133,17 @@ customer-provided preinstalled runtime path.
   processes in the same container while the installer runs. Use a
   preinstalled runtime to avoid this exposure. The installer receives only
   locale, proxy, and certificate environment variables.
-- The online installer URL tracks KX's latest release and the default PyKX
-  package spec resolves from the configured package index. For reproducible,
-  reviewed runtimes, stage an offline bundle and set `pykx_install_spec` to a
-  vetted wheel. Offline bundle members with absolute paths, `..` components,
-  or symbolic links are rejected before extraction.
+- Set every bootstrap option you use on the connection. Pipeline table
+  configuration can supply options the connection leaves unset, so offline
+  bundles and license files must be in the same Unity Catalog Volume as
+  `license_volume_path`, and the connector has no option that installs a
+  user-supplied package.
+- The online installer URL tracks KX's latest release. If PyKX is missing from
+  the pipeline environment, the connector installs the pinned `pykx==4.0.0b5`
+  from the configured package index. For reproducible, reviewed runtimes, add
+  PyKX to the pipeline environment and stage an offline bundle. Offline bundle
+  members with absolute paths, `..` components, or symbolic links are rejected
+  before extraction.
 
 ## Connection parameters
 
@@ -146,15 +152,14 @@ customer-provided preinstalled runtime path.
 | `hdb_root_path` | Yes | HDB root containing `sym` and date directories |
 | `license_volume_path` | Yes | KX license/runtime working directory |
 | `kdbx_install_mode` | No | `auto` (default), `offline`, or `online` |
-| `kdbx_offline_bundle_path` | No | Explicit KDB-X air-gapped bundle; use `l64arm-bundle.zip` on current serverless ARM64 and `l64-bundle.zip` on x86_64 |
-| `kdbx_license_file_path` | No | Existing license file or directory; `k4.lic` selects a commercial k4 license |
+| `kdbx_offline_bundle_path` | No | Explicit KDB-X air-gapped bundle in the license Volume; use `l64arm-bundle.zip` on current serverless ARM64 and `l64-bundle.zip` on x86_64 |
+| `kdbx_license_file_path` | No | License file or directory in the license Volume; `k4.lic` selects a commercial k4 license |
 | `kdbx_license_kind` | No | `k4` (commercial `k4.lic`) or `kc` (`kc.lic`); defaults to the license file name, otherwise `kc` |
 | `kdbx_install_bearer_token` | No | Secret-backed installer token |
 | `kdbx_license_b64` | No | Secret-backed base64 license |
 | `kdbx_secret_scope` | No | Legacy secret-scope lookup |
 | `kdbx_install_bearer_secret_key` | No | Legacy token key |
 | `kdbx_license_b64_secret_key` | No | Legacy license key |
-| `pykx_install_spec` | No | PyKX wheel path or package spec |
 | `discovery_sample_dates` | No | Dates sampled during discovery; `0` scans all |
 
 ## Table options
