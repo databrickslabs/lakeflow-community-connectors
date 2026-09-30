@@ -1,0 +1,112 @@
+[
+  {
+    "employeeId": "oscar-16-pk0",
+    "id": 1000,
+    "effectiveDate": "2024-01-01",
+    "activeEffectiveDate": "2024-01-01",
+    "isCurrent": true,
+    "creationDate": "2024-01-01T04:48:55Z",
+    "modificationDate": "2024-01-20T02:32:01Z",
+    "change": {
+      "reason": "sierra-282",
+      "changedBy": "lima-850",
+      "changedById": "yankee-527"
+    },
+    "customColumns": "sierra-858",
+    "endEffectiveDate": "2024-01-01",
+    "base": {
+      "value": 678.33,
+      "currency": "lima-174"
+    },
+    "payPeriod": "hotel-458",
+    "payFrequency": "papa-733"
+  },
+  {
+    "employeeId": "golf-944-pk1",
+    "id": 1001,
+    "effectiveDate": "2024-02-02",
+    "activeEffectiveDate": "2024-02-02",
+    "isCurrent": false,
+    "creationDate": "2024-01-28T18:27:30Z",
+    "modificationDate": "2024-01-27T16:07:32Z",
+    "change": {
+      "reason": "uniform-292",
+      "changedBy": "kilo-284",
+      "changedById": "delta-479"
+    },
+    "customColumns": "zulu-436",
+    "endEffectiveDate": "2024-02-02",
+    "base": {
+      "value": 726.54,
+      "currency": "sierra-223"
+    },
+    "payPeriod": "sierra-249",
+    "payFrequency": "lima-963"
+  },
+  {
+    "employeeId": "echo-408-pk2",
+    "id": 1002,
+    "effectiveDate": "2024-03-03",
+    "activeEffectiveDate": "2024-03-03",
+    "isCurrent": true,
+    "creationDate": "2024-01-09T12:06:26Z",
+    "modificationDate": "2024-01-04T16:53:15Z",
+    "change": {
+      "reason": "delta-519",
+      "changedBy": "sierra-187",
+      "changedById": "hotel-372"
+    },
+    "customColumns": "echo-302",
+    "endEffectiveDate": "2024-03-03",
+    "base": {
+      "value": 516.7,
+      "currency": "golf-403"
+    },
+    "payPeriod": "oscar-935",
+    "payFrequency": "uniform-260"
+  },
+  {
+    "employeeId": "mike-100-pk3",
+    "id": 1003,
+    "effectiveDate": "2024-04-04",
+    "activeEffectiveDate": "2024-04-04",
+    "isCurrent": false,
+    "creationDate": "2024-01-03T04:53:50Z",
+    "modificationDate": "2024-01-26T09:17:47Z",
+    "change": {
+      "reason": "mike-859",
+      "changedBy": "tango-577",
+      "changedById": "tango-411"
+    },
+    "customColumns": "papa-513",
+    "endEffectiveDate": "2024-04-04",
+    "base": {
+      "value": 626.18,
+      "currency": "uniform-182"
+    },
+    "payPeriod": "lima-284",
+    "payFrequency": "echo-711"
+  },
+  {
+    "employeeId": "november-pk4",
+    "id": 1004,
+    "effectiveDate": "2024-05-05",
+    "activeEffectiveDate": "2024-05-05",
+    "isCurrent": true,
+    "creationDate": "2024-01-30T00:48:27Z",
+    "modificationDate": "2024-01-05T11:40:24Z",
+    "change": {
+      "reason": "foxtrot-374",
+      "changedBy": "quebec-540",
+      "changedById": "delta-557"
+    },
+    "customColumns": "victor-124",
+    "endEffectiveDate": "2024-05-05",
+    "base": {
+      "value": 44.85,
+      "currency": "zulu-900"
+    },
+    "payPeriod": "yankee-495",
+    "payFrequency": "india-159"
+  }
+]

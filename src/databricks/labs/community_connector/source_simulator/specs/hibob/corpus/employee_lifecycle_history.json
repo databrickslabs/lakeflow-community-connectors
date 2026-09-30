@@ -1,0 +1,102 @@
+[
+  {
+    "employeeId": "india-32-pk0",
+    "id": 1000,
+    "effectiveDate": "2024-01-01",
+    "activeEffectiveDate": "2024-01-01",
+    "isCurrent": false,
+    "creationDate": "2024-01-24T02:40:51Z",
+    "modificationDate": "2024-01-07T06:29:06Z",
+    "change": {
+      "reason": "bravo-716",
+      "changedBy": "november-531",
+      "changedById": "sierra-455"
+    },
+    "customColumns": "oscar-402",
+    "endEffectiveDate": "echo-988",
+    "status": "zulu-126",
+    "employeeStatus": "lima-634",
+    "reasonType": "foxtrot-972",
+    "leaveReason": "foxtrot-125"
+  },
+  {
+    "employeeId": "lima-836-pk1",
+    "id": 1001,
+    "effectiveDate": "2024-02-02",
+    "activeEffectiveDate": "2024-02-02",
+    "isCurrent": false,
+    "creationDate": "2024-01-28T04:05:37Z",
+    "modificationDate": "2024-01-16T14:45:43Z",
+    "change": {
+      "reason": "hotel-729",
+      "changedBy": "delta-812",
+      "changedById": "india-410"
+    },
+    "customColumns": "golf-848",
+    "endEffectiveDate": "hotel-255",
+    "status": "tango-707",
+    "employeeStatus": "romeo-920",
+    "reasonType": "charlie-683",
+    "leaveReason": "juliet-708"
+  },
+  {
+    "employeeId": "charlie--pk2",
+    "id": 1002,
+    "effectiveDate": "2024-03-03",
+    "activeEffectiveDate": "2024-03-03",
+    "isCurrent": false,
+    "creationDate": "2024-01-28T15:19:39Z",
+    "modificationDate": "2024-01-17T20:17:19Z",
+    "change": {
+      "reason": "romeo-944",
+      "changedBy": "juliet-519",
+      "changedById": "echo-553"
+    },
+    "customColumns": "november-936",
+    "endEffectiveDate": "lima-444",
+    "status": "juliet-804",
+    "employeeStatus": "xray-982",
+    "reasonType": "november-718",
+    "leaveReason": "november-402"
+  },
+  {
+    "employeeId": "golf-880-pk3",
+    "id": 1003,
+    "effectiveDate": "2024-04-04",
+    "activeEffectiveDate": "2024-04-04",
+    "isCurrent": true,
+    "creationDate": "2024-01-05T08:40:10Z",
+    "modificationDate": "2024-01-06T00:00:14Z",
+    "change": {
+      "reason": "kilo-678",
+      "changedBy": "bravo-711",
+      "changedById": "echo-838"
+    },
+    "customColumns": "yankee-359",
+    "endEffectiveDate": "tango-641",
+    "status": "hotel-263",
+    "employeeStatus": "delta-235",
+    "reasonType": "delta-222",
+    "leaveReason": "romeo-518"
+  },
+  {
+    "employeeId": "lima-493-pk4",
+    "id": 1004,
+    "effectiveDate": "2024-05-05",
+    "activeEffectiveDate": "2024-05-05",
+    "isCurrent": false,
+    "creationDate": "2024-01-03T08:02:51Z",
+    "modificationDate": "2024-01-08T18:04:10Z",
+    "change": {
+      "reason": "zulu-180",
+      "changedBy": "juliet-292",
+      "changedById": "uniform-827"
+    },
+    "customColumns": "november-888",
+    "endEffectiveDate": "lima-423",
+    "status": "whiskey-950",
+    "employeeStatus": "tango-916",
+    "reasonType": "charlie-967",
+    "leaveReason": "lima-484"
+  }
+]

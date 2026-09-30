@@ -1,0 +1,42 @@
+[
+  {
+    "list_name": "juliet-5-pk0",
+    "item_id": "november-pk0",
+    "value": "foxtrot-475",
+    "name": "echo-923",
+    "archived": true,
+    "parent_id": "oscar-625"
+  },
+  {
+    "list_name": "tango-75-pk1",
+    "item_id": "golf-796-pk1",
+    "value": "whiskey-790",
+    "name": "bravo-251",
+    "archived": false,
+    "parent_id": "yankee-260"
+  },
+  {
+    "list_name": "hotel-83-pk2",
+    "item_id": "tango-31-pk2",
+    "value": "alpha-982",
+    "name": "hotel-606",
+    "archived": false,
+    "parent_id": null
+  },
+  {
+    "list_name": "charlie--pk3",
+    "item_id": "whiskey--pk3",
+    "value": "yankee-169",
+    "name": "november-943",
+    "archived": true,
+    "parent_id": "charlie-153"
+  },
+  {
+    "list_name": "hotel-83-pk2",
+    "item_id": "whiskey--pk4",
+    "value": "romeo-322",
+    "name": "tango-157",
+    "archived": false,
+    "parent_id": "tango-31-pk2"
+  }
+]

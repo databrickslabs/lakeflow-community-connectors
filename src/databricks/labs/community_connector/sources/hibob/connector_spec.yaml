@@ -1,0 +1,47 @@
+# HiBob Community Connector Spec
+# This file defines the specification for the connector including
+# connection parameters and allowlist options.
+
+# ============================================================================
+# Connection Parameters
+# These are provided when creating the Unity Catalog connection.
+# ============================================================================
+display_name: HiBob
+connection:
+  parameters:
+    - name: service_user_id
+      type: string
+      required: true
+      description: >
+        Service User ID for HiBob API authentication (Basic auth username).
+        Create this in your HiBob account settings under API/Integrations.
+
+    - name: service_user_token
+      type: string
+      required: true
+      secret: true
+      description: >
+        Service User token for HiBob API authentication (Basic auth password).
+        Generate this securely in your HiBob account settings and store it safely.
+
+    - name: use_sandbox
+      type: string
+      required: false
+      description: >
+        Set to 'true' to target the HiBob sandbox environment (api.sandbox.hibob.com).
+        Leave empty or set to 'false' (default) to target production (api.hibob.com).
+
+    - name: base_url
+      type: string
+      required: false
+      description: >
+        Explicit API base URL override (including /v1 suffix, e.g., https://api.hibob.com/v1).
+        If provided, takes precedence over use_sandbox setting. Optional for advanced use cases.
+
+# ============================================================================
+# External Options Allowlist
+# These table-specific options must be included in the externalOptionsAllowList
+# parameter of the UC connection to allow them to be passed through.
+# Use a comma-separated string of option names.
+# ============================================================================
+external_options_allowlist: "fields,show_inactive,human_readable,include_archived,employee_ids,page_size,start_date,window_days,max_lookback_days,include_pending,max_records_per_batch"

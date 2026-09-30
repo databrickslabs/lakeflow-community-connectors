@@ -1,0 +1,87 @@
+# HiBob (Bob) REST API — https://api.hibob.com/v1 (sandbox: api.sandbox.hibob.com/v1).
+#
+# Auth is HTTP Basic (service user ID + token); the simulator ignores it.
+# Corpus files are in the connector's output (row) shape, one per table, as
+# bootstrapped from TABLE_SCHEMAS. Endpoints whose wire shape nests those rows
+# (bulk history, named lists, policy types) use custom handlers in
+# handlers/responses.py to re-nest them.
+
+endpoints:
+  # ---- employees: POST people search (JSON body: fields / showInactive /
+  # humanReadable; never any filters). Single page, no pagination.
+  - path: "/v1/people/search"
+    method: POST
+    corpus: employees
+    response:
+      pagination_style: none
+      wrapper:
+        records_key: employees
+
+  # ---- Bulk history tables: cursor pagination over employee groups.
+  # Response: {"results":[{"employeeId", "values":[...]}],
+  #            "response_metadata":{"next_cursor"}, "errors":[]}
+  # Params handled by the handler: limit, cursor, employeeIds; includeArchived ignored.
+  - path: "/v1/bulk/people/work"
+    method: GET
+    corpus: employee_work_history
+    handler: databricks.labs.community_connector.source_simulator.specs.hibob.handlers.responses:serve_bulk
+
+  - path: "/v1/bulk/people/employment"
+    method: GET
+    corpus: employee_employment_history
+    handler: databricks.labs.community_connector.source_simulator.specs.hibob.handlers.responses:serve_bulk
+
+  - path: "/v1/bulk/people/lifecycle"
+    method: GET
+    corpus: employee_lifecycle_history
+    handler: databricks.labs.community_connector.source_simulator.specs.hibob.handlers.responses:serve_bulk
+
+  - path: "/v1/bulk/people/salaries"
+    method: GET
+    corpus: employee_salary_history
+    handler: databricks.labs.community_connector.source_simulator.specs.hibob.handlers.responses:serve_bulk
+
+  # ---- time_off_request_changes: since/to range on the change timestamp.
+  # The connector caps `to` at its init time; future-dated clones verify it.
+  - path: "/v1/timeoff/requests/changes"
+    method: GET
+    corpus: time_off_request_changes
+    params:
+      since:          {role: filter, field: createdOn, op: gt}
+      to:             {role: filter, field: createdOn, op: lte}
+      includePending: {role: ignore}
+    response:
+      pagination_style: none
+      default_sort: "createdOn asc"
+      wrapper:
+        records_key: changes
+    synthesize_future_records:
+      cursor_field: createdOn
+      count: 3
+
+  # ---- Reference data ----
+  - path: "/v1/company/named-lists"
+    method: GET
+    corpus: named_lists
+    handler: databricks.labs.community_connector.source_simulator.specs.hibob.handlers.responses:serve_named_lists
+
+  - path: "/v1/timeoff/policy-types"
+    method: GET
+    corpus: time_off_policy_types
+    handler: databricks.labs.community_connector.source_simulator.specs.hibob.handlers.responses:serve_policy_types
+
+  - path: "/v1/company/people/fields"
+    method: GET
+    corpus: employee_fields
+    response:
+      pagination_style: none
+      wrapper:
+        records_key: fields
+
+  - path: "/v1/people/custom-tables/metadata"
+    method: GET
+    corpus: custom_tables_metadata
+    response:
+      pagination_style: none
+      wrapper:
+        records_key: tables

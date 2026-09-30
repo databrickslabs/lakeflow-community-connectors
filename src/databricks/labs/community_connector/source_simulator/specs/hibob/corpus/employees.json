@@ -1,0 +1,172 @@
+[
+  {
+    "id": "mike-558-pk0",
+    "firstName": "foxtrot-104",
+    "surname": "india-112",
+    "email": "hotel-136",
+    "displayName": "echo-303",
+    "fullName": "oscar-663",
+    "creationDateTime": "2024-01-30T04:21:52Z",
+    "work": {
+      "department": "hotel-480",
+      "title": "india-865",
+      "site": "charlie-727",
+      "siteId": 59357,
+      "startDate": "2024-01-01",
+      "manager": "india-439",
+      "reportsTo": {
+        "id": "lima-638",
+        "firstName": "bravo-589",
+        "surname": "lima-356",
+        "email": "bravo-681",
+        "displayName": "alpha-496"
+      }
+    },
+    "internal": {
+      "status": "golf-764",
+      "lifecycleStatus": "delta-766",
+      "terminationDate": "2024-01-01"
+    },
+    "personal": {
+      "birthDate": "2024-01-01"
+    },
+    "humanReadable": "kilo-932",
+    "raw_json": "charlie-718"
+  },
+  {
+    "id": "romeo-12-pk1",
+    "firstName": "xray-573",
+    "surname": "alpha-215",
+    "email": "november-254",
+    "displayName": "foxtrot-528",
+    "fullName": "hotel-810",
+    "creationDateTime": "2024-01-08T14:34:17Z",
+    "work": {
+      "department": "zulu-685",
+      "title": "kilo-505",
+      "site": "whiskey-116",
+      "siteId": 47895,
+      "startDate": "2024-02-02",
+      "manager": "yankee-180",
+      "reportsTo": {
+        "id": "victor-510",
+        "firstName": "alpha-518",
+        "surname": "echo-258",
+        "email": "victor-434",
+        "displayName": "quebec-159"
+      }
+    },
+    "internal": {
+      "status": "yankee-259",
+      "lifecycleStatus": "victor-556",
+      "terminationDate": "2024-02-02"
+    },
+    "personal": {
+      "birthDate": "2024-02-02"
+    },
+    "humanReadable": "bravo-578",
+    "raw_json": "yankee-321"
+  },
+  {
+    "id": "sierra-6-pk2",
+    "firstName": "hotel-293",
+    "surname": "oscar-259",
+    "email": "charlie-406",
+    "displayName": "juliet-623",
+    "fullName": "whiskey-280",
+    "creationDateTime": "2024-01-05T21:33:42Z",
+    "work": {
+      "department": "echo-755",
+      "title": "hotel-266",
+      "site": "xray-785",
+      "siteId": 98275,
+      "startDate": "2024-03-03",
+      "manager": "november-647",
+      "reportsTo": {
+        "id": "yankee-557",
+        "firstName": "zulu-716",
+        "surname": "uniform-287",
+        "email": "yankee-915",
+        "displayName": "delta-619"
+      }
+    },
+    "internal": {
+      "status": "oscar-218",
+      "lifecycleStatus": "delta-484",
+      "terminationDate": "2024-03-03"
+    },
+    "personal": {
+      "birthDate": "2024-03-03"
+    },
+    "humanReadable": "xray-274",
+    "raw_json": "hotel-978"
+  },
+  {
+    "id": "tango-88-pk3",
+    "firstName": "quebec-416",
+    "surname": "xray-203",
+    "email": "golf-345",
+    "displayName": "alpha-855",
+    "fullName": "lima-517",
+    "creationDateTime": "2024-01-07T15:36:07Z",
+    "work": {
+      "department": "whiskey-902",
+      "title": "november-747",
+      "site": "papa-380",
+      "siteId": 99679,
+      "startDate": "2024-04-04",
+      "manager": "quebec-581",
+      "reportsTo": {
+        "id": "alpha-885",
+        "firstName": "mike-776",
+        "surname": "kilo-321",
+        "email": "zulu-690",
+        "displayName": "romeo-965"
+      }
+    },
+    "internal": {
+      "status": "sierra-362",
+      "lifecycleStatus": "victor-725",
+      "terminationDate": "2024-04-04"
+    },
+    "personal": {
+      "birthDate": "2024-04-04"
+    },
+    "humanReadable": "foxtrot-778",
+    "raw_json": "tango-303"
+  },
+  {
+    "id": "hotel-74-pk4",
+    "firstName": "hotel-948",
+    "surname": "kilo-847",
+    "email": "kilo-844",
+    "displayName": "quebec-385",
+    "fullName": "india-692",
+    "creationDateTime": "2024-01-25T00:28:54Z",
+    "work": {
+      "department": "charlie-913",
+      "title": "bravo-163",
+      "site": "papa-256",
+      "siteId": 43061,
+      "startDate": "2024-05-05",
+      "manager": "zulu-742",
+      "reportsTo": {
+        "id": "victor-949",
+        "firstName": "mike-888",
+        "surname": "alpha-999",
+        "email": "whiskey-586",
+        "displayName": "sierra-336"
+      }
+    },
+    "internal": {
+      "status": "golf-749",
+      "lifecycleStatus": "whiskey-378",
+      "terminationDate": "2024-05-05"
+    },
+    "personal": {
+      "birthDate": "2024-05-05"
+    },
+    "humanReadable": "india-222",
+    "raw_json": "bravo-158"
+  }
+]

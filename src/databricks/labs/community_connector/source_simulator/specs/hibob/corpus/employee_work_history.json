@@ -1,0 +1,147 @@
+[
+  {
+    "employeeId": "yankee-1-pk0",
+    "id": 1000,
+    "effectiveDate": "2024-01-01",
+    "activeEffectiveDate": "2024-01-01",
+    "isCurrent": false,
+    "creationDate": "2024-01-26T16:57:56Z",
+    "modificationDate": "2024-01-18T00:27:16Z",
+    "change": {
+      "reason": "sierra-746",
+      "changedBy": "delta-900",
+      "changedById": "oscar-921"
+    },
+    "customColumns": "india-862",
+    "endEffectiveDate": "2024-01-01",
+    "workChangeType": "charlie-595",
+    "department": "charlie-794",
+    "title": "delta-754",
+    "site": "quebec-766",
+    "siteId": 54408,
+    "reportsTo": {
+      "id": "november-101",
+      "firstName": "mike-341",
+      "surname": "quebec-379",
+      "email": "juliet-683",
+      "displayName": "echo-562"
+    },
+    "canBeDeleted": true
+  },
+  {
+    "employeeId": "uniform--pk1",
+    "id": 1001,
+    "effectiveDate": "2024-02-02",
+    "activeEffectiveDate": "2024-02-02",
+    "isCurrent": false,
+    "creationDate": "2024-01-09T10:14:47Z",
+    "modificationDate": "2024-01-11T13:20:27Z",
+    "change": {
+      "reason": "golf-321",
+      "changedBy": "lima-418",
+      "changedById": "whiskey-681"
+    },
+    "customColumns": "whiskey-311",
+    "endEffectiveDate": "2024-02-02",
+    "workChangeType": "bravo-839",
+    "department": "november-597",
+    "title": "romeo-577",
+    "site": "bravo-353",
+    "siteId": 9759,
+    "reportsTo": {
+      "id": "tango-946",
+      "firstName": "charlie-842",
+      "surname": "yankee-560",
+      "email": "oscar-519",
+      "displayName": "charlie-179"
+    },
+    "canBeDeleted": true
+  },
+  {
+    "employeeId": "yankee-1-pk2",
+    "id": 1002,
+    "effectiveDate": "2024-03-03",
+    "activeEffectiveDate": "2024-03-03",
+    "isCurrent": true,
+    "creationDate": "2024-01-02T02:46:08Z",
+    "modificationDate": "2024-01-01T09:18:08Z",
+    "change": {
+      "reason": "mike-559",
+      "changedBy": "papa-207",
+      "changedById": "kilo-702"
+    },
+    "customColumns": "hotel-630",
+    "endEffectiveDate": "2024-03-03",
+    "workChangeType": "sierra-770",
+    "department": "romeo-897",
+    "title": "zulu-796",
+    "site": "yankee-417",
+    "siteId": 15135,
+    "reportsTo": {
+      "id": "charlie-114",
+      "firstName": "quebec-442",
+      "surname": "xray-552",
+      "email": "yankee-826",
+      "displayName": "yankee-235"
+    },
+    "canBeDeleted": true
+  },
+  {
+    "employeeId": "sierra-7-pk3",
+    "id": 1003,
+    "effectiveDate": "2024-04-04",
+    "activeEffectiveDate": "2024-04-04",
+    "isCurrent": false,
+    "creationDate": "2024-01-11T00:36:43Z",
+    "modificationDate": "2024-01-24T13:01:04Z",
+    "change": {
+      "reason": "uniform-114",
+      "changedBy": "xray-395",
+      "changedById": "india-262"
+    },
+    "customColumns": "mike-671",
+    "endEffectiveDate": "2024-04-04",
+    "workChangeType": "delta-248",
+    "department": "juliet-665",
+    "title": "hotel-170",
+    "site": "quebec-437",
+    "siteId": 92200,
+    "reportsTo": {
+      "id": "golf-976",
+      "firstName": "romeo-536",
+      "surname": "romeo-856",
+      "email": "hotel-476",
+      "displayName": "papa-256"
+    },
+    "canBeDeleted": true
+  },
+  {
+    "employeeId": "golf-969-pk4",
+    "id": 1004,
+    "effectiveDate": "2024-05-05",
+    "activeEffectiveDate": "2024-05-05",
+    "isCurrent": true,
+    "creationDate": "2024-01-24T22:48:33Z",
+    "modificationDate": "2024-01-23T23:04:01Z",
+    "change": {
+      "reason": "echo-573",
+      "changedBy": "golf-126",
+      "changedById": "romeo-235"
+    },
+    "customColumns": "juliet-612",
+    "endEffectiveDate": "2024-05-05",
+    "workChangeType": "mike-734",
+    "department": "zulu-293",
+    "title": "foxtrot-535",
+    "site": "mike-740",
+    "siteId": 38002,
+    "reportsTo": {
+      "id": "sierra-283",
+      "firstName": "foxtrot-727",
+      "surname": "alpha-581",
+      "email": "foxtrot-780",
+      "displayName": "echo-832"
+    },
+    "canBeDeleted": true
+  }
+]

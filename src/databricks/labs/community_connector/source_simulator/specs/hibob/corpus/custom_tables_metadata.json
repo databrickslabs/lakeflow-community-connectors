@@ -1,0 +1,63 @@
+[
+  {
+    "id": "zulu-204-pk0",
+    "category": "uniform-583",
+    "name": "tango-785",
+    "description": "mike-244",
+    "columns": []
+  },
+  {
+    "id": "alpha-68-pk1",
+    "category": "lima-643",
+    "name": "kilo-758",
+    "description": "charlie-658",
+    "columns": []
+  },
+  {
+    "id": "oscar-28-pk2",
+    "category": "delta-544",
+    "name": "papa-875",
+    "description": "juliet-763",
+    "columns": []
+  },
+  {
+    "id": "xray-111-pk3",
+    "category": "sierra-505",
+    "name": "alpha-146",
+    "description": "victor-823",
+    "columns": [
+      {
+        "id": "quebec-742",
+        "name": "oscar-493",
+        "description": "oscar-451",
+        "mandatory": true,
+        "type": "quebec-178",
+        "typeData": "india-519"
+      }
+    ]
+  },
+  {
+    "id": "quebec-3-pk4",
+    "category": "delta-494",
+    "name": "charlie-969",
+    "description": "romeo-423",
+    "columns": [
+      {
+        "id": "uniform-612",
+        "name": "hotel-984",
+        "description": "tango-820",
+        "mandatory": false,
+        "type": "lima-906",
+        "typeData": "yankee-183"
+      },
+      {
+        "id": "november-193",
+        "name": "golf-339",
+        "description": "xray-431",
+        "mandatory": true,
+        "type": "oscar-993",
+        "typeData": "quebec-897"
+      }
+    ]
+  }
+]
