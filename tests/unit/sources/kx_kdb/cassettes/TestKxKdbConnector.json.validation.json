@@ -1,0 +1,33 @@
+{
+  "version": 1,
+  "generated_at": "2026-09-29T03:50:00Z",
+  "endpoints": [],
+  "summary": {
+    "status": "clean",
+    "source_kind": "filesystem",
+    "validation_mode": "record_contract_plus_licensed_managed_e2e_with_q_reconciliation",
+    "endpoints_total": 0,
+    "endpoints_validated": 0,
+    "endpoints_mismatched": 0,
+    "endpoints_missing_spec": 0,
+    "record_mode_tests_passed": 197,
+    "record_mode_tests_skipped": 4,
+    "managed_full_refresh_status": "COMPLETED",
+    "managed_full_refresh_rows": 1877827162,
+    "managed_incremental_status": "COMPLETED",
+    "managed_incremental_rows": 3495,
+    "rows": 1877830657,
+    "min_date": "2008.01.01",
+    "max_date": "2023.12.30",
+    "q_reconciled_date_symbol_pairs": 45869,
+    "q_count_mismatches": 0,
+    "initialization_seconds": 73.3
+  },
+  "notes": [
+    "KX KDB HDB is a filesystem source and makes no HTTP requests.",
+    "Record mode exercises the deterministic temporary HDB contract.",
+    "Licensed managed validation ran a full refresh bounded by end_date, then an incremental update that appended only the next date.",
+    "Every (date, symbol) row count in the destination table equals q's count of the HDB sym column, including rows whose symbol index is beyond the root sym file.",
+    "A licensed PyKX edge HDB matched q values for empty and slash symbols, a 10,005-row slice, nulls, 0W, longs above 2**53, byte, short, string, char, temporal, and timespan columns."
+  ]
+}
