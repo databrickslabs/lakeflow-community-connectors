@@ -1,11 +1,15 @@
 # remberg public REST API endpoints exercised by the connector.
 #
 # Connector flow (per RembergLakeflowConnect):
-# * Every list endpoint uses 1-indexed page + limit pagination (server
+# * Every list endpoint uses **0-indexed** page + limit pagination (server
 #   default 20, max 1000); the connector detects the last page by a short
 #   page. Declared as ``pagination_style: page_number`` with ``page`` in the
-#   page role and ``limit`` in the per_page role so the simulator slices
-#   the corpus exactly like the live server.
+#   page role (``base: 0``) and ``limit`` in the per_page role so the
+#   simulator slices the corpus exactly like the live server.
+#   The ``base: 0`` matters: remberg's prose docs claim pages are 1-indexed,
+#   but they are not, and a simulator that shared the connector's original
+#   1-indexed assumption could not catch the resulting first-page data loss.
+#   See ``PAGE_BASE`` in remberg.py.
 # * CDC tables (assets, work_orders, tickets, work_requests, organizations,
 #   parts) → bounded updatedAt-range reads via the inclusive
 #   ``updatedAtFrom`` / ``updatedAtUntil`` filters (gte/lte on the record's
@@ -37,7 +41,7 @@ endpoints:
       wrapper:
         records_key: data
     params:
-      page:           {role: page}
+      page:           {role: page, base: 0}
       limit:          {role: per_page, default: 20, max: 1000}
       updatedAtFrom:  {role: filter, field: updatedAt, op: gte}
       updatedAtUntil: {role: filter, field: updatedAt, op: lte}
@@ -55,7 +59,7 @@ endpoints:
       wrapper:
         records_key: data
     params:
-      page:           {role: page}
+      page:           {role: page, base: 0}
       limit:          {role: per_page, default: 20, max: 1000}
       updatedAtFrom:  {role: filter, field: updatedAt, op: gte}
       updatedAtUntil: {role: filter, field: updatedAt, op: lte}
@@ -71,7 +75,7 @@ endpoints:
       wrapper:
         records_key: tickets
     params:
-      page:           {role: page}
+      page:           {role: page, base: 0}
       limit:          {role: per_page, default: 20, max: 1000}
       updatedAtFrom:  {role: filter, field: updatedAt, op: gte}
       updatedAtUntil: {role: filter, field: updatedAt, op: lte}
@@ -87,7 +91,7 @@ endpoints:
       wrapper:
         records_key: data
     params:
-      page:           {role: page}
+      page:           {role: page, base: 0}
       limit:          {role: per_page, default: 20, max: 1000}
       updatedAtFrom:  {role: filter, field: updatedAt, op: gte}
       updatedAtUntil: {role: filter, field: updatedAt, op: lte}
@@ -103,7 +107,7 @@ endpoints:
       wrapper:
         records_key: organizations
     params:
-      page:           {role: page}
+      page:           {role: page, base: 0}
       limit:          {role: per_page, default: 20, max: 1000}
       updatedAtFrom:  {role: filter, field: updatedAt, op: gte}
       updatedAtUntil: {role: filter, field: updatedAt, op: lte}
@@ -121,7 +125,7 @@ endpoints:
       wrapper:
         records_key: data
     params:
-      page:           {role: page}
+      page:           {role: page, base: 0}
       limit:          {role: per_page, default: 20, max: 1000}
       updatedAtFrom:  {role: filter, field: updatedAt, op: gte}
       updatedAtUntil: {role: filter, field: updatedAt, op: lte}
@@ -130,6 +134,104 @@ endpoints:
     synthesize_future_records:
       cursor_field: updatedAt
       count: 3
+
+  # ---- flat sub-resource table ----
+  # /v2/assets/status-signals lists every signal across assets, so this is an
+  # ordinary CDC read — no fan-out. Note the range filter is createdAt*, not
+  # updatedAt*: the endpoint offers no updatedAt bound.
+
+  - path: /v2/assets/status-signals
+    method: GET
+    corpus: asset_status_signals
+    response:
+      pagination_style: page_number
+      wrapper:
+        records_key: data
+    params:
+      page:            {role: page, base: 0}
+      limit:           {role: per_page, default: 20, max: 1000}
+      createdAtFrom:   {role: filter, field: createdAt, op: gte}
+      createdAtUntil:  {role: filter, field: createdAt, op: lte}
+      # resolvedAt bounds exist live but are not a change cursor, so the
+      # connector never sends them.
+      resolvedAtFrom:  {role: ignore}
+      resolvedAtUntil: {role: ignore}
+      workOrderExternalReference: {role: ignore}
+      workRequestReference:       {role: ignore}
+    synthesize_future_records:
+      cursor_field: createdAt
+      count: 3
+
+  # ---- child (fan-out) endpoints ----
+  # These are served per parent id. The simulator matches the {id} path
+  # placeholder but serves the whole corpus regardless of which parent was
+  # requested, so every parent yields the same child records — enough to
+  # exercise the fan-out loop, the parent-id/cursor injection and the
+  # max_records_per_batch split. The connector injects the *requested*
+  # parent's id, so rows still differ per parent.
+
+  - path: /v2/work-orders/{id}/times
+    method: GET
+    corpus: work_order_times
+    response:
+      # No pagination and no query params on this endpoint at all.
+      pagination_style: none
+      wrapper:
+        records_key: timeEntries
+        extras:
+          totalDurationInSeconds: 13500
+
+  - path: /v2/work-orders/{id}/stock-changes
+    method: GET
+    corpus: work_order_stock_changes
+    response:
+      pagination_style: page_number
+      wrapper:
+        records_key: data
+        extras:
+          count: 3
+    params:
+      page:  {role: page, base: 0}
+      limit: {role: per_page, default: 20, max: 1000}
+
+  - path: /v2/parts/{id}/inventories
+    method: GET
+    corpus: part_inventories
+    response:
+      pagination_style: page_number
+      wrapper:
+        records_key: data
+        extras:
+          count: 3
+    params:
+      page:  {role: page, base: 0}
+      limit: {role: per_page, default: 20, max: 1000}
+
+  - path: /v2/parts/{id}/stock-changes
+    method: GET
+    corpus: part_stock_changes
+    response:
+      pagination_style: page_number
+      wrapper:
+        records_key: data
+    params:
+      page:  {role: page, base: 0}
+      limit: {role: per_page, default: 20, max: 1000}
+      # The endpoint supports its own createdAt*/updatedAt* bounds, but the
+      # connector filters on the parent range instead, so it never sends them.
+      createdAtFrom:  {role: ignore}
+      createdAtUntil: {role: ignore}
+      updatedAtFrom:  {role: ignore}
+      updatedAtUntil: {role: ignore}
+
+  - path: /v2/tickets/{id}/conversations
+    method: GET
+    corpus: ticket_conversations
+    response:
+      # No pagination and no query params on this endpoint at all.
+      pagination_style: none
+      wrapper:
+        records_key: activities
 
   # ---- snapshot tables: plain paged full listing ----
 
@@ -141,7 +243,7 @@ endpoints:
       wrapper:
         records_key: contacts
     params:
-      page:           {role: page}
+      page:           {role: page, base: 0}
       limit:          {role: per_page, default: 20, max: 1000}
       # Live filters the connector never sends — contact records carry no
       # updatedAt field, so there is no usable cursor.
@@ -158,7 +260,7 @@ endpoints:
       wrapper:
         records_key: data
     params:
-      page:          {role: page}
+      page:          {role: page, base: 0}
       limit:         {role: per_page, default: 20, max: 1000}
       # Note: /v1/users names its upper bound ``updatedAtTo`` (not
       # ``Until``); the connector never sends either — user records carry
@@ -174,7 +276,7 @@ endpoints:
       wrapper:
         records_key: data
     params:
-      page:             {role: page}
+      page:             {role: page, base: 0}
       limit:            {role: per_page, default: 20, max: 1000}
       # /v1/forms only filters on finalizedAt, which is not a change
       # cursor (never set for inProgress forms) — connector treats the

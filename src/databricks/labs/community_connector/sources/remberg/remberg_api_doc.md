@@ -53,18 +53,69 @@ Note the response envelope is inconsistent across resources: most wrap the
 record array in `data`, but tickets/organizations/contacts use a
 resource-named key (`tickets` / `organizations` / `contacts`).
 
-### Deferred objects (not in the first connector version)
+### Sub-resource objects
 
-These exist in the API but are nested per-parent (one request per parent
-record — prohibitively request-hungry under the strict rate limits) or are
-low-value metadata; they can be added later:
+These are served per parent record rather than as a flat list. Endpoint
+inventory taken from the API's own documentation index at
+<https://developers.remberg.de/llms.txt>, which is authoritative for what
+actually has a GET.
 
-- Part inventories & stock changes (`/v2/parts/{id}/inventories`, `.../stock-changes`)
-- Work order times, stock changes, checklist (`/v2/work-orders/{id}/...`)
-- Ticket conversations (`/v2/tickets/{id}/conversations`)
-- Asset status signals (`/v2/assets/{id}/status-signals`)
-- Failure types, ticket categories, user groups/roles, procedure templates
-- Files (`/v1/files`, hierarchical) and AI endpoints
+| Table | Endpoint | Records key | Pagination | Own filters |
+|---|---|---|---|---|
+| `work_order_times` | `GET /v2/work-orders/{id}/times` | `timeEntries` | none | none |
+| `work_order_stock_changes` | `GET /v2/work-orders/{id}/stock-changes` | `data` | `page`/`limit` | none |
+| `part_inventories` | `GET /v2/parts/{partTypeId}/inventories` | `data` | `page`/`limit` | none |
+| `part_stock_changes` | `GET /v2/parts/{partTypeId}/stock-changes` | `data` | `page`/`limit` | `createdAt*`, `updatedAt*` |
+| `ticket_conversations` | `GET /v2/tickets/{id}/conversations` | `activities` | none | none |
+| `asset_status_signals` | `GET /v2/assets/status-signals` | `data` | `page`/`limit` | `createdAt*`, `resolvedAt*` |
+
+Two findings that shaped the implementation:
+
+1. **Asset status signals need no fan-out.** Besides the per-asset
+   `/v2/assets/{id}/status-signals`, remberg exposes a flat
+   `/v2/assets/status-signals` returning every signal across all assets with
+   the asset reference embedded (`AssetStatusSignalWithAssetInfoCfaResponseDto`).
+   The connector uses the flat one, so this is an ordinary CDC table.
+2. **Work order checklists cannot be read.** `/v2/work-orders/{id}/checklist`
+   is **POST-only** (add items); there is no GET, on either the `{id}` or the
+   `erp/{externalReference}` variant. The table is therefore not implementable.
+
+The remaining `{id}` endpoints have no list-all variant, so the connector
+lists the parent over a bounded `updatedAt` range and issues one request per
+parent in that range (`_read_child`). Cost tracks parent churn rather than
+table size, which keeps it inside the rate-limit budget in steady state; a
+first backfill still costs one request per parent record.
+
+Also not implemented (low-value metadata / different shapes): failure types,
+ticket categories, user groups & roles, procedure templates, files
+(`/v1/files`, hierarchical), AI endpoints, and the `number/{...}` and
+`erp/{...}` lookup variants of the above (same data, keyed differently).
+
+#### Cursor caveats for these tables
+
+- **Child tables have no independent change cursor.** Time entries and
+  conversation activities carry no `id` at all; none of the five has a
+  filterable `updatedAt`. The connector injects the parent's `id` and
+  `updatedAt` onto every child row and uses the injected `updatedAt` as
+  `cursor_field`, because that is the value incrementality actually advances
+  on. **This assumes editing a sub-resource bumps the parent's `updatedAt`.**
+  Not verifiable from the docs — confirm on live data. The
+  `full_parent_scan` table option is the fallback if it does not hold.
+- **`asset_status_signals` is keyed on `createdAt`,** the only bound the flat
+  endpoint offers. A signal's `resolvedAt` is set later, and that transition
+  does not move `createdAt`, so resolutions are not picked up by an
+  incremental read. Use `full_parent_scan`-style backfills or a periodic full
+  refresh if resolution state matters downstream.
+
+#### Doc bugs in these DTOs
+
+`PartStockChangeCfaResponseDto.createdAt` / `.updatedAt` are declared as
+free-form objects in the OpenAPI spec but are ISO date-time strings on the
+wire — the same bug class as `tickets.createdAt/updatedAt`,
+`assets.installationDate` and `work_orders.dueDate`. Typed as timestamps.
+`TicketCfaConversationActivityResponseDto.creator` is declared as an object
+with no properties at all; it is JSON-serialized to a string rather than
+guessed at as a struct.
 
 ## **Object Schema**
 
@@ -168,6 +219,60 @@ name: string (req)            status: enum inProgress|finalized (req)
 createdAt / updatedAt: date-time (req)   finalizedAt: date-time
 ```
 
+### `asset_status_signals` (`AssetStatusSignalWithAssetInfoCfaResponseDto`)
+```
+id: string (req)              createdAt: date-time (req)
+reportedAt: date-time (req)   resolvedAt: date-time
+status: enum new|running|warning|stopped|inactive (req)
+asset: {id, assetNumber, assetType} (req)   # AssetInfoCfaResponseDto
+```
+
+### `work_order_times` (`WorkOrderTimeEntryCfaResponseDto`)
+```
+performingPersonId: string (req)   startTime: date-time (req)
+endTime: date-time (req)           durationInSeconds: number (req)
++ injected: workOrderId, workOrderUpdatedAt
+```
+The response root also carries `totalDurationInSeconds`; it is dropped
+because it is exactly `SUM(durationInSeconds)` per work order.
+
+### `work_order_stock_changes` (`WorkOrderCfaPartStockChangeResponseDto`)
+```
+id: string (req)              createdAt / updatedAt: date-time (req)
+change: number (req)
+action: enum created|added|taken|reserved|reservationCanceled|planned|plannedCanceled (req)
+partType: {id, partNumber, externalReference, name}   # PartTypeInfoCfaResponseDto
+storageAsset: {id, assetNumber, assetType}
++ injected: workOrderId, workOrderUpdatedAt
+```
+
+### `part_inventories` (`PartInventoryWithStorageCfaResponseDto`)
+```
+id: string (req)              partTypeId: string (req)
+storageAsset: {id, assetNumber, assetType} (req)
+availableStock: number (req)  totalStock: number (req)
+createdAt: date-time (req)
++ injected: partTypeId (already on the wire), partUpdatedAt
+```
+
+### `part_stock_changes` (`PartStockChangeCfaResponseDto`)
+```
+id: string (req)              change: number (req)   comment: string
+createdAt / updatedAt: <free-form objects in OpenAPI — doc bug, ISO strings>
+action: enum created|added|taken|reserved|reservationCanceled|planned|plannedCanceled (req)
+storageAsset: {id, assetNumber, assetType}
++ injected: partTypeId, partUpdatedAt
+```
+
+### `ticket_conversations` (`TicketCfaConversationActivityResponseDto`)
+```
+creator: <object with no declared properties — JSON-serialized to string> (req)
+createdAt: string (req)       kind: enum note|inboundEmail|outboundEmail|portalMessage (req)
+plainText: string (req)       subject: string
+header: {from: string, to: [string], cc: [string], bcc: [string]}
++ injected: ticketId, ticketUpdatedAt
+```
+
 **TBD / OpenAPI doc bugs found during research:**
 1. `tickets.createdAt` / `tickets.updatedAt` are declared as unconstrained
    objects in `tickets.json`; every other resource declares them
@@ -201,6 +306,12 @@ Static: every object's primary key is `id` (a Mongo-style hex string, e.g.
 | `contacts` | `snapshot` | list filter exists but records carry **no** `updatedAt`, so no usable cursor field |
 | `users` | `snapshot` | records carry no timestamps |
 | `forms` | `snapshot` | no server-side `updatedAt` filter (only `finalizedAt*`); could later become cdc via `sortField=dateModified` descending scan |
+| `asset_status_signals` | `cdc` | flat `/v2/assets/status-signals` with `createdAtFrom/Until`; cursor `createdAt` (no `updatedAt` bound — see caveat above) |
+| `work_order_times` | `cdc` | fan-out; cursor is the injected `workOrderUpdatedAt`. PK is composite (`workOrderId`, `performingPersonId`, `startTime`) — entries have no `id` |
+| `work_order_stock_changes` | `cdc` | fan-out; cursor `workOrderUpdatedAt`, PK `id` |
+| `part_inventories` | `cdc` | fan-out; cursor `partUpdatedAt`, PK `id` |
+| `part_stock_changes` | `cdc` | fan-out; cursor `partUpdatedAt`, PK `id` |
+| `ticket_conversations` | `cdc` | fan-out; cursor `ticketUpdatedAt`. PK is composite (`ticketId`, `createdAt`, `kind`) — activities have no `id` |
 
 No object exposes deleted records (no `deletedAt` flag, no deletions feed),
 so `cdc_with_deletes` is not available; deletes in remberg do not propagate.
@@ -213,8 +324,27 @@ All reads are plain `GET` list endpoints returning JSON.
 
 Every list endpoint uses **page-number pagination**:
 
-- `page` — 1-indexed page number
+- `page` — **0-indexed** page number
 - `limit` — page size; default 20, **maximum 1000**
+
+> **Doc bug — `page` is 0-indexed, not 1-indexed.** remberg's prose
+> documentation states "1-indexed page number", and the first version of this
+> connector took it at face value. It is wrong: the OpenAPI parameter
+> description for `/v2/work-orders/{id}/stock-changes` says `page` "defaults
+> to 0", and live counts confirm it. Reading a sandbox tenant holding 80 work
+> orders returned **60** records at `limit=20` and **75** at `limit=5` — in
+> both cases exactly `limit` records short, i.e. the first page was being
+> skipped. The tell is that the record count varies with page size, which
+> correct pagination never does.
+>
+> This affected every table, and shipped in the connector's first release
+> (`89190c3`). Fixed by `PAGE_BASE = 0`; regression-tested by
+> `test_record_count_is_independent_of_page_size` and
+> `test_first_page_is_page_zero`.
+>
+> Note the simulator could not have caught this on its own: it modelled pages
+> as 1-indexed too, so both sides agreed on the same wrong assumption. The
+> spec now declares `base: 0` explicitly.
 
 The last page is detected by receiving fewer than `limit` records (responses
 do not consistently expose a total count across resources). Example:

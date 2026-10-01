@@ -66,6 +66,10 @@ class SortOrderParam:
 @dataclass
 class PageParam:
     name: str = "page"
+    # Number of the first page. Almost every API is 1-indexed, but some (e.g.
+    # remberg) number pages from 0 — declare ``base: 0`` so the simulator maps
+    # page numbers to corpus offsets the same way the live server does.
+    base: int = 1
 
 
 @dataclass
@@ -353,7 +357,7 @@ def _attach_param(spec: EndpointSpec, name: str, info: Any) -> None:
     elif role == ParamRole.PAGE:
         if spec.page is not None:
             raise ValueError(f"only one page param allowed; second was {name!r}")
-        spec.page = PageParam(name=name)
+        spec.page = PageParam(name=name, base=int(info.get("base", 1)))
 
     elif role == ParamRole.PER_PAGE:
         if spec.per_page is not None:

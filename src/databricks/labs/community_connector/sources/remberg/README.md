@@ -58,8 +58,9 @@ The connection can also be created using the standard Unity Catalog API.
 
 ## Supported Objects
 
-All primary keys are the remberg object `id` (a stable hex string). No
-object exposes deleted records, so deletes do not propagate
+Most primary keys are the remberg object `id` (a stable hex string); two
+sub-resource tables use composite keys because remberg gives their records no
+`id` at all. No object exposes deleted records, so deletes do not propagate
 (re-ingest with a fresh pipeline if you need hard-delete reconciliation).
 
 | Object | Ingestion | Cursor | Notes |
@@ -70,9 +71,15 @@ object exposes deleted records, so deletes do not propagate
 | `work_requests` | CDC (incremental) | `updatedAt` | |
 | `organizations` | CDC (incremental) | `updatedAt` | |
 | `parts` | CDC (incremental) | `updatedAt` | |
+| `asset_status_signals` | CDC (incremental) | `createdAt` | operational state per asset, with the asset reference embedded. See the resolution caveat below. |
 | `contacts` | Snapshot (full refresh) | — | list records carry no `updatedAt`, so no usable cursor |
 | `users` | Snapshot (full refresh) | — | records carry no timestamps |
 | `forms` | Snapshot (full refresh) | — | the endpoint cannot filter on `updatedAt` |
+| `work_order_times` | CDC via fan-out | `workOrderUpdatedAt` | time entries per work order. PK `(workOrderId, performingPersonId, startTime)` |
+| `work_order_stock_changes` | CDC via fan-out | `workOrderUpdatedAt` | parts booked against a work order |
+| `part_inventories` | CDC via fan-out | `partUpdatedAt` | stock levels per part per storage asset |
+| `part_stock_changes` | CDC via fan-out | `partUpdatedAt` | stock movements per part |
+| `ticket_conversations` | CDC via fan-out | `ticketUpdatedAt` | notes and emails on a ticket. PK `(ticketId, createdAt, kind)` |
 
 Incremental strategy: CDC tables are read as bounded `updatedAt` ranges
 (`updatedAtFrom`/`updatedAtUntil` server-side filters, inclusive) from the
@@ -81,10 +88,44 @@ time, page by page until drained. The first sync is a full backfill unless
 `start_timestamp` is set. Snapshot tables are re-listed in full each run and
 upserted on `id`.
 
+### Fan-out tables
+
+remberg serves the last five objects only underneath a parent record
+(`/v2/work-orders/{id}/times`) — there is no list-all endpoint. The connector
+lists the parent over the same bounded `updatedAt` range and then issues **one
+request per parent in that range**. Two consequences worth planning for:
+
+- **The first sync costs one request per parent record.** Against remberg's
+  10 requests/second ceiling, a tenant with 50,000 work orders needs roughly
+  90 minutes to backfill `work_order_times`. Steady-state runs only visit
+  parents that changed, so they are far cheaper. Consider giving these tables
+  their own pipeline with a lower trigger frequency.
+- **Incrementality relies on the parent's `updatedAt` moving when a
+  sub-resource changes.** If you observe edits to time entries or
+  conversations that never land in the destination, set `full_parent_scan` to
+  `true` for that table — it revisits every parent each run, at the cost of a
+  full request-per-parent sweep every time.
+
+Each fan-out row carries its parent's id and its parent's `updatedAt` (e.g.
+`workOrderId` and `workOrderUpdatedAt`); the latter is the cursor, since the
+child records themselves have no change timestamp to sequence on.
+
+### Caveats
+
+- **`asset_status_signals` will not reflect resolutions.** The flat endpoint
+  can only be filtered on `createdAt`, and setting a signal's `resolvedAt`
+  does not move `createdAt` — so an incremental run never revisits the row.
+  If resolution state matters downstream, run a periodic full refresh of this
+  table.
+- **Work order checklists are not available.** `/v2/work-orders/{id}/checklist`
+  is POST-only in the remberg API; there is no endpoint to read them back.
+
 Special columns:
 - `tickets.customPropertyValues[].value` and `[].associationValue[]` are
   user-defined and untyped in remberg; non-string values arrive
   JSON-serialized as strings.
+- `ticket_conversations.creator` is an untyped object in the remberg API and
+  arrives JSON-serialized as a string.
 - Column names are kept exactly as the remberg API returns them (camelCase),
   so rows map 1:1 to the official API documentation.
 
@@ -119,7 +160,8 @@ These are set inside the `table_configuration` map alongside any source-specific
 | `start_timestamp` | CDC tables | No | ISO-8601 UTC lower bound for the very first sync (e.g. `2024-01-01T00:00:00.000Z`). Default: unbounded full backfill. |
 | `lookback_seconds` | CDC tables | No | Seconds subtracted from the cursor at read time to re-capture records updated while a range was being paginated. Default `300`. |
 | `limit` | All tables | No | Page size for the remberg list endpoints. Default `1000` (the server maximum). |
-| `max_records_per_batch` | CDC tables | No | Per-microbatch cap on emitted rows, applied at page granularity. Default: drain the whole range in one microbatch. |
+| `max_records_per_batch` | CDC tables | No | Per-microbatch cap on emitted rows, applied at page granularity (at parent granularity for fan-out tables, so one parent's children are never split). Default: drain the whole range in one microbatch. |
+| `full_parent_scan` | Fan-out tables | No | `true` revisits every parent each run instead of only those changed since the cursor. Use for backfills, or if sub-resource edits do not bump the parent's `updatedAt`. Costs one request per parent per run. Default `false`. |
 
 ## Data Type Mapping
 

@@ -50,6 +50,12 @@ Thumbs.db
 # Dev config
 tests/unit/sources/*/configs/dev_config.json
 
+# Per-table options for live runs (table name -> table_options). Local to a
+# developer's machine — used to bound what a live run touches, e.g. a
+# start_timestamp that keeps a fan-out connector from backfilling a whole
+# production tenant on the first request.
+tests/unit/sources/*/configs/dev_table_config.json
+
 # Replay config — fake credentials for simulate/replay mode. The canonical
 # source is the ``replay_config`` class attribute on each test class
 # (``LakeflowConnectTests`` writes them there); this glob lets contributors
