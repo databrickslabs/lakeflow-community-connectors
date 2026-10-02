@@ -5,6 +5,7 @@ from pathlib import Path
 
 import cbor2
 import pytest
+import xxhash
 import zstandard
 from conftest import block_bytes
 
@@ -12,9 +13,32 @@ from databricks.labs.community_connector.sources.bluesky.archive import (
     cid,
     decode_block,
     decode_payload,
+    segment_events,
 )
 from databricks.labs.community_connector.sources.bluesky.errors import ProtocolError
 from databricks.labs.community_connector.sources.bluesky.options import Options
+from databricks.labs.community_connector.sources.bluesky.transport import Transport
+
+
+def reseal(service, change):
+    """Keep the fixture's checksum valid so corrupt metadata reaches the decoder."""
+    data = bytearray(service.data)
+    footer_start = struct.unpack_from("<Q", data, 58)[0]
+    change(data)
+    service.checksum = xxhash.xxh3_64(data[12:256] + data[footer_start:]).hexdigest()
+    struct.pack_into("<Q", data, 4, int(service.checksum, 16))
+    service.data = bytes(data)
+
+
+def read_segment(service, after=0, through=7, blocks=None):
+    entry = {
+        "name": "seg_0000000000.jss",
+        "checksum": service.checksum,
+        "mode": "blocks" if blocks is not None else "segment",
+        "blocks": blocks or [],
+    }
+    with Transport(Options.parse({}, {})) as transport:
+        return list(segment_events(transport, entry, after, through, False))
 
 
 def test_dag_cbor_bytes_links_and_large_integer():
@@ -69,12 +93,50 @@ def test_corrupt_frame(events):
         list(decode_block(frame, size, True))
 
 
+def test_block_requires_zstd_content_checksum(events):
+    frame, size = block_bytes(events[:1])
+    body = zstandard.ZstdDecompressor().decompress(frame)
+    unchecked = zstandard.ZstdCompressor(write_checksum=False).compress(body)
+    with pytest.raises(ProtocolError, match="content checksum"):
+        list(decode_block(unchecked, size, False))
+
+
 def test_truncated_columns(events):
     frame, _ = block_bytes(events)
     body = zstandard.ZstdDecompressor().decompress(frame)[:-1]
     damaged = zstandard.ZstdCompressor(write_checksum=True).compress(body)
     with pytest.raises(ProtocolError):
         list(decode_block(damaged, len(body), True))
+
+
+def test_trailing_block_bytes(events):
+    frame, _ = block_bytes(events[:1])
+    body = zstandard.ZstdDecompressor().decompress(frame) + b"extra"
+    damaged = zstandard.ZstdCompressor(write_checksum=True).compress(body)
+    with pytest.raises(ProtocolError, match="Trailing bytes"):
+        list(decode_block(damaged, len(body), False))
+
+
+def test_segment_reads_only_selected_block(service):
+    rows = read_segment(service, after=2, through=4, blocks=[{"first": 1, "last": 1}])
+    assert [row["seq"] for row in rows] == [3, 4]
+    # Header + footer + one frame, rather than downloading every block.
+    assert len(service.calls) == 3
+    assert service.calls[-1].headers["Range"].startswith("bytes=")
+
+
+def test_invalid_footer_offset_fails_before_fetching_footer(service):
+    reseal(service, lambda data: struct.pack_into("<Q", data, 90, len(data)))
+    with pytest.raises(ProtocolError, match="footer offsets"):
+        read_segment(service)
+    assert len(service.calls) == 1
+
+
+def test_block_index_must_match_decoded_rows(service):
+    footer_start = struct.unpack_from("<Q", service.data, 58)[0]
+    reseal(service, lambda data: struct.pack_into("<I", data, footer_start + 16, 3))
+    with pytest.raises(ProtocolError, match="disagree with sealed index"):
+        read_segment(service)
 
 
 def test_record_json_and_cid(events):
