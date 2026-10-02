@@ -108,7 +108,7 @@ class Transport:
         checksum: str,
     ) -> tuple[bytes, int]: ...
 
-    def _request(
+    def _request(  # pylint: disable=too-many-branches,too-many-statements
         self,
         method: str,
         endpoint: str,

@@ -38,7 +38,8 @@ class ArchiveValidator:
 
     @staticmethod
     def sequence(value: Any, name: str) -> int:
-        if type(value) is not int:
+        # bool subclasses int, but is not a valid archive sequence.
+        if type(value) is not int:  # pylint: disable=unidiomatic-typecheck
             raise ProtocolError(f"{name} must be an integer")
         try:
             return integer(value, name)

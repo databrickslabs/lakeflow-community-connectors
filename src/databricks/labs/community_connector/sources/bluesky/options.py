@@ -122,7 +122,7 @@ class Options:
         values = {**connection, **table}
         endpoint = values.get("endpoint", "https://jetstream.us-east.bsky.network").rstrip("/")
         url = urlsplit(endpoint)
-        if (
+        if (  # pylint: disable=too-many-boolean-expressions
             url.scheme != "https"
             or not url.hostname
             or url.username

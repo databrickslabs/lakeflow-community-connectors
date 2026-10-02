@@ -76,7 +76,9 @@ def timestamp(microseconds: int) -> str:
         raise ProtocolError("Event timestamp outside supported range") from None
 
 
-def decode_block(frame: bytes, expected_size: int, include_raw: bool) -> Iterator[dict[str, Any]]:
+def decode_block(  # pylint: disable=too-many-locals,too-many-statements
+    frame: bytes, expected_size: int, include_raw: bool
+) -> Iterator[dict[str, Any]]:
     if expected_size > MAX_BLOCK:
         raise ProtocolError("Decompressed block exceeds safety limit")
     try:
