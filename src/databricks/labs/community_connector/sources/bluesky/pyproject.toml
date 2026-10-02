@@ -1,0 +1,28 @@
+# Upstream's per-source wheel builder runs in this directory.
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "lakeflow-community-connectors-bluesky"
+version = "0.1.0"
+description = "Bluesky Jetstream v2 archive connector for Databricks Lakeflow Connect"
+requires-python = ">=3.10"
+readme = "README.md"
+license = "Apache-2.0"
+dependencies = [
+  "lakeflow-community-connectors>=0.1.0,<0.2",
+  "requests>=2.32,<3",
+  "zstandard>=0.23,<1",
+  "cbor2>=5.6,<6",
+  "xxhash>=3.5,<4",
+]
+
+[tool.setuptools]
+packages = ["databricks.labs.community_connector.sources.bluesky"]
+
+[tool.setuptools.package-dir]
+"databricks.labs.community_connector.sources.bluesky" = "."
+
+[tool.setuptools.package-data]
+"*" = ["*.yaml", "*.md"]
