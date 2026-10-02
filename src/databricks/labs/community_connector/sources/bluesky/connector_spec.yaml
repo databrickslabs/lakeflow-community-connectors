@@ -1,0 +1,17 @@
+display_name: Bluesky
+connection:
+  parameters:
+    - name: endpoint
+      type: string
+      required: false
+      description: >-
+        Jetstream v2 HTTPS origin. Defaults to https://jetstream.us-east.bsky.network.
+        Checkpoints are instance-local; never switch origins with an existing checkpoint.
+    - name: api_key
+      type: string
+      required: false
+      secret: true
+      description: >-
+        Raw bearer key for archive HTTP access. Required by Bluesky-hosted archives;
+        optional only for self-hosted instances that permit unauthenticated snapshots.
+external_options_allowlist: starting_cursor,collections,kinds,dids,max_events_per_refresh,request_timeout_seconds,refresh_timeout_seconds,max_retries,include_raw_payload

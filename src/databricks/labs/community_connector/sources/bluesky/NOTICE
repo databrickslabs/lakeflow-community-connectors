@@ -1,0 +1,11 @@
+lakeflow-connect-bluesky
+Copyright 2026 lakeflow-connect-bluesky contributors
+
+This project independently implements the Bluesky Jetstream jss0 archive format.
+Protocol reference: https://github.com/bluesky-social/jetstream
+The native.jss test fixture is generated from synthetic records using the official
+Jetstream segment writer at 3fa54fdbb0f47ad3aa43de78a6fbbd8dc362f81d.
+Jetstream is available under Apache-2.0 OR MIT. No Jetstream runtime is bundled.
+
+The connector depends on, but does not vendor, Databricks Labs Lakeflow Community
+Connectors (Apache-2.0): https://github.com/databrickslabs/lakeflow-community-connectors
