@@ -1,0 +1,558 @@
+[
+  {
+    "id": "uniform--pk0",
+    "identifier": "zulu-943",
+    "title": "romeo-495",
+    "description": "sierra-222",
+    "number": 88152,
+    "url": "papa-682",
+    "priority": 54686,
+    "priorityLabel": "lima-544",
+    "estimate": 658.43,
+    "dueDate": "2024-06-01",
+    "boardOrder": 988.91,
+    "sortOrder": 923.67,
+    "prioritySortOrder": 493.9,
+    "subIssueSortOrder": 640.88,
+    "branchName": "victor-185",
+    "labelIds": [],
+    "previousIdentifiers": [],
+    "integrationSourceType": "juliet-267",
+    "customerTicketCount": 48652,
+    "reactionData": "hotel-373",
+    "trashed": true,
+    "inheritsSharedAccess": false,
+    "slaType": "uniform-717",
+    "createdAt": "2024-01-08T15:59:34Z",
+    "updatedAt": "2024-01-01T00:00:00Z",
+    "archivedAt": "2024-01-28T15:02:22Z",
+    "completedAt": "2024-01-21T08:12:19Z",
+    "canceledAt": "2024-01-21T16:55:25Z",
+    "startedAt": "2024-01-22T13:43:16Z",
+    "autoArchivedAt": "2024-01-22T15:16:13Z",
+    "autoClosedAt": "2024-01-24T18:17:44Z",
+    "addedToCycleAt": "2024-01-27T17:51:27Z",
+    "addedToProjectAt": "2024-01-10T20:13:01Z",
+    "addedToTeamAt": "2024-01-24T13:25:00Z",
+    "startedTriageAt": "2024-01-25T01:00:22Z",
+    "triagedAt": "2024-01-05T19:40:48Z",
+    "snoozedUntilAt": "2024-01-14T04:10:23Z",
+    "slaStartedAt": "2024-01-11T20:11:34Z",
+    "slaBreachesAt": "2024-01-10T02:22:33Z",
+    "slaHighRiskAt": "2024-01-24T13:53:40Z",
+    "slaMediumRiskAt": "2024-01-31T14:44:43Z",
+    "team": {
+      "id": "golf-647"
+    },
+    "state": {
+      "id": "romeo-955"
+    },
+    "assignee": {
+      "id": "tango-840"
+    },
+    "creator": {
+      "id": "hotel-203"
+    },
+    "parent": {
+      "id": "oscar-754"
+    },
+    "project": {
+      "id": "foxtrot-638"
+    },
+    "projectMilestone": {
+      "id": "yankee-370"
+    },
+    "cycle": {
+      "id": "victor-407"
+    }
+  },
+  {
+    "id": "romeo-51-pk1",
+    "identifier": "whiskey-203",
+    "title": "uniform-128",
+    "description": "sierra-331",
+    "number": 70294,
+    "url": "oscar-347",
+    "priority": 98670,
+    "priorityLabel": "hotel-468",
+    "estimate": 678.24,
+    "dueDate": "2024-06-08",
+    "boardOrder": 521.83,
+    "sortOrder": 806.95,
+    "prioritySortOrder": 965.01,
+    "subIssueSortOrder": 464.86,
+    "branchName": "oscar-546",
+    "labelIds": [],
+    "previousIdentifiers": [
+      "golf-938"
+    ],
+    "integrationSourceType": "victor-123",
+    "customerTicketCount": 78670,
+    "reactionData": "hotel-896",
+    "trashed": true,
+    "inheritsSharedAccess": true,
+    "slaType": "papa-356",
+    "createdAt": "2024-01-16T00:13:34Z",
+    "updatedAt": "2024-01-01T01:00:00Z",
+    "archivedAt": "2024-01-25T16:30:27Z",
+    "completedAt": "2024-01-16T00:35:24Z",
+    "canceledAt": "2024-01-31T13:48:34Z",
+    "startedAt": "2024-01-15T16:13:37Z",
+    "autoArchivedAt": "2024-01-27T14:49:22Z",
+    "autoClosedAt": "2024-01-18T09:14:35Z",
+    "addedToCycleAt": "2024-01-18T01:17:59Z",
+    "addedToProjectAt": "2024-01-03T22:51:39Z",
+    "addedToTeamAt": "2024-01-10T13:21:49Z",
+    "startedTriageAt": "2024-01-04T18:25:14Z",
+    "triagedAt": "2024-01-17T01:47:08Z",
+    "snoozedUntilAt": "2024-01-06T01:13:30Z",
+    "slaStartedAt": "2024-01-19T06:19:56Z",
+    "slaBreachesAt": "2024-01-06T17:58:08Z",
+    "slaHighRiskAt": "2024-01-24T13:36:24Z",
+    "slaMediumRiskAt": "2024-01-24T04:03:14Z",
+    "team": {
+      "id": "oscar-154"
+    },
+    "state": {
+      "id": "november-352"
+    },
+    "assignee": {
+      "id": "zulu-405"
+    },
+    "creator": {
+      "id": "echo-657"
+    },
+    "parent": {
+      "id": "xray-637"
+    },
+    "project": {
+      "id": "lima-518"
+    },
+    "projectMilestone": {
+      "id": "juliet-804"
+    },
+    "cycle": {
+      "id": "bravo-420"
+    }
+  },
+  {
+    "id": "foxtrot--pk2",
+    "identifier": "lima-981",
+    "title": "tango-900",
+    "description": "kilo-518",
+    "number": 27927,
+    "url": "yankee-728",
+    "priority": 69352,
+    "priorityLabel": "quebec-832",
+    "estimate": 963.78,
+    "dueDate": "2024-06-15",
+    "boardOrder": 508.52,
+    "sortOrder": 940.42,
+    "prioritySortOrder": 677.75,
+    "subIssueSortOrder": 580.68,
+    "branchName": "delta-253",
+    "labelIds": [
+      "quebec-515"
+    ],
+    "previousIdentifiers": [],
+    "integrationSourceType": "xray-970",
+    "customerTicketCount": 204,
+    "reactionData": "charlie-907",
+    "trashed": false,
+    "inheritsSharedAccess": false,
+    "slaType": "yankee-286",
+    "createdAt": "2024-01-26T15:13:05Z",
+    "updatedAt": "2024-01-01T02:00:00Z",
+    "archivedAt": "2024-01-04T08:34:25Z",
+    "completedAt": "2024-01-28T16:42:44Z",
+    "canceledAt": "2024-01-07T04:46:01Z",
+    "startedAt": "2024-01-12T04:25:34Z",
+    "autoArchivedAt": "2024-01-20T18:07:59Z",
+    "autoClosedAt": "2024-01-27T16:32:51Z",
+    "addedToCycleAt": "2024-01-16T13:20:14Z",
+    "addedToProjectAt": "2024-01-19T01:49:46Z",
+    "addedToTeamAt": "2024-01-13T19:14:30Z",
+    "startedTriageAt": "2024-01-01T02:39:23Z",
+    "triagedAt": "2024-01-29T13:36:49Z",
+    "snoozedUntilAt": "2024-01-31T14:08:33Z",
+    "slaStartedAt": "2024-01-26T11:28:49Z",
+    "slaBreachesAt": "2024-01-24T14:23:57Z",
+    "slaHighRiskAt": "2024-01-18T10:30:54Z",
+    "slaMediumRiskAt": "2024-01-18T06:41:12Z",
+    "team": {
+      "id": "november-902"
+    },
+    "state": {
+      "id": "papa-121"
+    },
+    "assignee": {
+      "id": "hotel-905"
+    },
+    "creator": {
+      "id": "papa-270"
+    },
+    "parent": {
+      "id": "uniform-534"
+    },
+    "project": {
+      "id": "uniform-744"
+    },
+    "projectMilestone": {
+      "id": "tango-679"
+    },
+    "cycle": {
+      "id": "bravo-273"
+    }
+  },
+  {
+    "id": "mike-769-pk3",
+    "identifier": "sierra-418",
+    "title": "yankee-844",
+    "description": "oscar-560",
+    "number": 9506,
+    "url": "romeo-877",
+    "priority": 17199,
+    "priorityLabel": "kilo-904",
+    "estimate": 742.3,
+    "dueDate": "2024-06-22",
+    "boardOrder": 36.4,
+    "sortOrder": 156.85,
+    "prioritySortOrder": 301.63,
+    "subIssueSortOrder": 802.17,
+    "branchName": "tango-112",
+    "labelIds": [
+      "golf-248"
+    ],
+    "previousIdentifiers": [],
+    "integrationSourceType": "yankee-249",
+    "customerTicketCount": 13736,
+    "reactionData": "tango-486",
+    "trashed": true,
+    "inheritsSharedAccess": true,
+    "slaType": "juliet-221",
+    "createdAt": "2024-01-09T14:04:38Z",
+    "updatedAt": "2024-01-01T03:00:00Z",
+    "archivedAt": "2024-01-07T19:49:38Z",
+    "completedAt": "2024-01-14T06:09:48Z",
+    "canceledAt": "2024-01-25T03:31:36Z",
+    "startedAt": "2024-01-14T11:36:04Z",
+    "autoArchivedAt": "2024-01-03T14:46:59Z",
+    "autoClosedAt": "2024-01-12T16:07:07Z",
+    "addedToCycleAt": "2024-01-24T00:20:30Z",
+    "addedToProjectAt": "2024-01-28T01:51:53Z",
+    "addedToTeamAt": "2024-01-21T02:49:51Z",
+    "startedTriageAt": "2024-01-13T00:36:07Z",
+    "triagedAt": "2024-01-21T07:20:32Z",
+    "snoozedUntilAt": "2024-01-12T05:02:54Z",
+    "slaStartedAt": "2024-01-12T13:51:59Z",
+    "slaBreachesAt": "2024-01-24T04:33:00Z",
+    "slaHighRiskAt": "2024-01-17T11:45:19Z",
+    "slaMediumRiskAt": "2024-01-19T09:42:26Z",
+    "team": {
+      "id": "foxtrot-262"
+    },
+    "state": {
+      "id": "charlie-183"
+    },
+    "assignee": {
+      "id": "alpha-468"
+    },
+    "creator": {
+      "id": "lima-388"
+    },
+    "parent": {
+      "id": "alpha-875"
+    },
+    "project": {
+      "id": "foxtrot-376"
+    },
+    "projectMilestone": {
+      "id": "zulu-676"
+    },
+    "cycle": {
+      "id": "alpha-565"
+    }
+  },
+  {
+    "id": "hotel-44-pk4",
+    "identifier": "quebec-892",
+    "title": "oscar-812",
+    "description": "alpha-781",
+    "number": 41783,
+    "url": "sierra-520",
+    "priority": 36726,
+    "priorityLabel": "india-426",
+    "estimate": 121.36,
+    "dueDate": "2024-06-29",
+    "boardOrder": 27.31,
+    "sortOrder": 998.79,
+    "prioritySortOrder": 920.71,
+    "subIssueSortOrder": 513.82,
+    "branchName": "quebec-356",
+    "labelIds": [
+      "tango-559",
+      "foxtrot-696"
+    ],
+    "previousIdentifiers": [
+      "victor-475"
+    ],
+    "integrationSourceType": "alpha-731",
+    "customerTicketCount": 40553,
+    "reactionData": "delta-480",
+    "trashed": false,
+    "inheritsSharedAccess": true,
+    "slaType": "uniform-869",
+    "createdAt": "2024-01-28T14:39:04Z",
+    "updatedAt": "2024-01-01T04:00:00Z",
+    "archivedAt": "2024-01-07T13:59:03Z",
+    "completedAt": "2024-01-23T06:21:38Z",
+    "canceledAt": "2024-01-18T05:42:04Z",
+    "startedAt": "2024-01-27T00:21:45Z",
+    "autoArchivedAt": "2024-01-01T22:00:31Z",
+    "autoClosedAt": "2024-01-14T04:22:53Z",
+    "addedToCycleAt": "2024-01-26T11:42:44Z",
+    "addedToProjectAt": "2024-01-14T15:17:29Z",
+    "addedToTeamAt": "2024-01-31T14:58:06Z",
+    "startedTriageAt": "2024-01-04T20:00:05Z",
+    "triagedAt": "2024-01-11T23:31:24Z",
+    "snoozedUntilAt": "2024-01-08T00:10:49Z",
+    "slaStartedAt": "2024-01-12T11:25:17Z",
+    "slaBreachesAt": "2024-01-23T13:20:27Z",
+    "slaHighRiskAt": "2024-01-04T08:36:07Z",
+    "slaMediumRiskAt": "2024-01-15T15:08:23Z",
+    "team": {
+      "id": "juliet-974"
+    },
+    "state": {
+      "id": "juliet-572"
+    },
+    "assignee": {
+      "id": "november-974"
+    },
+    "creator": {
+      "id": "oscar-894"
+    },
+    "parent": {
+      "id": "bravo-789"
+    },
+    "project": {
+      "id": "uniform-647"
+    },
+    "projectMilestone": {
+      "id": "xray-403"
+    },
+    "cycle": {
+      "id": "uniform-472"
+    }
+  },
+  {
+    "id": "lima-435-pk5",
+    "identifier": "golf-458",
+    "title": "mike-748",
+    "description": "uniform-706",
+    "number": 22962,
+    "url": "foxtrot-587",
+    "priority": 91261,
+    "priorityLabel": "bravo-582",
+    "estimate": 807.26,
+    "dueDate": "2024-07-06",
+    "boardOrder": 242.33,
+    "sortOrder": 13.24,
+    "prioritySortOrder": 438.26,
+    "subIssueSortOrder": 941.47,
+    "branchName": "mike-502",
+    "labelIds": [],
+    "previousIdentifiers": [
+      "oscar-933"
+    ],
+    "integrationSourceType": "uniform-731",
+    "customerTicketCount": 22149,
+    "reactionData": "yankee-581",
+    "trashed": true,
+    "inheritsSharedAccess": false,
+    "slaType": "delta-718",
+    "createdAt": "2024-01-05T04:22:38Z",
+    "updatedAt": "2024-01-01T05:00:00Z",
+    "archivedAt": "2024-01-18T03:29:22Z",
+    "completedAt": "2024-01-17T01:13:57Z",
+    "canceledAt": "2024-01-31T01:16:37Z",
+    "startedAt": "2024-01-25T00:33:46Z",
+    "autoArchivedAt": "2024-01-16T11:54:29Z",
+    "autoClosedAt": "2024-01-28T20:36:18Z",
+    "addedToCycleAt": "2024-01-29T02:24:04Z",
+    "addedToProjectAt": "2024-01-04T15:27:16Z",
+    "addedToTeamAt": "2024-01-27T04:42:00Z",
+    "startedTriageAt": "2024-01-27T19:11:32Z",
+    "triagedAt": "2024-01-10T11:20:01Z",
+    "snoozedUntilAt": "2024-01-17T21:49:41Z",
+    "slaStartedAt": "2024-01-20T23:11:03Z",
+    "slaBreachesAt": "2024-01-08T00:41:52Z",
+    "slaHighRiskAt": "2024-01-25T08:24:16Z",
+    "slaMediumRiskAt": "2024-01-18T00:07:43Z",
+    "team": {
+      "id": "november-479"
+    },
+    "state": {
+      "id": "november-107"
+    },
+    "assignee": {
+      "id": "delta-663"
+    },
+    "creator": {
+      "id": "uniform-898"
+    },
+    "parent": {
+      "id": "romeo-444"
+    },
+    "project": {
+      "id": "victor-236"
+    },
+    "projectMilestone": {
+      "id": "mike-676"
+    },
+    "cycle": {
+      "id": "alpha-862"
+    }
+  },
+  {
+    "id": "whiskey--pk6",
+    "identifier": "hotel-560",
+    "title": "golf-584",
+    "description": "whiskey-415",
+    "number": 88660,
+    "url": "papa-137",
+    "priority": 67725,
+    "priorityLabel": "xray-881",
+    "estimate": 474.92,
+    "dueDate": "2024-07-13",
+    "boardOrder": 220.24,
+    "sortOrder": 456.44,
+    "prioritySortOrder": 81.61,
+    "subIssueSortOrder": 833.12,
+    "branchName": "quebec-493",
+    "labelIds": [
+      "uniform-952",
+      "golf-138"
+    ],
+    "previousIdentifiers": [],
+    "integrationSourceType": "sierra-898",
+    "customerTicketCount": 1983,
+    "reactionData": "november-478",
+    "trashed": true,
+    "inheritsSharedAccess": false,
+    "slaType": "golf-932",
+    "createdAt": "2024-01-06T20:02:06Z",
+    "updatedAt": "2024-01-01T06:00:00Z",
+    "archivedAt": "2024-01-26T19:27:53Z",
+    "completedAt": "2024-01-25T07:03:22Z",
+    "canceledAt": "2024-01-30T16:20:27Z",
+    "startedAt": "2024-01-20T04:06:42Z",
+    "autoArchivedAt": "2024-01-29T17:51:42Z",
+    "autoClosedAt": "2024-01-28T08:37:23Z",
+    "addedToCycleAt": "2024-01-27T03:08:58Z",
+    "addedToProjectAt": "2024-01-28T07:21:28Z",
+    "addedToTeamAt": "2024-01-23T06:28:29Z",
+    "startedTriageAt": "2024-01-27T05:15:58Z",
+    "triagedAt": "2024-01-14T08:29:30Z",
+    "snoozedUntilAt": "2024-01-30T08:15:45Z",
+    "slaStartedAt": "2024-01-29T20:09:49Z",
+    "slaBreachesAt": "2024-01-23T10:04:07Z",
+    "slaHighRiskAt": "2024-01-21T05:45:22Z",
+    "slaMediumRiskAt": "2024-01-02T18:10:49Z",
+    "team": {
+      "id": "papa-152"
+    },
+    "state": {
+      "id": "charlie-524"
+    },
+    "assignee": {
+      "id": "juliet-111"
+    },
+    "creator": {
+      "id": "kilo-700"
+    },
+    "parent": {
+      "id": "romeo-216"
+    },
+    "project": {
+      "id": "uniform-212"
+    },
+    "projectMilestone": {
+      "id": "mike-351"
+    },
+    "cycle": {
+      "id": "sierra-964"
+    }
+  },
+  {
+    "id": "yankee-2-pk7",
+    "identifier": "sierra-304",
+    "title": "golf-150",
+    "description": "kilo-637",
+    "number": 75782,
+    "url": "mike-282",
+    "priority": 93960,
+    "priorityLabel": "hotel-671",
+    "estimate": 660.87,
+    "dueDate": "2024-07-20",
+    "boardOrder": 969.89,
+    "sortOrder": 39.42,
+    "prioritySortOrder": 716.15,
+    "subIssueSortOrder": 3.5,
+    "branchName": "victor-630",
+    "labelIds": [
+      "alpha-171"
+    ],
+    "previousIdentifiers": [
+      "november-982"
+    ],
+    "integrationSourceType": "golf-640",
+    "customerTicketCount": 49980,
+    "reactionData": "sierra-325",
+    "trashed": false,
+    "inheritsSharedAccess": true,
+    "slaType": "kilo-789",
+    "createdAt": "2024-01-09T06:22:09Z",
+    "updatedAt": "2024-01-01T07:00:00Z",
+    "archivedAt": "2024-01-26T23:40:22Z",
+    "completedAt": "2024-01-10T09:18:09Z",
+    "canceledAt": "2024-01-10T00:37:23Z",
+    "startedAt": "2024-01-17T06:54:40Z",
+    "autoArchivedAt": "2024-01-15T13:27:32Z",
+    "autoClosedAt": "2024-01-12T10:27:15Z",
+    "addedToCycleAt": "2024-01-17T02:32:13Z",
+    "addedToProjectAt": "2024-01-23T07:54:53Z",
+    "addedToTeamAt": "2024-01-01T05:49:08Z",
+    "startedTriageAt": "2024-01-12T01:34:30Z",
+    "triagedAt": "2024-01-03T22:07:52Z",
+    "snoozedUntilAt": "2024-01-23T13:46:13Z",
+    "slaStartedAt": "2024-01-04T03:04:51Z",
+    "slaBreachesAt": "2024-01-31T04:56:14Z",
+    "slaHighRiskAt": "2024-01-24T11:50:57Z",
+    "slaMediumRiskAt": "2024-01-24T23:40:58Z",
+    "team": {
+      "id": "india-108"
+    },
+    "state": {
+      "id": "charlie-485"
+    },
+    "assignee": {
+      "id": "zulu-141"
+    },
+    "creator": {
+      "id": "whiskey-470"
+    },
+    "parent": {
+      "id": "victor-343"
+    },
+    "project": {
+      "id": "uniform-133"
+    },
+    "projectMilestone": {
+      "id": "bravo-615"
+    },
+    "cycle": {
+      "id": "kilo-351"
+    }
+  }
+]
