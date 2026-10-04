@@ -1,172 +1,692 @@
 [
   {
-    "id": "mike-558-pk0",
-    "firstName": "foxtrot-104",
-    "surname": "india-112",
-    "email": "hotel-136",
-    "displayName": "echo-303",
-    "fullName": "oscar-663",
-    "creationDateTime": "2024-01-30T04:21:52Z",
+    "id": "9000000000000000001",
+    "firstName": "Test",
+    "surname": "User 1",
+    "email": "test.user1@example.com",
+    "displayName": "Test User 1",
+    "fullName": "Test User 1",
+    "creationDateTime": "2024-01-10T08:30:10.123456",
     "work": {
-      "department": "hotel-480",
-      "title": "india-865",
-      "site": "charlie-727",
-      "siteId": 59357,
-      "startDate": "2024-01-01",
-      "manager": "india-439",
+      "startDate": "2024-01-15",
+      "manager": "9000000000000000002",
       "reportsTo": {
-        "id": "lima-638",
-        "firstName": "bravo-589",
-        "surname": "lima-356",
-        "email": "bravo-681",
-        "displayName": "alpha-496"
-      }
+        "id": "9000000000000000002",
+        "firstName": "Test",
+        "surname": "User 2",
+        "email": "test.user2@example.com",
+        "displayName": "Test User 2"
+      },
+      "department": "Engineering",
+      "siteId": 900001,
+      "title": "Test Title 1",
+      "site": "Test Site A"
     },
     "internal": {
-      "status": "golf-764",
-      "lifecycleStatus": "delta-766",
-      "terminationDate": "2024-01-01"
+      "terminationDate": null,
+      "status": "Active",
+      "lifecycleStatus": "Employed"
     },
     "personal": {
-      "birthDate": "2024-01-01"
+      "birthDate": null
     },
-    "humanReadable": "kilo-932",
-    "raw_json": "charlie-718"
+    "humanReadable": {
+      "fullName": "Test User 1",
+      "displayName": "Test User 1",
+      "creationDateTime": "2024-01-10T08:30:10.123456",
+      "work": {
+        "startDate": "15/01/2024",
+        "manager": "Test User 2",
+        "reportsTo": "Test User 2",
+        "department": "Engineering",
+        "siteId": "Test Site A",
+        "title": "Test Title 1",
+        "site": "Test Site A"
+      },
+      "internal": {
+        "terminationDate": null,
+        "status": "Active",
+        "lifecycleStatus": "Employed"
+      },
+      "email": "test.user1@example.com",
+      "surname": "User 1",
+      "id": "9000000000000000001",
+      "firstName": "Test"
+    },
+    "/root/id": {
+      "value": "9000000000000000001"
+    },
+    "/root/firstName": {
+      "value": "Test"
+    },
+    "/root/surname": {
+      "value": "User 1"
+    },
+    "/root/email": {
+      "value": "test.user1@example.com"
+    },
+    "/root/displayName": {
+      "value": "Test User 1"
+    },
+    "/root/fullName": {
+      "value": "Test User 1"
+    },
+    "/root/creationDateTime": {
+      "value": "2024-01-10T08:30:10.123456"
+    },
+    "/work/department": {
+      "value": "Engineering"
+    },
+    "/work/title": {
+      "value": "Test Title 1"
+    },
+    "/work/startDate": {
+      "value": "2024-01-15"
+    },
+    "/work/manager": {
+      "value": "9000000000000000002"
+    },
+    "/work/site": {
+      "value": "Test Site A"
+    },
+    "/work/siteId": {
+      "value": 900001
+    },
+    "/work/reportsTo": {
+      "value": {
+        "id": "9000000000000000002",
+        "firstName": "Test",
+        "surname": "User 2",
+        "email": "test.user2@example.com",
+        "displayName": "Test User 2"
+      }
+    },
+    "/internal/status": {
+      "value": "Active"
+    },
+    "/internal/lifecycleStatus": {
+      "value": "Employed"
+    },
+    "/internal/terminationDate": {
+      "value": null
+    },
+    "/personal/birthDate": {
+      "value": null
+    }
   },
   {
-    "id": "romeo-12-pk1",
-    "firstName": "xray-573",
-    "surname": "alpha-215",
-    "email": "november-254",
-    "displayName": "foxtrot-528",
-    "fullName": "hotel-810",
-    "creationDateTime": "2024-01-08T14:34:17Z",
+    "id": "9000000000000000002",
+    "firstName": "Test",
+    "surname": "User 2",
+    "email": "test.user2@example.com",
+    "displayName": "Test User 2",
+    "fullName": "Test User 2",
+    "creationDateTime": "2024-01-11T08:30:11.123457",
     "work": {
-      "department": "zulu-685",
-      "title": "kilo-505",
-      "site": "whiskey-116",
-      "siteId": 47895,
-      "startDate": "2024-02-02",
-      "manager": "yankee-180",
+      "startDate": "2024-02-15",
+      "manager": "9000000000000000003",
       "reportsTo": {
-        "id": "victor-510",
-        "firstName": "alpha-518",
-        "surname": "echo-258",
-        "email": "victor-434",
-        "displayName": "quebec-159"
-      }
+        "id": "9000000000000000003",
+        "firstName": "Test",
+        "surname": "User 3",
+        "email": "test.user3@example.com",
+        "displayName": "Test User 3"
+      },
+      "department": "Sales",
+      "siteId": 900002,
+      "title": "Test Title 2",
+      "site": "Test Site B"
     },
     "internal": {
-      "status": "yankee-259",
-      "lifecycleStatus": "victor-556",
-      "terminationDate": "2024-02-02"
+      "terminationDate": null,
+      "status": "Active",
+      "lifecycleStatus": "Employed"
     },
     "personal": {
-      "birthDate": "2024-02-02"
+      "birthDate": "1991-01-11"
     },
-    "humanReadable": "bravo-578",
-    "raw_json": "yankee-321"
+    "humanReadable": {
+      "fullName": "Test User 2",
+      "displayName": "Test User 2",
+      "creationDateTime": "2024-01-11T08:30:11.123457",
+      "work": {
+        "startDate": "15/02/2024",
+        "manager": "Test User 3",
+        "reportsTo": "Test User 3",
+        "department": "Sales",
+        "siteId": "Test Site B",
+        "title": "Test Title 2",
+        "site": "Test Site B"
+      },
+      "internal": {
+        "terminationDate": null,
+        "status": "Active",
+        "lifecycleStatus": "Employed"
+      },
+      "email": "test.user2@example.com",
+      "surname": "User 2",
+      "id": "9000000000000000002",
+      "firstName": "Test"
+    },
+    "/root/id": {
+      "value": "9000000000000000002"
+    },
+    "/root/firstName": {
+      "value": "Test"
+    },
+    "/root/surname": {
+      "value": "User 2"
+    },
+    "/root/email": {
+      "value": "test.user2@example.com"
+    },
+    "/root/displayName": {
+      "value": "Test User 2"
+    },
+    "/root/fullName": {
+      "value": "Test User 2"
+    },
+    "/root/creationDateTime": {
+      "value": "2024-01-11T08:30:11.123457"
+    },
+    "/work/department": {
+      "value": "Sales"
+    },
+    "/work/title": {
+      "value": "Test Title 2"
+    },
+    "/work/startDate": {
+      "value": "2024-02-15"
+    },
+    "/work/manager": {
+      "value": "9000000000000000003"
+    },
+    "/work/site": {
+      "value": "Test Site B"
+    },
+    "/work/siteId": {
+      "value": 900002
+    },
+    "/work/reportsTo": {
+      "value": {
+        "id": "9000000000000000003",
+        "firstName": "Test",
+        "surname": "User 3",
+        "email": "test.user3@example.com",
+        "displayName": "Test User 3"
+      }
+    },
+    "/internal/status": {
+      "value": "Active"
+    },
+    "/internal/lifecycleStatus": {
+      "value": "Employed"
+    },
+    "/internal/terminationDate": {
+      "value": null
+    },
+    "/personal/birthDate": {
+      "value": "1991-01-11"
+    }
   },
   {
-    "id": "sierra-6-pk2",
-    "firstName": "hotel-293",
-    "surname": "oscar-259",
-    "email": "charlie-406",
-    "displayName": "juliet-623",
-    "fullName": "whiskey-280",
-    "creationDateTime": "2024-01-05T21:33:42Z",
+    "id": "9000000000000000003",
+    "firstName": "Test",
+    "surname": "User 3",
+    "email": "test.user3@example.com",
+    "displayName": "Test User 3",
+    "fullName": "Test User 3",
+    "creationDateTime": "2024-01-12T08:30:12.123458",
     "work": {
-      "department": "echo-755",
-      "title": "hotel-266",
-      "site": "xray-785",
-      "siteId": 98275,
-      "startDate": "2024-03-03",
-      "manager": "november-647",
+      "startDate": "2024-03-15",
+      "manager": "9000000000000000004",
       "reportsTo": {
-        "id": "yankee-557",
-        "firstName": "zulu-716",
-        "surname": "uniform-287",
-        "email": "yankee-915",
-        "displayName": "delta-619"
-      }
+        "id": "9000000000000000004",
+        "firstName": "Test",
+        "surname": "User 4",
+        "email": "test.user4@example.com",
+        "displayName": "Test User 4"
+      },
+      "department": "Finance",
+      "siteId": 900001,
+      "title": "Test Title 3",
+      "site": "Test Site A"
     },
     "internal": {
-      "status": "oscar-218",
-      "lifecycleStatus": "delta-484",
-      "terminationDate": "2024-03-03"
+      "terminationDate": null,
+      "status": "Active",
+      "lifecycleStatus": "Employed"
     },
     "personal": {
-      "birthDate": "2024-03-03"
+      "birthDate": "1992-02-12"
     },
-    "humanReadable": "xray-274",
-    "raw_json": "hotel-978"
+    "humanReadable": {
+      "fullName": "Test User 3",
+      "displayName": "Test User 3",
+      "creationDateTime": "2024-01-12T08:30:12.123458",
+      "work": {
+        "startDate": "15/03/2024",
+        "manager": "Test User 4",
+        "reportsTo": "Test User 4",
+        "department": "Finance",
+        "siteId": "Test Site A",
+        "title": "Test Title 3",
+        "site": "Test Site A"
+      },
+      "internal": {
+        "terminationDate": null,
+        "status": "Active",
+        "lifecycleStatus": "Employed"
+      },
+      "email": "test.user3@example.com",
+      "surname": "User 3",
+      "id": "9000000000000000003",
+      "firstName": "Test"
+    },
+    "/root/id": {
+      "value": "9000000000000000003"
+    },
+    "/root/firstName": {
+      "value": "Test"
+    },
+    "/root/surname": {
+      "value": "User 3"
+    },
+    "/root/email": {
+      "value": "test.user3@example.com"
+    },
+    "/root/displayName": {
+      "value": "Test User 3"
+    },
+    "/root/fullName": {
+      "value": "Test User 3"
+    },
+    "/root/creationDateTime": {
+      "value": "2024-01-12T08:30:12.123458"
+    },
+    "/work/department": {
+      "value": "Finance"
+    },
+    "/work/title": {
+      "value": "Test Title 3"
+    },
+    "/work/startDate": {
+      "value": "2024-03-15"
+    },
+    "/work/manager": {
+      "value": "9000000000000000004"
+    },
+    "/work/site": {
+      "value": "Test Site A"
+    },
+    "/work/siteId": {
+      "value": 900001
+    },
+    "/work/reportsTo": {
+      "value": {
+        "id": "9000000000000000004",
+        "firstName": "Test",
+        "surname": "User 4",
+        "email": "test.user4@example.com",
+        "displayName": "Test User 4"
+      }
+    },
+    "/internal/status": {
+      "value": "Active"
+    },
+    "/internal/lifecycleStatus": {
+      "value": "Employed"
+    },
+    "/internal/terminationDate": {
+      "value": null
+    },
+    "/personal/birthDate": {
+      "value": "1992-02-12"
+    }
   },
   {
-    "id": "tango-88-pk3",
-    "firstName": "quebec-416",
-    "surname": "xray-203",
-    "email": "golf-345",
-    "displayName": "alpha-855",
-    "fullName": "lima-517",
-    "creationDateTime": "2024-01-07T15:36:07Z",
+    "id": "9000000000000000004",
+    "firstName": "Test",
+    "surname": "User 4",
+    "email": "test.user4@example.com",
+    "displayName": "Test User 4",
+    "fullName": "Test User 4",
+    "creationDateTime": "2024-01-13T08:30:13.123459",
     "work": {
-      "department": "whiskey-902",
-      "title": "november-747",
-      "site": "papa-380",
-      "siteId": 99679,
-      "startDate": "2024-04-04",
-      "manager": "quebec-581",
+      "startDate": "2024-04-15",
+      "manager": "9000000000000000005",
       "reportsTo": {
-        "id": "alpha-885",
-        "firstName": "mike-776",
-        "surname": "kilo-321",
-        "email": "zulu-690",
-        "displayName": "romeo-965"
-      }
+        "id": "9000000000000000005",
+        "firstName": "Test",
+        "surname": "User 5",
+        "email": "test.user5@example.com",
+        "displayName": "Test User 5"
+      },
+      "department": "Engineering",
+      "siteId": 900002,
+      "title": "Test Title 4",
+      "site": "Test Site B"
     },
     "internal": {
-      "status": "sierra-362",
-      "lifecycleStatus": "victor-725",
-      "terminationDate": "2024-04-04"
+      "terminationDate": null,
+      "status": "Active",
+      "lifecycleStatus": "Employed"
     },
     "personal": {
-      "birthDate": "2024-04-04"
+      "birthDate": "1993-03-13"
     },
-    "humanReadable": "foxtrot-778",
-    "raw_json": "tango-303"
+    "humanReadable": {
+      "fullName": "Test User 4",
+      "displayName": "Test User 4",
+      "creationDateTime": "2024-01-13T08:30:13.123459",
+      "work": {
+        "startDate": "15/04/2024",
+        "manager": "Test User 5",
+        "reportsTo": "Test User 5",
+        "department": "Engineering",
+        "siteId": "Test Site B",
+        "title": "Test Title 4",
+        "site": "Test Site B"
+      },
+      "internal": {
+        "terminationDate": null,
+        "status": "Active",
+        "lifecycleStatus": "Employed"
+      },
+      "email": "test.user4@example.com",
+      "surname": "User 4",
+      "id": "9000000000000000004",
+      "firstName": "Test"
+    },
+    "/root/id": {
+      "value": "9000000000000000004"
+    },
+    "/root/firstName": {
+      "value": "Test"
+    },
+    "/root/surname": {
+      "value": "User 4"
+    },
+    "/root/email": {
+      "value": "test.user4@example.com"
+    },
+    "/root/displayName": {
+      "value": "Test User 4"
+    },
+    "/root/fullName": {
+      "value": "Test User 4"
+    },
+    "/root/creationDateTime": {
+      "value": "2024-01-13T08:30:13.123459"
+    },
+    "/work/department": {
+      "value": "Engineering"
+    },
+    "/work/title": {
+      "value": "Test Title 4"
+    },
+    "/work/startDate": {
+      "value": "2024-04-15"
+    },
+    "/work/manager": {
+      "value": "9000000000000000005"
+    },
+    "/work/site": {
+      "value": "Test Site B"
+    },
+    "/work/siteId": {
+      "value": 900002
+    },
+    "/work/reportsTo": {
+      "value": {
+        "id": "9000000000000000005",
+        "firstName": "Test",
+        "surname": "User 5",
+        "email": "test.user5@example.com",
+        "displayName": "Test User 5"
+      }
+    },
+    "/internal/status": {
+      "value": "Active"
+    },
+    "/internal/lifecycleStatus": {
+      "value": "Employed"
+    },
+    "/internal/terminationDate": {
+      "value": null
+    },
+    "/personal/birthDate": {
+      "value": "1993-03-13"
+    }
   },
   {
-    "id": "hotel-74-pk4",
-    "firstName": "hotel-948",
-    "surname": "kilo-847",
-    "email": "kilo-844",
-    "displayName": "quebec-385",
-    "fullName": "india-692",
-    "creationDateTime": "2024-01-25T00:28:54Z",
+    "id": "9000000000000000005",
+    "firstName": "Test",
+    "surname": "User 5",
+    "email": "test.user5@example.com",
+    "displayName": "Test User 5",
+    "fullName": "Test User 5",
+    "creationDateTime": "2024-01-14T08:30:14.123460",
     "work": {
-      "department": "charlie-913",
-      "title": "bravo-163",
-      "site": "papa-256",
-      "siteId": 43061,
-      "startDate": "2024-05-05",
-      "manager": "zulu-742",
+      "startDate": "2024-05-15",
+      "manager": "9000000000000000006",
       "reportsTo": {
-        "id": "victor-949",
-        "firstName": "mike-888",
-        "surname": "alpha-999",
-        "email": "whiskey-586",
-        "displayName": "sierra-336"
-      }
+        "id": "9000000000000000006",
+        "firstName": "Test",
+        "surname": "User 6",
+        "email": "test.user6@example.com",
+        "displayName": "Test User 6"
+      },
+      "department": "Sales",
+      "siteId": 900001,
+      "title": "Test Title 5",
+      "site": "Test Site A"
     },
     "internal": {
-      "status": "golf-749",
-      "lifecycleStatus": "whiskey-378",
-      "terminationDate": "2024-05-05"
+      "terminationDate": null,
+      "status": "Active",
+      "lifecycleStatus": "Employed"
     },
     "personal": {
-      "birthDate": "2024-05-05"
+      "birthDate": "1994-04-14"
     },
-    "humanReadable": "india-222",
-    "raw_json": "bravo-158"
+    "humanReadable": {
+      "fullName": "Test User 5",
+      "displayName": "Test User 5",
+      "creationDateTime": "2024-01-14T08:30:14.123460",
+      "work": {
+        "startDate": "15/05/2024",
+        "manager": "Test User 6",
+        "reportsTo": "Test User 6",
+        "department": "Sales",
+        "siteId": "Test Site A",
+        "title": "Test Title 5",
+        "site": "Test Site A"
+      },
+      "internal": {
+        "terminationDate": null,
+        "status": "Active",
+        "lifecycleStatus": "Employed"
+      },
+      "email": "test.user5@example.com",
+      "surname": "User 5",
+      "id": "9000000000000000005",
+      "firstName": "Test"
+    },
+    "/root/id": {
+      "value": "9000000000000000005"
+    },
+    "/root/firstName": {
+      "value": "Test"
+    },
+    "/root/surname": {
+      "value": "User 5"
+    },
+    "/root/email": {
+      "value": "test.user5@example.com"
+    },
+    "/root/displayName": {
+      "value": "Test User 5"
+    },
+    "/root/fullName": {
+      "value": "Test User 5"
+    },
+    "/root/creationDateTime": {
+      "value": "2024-01-14T08:30:14.123460"
+    },
+    "/work/department": {
+      "value": "Sales"
+    },
+    "/work/title": {
+      "value": "Test Title 5"
+    },
+    "/work/startDate": {
+      "value": "2024-05-15"
+    },
+    "/work/manager": {
+      "value": "9000000000000000006"
+    },
+    "/work/site": {
+      "value": "Test Site A"
+    },
+    "/work/siteId": {
+      "value": 900001
+    },
+    "/work/reportsTo": {
+      "value": {
+        "id": "9000000000000000006",
+        "firstName": "Test",
+        "surname": "User 6",
+        "email": "test.user6@example.com",
+        "displayName": "Test User 6"
+      }
+    },
+    "/internal/status": {
+      "value": "Active"
+    },
+    "/internal/lifecycleStatus": {
+      "value": "Employed"
+    },
+    "/internal/terminationDate": {
+      "value": null
+    },
+    "/personal/birthDate": {
+      "value": "1994-04-14"
+    }
+  },
+  {
+    "id": "9000000000000000006",
+    "firstName": "Test",
+    "surname": "User 6",
+    "email": "test.user6@example.com",
+    "displayName": "Test User 6",
+    "fullName": "Test User 6",
+    "creationDateTime": "2024-01-15T08:30:15.123461",
+    "work": {
+      "startDate": "2024-06-15",
+      "manager": "9000000000000000001",
+      "reportsTo": {
+        "id": "9000000000000000001",
+        "firstName": "Test",
+        "surname": "User 1",
+        "email": "test.user1@example.com",
+        "displayName": "Test User 1"
+      },
+      "department": "Finance",
+      "siteId": 900002,
+      "title": "Test Title 6",
+      "site": "Test Site B"
+    },
+    "internal": {
+      "terminationDate": "2025-06-30",
+      "status": "Inactive",
+      "lifecycleStatus": "Terminated"
+    },
+    "personal": {
+      "birthDate": "1995-05-15"
+    },
+    "humanReadable": {
+      "fullName": "Test User 6",
+      "displayName": "Test User 6",
+      "creationDateTime": "2024-01-15T08:30:15.123461",
+      "work": {
+        "startDate": "15/06/2024",
+        "manager": "Test User 1",
+        "reportsTo": "Test User 1",
+        "department": "Finance",
+        "siteId": "Test Site B",
+        "title": "Test Title 6",
+        "site": "Test Site B"
+      },
+      "internal": {
+        "terminationDate": "30/06/2025",
+        "status": "Inactive",
+        "lifecycleStatus": "Terminated"
+      },
+      "email": "test.user6@example.com",
+      "surname": "User 6",
+      "id": "9000000000000000006",
+      "firstName": "Test"
+    },
+    "/root/id": {
+      "value": "9000000000000000006"
+    },
+    "/root/firstName": {
+      "value": "Test"
+    },
+    "/root/surname": {
+      "value": "User 6"
+    },
+    "/root/email": {
+      "value": "test.user6@example.com"
+    },
+    "/root/displayName": {
+      "value": "Test User 6"
+    },
+    "/root/fullName": {
+      "value": "Test User 6"
+    },
+    "/root/creationDateTime": {
+      "value": "2024-01-15T08:30:15.123461"
+    },
+    "/work/department": {
+      "value": "Finance"
+    },
+    "/work/title": {
+      "value": "Test Title 6"
+    },
+    "/work/startDate": {
+      "value": "2024-06-15"
+    },
+    "/work/manager": {
+      "value": "9000000000000000001"
+    },
+    "/work/site": {
+      "value": "Test Site B"
+    },
+    "/work/siteId": {
+      "value": 900002
+    },
+    "/work/reportsTo": {
+      "value": {
+        "id": "9000000000000000001",
+        "firstName": "Test",
+        "surname": "User 1",
+        "email": "test.user1@example.com",
+        "displayName": "Test User 1"
+      }
+    },
+    "/internal/status": {
+      "value": "Inactive"
+    },
+    "/internal/lifecycleStatus": {
+      "value": "Terminated"
+    },
+    "/internal/terminationDate": {
+      "value": "2025-06-30"
+    },
+    "/personal/birthDate": {
+      "value": "1995-05-15"
+    }
   }
 ]

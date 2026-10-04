@@ -1,42 +1,82 @@
 [
   {
-    "list_name": "juliet-5-pk0",
-    "item_id": "november-pk0",
-    "value": "foxtrot-475",
-    "name": "echo-923",
-    "archived": true,
-    "parent_id": "oscar-625"
-  },
-  {
-    "list_name": "tango-75-pk1",
-    "item_id": "golf-796-pk1",
-    "value": "whiskey-790",
-    "name": "bravo-251",
-    "archived": false,
-    "parent_id": "yankee-260"
-  },
-  {
-    "list_name": "hotel-83-pk2",
-    "item_id": "tango-31-pk2",
-    "value": "alpha-982",
-    "name": "hotel-606",
+    "list_name": "department",
+    "item_id": "900301",
+    "value": "Engineering",
+    "name": "Engineering",
     "archived": false,
     "parent_id": null
   },
   {
-    "list_name": "charlie--pk3",
-    "item_id": "whiskey--pk3",
-    "value": "yankee-169",
-    "name": "november-943",
-    "archived": true,
-    "parent_id": "charlie-153"
+    "list_name": "department",
+    "item_id": "900302",
+    "value": "Sales",
+    "name": "Sales",
+    "archived": false,
+    "parent_id": null
   },
   {
-    "list_name": "hotel-83-pk2",
-    "item_id": "whiskey--pk4",
-    "value": "romeo-322",
-    "name": "tango-157",
+    "list_name": "department",
+    "item_id": "900303",
+    "value": "Finance",
+    "name": "Finance",
     "archived": false,
-    "parent_id": "tango-31-pk2"
+    "parent_id": null
+  },
+  {
+    "list_name": "site",
+    "item_id": "900311",
+    "value": "Test Site A",
+    "name": "Test Site A",
+    "archived": false,
+    "parent_id": null
+  },
+  {
+    "list_name": "site",
+    "item_id": "900312",
+    "value": "Test Site B",
+    "name": "Test Site B",
+    "archived": false,
+    "parent_id": null
+  },
+  {
+    "list_name": "custom.field_9000000000010",
+    "item_id": "Option A",
+    "value": "Option A",
+    "name": "Option A",
+    "archived": false,
+    "parent_id": null
+  },
+  {
+    "list_name": "custom.field_9000000000010",
+    "item_id": "Option B",
+    "value": "Option B",
+    "name": "Option B",
+    "archived": false,
+    "parent_id": null
+  },
+  {
+    "list_name": "department",
+    "item_id": "900304",
+    "value": "Backend",
+    "name": "Backend",
+    "archived": false,
+    "parent_id": "900301"
+  },
+  {
+    "list_name": "department",
+    "item_id": "900305",
+    "value": "Platform",
+    "name": "Platform",
+    "archived": false,
+    "parent_id": "900304"
+  },
+  {
+    "list_name": "site",
+    "item_id": "900313",
+    "value": "Old Test Site",
+    "name": "Old Test Site",
+    "archived": true,
+    "parent_id": null
   }
 ]

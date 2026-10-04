@@ -44,4 +44,4 @@ connection:
 # parameter of the UC connection to allow them to be passed through.
 # Use a comma-separated string of option names.
 # ============================================================================
-external_options_allowlist: "fields,show_inactive,human_readable,include_archived,employee_ids,page_size,start_date,window_days,max_lookback_days,include_pending,max_records_per_batch"
+external_options_allowlist: "fields,show_inactive,human_readable,include_archived,employee_ids,page_size,start_date,window_days,max_lookback_days,include_pending,max_records_per_batch,report_id,primary_keys"

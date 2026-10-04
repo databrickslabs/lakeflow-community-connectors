@@ -1,10 +1,17 @@
 # HiBob (Bob) REST API — https://api.hibob.com/v1 (sandbox: api.sandbox.hibob.com/v1).
 #
 # Auth is HTTP Basic (service user ID + token); the simulator ignores it.
-# Corpus files are in the connector's output (row) shape, one per table, as
-# bootstrapped from TABLE_SCHEMAS. Endpoints whose wire shape nests those rows
-# (bulk history, named lists, policy types) use custom handlers in
-# handlers/responses.py to re-nest them.
+# Corpus files are synthetic (fake values only) and hold records in the live
+# wire shape, validated against production responses (people search: nested
+# fields + flat "/category/field": {"value"} keys + humanReadable object; bulk
+# history: date-only creation/modificationDate, customColumns /
+# actualWorkingPattern objects; time-off createdOn: naive ISO with fractional
+# seconds). Exceptions: bulk history rows carry their ``employeeId`` and
+# named lists are stored as flat rows; the custom handlers in
+# handlers/responses.py re-nest them into the wire shape.
+#
+# Bulk endpoints are rate-limited aggressively in production (429 with
+# X-RateLimit-Reset); the connector retries, so 429 is an expected status.
 
 endpoints:
   # ---- employees: POST people search (JSON body: fields / showInactive /
@@ -19,27 +26,28 @@ endpoints:
 
   # ---- Bulk history tables: cursor pagination over employee groups.
   # Response: {"results":[{"employeeId", "values":[...]}],
-  #            "response_metadata":{"next_cursor"}, "errors":[]}
+  #            "response_metadata":{"next_cursor"}, "errors":{}}
   # Params handled by the handler: limit, cursor, employeeIds; includeArchived ignored.
   - path: "/v1/bulk/people/work"
     method: GET
     corpus: employee_work_history
     handler: databricks.labs.community_connector.source_simulator.specs.hibob.handlers.responses:serve_bulk
+    response:
+      expected_status_codes: [429]
 
   - path: "/v1/bulk/people/employment"
     method: GET
     corpus: employee_employment_history
     handler: databricks.labs.community_connector.source_simulator.specs.hibob.handlers.responses:serve_bulk
+    response:
+      expected_status_codes: [429]
 
   - path: "/v1/bulk/people/lifecycle"
     method: GET
     corpus: employee_lifecycle_history
     handler: databricks.labs.community_connector.source_simulator.specs.hibob.handlers.responses:serve_bulk
-
-  - path: "/v1/bulk/people/salaries"
-    method: GET
-    corpus: employee_salary_history
-    handler: databricks.labs.community_connector.source_simulator.specs.hibob.handlers.responses:serve_bulk
+    response:
+      expected_status_codes: [429]
 
   # ---- time_off_request_changes: since/to range on the change timestamp.
   # The connector caps `to` at its init time; future-dated clones verify it.
@@ -64,19 +72,21 @@ endpoints:
     method: GET
     corpus: named_lists
     handler: databricks.labs.community_connector.source_simulator.specs.hibob.handlers.responses:serve_named_lists
-
-  - path: "/v1/timeoff/policy-types"
-    method: GET
-    corpus: time_off_policy_types
-    handler: databricks.labs.community_connector.source_simulator.specs.hibob.handlers.responses:serve_policy_types
+    # Live body is a map keyed by list name (tenant-specific field IDs such as
+    # "department" or "<category>.field_<n>"), each {"name", "values", "items"}.
+    # The keys are dynamic, so skip the validator's top-level key diff; the
+    # records_key is a placeholder (the handler builds the body itself).
+    response:
+      wrapper:
+        records_key: __named_lists__
+        ignore_extra_keys: true
 
   - path: "/v1/company/people/fields"
     method: GET
     corpus: employee_fields
+    # Live response is a bare JSON array of field definitions (no wrapper).
     response:
       pagination_style: none
-      wrapper:
-        records_key: fields
 
   - path: "/v1/people/custom-tables/metadata"
     method: GET
@@ -85,3 +95,28 @@ endpoints:
       pagination_style: none
       wrapper:
         records_key: tables
+
+  # ---- Saved reports ----
+  # List of saved reports visible to the service user (not read by the
+  # connector today; documented for completeness / report discovery).
+  # Live body: {"views": [{id, name, description, createdBy, configuration,
+  # type, modificationDate, creationDate, folderId, modifiedBy, isScheduled,
+  # isComparable, scheduleStatus}]}.
+  - path: "/v1/company/reports"
+    method: GET
+    corpus: company_reports
+    response:
+      pagination_style: none
+      wrapper:
+        records_key: views
+
+  # company_report: CSV download of one saved report (format=csv). The body
+  # is text/csv (UTF-8 with BOM), so a custom handler renders it from the
+  # company_report_data corpus (report ID -> header labels + rows, fake
+  # values only). Unknown report IDs -> 404.
+  - path: "/v1/company/reports/{reportId}/download"
+    method: GET
+    corpus: company_report_data
+    handler: databricks.labs.community_connector.source_simulator.specs.hibob.handlers.responses:serve_report_download
+    response:
+      expected_status_codes: [429]

@@ -29,18 +29,30 @@ Proposed tables (Airbyte supports profiles/payroll/employees via full refresh on
 | `employee_work_history` | `/bulk/people/work` | GET | cursor-paginated |
 | `employee_employment_history` | `/bulk/people/employment` | GET | cursor-paginated |
 | `employee_lifecycle_history` | `/bulk/people/lifecycle` | GET | cursor-paginated |
-| `employee_salary_history` | `/bulk/people/salaries` | GET | cursor-paginated, sensitive |
 | `time_off_request_changes` | `/timeoff/requests/changes` | GET | `since` incremental, 6 month window |
-| `time_off_policy_types` | `/timeoff/policy-types` | GET | small reference list |
 | `named_lists` | `/company/named-lists` | GET | reference data, nested items |
 | `employee_fields` | `/company/people/fields` | GET | field metadata |
 | `custom_tables_metadata` | `/people/custom-tables/metadata` | GET | table/column definitions |
+| `company_report` | `/company/reports/{reportId}/download?format=csv` | GET | one saved report per table config (`report_id`); dynamic CSV schema |
 
 ### Deferred Tables
-- `employee_equity_history` (`/bulk/people/equities`), `employee_variable_pay_history` (`/bulk/people/variable`), `employee_dependents` (`/bulk/people/dependents`), `employee_right_to_work` (`/bulk/people/right-to-work`), `employee_entitlements` (`/bulk/people/entitlement`), `employee_deductions` (`/bulk/people/deduction`): identical bulk cursor pattern to work/salary; same connector code applies, deferred only for permission/sensitivity and low demand. Easy follow-ups.
+
+#### Not implemented: permission denied in production
+The two tables below were researched and implemented in the first batch, then dropped. The production service user got **403 Forbidden** on both endpoints (it lacked the required permission), so they could not be validated. The research is kept here so they can be added back once a service user with the right permissions is available.
+
+| Table | Endpoint | Method | Notes |
+|---|---|---|---|
+| `employee_salary_history` | `/bulk/people/salaries` | GET | cursor-paginated, sensitive. Needs Payroll/Salary View + View history. 403 in production. |
+| `time_off_policy_types` | `/timeoff/policy-types` | GET | small reference list. 403 in production. |
+
+- **employee_salary_history**: same bulk shared pattern as the work/employment/lifecycle tables (see "Bulk history tables" below; `GET /bulk/people/salaries`). Extra entry fields: `base` object {value: number, currency: string}, `payPeriod` string (Annual/Hourly/Daily/Weekly/Monthly), `payFrequency` string (Monthly/Semi Monthly/Weekly/Bi-Weekly), plus `endEffectiveDate` date. Primary key (`employeeId`, `id`); ingestion type `snapshot` (no date filter). Number type: `base.value` -> DoubleType; `base` -> struct {value: double, currency: string}.
+- **time_off_policy_types**: response `{"policyTypes":["Holiday","Sick", ...]}` (array of strings). Primary key `name`; ingestion type `snapshot` (small reference data).
+
+#### Other deferred tables
+- `employee_equity_history` (`/bulk/people/equities`), `employee_variable_pay_history` (`/bulk/people/variable`), `employee_dependents` (`/bulk/people/dependents`), `employee_right_to_work` (`/bulk/people/right-to-work`), `employee_entitlements` (`/bulk/people/entitlement`), `employee_deductions` (`/bulk/people/deduction`): identical bulk cursor pattern to the work history table; same connector code applies, deferred only for permission/sensitivity and low demand. Easy follow-ups.
 - `employee_training`, `employee_bank_accounts`: per-employee only (`/people/{id}/training`, `/people/{id}/bank-accounts`), N+1 calls; sensitive.
 - Custom table entries (`GET /people/custom-tables/{employeeId}/{customTableId}`): per-employee, no bulk: N employees x M tables calls; rate limit risk. Deferred.
-- `actual_payments` (`POST /people/actual-payments/search`), `timeoff whosout`/`outtoday`, time off balances (`/timeoff/employees/{id}/balance`, per-employee), policies (`/timeoff/policies`), calendar events search, reports (`/company/reports`, download by ID; report contents are user-defined), tasks, onboarding wizards, workforce planning, `/payroll/history` (legacy, planned deprecation), `/profiles` (subset of people search; active only).
+- `actual_payments` (`POST /people/actual-payments/search`), `timeoff whosout`/`outtoday`, time off balances (`/timeoff/employees/{id}/balance`, per-employee), policies (`/timeoff/policies`), calendar events search, tasks, onboarding wizards, workforce planning, `/payroll/history` (legacy, planned deprecation), `/profiles` (subset of people search; active only).
 
 ## **Object Schema**
 
@@ -64,22 +76,20 @@ Request body:
 - Stale reads: up to ~20 seconds after writes.
 
 ### Bulk history tables (shared pattern)
-`GET /bulk/people/{work|employment|lifecycle|salaries}`; query params: `limit` (1-200, default 50), `cursor` (URL-encode), `employeeIds` (comma-separated, max 200; omit for all accessible), `includeArchived` (default false).
+`GET /bulk/people/{work|employment|lifecycle}`; query params: `limit` (1-200, default 50), `cursor` (URL-encode), `employeeIds` (comma-separated, max 200; omit for all accessible), `includeArchived` (default false).
 Response:
 ```json
 {"results":[{"employeeId":"...","values":[{...entries...}]}],
  "response_metadata":{"next_cursor":"string|null"},
  "errors":[{"employeeId":{"error":"MISSING_PERMISSION","message":"..."}}]}
 ```
-Flatten `results[].values[]` into rows, adding `employeeId`. Common entry fields: `id` integer, `effectiveDate` date, `activeEffectiveDate` date, `endEffectiveDate` date, `isCurrent` boolean, `creationDate` date(time), `modificationDate` date(time), `workChangeType` string, `change` {reason, changedBy, changedById} object, `customColumns` object (keys are backend IDs like `column_1666178477233`; map to names via custom-tables / fields metadata).
+Flatten `results[].values[]` into rows, adding `employeeId`. Common entry fields: `id` integer, `effectiveDate` date, `activeEffectiveDate` date, `endEffectiveDate` date, `isCurrent` boolean, `canBeDeleted` boolean, `creationDate` date (`YYYY-MM-DD`, often null), `modificationDate` date (`YYYY-MM-DD`), `workChangeType` string, `change` {reason, changedBy, changedById} object, `customColumns` object (keys are backend IDs like `column_1666178477233`; map to names via custom-tables / fields metadata).
 
-**employee_work_history** extra: `department` string, `title` string, `site` string, `siteId` integer, `reportsTo` object {id, firstName, surname, email, displayName}, `canBeDeleted` boolean.
+**employee_work_history** extra: `department` string, `title` string, `site` string, `siteId` integer, `reportsTo` object {id, firstName, surname, email, displayName}.
 
 **employee_employment_history** extra: `contract` string, `type` string, `salaryPayType` string, `weeklyHours` number, `fte` number, `hoursInDayNotWorked` number, `calendarName` string, `calendarId` integer, `flsaCode` string (Exempt/Non-Exempt), `actualWorkingPattern` object (pattern type hourly/fortnightly/flexible with per-day hours or weekly percentage; store as struct/JSON string).
 
 **employee_lifecycle_history** extra: `status` string (Hired, Employed, Terminated, ...), `employeeStatus` string (Active/Inactive), `reasonType` string, `leaveReason` string; `endEffectiveDate` is string.
-
-**employee_salary_history** extra: `base` object {value: number, currency: string}, `payPeriod` string (Annual/Hourly/Daily/Weekly/Monthly), `payFrequency` string (Monthly/Semi Monthly/Weekly/Bi-Weekly).
 
 ### time_off_request_changes (`GET /timeoff/requests/changes`)
 Response `{"changes":[{...}]}`. Fields: `changeType` string (Created, Canceled, Deleted, Pending), `requestId` int64, `originalRequestId` int64|null, `previousRequestId` int64|null, `employeeId` string, `employeeDisplayName` string, `employeeEmail` string, `policyTypeDisplayName` string, `type` string (duration config, e.g. `days`, `specificHoursDayDurations`, `DifferentDayDurations`, ...), `createdOn` datetime string (change timestamp, e.g. `2025-08-17T18:29:10.408597`), `durationUnit` string (days/hours), `totalDuration` number, `totalCost` number, `changeReason` string, `visibility` string (Public/Private/custom), `startDate` date, `endDate` date, `timeZone` string. Additional type-specific fields (start/end time, portions, day durations) may appear depending on `type`; keep extras in a JSON/variant column.
@@ -87,27 +97,40 @@ Response `{"changes":[{...}]}`. Fields: `changeType` string (Created, Canceled, 
 ### named_lists (`GET /company/named-lists`, `includeArchived` bool)
 `{"lists":[{"name":"...","items":[{"id":int,"value":string,"name":string,"archived":bool,"children":[...]}]}]}`. Flatten to rows (list_name, item id, value, name, archived, parent_id); children are recursive.
 
-### time_off_policy_types (`GET /timeoff/policy-types`)
-`{"policyTypes":["Holiday","Sick", ...]}` (array of strings).
+### company_report (saved reports)
+
+**List reports** — `GET /v1/company/reports` → 200, `{"views": [{"id": str, "name": str, "description": str, "createdBy": str, "configuration": object, "type": str, "modificationDate": str, "creationDate": str, "folderId": int, "modifiedBy": str, "isScheduled": bool, "isComparable": bool, "scheduleStatus": str}]}`. Returns only reports visible to (shared with) the calling service user (610 entries for the production account checked). Not paginated. The connector does not call it; use it to discover `report_id` values.
+
+**Download a report** — `GET /v1/company/reports/{reportId}/download?format=csv` → 200, `Content-Type: text/csv; charset=UTF-8`.
+- Body: UTF-8, possibly with a BOM (decode as `utf-8-sig`). First row is the header with the report's **human-readable column labels** (as defined in the Bob report builder), followed by one row per data row. Empty cells are `""`. Dates are `YYYY-MM-DD`.
+- Example (production report "Work history report - BI", ~3 MB, ~15k rows) header: `Employee ID (bob)`, `Start date`, `Employment type`, `Termination date`, `Effective date`, `Job title`, `Level`, `Manager's ID`, `Site`, `Department`, `Finance Department Description`, `Group`, `Team`, `Product Line`, `Function`, `Reason`, `Leave and termination type`, `Reason for termination`. (`Employee ID (bob)`, `Effective date`) is unique in that report.
+- The column set, order and row grain are entirely user-defined and change when the report is edited in Bob, so the schema must be derived from the header at read time.
+- `format=json` also works (`{"employees": [{id, internal:{}, work:{}, payroll:{}}]}`, ~6x larger, nested per category) — not used; CSV is flatter and smaller.
+- Rate-limit headers (`X-RateLimit-Limit: 50`, `-Remaining`, `-Reset`) are returned; 429 handling is the same as other endpoints.
+- 404 when the report ID is unknown or not visible to the service user.
+- **Future option (not implemented):** `GET /v1/company/reports/{reportId}/download-async` returns a polling URL for generating large reports asynchronously; consider it if synchronous downloads start timing out.
+
+**Connector mapping** — table `company_report`, required option `report_id`. Every header label becomes a nullable `STRING` column; empty cells become `null`. Column names are normalised: strip accents (NFKD → ASCII), lowercase, replace each run of non-`[a-z0-9]` characters with `_`, strip leading/trailing `_` (e.g. `Employee ID (bob)` → `employee_id_bob`, `Manager's ID` → `manager_s_id`). A label with nothing left becomes `column_<position>`; duplicates get `_2`, `_3`, ... in header order. Optional `primary_keys` (comma-separated or JSON list of normalised names) is validated against the header.
 
 ## **Get Object Primary Keys**
 
 Static (no API):
 - `employees`: `id`
-- `employee_work_history`, `employee_employment_history`, `employee_lifecycle_history`, `employee_salary_history`: (`employeeId`, `id`) (entry `id` is an integer row id; use the pair to be safe)
+- `employee_work_history`, `employee_employment_history`, `employee_lifecycle_history`: (`employeeId`, `id`) (entry `id` is an integer row id; use the pair to be safe)
 - `time_off_request_changes`: (`requestId`, `changeType`) (a request ID is regenerated on modification; same requestId can appear as Created then Canceled/Deleted). Hedge: also include `createdOn` if duplicates appear.
 - `named_lists`: (`list_name`, `item_id`)
-- `time_off_policy_types`: `name`
 - `employee_fields`: `id`; `custom_tables_metadata`: `id` (columns: (`table_id`, `column_id`)).
+- `company_report`: none inherent (report-defined). Supplied by the user via `primary_keys`; e.g. (`employee_id_bob`, `effective_date`) for a work-history report.
 
 ## **Object's ingestion type**
 
 | Table | Type | Rationale |
 |---|---|---|
 | `employees` | `snapshot` | No modified-since filter on people search; full pull each run (filter by `root.id` batches if large). Not aware of hard deletes other than absence / `internal.status` inactive |
-| `employee_work_history`, `employee_employment_history`, `employee_lifecycle_history`, `employee_salary_history` | `snapshot` | Bulk endpoints have no date filter. Entries carry `modificationDate`, which can be used client-side to filter, but the API still returns everything. Not `cdc` as deletes are undetectable incrementally. |
+| `employee_work_history`, `employee_employment_history`, `employee_lifecycle_history` | `snapshot` | Bulk endpoints have no date filter. Entries carry `modificationDate`, which can be used client-side to filter, but the API still returns everything. Not `cdc` as deletes are undetectable incrementally. |
 | `time_off_request_changes` | `append` | Change log filtered by `since` (change date); each row is an immutable snapshot of a change |
-| `named_lists`, `time_off_policy_types`, `employee_fields`, `custom_tables_metadata` | `snapshot` | Small reference data |
+| `named_lists`, `employee_fields`, `custom_tables_metadata` | `snapshot` | Small reference data |
+| `company_report` | `snapshot` | Report download is always the full current result; no filter or cursor |
 
 ## **Read API for Data Retrieval**
 
@@ -142,11 +165,11 @@ Per-endpoint, per service user; 429 on exceed. Headers: `X-RateLimit-Limit`, `X-
 |---|---|
 | string / id (numeric-like, e.g. `3332883884017713938`) | StringType (employee IDs are strings; exceed safe JS ints) |
 | integer (entry `id`, `siteId`, `calendarId`, `requestId`) | LongType |
-| number (`fte`, `weeklyHours`, `totalDuration`, `totalCost`, salary `value`) | DoubleType (or Decimal) |
+| number (`fte`, `weeklyHours`, `totalDuration`, `totalCost`) | DoubleType (or Decimal) |
 | boolean | BooleanType |
 | date (`yyyy-MM-dd`) | DateType (or StringType to be safe) |
 | datetime (ISO 8601, e.g. `createdOn`, `creationDateTime`) | TimestampType/StringType |
-| object (`change`, `reportsTo`, `base`, `actualWorkingPattern`, `customColumns`) | StructType / MapType / JSON string |
+| object (`change`, `reportsTo`, `actualWorkingPattern`, `customColumns`) | StructType / MapType / JSON string |
 | list / multi-list / hierarchy-list | list item value (string) or ID; use `humanReadable` for label |
 | currency | struct {value: double, currency: string} |
 
@@ -155,7 +178,7 @@ Notes: `customColumns` keys are opaque backend IDs; resolve via metadata. Some d
 ## Gotchas
 - People search: POST, no pagination, 400 on `filters: []`, only `root.id`/`root.email` equals filters, 400 field cap, silent omission of unpermitted fields, `showInactive` needed for leavers.
 - Each field category needs View permission; historical bulk tables need "View history".
-- `/payroll/history` and `/profiles` are legacy/limited; use people search and `/bulk/people/salaries` instead.
+- `/payroll/history` and `/profiles` are legacy/limited; use people search and the bulk endpoints instead (`/bulk/people/salaries` is deferred: 403 for the production service user).
 - Time-off changes limited to 6 months lookback.
 - Custom table entries are per-employee (no bulk), so costly.
 - Sandbox and production use different hosts and different service users.

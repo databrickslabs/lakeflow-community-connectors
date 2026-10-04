@@ -3,13 +3,17 @@
 Tables
 ------
 * ``employees`` — ``POST /people/search`` (snapshot).
-* ``employee_{work,employment,lifecycle,salary}_history`` —
-  ``GET /bulk/people/{work|employment|lifecycle|salaries}`` with cursor
+* ``employee_{work,employment,lifecycle}_history`` —
+  ``GET /bulk/people/{work|employment|lifecycle}`` with cursor
   pagination, flattened from ``results[].values[]`` (snapshot).
 * ``time_off_request_changes`` — ``GET /timeoff/requests/changes`` with a
   ``since``/``to`` range (append, partitioned by time window).
-* ``named_lists``, ``time_off_policy_types``, ``employee_fields``,
-  ``custom_tables_metadata`` — small reference data (snapshot).
+* ``named_lists``, ``employee_fields``, ``custom_tables_metadata`` — small
+  reference data (snapshot).
+* ``company_report`` — ``GET /company/reports/{reportId}/download?format=csv``
+  for the report named by the required ``report_id`` table option
+  (snapshot). The schema is dynamic: one nullable string column per CSV
+  header label, normalised to snake_case.
 
 Only ``time_off_request_changes`` exposes a range filter, so it is the only
 table on the partitioned-stream path; everything else falls back to
@@ -19,14 +23,19 @@ table on the partitioned-stream path; everything else falls back to
 from __future__ import annotations
 
 import copy
+import csv
+import io
 import json
 import logging
+import re
 import time
+import unicodedata
 from datetime import datetime, timedelta, timezone
 from typing import Any, Iterator, Sequence
+from urllib.parse import quote
 
 import requests
-from pyspark.sql.types import ArrayType, StructType
+from pyspark.sql.types import ArrayType, StringType, StructField, StructType
 
 from databricks.labs.community_connector.interface import (
     LakeflowConnect,
@@ -38,7 +47,9 @@ from databricks.labs.community_connector.sources.hibob.hibob_schemas import (
     BULK_MAX_EMPLOYEE_IDS,
     BULK_MAX_PAGE_SIZE,
     BULK_TABLE_ENDPOINTS,
+    COMPANY_REPORT_TABLE,
     DEFAULT_EMPLOYEE_FIELDS,
+    DYNAMIC_SCHEMA_TABLES,
     HUMAN_READABLE_MODES,
     INITIAL_BACKOFF_SECONDS,
     MAX_BACKOFF_SECONDS,
@@ -47,6 +58,7 @@ from databricks.labs.community_connector.sources.hibob.hibob_schemas import (
     NAMED_LIST_MAX_DEPTH,
     PARTITIONED_TABLES,
     PRODUCTION_BASE_URL,
+    REPORT_DOWNLOAD_TIMEOUT_SECONDS,
     REQUEST_TIMEOUT_SECONDS,
     RETRIABLE_STATUS_CODES,
     SANDBOX_BASE_URL,
@@ -98,6 +110,13 @@ class HibobLakeflowConnect(LakeflowConnect, SupportsPartitionedStream):
                                Best-effort cap for the non-partitioned
                                ``read_table`` path (default 1000). Windows are
                                always fully drained (append-only table).
+        company_report:
+            report_id          ID of the saved HiBob report to download.
+                               Required.
+            primary_keys       Comma-separated (or JSON list of) normalised
+                               column names to report as primary keys.
+                               Optional; when omitted no primary key is
+                               returned and the pipeline spec must supply one.
     """
 
     def __init__(self, options: dict[str, str]) -> None:
@@ -118,6 +137,9 @@ class HibobLakeflowConnect(LakeflowConnect, SupportsPartitionedStream):
         # Offset cap: a trigger never chases data created after it started.
         self._init_time = _format_ts(datetime.now(timezone.utc))
         self._session_obj: requests.Session | None = None
+        # report_id -> (header labels, data rows); avoids downloading the same
+        # report twice for schema + metadata + read on one instance.
+        self._report_cache: dict[str, tuple[list[str], list[list[str]]]] = {}
 
     # ------------------------------------------------------------------
     # Pickling: drop the live HTTP session (re-created lazily on executors).
@@ -126,6 +148,8 @@ class HibobLakeflowConnect(LakeflowConnect, SupportsPartitionedStream):
     def __getstate__(self) -> dict:
         state = self.__dict__.copy()
         state["_session_obj"] = None
+        # Do not ship (potentially multi-MB) downloaded reports to executors.
+        state["_report_cache"] = {}
         return state
 
     @property
@@ -146,10 +170,15 @@ class HibobLakeflowConnect(LakeflowConnect, SupportsPartitionedStream):
 
     def get_table_schema(self, table_name: str, table_options: dict[str, str]) -> StructType:
         self._validate_table(table_name)
+        if table_name == COMPANY_REPORT_TABLE:
+            columns = self._report_columns(table_options)
+            return StructType([StructField(c, StringType(), True) for c in columns])
         return TABLE_SCHEMAS[table_name]
 
     def read_table_metadata(self, table_name: str, table_options: dict[str, str]) -> dict:
         self._validate_table(table_name)
+        if table_name == COMPANY_REPORT_TABLE:
+            return self._company_report_metadata(table_options)
         return dict(TABLE_METADATA[table_name])
 
     # ------------------------------------------------------------------
@@ -165,14 +194,14 @@ class HibobLakeflowConnect(LakeflowConnect, SupportsPartitionedStream):
         return iter(self._read_snapshot(table_name, table_options)), {}
 
     def _read_snapshot(self, table_name: str, table_options: dict[str, str]) -> list[dict]:
+        if table_name == COMPANY_REPORT_TABLE:
+            return self._read_company_report(table_options)
         if table_name == "employees":
             records = self._read_employees(table_options)
         elif table_name in BULK_TABLE_ENDPOINTS:
             records = self._read_bulk(table_name, table_options)
         elif table_name == "named_lists":
             records = self._read_named_lists(table_options)
-        elif table_name == "time_off_policy_types":
-            records = self._read_policy_types()
         elif table_name == "employee_fields":
             records = self._read_employee_fields()
         elif table_name == "custom_tables_metadata":
@@ -444,12 +473,6 @@ class HibobLakeflowConnect(LakeflowConnect, SupportsPartitionedStream):
             _flatten_list_items(list_name, named_list.get("items") or [], None, rows, 0)
         return rows
 
-    def _read_policy_types(self) -> list[dict]:
-        body = self._get_json("/timeoff/policy-types")
-        names = body.get("policyTypes") or []
-        return [{"name": n if isinstance(n, str) else (n or {}).get("name")}
-                for n in names if n]
-
     def _read_employee_fields(self) -> list[dict]:
         body = self._get_json("/company/people/fields")
         fields = body.get("fields") if isinstance(body, dict) else body
@@ -473,6 +496,93 @@ class HibobLakeflowConnect(LakeflowConnect, SupportsPartitionedStream):
             rec["columns"] = columns
             out.append(rec)
         return out
+
+    # ------------------------------------------------------------------
+    # company_report
+    # ------------------------------------------------------------------
+
+    def _company_report_metadata(self, table_options: dict[str, str]) -> dict:
+        report_id = _require_report_id(table_options)
+        metadata: dict[str, Any] = {"ingestion_type": "snapshot"}
+        raw_pks = table_options.get("primary_keys")
+        pks = _parse_name_list(raw_pks)
+        if raw_pks not in (None, "") and not pks:
+            raise ValueError(
+                f"company_report: 'primary_keys' option {raw_pks!r} contains no column names."
+            )
+        if pks:
+            columns = self._report_columns(table_options)
+            missing = [pk for pk in pks if pk not in columns]
+            if missing:
+                raise ValueError(
+                    f"company_report: primary_keys {missing} are not columns of report "
+                    f"{report_id}. Use normalised column names; available columns: {columns}"
+                )
+            metadata["primary_keys"] = pks
+        return metadata
+
+    def _report_columns(self, table_options: dict[str, str]) -> list[str]:
+        header, _ = self._download_report(_require_report_id(table_options))
+        return normalize_report_columns(header)
+
+    def _read_company_report(self, table_options: dict[str, str]) -> list[dict]:
+        report_id = _require_report_id(table_options)
+        header, rows = self._download_report(report_id)
+        columns = normalize_report_columns(header)
+        width = len(columns)
+        out: list[dict] = []
+        overflow = 0
+        for row in rows:
+            if len(row) > width:
+                overflow += 1
+            values = list(row[:width]) + [""] * (width - len(row))
+            out.append({c: (v if v != "" else None) for c, v in zip(columns, values)})
+        if overflow:
+            logger.warning(
+                "HiBob company_report %s: %d row(s) had more cells than the header; "
+                "extra cells were dropped.", report_id, overflow,
+            )
+        return out
+
+    def _download_report(self, report_id: str) -> tuple[list[str], list[list[str]]]:
+        """Download a saved report as CSV; returns ``(header, data_rows)``.
+
+        Cached per ``report_id`` on this instance. The body is UTF-8 with an
+        optional BOM; fully blank lines are skipped.
+        """
+        cached = self._report_cache.get(report_id)
+        if cached is not None:
+            return cached
+        path = f"/company/reports/{quote(report_id, safe='')}/download"
+        resp = self._request_with_retry(
+            "GET",
+            path,
+            params={"format": "csv"},
+            headers={"Accept": "text/csv, */*"},
+            timeout=REPORT_DOWNLOAD_TIMEOUT_SECONDS,
+        )
+        if resp.status_code >= 400:
+            hint = {
+                401: "invalid service user credentials",
+                403: "the service user lacks permission to this report or its fields",
+                404: ("report not found, or not shared with the service user; it must "
+                      "be visible in GET /company/reports"),
+                429: "rate limit exceeded after retries",
+            }.get(resp.status_code, "request failed")
+            raise RuntimeError(
+                f"HiBob API GET {path} returned {resp.status_code} ({hint}): "
+                f"{resp.text[:500]}"
+            )
+        text = resp.content.decode("utf-8-sig")
+        reader = csv.reader(io.StringIO(text, newline=""))
+        rows = [r for r in reader if r and any(cell != "" for cell in r)]
+        if not rows:
+            raise RuntimeError(
+                f"HiBob report {report_id} download returned no CSV header row."
+            )
+        result = (rows[0], rows[1:])
+        self._report_cache[report_id] = result
+        return result
 
     # ------------------------------------------------------------------
     # HTTP helpers
@@ -511,6 +621,8 @@ class HibobLakeflowConnect(LakeflowConnect, SupportsPartitionedStream):
         path: str,
         params: dict | None = None,
         json_body: dict | None = None,
+        headers: dict | None = None,
+        timeout: float = REQUEST_TIMEOUT_SECONDS,
     ) -> requests.Response:
         url = f"{self._base_url}{path}"
         backoff = INITIAL_BACKOFF_SECONDS
@@ -522,7 +634,8 @@ class HibobLakeflowConnect(LakeflowConnect, SupportsPartitionedStream):
                     url,
                     params=params,
                     json=json_body,
-                    timeout=REQUEST_TIMEOUT_SECONDS,
+                    headers=headers,
+                    timeout=timeout,
                 )
             except (requests.ConnectionError, requests.Timeout):
                 if attempt == MAX_RETRIES - 1:
@@ -539,7 +652,7 @@ class HibobLakeflowConnect(LakeflowConnect, SupportsPartitionedStream):
         return resp  # type: ignore[return-value]
 
     def _validate_table(self, table_name: str) -> None:
-        if table_name not in TABLE_SCHEMAS:
+        if table_name not in TABLE_SCHEMAS and table_name not in DYNAMIC_SCHEMA_TABLES:
             raise ValueError(
                 f"Table '{table_name}' is not supported. Supported tables: {SUPPORTED_TABLES}"
             )
@@ -548,6 +661,81 @@ class HibobLakeflowConnect(LakeflowConnect, SupportsPartitionedStream):
 # ---------------------------------------------------------------------------
 # Module-level helpers
 # ---------------------------------------------------------------------------
+
+
+_NON_ALNUM_RE = re.compile(r"[^a-z0-9]+")
+
+
+def normalize_report_column(label: str) -> str:
+    """Normalise one report header label to a snake_case, Spark-safe name.
+
+    Accents are stripped (NFKD → ASCII), the text is lower-cased, every run
+    of characters outside ``[a-z0-9]`` becomes a single ``_`` and leading /
+    trailing underscores are removed. E.g. ``"Employee ID (bob)"`` →
+    ``"employee_id_bob"``, ``"Manager's ID"`` → ``"manager_s_id"``. Returns
+    ``""`` when nothing alphanumeric remains.
+    """
+    ascii_label = (
+        unicodedata.normalize("NFKD", label or "").encode("ascii", "ignore").decode("ascii")
+    )
+    return _NON_ALNUM_RE.sub("_", ascii_label.lower()).strip("_")
+
+
+def normalize_report_columns(labels: Sequence[str]) -> list[str]:
+    """Normalise header labels and make them unique.
+
+    Labels that normalise to an empty string become ``column_<n>`` (1-based
+    position). Collisions get a numeric suffix in header order: the first
+    occurrence keeps the bare name, later ones become ``<name>_2``,
+    ``<name>_3``, ... (skipping any suffix that is already taken).
+    """
+    names: list[str] = []
+    used: set[str] = set()
+    for position, label in enumerate(labels, start=1):
+        base = normalize_report_column(label) or f"column_{position}"
+        name = base
+        suffix = 2
+        while name in used:
+            name = f"{base}_{suffix}"
+            suffix += 1
+        used.add(name)
+        names.append(name)
+    return names
+
+
+def _require_report_id(table_options: dict[str, str]) -> str:
+    report_id = str(table_options.get("report_id") or "").strip()
+    if not report_id:
+        raise ValueError(
+            "Table 'company_report' requires the 'report_id' table option (the ID of a "
+            "saved HiBob report shared with the service user; list them with "
+            "GET /company/reports)."
+        )
+    return report_id
+
+
+def _parse_name_list(raw: Any) -> list[str]:
+    """Parse ``"a,b"`` / ``'["a","b"]'`` / a list into stripped, non-empty names."""
+    if raw is None:
+        return []
+    if isinstance(raw, (list, tuple)):
+        items = list(raw)
+    else:
+        text = str(raw).strip()
+        if text.startswith("["):
+            try:
+                parsed = json.loads(text)
+            except ValueError as exc:
+                raise ValueError(f"Invalid JSON list for primary_keys: {text!r}") from exc
+            items = parsed if isinstance(parsed, list) else [parsed]
+        else:
+            items = text.split(",")
+    out: list[str] = []
+    for item in items:
+        name = str(item).strip()
+        if name and name not in out:
+            out.append(name)
+    return out
 
 
 def _retry_wait_seconds(resp: requests.Response, backoff: float) -> float:
@@ -689,9 +877,8 @@ def _normalize_bulk_entry(entry: dict, employee_id: Any) -> dict:
             row[key] = _to_json(row[key])
     if "reportsTo" in row:
         row["reportsTo"] = _as_employee_ref(row.get("reportsTo"))
-    for key in ("change", "base"):
-        if row.get(key) == {}:
-            row[key] = None
+    if row.get("change") == {}:
+        row["change"] = None
     return row
 
 

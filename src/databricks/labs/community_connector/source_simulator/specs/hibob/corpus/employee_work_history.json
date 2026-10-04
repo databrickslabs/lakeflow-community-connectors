@@ -1,147 +1,392 @@
 [
   {
-    "employeeId": "yankee-1-pk0",
-    "id": 1000,
+    "employeeId": "9000000000000000001",
+    "id": 700001,
     "effectiveDate": "2024-01-01",
+    "endEffectiveDate": "2024-03-28",
+    "isCurrent": false,
+    "canBeDeleted": true,
+    "change": {
+      "reason": "Hire",
+      "changedBy": null,
+      "changedById": "9000000000000000099"
+    },
+    "creationDate": null,
+    "modificationDate": "2024-01-10",
+    "title": "Test Title 1",
+    "department": "Engineering",
+    "site": "Test Site A",
+    "siteId": 900001,
+    "reportsTo": null,
     "activeEffectiveDate": "2024-01-01",
-    "isCurrent": false,
-    "creationDate": "2024-01-26T16:57:56Z",
-    "modificationDate": "2024-01-18T00:27:16Z",
-    "change": {
-      "reason": "sierra-746",
-      "changedBy": "delta-900",
-      "changedById": "oscar-921"
-    },
-    "customColumns": "india-862",
-    "endEffectiveDate": "2024-01-01",
-    "workChangeType": "charlie-595",
-    "department": "charlie-794",
-    "title": "delta-754",
-    "site": "quebec-766",
-    "siteId": 54408,
-    "reportsTo": {
-      "id": "november-101",
-      "firstName": "mike-341",
-      "surname": "quebec-379",
-      "email": "juliet-683",
-      "displayName": "echo-562"
-    },
-    "canBeDeleted": true
+    "workChangeType": "Hire",
+    "customColumns": {
+      "Seniority": "Junior",
+      "column_9000000000001": null,
+      "column_9000000000002": "100"
+    }
   },
   {
-    "employeeId": "uniform--pk1",
-    "id": 1001,
-    "effectiveDate": "2024-02-02",
-    "activeEffectiveDate": "2024-02-02",
-    "isCurrent": false,
-    "creationDate": "2024-01-09T10:14:47Z",
-    "modificationDate": "2024-01-11T13:20:27Z",
-    "change": {
-      "reason": "golf-321",
-      "changedBy": "lima-418",
-      "changedById": "whiskey-681"
-    },
-    "customColumns": "whiskey-311",
-    "endEffectiveDate": "2024-02-02",
-    "workChangeType": "bravo-839",
-    "department": "november-597",
-    "title": "romeo-577",
-    "site": "bravo-353",
-    "siteId": 9759,
-    "reportsTo": {
-      "id": "tango-946",
-      "firstName": "charlie-842",
-      "surname": "yankee-560",
-      "email": "oscar-519",
-      "displayName": "charlie-179"
-    },
-    "canBeDeleted": true
-  },
-  {
-    "employeeId": "yankee-1-pk2",
-    "id": 1002,
-    "effectiveDate": "2024-03-03",
-    "activeEffectiveDate": "2024-03-03",
+    "employeeId": "9000000000000000001",
+    "id": 700004,
+    "effectiveDate": "2024-04-01",
+    "endEffectiveDate": null,
     "isCurrent": true,
-    "creationDate": "2024-01-02T02:46:08Z",
-    "modificationDate": "2024-01-01T09:18:08Z",
+    "canBeDeleted": false,
     "change": {
-      "reason": "mike-559",
-      "changedBy": "papa-207",
-      "changedById": "kilo-702"
+      "reason": "Promotion",
+      "changedBy": "Test Admin",
+      "changedById": "9000000000000000099"
     },
-    "customColumns": "hotel-630",
-    "endEffectiveDate": "2024-03-03",
-    "workChangeType": "sierra-770",
-    "department": "romeo-897",
-    "title": "zulu-796",
-    "site": "yankee-417",
-    "siteId": 15135,
+    "creationDate": null,
+    "modificationDate": "2024-04-10",
+    "title": "Test Title 1",
+    "department": "Sales",
+    "site": "Test Site B",
+    "siteId": 900002,
     "reportsTo": {
-      "id": "charlie-114",
-      "firstName": "quebec-442",
-      "surname": "xray-552",
-      "email": "yankee-826",
-      "displayName": "yankee-235"
+      "id": "9000000000000000002",
+      "firstName": "Test",
+      "surname": "User 2",
+      "email": "test.user2@example.com",
+      "displayName": "Test User 2"
     },
-    "canBeDeleted": true
+    "activeEffectiveDate": "2024-04-01",
+    "workChangeType": "Promotion",
+    "customColumns": {
+      "Seniority": "Senior",
+      "column_9000000000001": null,
+      "column_9000000000002": "100"
+    }
   },
   {
-    "employeeId": "sierra-7-pk3",
-    "id": 1003,
+    "employeeId": "9000000000000000002",
+    "id": 700007,
+    "effectiveDate": "2024-01-02",
+    "endEffectiveDate": "2024-03-28",
+    "isCurrent": false,
+    "canBeDeleted": true,
+    "change": {
+      "reason": "Hire",
+      "changedBy": null,
+      "changedById": "9000000000000000099"
+    },
+    "creationDate": null,
+    "modificationDate": "2024-01-11",
+    "title": "Test Title 2",
+    "department": "Sales",
+    "site": "Test Site B",
+    "siteId": 900002,
+    "reportsTo": {
+      "id": "9000000000000000003",
+      "firstName": "Test",
+      "surname": "User 3",
+      "email": "test.user3@example.com",
+      "displayName": "Test User 3"
+    },
+    "activeEffectiveDate": "2024-01-02",
+    "workChangeType": "Hire",
+    "customColumns": {
+      "Seniority": "Junior",
+      "column_9000000000001": null,
+      "column_9000000000002": "101"
+    }
+  },
+  {
+    "employeeId": "9000000000000000002",
+    "id": 700010,
+    "effectiveDate": "2024-04-02",
+    "endEffectiveDate": null,
+    "isCurrent": true,
+    "canBeDeleted": false,
+    "change": {
+      "reason": "Promotion",
+      "changedBy": "Test Admin",
+      "changedById": "9000000000000000099"
+    },
+    "creationDate": null,
+    "modificationDate": "2024-04-11",
+    "title": "Test Title 2",
+    "department": "Finance",
+    "site": "Test Site A",
+    "siteId": 900001,
+    "reportsTo": {
+      "id": "9000000000000000003",
+      "firstName": "Test",
+      "surname": "User 3",
+      "email": "test.user3@example.com",
+      "displayName": "Test User 3"
+    },
+    "activeEffectiveDate": "2024-04-02",
+    "workChangeType": "Promotion",
+    "customColumns": {
+      "Seniority": "Senior",
+      "column_9000000000001": null,
+      "column_9000000000002": "101"
+    }
+  },
+  {
+    "employeeId": "9000000000000000003",
+    "id": 700013,
+    "effectiveDate": "2024-01-03",
+    "endEffectiveDate": "2024-03-28",
+    "isCurrent": false,
+    "canBeDeleted": true,
+    "change": {
+      "reason": "Hire",
+      "changedBy": null,
+      "changedById": "9000000000000000099"
+    },
+    "creationDate": null,
+    "modificationDate": "2024-01-12",
+    "title": "Test Title 3",
+    "department": "Finance",
+    "site": "Test Site A",
+    "siteId": 900001,
+    "reportsTo": {
+      "id": "9000000000000000004",
+      "firstName": "Test",
+      "surname": "User 4",
+      "email": "test.user4@example.com",
+      "displayName": "Test User 4"
+    },
+    "activeEffectiveDate": "2024-01-03",
+    "workChangeType": "Hire",
+    "customColumns": {
+      "Seniority": "Junior",
+      "column_9000000000001": null,
+      "column_9000000000002": "102"
+    }
+  },
+  {
+    "employeeId": "9000000000000000003",
+    "id": 700016,
+    "effectiveDate": "2024-04-03",
+    "endEffectiveDate": null,
+    "isCurrent": true,
+    "canBeDeleted": false,
+    "change": {
+      "reason": "Promotion",
+      "changedBy": "Test Admin",
+      "changedById": "9000000000000000099"
+    },
+    "creationDate": null,
+    "modificationDate": "2024-04-12",
+    "title": "Test Title 3",
+    "department": "Engineering",
+    "site": "Test Site B",
+    "siteId": 900002,
+    "reportsTo": {
+      "id": "9000000000000000004",
+      "firstName": "Test",
+      "surname": "User 4",
+      "email": "test.user4@example.com",
+      "displayName": "Test User 4"
+    },
+    "activeEffectiveDate": "2024-04-03",
+    "workChangeType": "Promotion",
+    "customColumns": {
+      "Seniority": "Senior",
+      "column_9000000000001": null,
+      "column_9000000000002": "102"
+    }
+  },
+  {
+    "employeeId": "9000000000000000004",
+    "id": 700019,
+    "effectiveDate": "2024-01-04",
+    "endEffectiveDate": "2024-03-28",
+    "isCurrent": false,
+    "canBeDeleted": true,
+    "change": {
+      "reason": "Hire",
+      "changedBy": null,
+      "changedById": "9000000000000000099"
+    },
+    "creationDate": null,
+    "modificationDate": "2024-01-13",
+    "title": "Test Title 4",
+    "department": "Engineering",
+    "site": "Test Site B",
+    "siteId": 900002,
+    "reportsTo": {
+      "id": "9000000000000000005",
+      "firstName": "Test",
+      "surname": "User 5",
+      "email": "test.user5@example.com",
+      "displayName": "Test User 5"
+    },
+    "activeEffectiveDate": "2024-01-04",
+    "workChangeType": "Hire",
+    "customColumns": {
+      "Seniority": "Junior",
+      "column_9000000000001": null,
+      "column_9000000000002": "103"
+    }
+  },
+  {
+    "employeeId": "9000000000000000004",
+    "id": 700022,
     "effectiveDate": "2024-04-04",
-    "activeEffectiveDate": "2024-04-04",
-    "isCurrent": false,
-    "creationDate": "2024-01-11T00:36:43Z",
-    "modificationDate": "2024-01-24T13:01:04Z",
+    "endEffectiveDate": null,
+    "isCurrent": true,
+    "canBeDeleted": false,
     "change": {
-      "reason": "uniform-114",
-      "changedBy": "xray-395",
-      "changedById": "india-262"
+      "reason": "Promotion",
+      "changedBy": "Test Admin",
+      "changedById": "9000000000000000099"
     },
-    "customColumns": "mike-671",
-    "endEffectiveDate": "2024-04-04",
-    "workChangeType": "delta-248",
-    "department": "juliet-665",
-    "title": "hotel-170",
-    "site": "quebec-437",
-    "siteId": 92200,
+    "creationDate": null,
+    "modificationDate": "2024-04-13",
+    "title": "Test Title 4",
+    "department": "Sales",
+    "site": "Test Site A",
+    "siteId": 900001,
     "reportsTo": {
-      "id": "golf-976",
-      "firstName": "romeo-536",
-      "surname": "romeo-856",
-      "email": "hotel-476",
-      "displayName": "papa-256"
+      "id": "9000000000000000005",
+      "firstName": "Test",
+      "surname": "User 5",
+      "email": "test.user5@example.com",
+      "displayName": "Test User 5"
     },
-    "canBeDeleted": true
+    "activeEffectiveDate": "2024-04-04",
+    "workChangeType": "Promotion",
+    "customColumns": {
+      "Seniority": "Senior",
+      "column_9000000000001": null,
+      "column_9000000000002": "103"
+    }
   },
   {
-    "employeeId": "golf-969-pk4",
-    "id": 1004,
-    "effectiveDate": "2024-05-05",
-    "activeEffectiveDate": "2024-05-05",
-    "isCurrent": true,
-    "creationDate": "2024-01-24T22:48:33Z",
-    "modificationDate": "2024-01-23T23:04:01Z",
+    "employeeId": "9000000000000000005",
+    "id": 700025,
+    "effectiveDate": "2024-01-05",
+    "endEffectiveDate": "2024-03-28",
+    "isCurrent": false,
+    "canBeDeleted": true,
     "change": {
-      "reason": "echo-573",
-      "changedBy": "golf-126",
-      "changedById": "romeo-235"
+      "reason": "Hire",
+      "changedBy": null,
+      "changedById": "9000000000000000099"
     },
-    "customColumns": "juliet-612",
-    "endEffectiveDate": "2024-05-05",
-    "workChangeType": "mike-734",
-    "department": "zulu-293",
-    "title": "foxtrot-535",
-    "site": "mike-740",
-    "siteId": 38002,
+    "creationDate": null,
+    "modificationDate": "2024-01-14",
+    "title": "Test Title 5",
+    "department": "Sales",
+    "site": "Test Site A",
+    "siteId": 900001,
     "reportsTo": {
-      "id": "sierra-283",
-      "firstName": "foxtrot-727",
-      "surname": "alpha-581",
-      "email": "foxtrot-780",
-      "displayName": "echo-832"
+      "id": "9000000000000000006",
+      "firstName": "Test",
+      "surname": "User 6",
+      "email": "test.user6@example.com",
+      "displayName": "Test User 6"
     },
-    "canBeDeleted": true
+    "activeEffectiveDate": "2024-01-05",
+    "workChangeType": "Hire",
+    "customColumns": {
+      "Seniority": "Junior",
+      "column_9000000000001": null,
+      "column_9000000000002": "104"
+    }
+  },
+  {
+    "employeeId": "9000000000000000005",
+    "id": 700028,
+    "effectiveDate": "2024-04-05",
+    "endEffectiveDate": null,
+    "isCurrent": true,
+    "canBeDeleted": false,
+    "change": {
+      "reason": "Promotion",
+      "changedBy": "Test Admin",
+      "changedById": "9000000000000000099"
+    },
+    "creationDate": null,
+    "modificationDate": "2024-04-14",
+    "title": "Test Title 5",
+    "department": "Finance",
+    "site": "Test Site B",
+    "siteId": 900002,
+    "reportsTo": {
+      "id": "9000000000000000006",
+      "firstName": "Test",
+      "surname": "User 6",
+      "email": "test.user6@example.com",
+      "displayName": "Test User 6"
+    },
+    "activeEffectiveDate": "2024-04-05",
+    "workChangeType": "Promotion",
+    "customColumns": {
+      "Seniority": "Senior",
+      "column_9000000000001": null,
+      "column_9000000000002": "104"
+    }
+  },
+  {
+    "employeeId": "9000000000000000006",
+    "id": 700031,
+    "effectiveDate": "2024-01-06",
+    "endEffectiveDate": "2024-03-28",
+    "isCurrent": false,
+    "canBeDeleted": true,
+    "change": {
+      "reason": "Hire",
+      "changedBy": null,
+      "changedById": "9000000000000000099"
+    },
+    "creationDate": null,
+    "modificationDate": "2024-01-15",
+    "title": "Test Title 6",
+    "department": "Finance",
+    "site": "Test Site B",
+    "siteId": 900002,
+    "reportsTo": {
+      "id": "9000000000000000001",
+      "firstName": "Test",
+      "surname": "User 1",
+      "email": "test.user1@example.com",
+      "displayName": "Test User 1"
+    },
+    "activeEffectiveDate": "2024-01-06",
+    "workChangeType": "Hire",
+    "customColumns": {
+      "Seniority": "Junior",
+      "column_9000000000001": null,
+      "column_9000000000002": "105"
+    }
+  },
+  {
+    "employeeId": "9000000000000000006",
+    "id": 700034,
+    "effectiveDate": "2024-04-06",
+    "endEffectiveDate": null,
+    "isCurrent": true,
+    "canBeDeleted": false,
+    "change": {
+      "reason": "Promotion",
+      "changedBy": "Test Admin",
+      "changedById": "9000000000000000099"
+    },
+    "creationDate": "2024-04-02",
+    "modificationDate": "2024-04-15",
+    "title": "Test Title 6",
+    "department": "Engineering",
+    "site": "Test Site A",
+    "siteId": 900001,
+    "reportsTo": {
+      "id": "9000000000000000001",
+      "firstName": "Test",
+      "surname": "User 1",
+      "email": "test.user1@example.com",
+      "displayName": "Test User 1"
+    },
+    "activeEffectiveDate": "2024-04-06",
+    "workChangeType": "Promotion",
+    "customColumns": {
+      "Seniority": "Senior",
+      "column_9000000000001": null,
+      "column_9000000000002": "105"
+    }
   }
 ]

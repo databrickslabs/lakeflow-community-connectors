@@ -1,62 +1,43 @@
 [
   {
-    "id": "zulu-204-pk0",
-    "category": "uniform-583",
-    "name": "tango-785",
-    "description": "mike-244",
-    "columns": []
-  },
-  {
-    "id": "alpha-68-pk1",
-    "category": "lima-643",
-    "name": "kilo-758",
-    "description": "charlie-658",
-    "columns": []
-  },
-  {
-    "id": "oscar-28-pk2",
-    "category": "delta-544",
-    "name": "papa-875",
-    "description": "juliet-763",
-    "columns": []
-  },
-  {
-    "id": "xray-111-pk3",
-    "category": "sierra-505",
-    "name": "alpha-146",
-    "description": "victor-823",
+    "id": "category_9000000000020__table_9000000000021",
+    "name": "Test Table One",
+    "category": "category_9000000000020",
+    "description": null,
     "columns": [
       {
-        "id": "quebec-742",
-        "name": "oscar-493",
-        "description": "oscar-451",
+        "id": "column_9000000000022",
+        "name": "Test Column A",
+        "description": null,
         "mandatory": true,
-        "type": "quebec-178",
-        "typeData": "india-519"
+        "type": "text",
+        "typeData": {}
+      },
+      {
+        "id": "column_9000000000023",
+        "name": "Test Column B",
+        "description": "A test list column",
+        "mandatory": false,
+        "type": "list",
+        "typeData": {
+          "listId": "custom.field_9000000000010"
+        }
       }
     ]
   },
   {
-    "id": "quebec-3-pk4",
-    "category": "delta-494",
-    "name": "charlie-969",
-    "description": "romeo-423",
+    "id": "category_9000000000020__table_9000000000024",
+    "name": "Test Table Two",
+    "category": "category_9000000000020",
+    "description": "Second test table",
     "columns": [
       {
-        "id": "uniform-612",
-        "name": "hotel-984",
-        "description": "tango-820",
+        "id": "column_9000000000025",
+        "name": "Test Column C",
+        "description": null,
         "mandatory": false,
-        "type": "lima-906",
-        "typeData": "yankee-183"
-      },
-      {
-        "id": "november-193",
-        "name": "golf-339",
-        "description": "xray-431",
-        "mandatory": true,
-        "type": "oscar-993",
-        "typeData": "quebec-897"
+        "type": "date",
+        "typeData": {}
       }
     ]
   }

@@ -1,132 +1,722 @@
 [
   {
-    "employeeId": "charlie--pk0",
-    "id": 1000,
+    "employeeId": "9000000000000000001",
+    "id": 700002,
     "effectiveDate": "2024-01-01",
+    "endEffectiveDate": "2024-03-28",
+    "isCurrent": false,
+    "canBeDeleted": true,
+    "change": {
+      "reason": null,
+      "changedBy": null,
+      "changedById": "9000000000000000099"
+    },
+    "creationDate": null,
+    "modificationDate": "2024-01-10",
+    "contract": "Part time",
+    "type": "Permanent",
+    "workingPattern": null,
+    "standardWorkingPattern": null,
+    "standardWorkingPatternId": null,
+    "personalWorkingPatternType": null,
+    "siteWorkingPattern": {
+      "workingPatternType": "weekly",
+      "days": {
+        "sunday": 0,
+        "monday": 8,
+        "tuesday": 8,
+        "wednesday": 8,
+        "thursday": 8,
+        "friday": 8,
+        "saturday": 0
+      },
+      "hoursPerDay": 8.0,
+      "workingPatternId": 900100
+    },
+    "calendarName": null,
+    "calendarId": null,
+    "flsaCode": null,
+    "salaryPayType": null,
+    "fte": 50,
+    "weeklyHours": 20.5,
     "activeEffectiveDate": "2024-01-01",
+    "actualWorkingPattern": {
+      "workingPatternType": "weekly",
+      "days": {
+        "sunday": 0,
+        "monday": 8,
+        "tuesday": 8,
+        "wednesday": 8,
+        "thursday": 8,
+        "friday": 8,
+        "saturday": 0
+      },
+      "hoursPerDay": 8.0,
+      "workingPatternId": 900100
+    },
+    "hoursInDayNotWorked": 0.5,
+    "customColumns": {
+      "column_9000000000003": null
+    }
+  },
+  {
+    "employeeId": "9000000000000000001",
+    "id": 700005,
+    "effectiveDate": "2024-04-01",
+    "endEffectiveDate": null,
+    "isCurrent": true,
+    "canBeDeleted": false,
+    "change": {
+      "reason": "Contract change",
+      "changedBy": null,
+      "changedById": "9000000000000000099"
+    },
+    "creationDate": null,
+    "modificationDate": "2024-04-10",
+    "contract": "Full time",
+    "type": "Permanent",
+    "workingPattern": null,
+    "standardWorkingPattern": null,
+    "standardWorkingPatternId": null,
+    "personalWorkingPatternType": null,
+    "siteWorkingPattern": {
+      "workingPatternType": "weekly",
+      "days": {
+        "sunday": 0,
+        "monday": 8,
+        "tuesday": 8,
+        "wednesday": 8,
+        "thursday": 8,
+        "friday": 8,
+        "saturday": 0
+      },
+      "hoursPerDay": 8.0,
+      "workingPatternId": 900101
+    },
+    "calendarName": "Test Calendar",
+    "calendarId": 900200,
+    "flsaCode": null,
+    "salaryPayType": null,
+    "fte": 100,
+    "weeklyHours": 40,
+    "activeEffectiveDate": "2024-04-01",
+    "actualWorkingPattern": {
+      "workingPatternType": "weekly",
+      "days": {
+        "sunday": 0,
+        "monday": 8,
+        "tuesday": 8,
+        "wednesday": 8,
+        "thursday": 8,
+        "friday": 8,
+        "saturday": 0
+      },
+      "hoursPerDay": 8.0,
+      "workingPatternId": 900101
+    },
+    "hoursInDayNotWorked": 0,
+    "customColumns": {
+      "column_9000000000003": null
+    }
+  },
+  {
+    "employeeId": "9000000000000000002",
+    "id": 700008,
+    "effectiveDate": "2024-01-02",
+    "endEffectiveDate": "2024-03-28",
     "isCurrent": false,
-    "creationDate": "2024-01-09T05:37:30Z",
-    "modificationDate": "2024-01-08T09:54:39Z",
+    "canBeDeleted": true,
     "change": {
-      "reason": "delta-283",
-      "changedBy": "november-637",
-      "changedById": "tango-801"
+      "reason": null,
+      "changedBy": null,
+      "changedById": "9000000000000000099"
     },
-    "customColumns": "papa-862",
-    "endEffectiveDate": "2024-01-01",
-    "contract": "golf-982",
-    "type": "zulu-373",
-    "salaryPayType": "kilo-808",
-    "weeklyHours": 85.51,
-    "fte": 112.87,
-    "hoursInDayNotWorked": 696.27,
-    "calendarName": "whiskey-854",
-    "calendarId": 44553,
-    "flsaCode": "whiskey-928",
-    "actualWorkingPattern": "papa-458"
+    "creationDate": null,
+    "modificationDate": "2024-01-11",
+    "contract": "Part time",
+    "type": "Permanent",
+    "workingPattern": null,
+    "standardWorkingPattern": null,
+    "standardWorkingPatternId": null,
+    "personalWorkingPatternType": null,
+    "siteWorkingPattern": {
+      "workingPatternType": "weekly",
+      "days": {
+        "sunday": 0,
+        "monday": 8,
+        "tuesday": 8,
+        "wednesday": 8,
+        "thursday": 8,
+        "friday": 8,
+        "saturday": 0
+      },
+      "hoursPerDay": 8.0,
+      "workingPatternId": 900100
+    },
+    "calendarName": null,
+    "calendarId": null,
+    "flsaCode": null,
+    "salaryPayType": null,
+    "fte": 50,
+    "weeklyHours": 20.5,
+    "activeEffectiveDate": "2024-01-02",
+    "actualWorkingPattern": {
+      "workingPatternType": "weekly",
+      "days": {
+        "sunday": 0,
+        "monday": 8,
+        "tuesday": 8,
+        "wednesday": 8,
+        "thursday": 8,
+        "friday": 8,
+        "saturday": 0
+      },
+      "hoursPerDay": 8.0,
+      "workingPatternId": 900100
+    },
+    "hoursInDayNotWorked": 0.5,
+    "customColumns": {
+      "column_9000000000003": null
+    }
   },
   {
-    "employeeId": "november-pk1",
-    "id": 1001,
-    "effectiveDate": "2024-02-02",
-    "activeEffectiveDate": "2024-02-02",
+    "employeeId": "9000000000000000002",
+    "id": 700011,
+    "effectiveDate": "2024-04-02",
+    "endEffectiveDate": null,
     "isCurrent": true,
-    "creationDate": "2024-01-24T23:07:12Z",
-    "modificationDate": "2024-01-12T13:48:46Z",
+    "canBeDeleted": false,
     "change": {
-      "reason": "victor-335",
-      "changedBy": "lima-668",
-      "changedById": "quebec-309"
+      "reason": "Contract change",
+      "changedBy": null,
+      "changedById": "9000000000000000099"
     },
-    "customColumns": "echo-759",
-    "endEffectiveDate": "2024-02-02",
-    "contract": "golf-286",
-    "type": "oscar-770",
-    "salaryPayType": "charlie-408",
-    "weeklyHours": 433.0,
-    "fte": 73.57,
-    "hoursInDayNotWorked": 791.83,
-    "calendarName": "papa-716",
-    "calendarId": 68878,
-    "flsaCode": "romeo-691",
-    "actualWorkingPattern": "hotel-340"
+    "creationDate": null,
+    "modificationDate": "2024-04-11",
+    "contract": "Full time",
+    "type": "Permanent",
+    "workingPattern": null,
+    "standardWorkingPattern": null,
+    "standardWorkingPatternId": null,
+    "personalWorkingPatternType": null,
+    "siteWorkingPattern": {
+      "workingPatternType": "weekly",
+      "days": {
+        "sunday": 0,
+        "monday": 8,
+        "tuesday": 8,
+        "wednesday": 8,
+        "thursday": 8,
+        "friday": 8,
+        "saturday": 0
+      },
+      "hoursPerDay": 8.0,
+      "workingPatternId": 900101
+    },
+    "calendarName": "Test Calendar",
+    "calendarId": 900200,
+    "flsaCode": null,
+    "salaryPayType": null,
+    "fte": 100,
+    "weeklyHours": 40,
+    "activeEffectiveDate": "2024-04-02",
+    "actualWorkingPattern": {
+      "workingPatternType": "weekly",
+      "days": {
+        "sunday": 0,
+        "monday": 8,
+        "tuesday": 8,
+        "wednesday": 8,
+        "thursday": 8,
+        "friday": 8,
+        "saturday": 0
+      },
+      "hoursPerDay": 8.0,
+      "workingPatternId": 900101
+    },
+    "hoursInDayNotWorked": 0,
+    "customColumns": {
+      "column_9000000000003": null
+    }
   },
   {
-    "employeeId": "romeo-82-pk2",
-    "id": 1002,
-    "effectiveDate": "2024-03-03",
-    "activeEffectiveDate": "2024-03-03",
+    "employeeId": "9000000000000000003",
+    "id": 700014,
+    "effectiveDate": "2024-01-03",
+    "endEffectiveDate": "2024-03-28",
+    "isCurrent": false,
+    "canBeDeleted": true,
+    "change": {
+      "reason": null,
+      "changedBy": null,
+      "changedById": "9000000000000000099"
+    },
+    "creationDate": null,
+    "modificationDate": "2024-01-12",
+    "contract": "Part time",
+    "type": "Permanent",
+    "workingPattern": null,
+    "standardWorkingPattern": null,
+    "standardWorkingPatternId": null,
+    "personalWorkingPatternType": null,
+    "siteWorkingPattern": {
+      "workingPatternType": "weekly",
+      "days": {
+        "sunday": 0,
+        "monday": 8,
+        "tuesday": 8,
+        "wednesday": 8,
+        "thursday": 8,
+        "friday": 8,
+        "saturday": 0
+      },
+      "hoursPerDay": 8.0,
+      "workingPatternId": 900100
+    },
+    "calendarName": null,
+    "calendarId": null,
+    "flsaCode": null,
+    "salaryPayType": null,
+    "fte": 50,
+    "weeklyHours": 20.5,
+    "activeEffectiveDate": "2024-01-03",
+    "actualWorkingPattern": {
+      "workingPatternType": "weekly",
+      "days": {
+        "sunday": 0,
+        "monday": 8,
+        "tuesday": 8,
+        "wednesday": 8,
+        "thursday": 8,
+        "friday": 8,
+        "saturday": 0
+      },
+      "hoursPerDay": 8.0,
+      "workingPatternId": 900100
+    },
+    "hoursInDayNotWorked": 0.5,
+    "customColumns": {
+      "column_9000000000003": null
+    }
+  },
+  {
+    "employeeId": "9000000000000000003",
+    "id": 700017,
+    "effectiveDate": "2024-04-03",
+    "endEffectiveDate": null,
     "isCurrent": true,
-    "creationDate": "2024-01-16T23:42:35Z",
-    "modificationDate": "2024-01-10T12:14:23Z",
+    "canBeDeleted": false,
     "change": {
-      "reason": "kilo-788",
-      "changedBy": "yankee-215",
-      "changedById": "xray-765"
+      "reason": "Contract change",
+      "changedBy": null,
+      "changedById": "9000000000000000099"
     },
-    "customColumns": "xray-898",
-    "endEffectiveDate": "2024-03-03",
-    "contract": "kilo-793",
-    "type": "kilo-426",
-    "salaryPayType": "november-568",
-    "weeklyHours": 785.57,
-    "fte": 742.51,
-    "hoursInDayNotWorked": 484.71,
-    "calendarName": "juliet-832",
-    "calendarId": 82847,
-    "flsaCode": "victor-579",
-    "actualWorkingPattern": "charlie-683"
+    "creationDate": null,
+    "modificationDate": "2024-04-12",
+    "contract": "Full time",
+    "type": "Permanent",
+    "workingPattern": null,
+    "standardWorkingPattern": null,
+    "standardWorkingPatternId": null,
+    "personalWorkingPatternType": null,
+    "siteWorkingPattern": {
+      "workingPatternType": "weekly",
+      "days": {
+        "sunday": 0,
+        "monday": 8,
+        "tuesday": 8,
+        "wednesday": 8,
+        "thursday": 8,
+        "friday": 8,
+        "saturday": 0
+      },
+      "hoursPerDay": 8.0,
+      "workingPatternId": 900101
+    },
+    "calendarName": "Test Calendar",
+    "calendarId": 900200,
+    "flsaCode": null,
+    "salaryPayType": null,
+    "fte": 100,
+    "weeklyHours": 40,
+    "activeEffectiveDate": "2024-04-03",
+    "actualWorkingPattern": {
+      "workingPatternType": "weekly",
+      "days": {
+        "sunday": 0,
+        "monday": 8,
+        "tuesday": 8,
+        "wednesday": 8,
+        "thursday": 8,
+        "friday": 8,
+        "saturday": 0
+      },
+      "hoursPerDay": 8.0,
+      "workingPatternId": 900101
+    },
+    "hoursInDayNotWorked": 0,
+    "customColumns": {
+      "column_9000000000003": null
+    }
   },
   {
-    "employeeId": "november-pk3",
-    "id": 1003,
+    "employeeId": "9000000000000000004",
+    "id": 700020,
+    "effectiveDate": "2024-01-04",
+    "endEffectiveDate": "2024-03-28",
+    "isCurrent": false,
+    "canBeDeleted": true,
+    "change": {
+      "reason": null,
+      "changedBy": null,
+      "changedById": "9000000000000000099"
+    },
+    "creationDate": null,
+    "modificationDate": "2024-01-13",
+    "contract": "Part time",
+    "type": "Permanent",
+    "workingPattern": null,
+    "standardWorkingPattern": null,
+    "standardWorkingPatternId": null,
+    "personalWorkingPatternType": null,
+    "siteWorkingPattern": {
+      "workingPatternType": "weekly",
+      "days": {
+        "sunday": 0,
+        "monday": 8,
+        "tuesday": 8,
+        "wednesday": 8,
+        "thursday": 8,
+        "friday": 8,
+        "saturday": 0
+      },
+      "hoursPerDay": 8.0,
+      "workingPatternId": 900100
+    },
+    "calendarName": null,
+    "calendarId": null,
+    "flsaCode": null,
+    "salaryPayType": null,
+    "fte": 50,
+    "weeklyHours": 20.5,
+    "activeEffectiveDate": "2024-01-04",
+    "actualWorkingPattern": {
+      "workingPatternType": "weekly",
+      "days": {
+        "sunday": 0,
+        "monday": 8,
+        "tuesday": 8,
+        "wednesday": 8,
+        "thursday": 8,
+        "friday": 8,
+        "saturday": 0
+      },
+      "hoursPerDay": 8.0,
+      "workingPatternId": 900100
+    },
+    "hoursInDayNotWorked": 0.5,
+    "customColumns": {
+      "column_9000000000003": null
+    }
+  },
+  {
+    "employeeId": "9000000000000000004",
+    "id": 700023,
     "effectiveDate": "2024-04-04",
-    "activeEffectiveDate": "2024-04-04",
+    "endEffectiveDate": null,
     "isCurrent": true,
-    "creationDate": "2024-01-10T09:08:54Z",
-    "modificationDate": "2024-01-17T01:33:20Z",
+    "canBeDeleted": false,
     "change": {
-      "reason": "charlie-715",
-      "changedBy": "november-455",
-      "changedById": "alpha-766"
+      "reason": "Contract change",
+      "changedBy": null,
+      "changedById": "9000000000000000099"
     },
-    "customColumns": "oscar-410",
-    "endEffectiveDate": "2024-04-04",
-    "contract": "sierra-712",
-    "type": "romeo-580",
-    "salaryPayType": "golf-321",
-    "weeklyHours": 584.33,
-    "fte": 500.81,
-    "hoursInDayNotWorked": 463.47,
-    "calendarName": "november-231",
-    "calendarId": 74816,
-    "flsaCode": "lima-512",
-    "actualWorkingPattern": "whiskey-766"
+    "creationDate": null,
+    "modificationDate": "2024-04-13",
+    "contract": "Full time",
+    "type": "Permanent",
+    "workingPattern": null,
+    "standardWorkingPattern": null,
+    "standardWorkingPatternId": null,
+    "personalWorkingPatternType": null,
+    "siteWorkingPattern": {
+      "workingPatternType": "weekly",
+      "days": {
+        "sunday": 0,
+        "monday": 8,
+        "tuesday": 8,
+        "wednesday": 8,
+        "thursday": 8,
+        "friday": 8,
+        "saturday": 0
+      },
+      "hoursPerDay": 8.0,
+      "workingPatternId": 900101
+    },
+    "calendarName": "Test Calendar",
+    "calendarId": 900200,
+    "flsaCode": null,
+    "salaryPayType": null,
+    "fte": 100,
+    "weeklyHours": 40,
+    "activeEffectiveDate": "2024-04-04",
+    "actualWorkingPattern": {
+      "workingPatternType": "weekly",
+      "days": {
+        "sunday": 0,
+        "monday": 8,
+        "tuesday": 8,
+        "wednesday": 8,
+        "thursday": 8,
+        "friday": 8,
+        "saturday": 0
+      },
+      "hoursPerDay": 8.0,
+      "workingPatternId": 900101
+    },
+    "hoursInDayNotWorked": 0,
+    "customColumns": {
+      "column_9000000000003": null
+    }
   },
   {
-    "employeeId": "xray-449-pk4",
-    "id": 1004,
-    "effectiveDate": "2024-05-05",
-    "activeEffectiveDate": "2024-05-05",
+    "employeeId": "9000000000000000005",
+    "id": 700026,
+    "effectiveDate": "2024-01-05",
+    "endEffectiveDate": "2024-03-28",
     "isCurrent": false,
-    "creationDate": "2024-01-08T18:09:00Z",
-    "modificationDate": "2024-01-24T11:27:48Z",
+    "canBeDeleted": true,
     "change": {
-      "reason": "foxtrot-856",
-      "changedBy": "romeo-407",
-      "changedById": "whiskey-128"
+      "reason": null,
+      "changedBy": null,
+      "changedById": "9000000000000000099"
     },
-    "customColumns": "golf-407",
-    "endEffectiveDate": "2024-05-05",
-    "contract": "hotel-311",
-    "type": "hotel-541",
-    "salaryPayType": "victor-524",
-    "weeklyHours": 399.13,
-    "fte": 82.69,
-    "hoursInDayNotWorked": 165.4,
-    "calendarName": "xray-877",
-    "calendarId": 12060,
-    "flsaCode": "uniform-878",
-    "actualWorkingPattern": "oscar-684"
+    "creationDate": null,
+    "modificationDate": "2024-01-14",
+    "contract": "Part time",
+    "type": "Permanent",
+    "workingPattern": null,
+    "standardWorkingPattern": null,
+    "standardWorkingPatternId": null,
+    "personalWorkingPatternType": null,
+    "siteWorkingPattern": {
+      "workingPatternType": "weekly",
+      "days": {
+        "sunday": 0,
+        "monday": 8,
+        "tuesday": 8,
+        "wednesday": 8,
+        "thursday": 8,
+        "friday": 8,
+        "saturday": 0
+      },
+      "hoursPerDay": 8.0,
+      "workingPatternId": 900100
+    },
+    "calendarName": null,
+    "calendarId": null,
+    "flsaCode": null,
+    "salaryPayType": null,
+    "fte": 50,
+    "weeklyHours": 20.5,
+    "activeEffectiveDate": "2024-01-05",
+    "actualWorkingPattern": {
+      "workingPatternType": "weekly",
+      "days": {
+        "sunday": 0,
+        "monday": 8,
+        "tuesday": 8,
+        "wednesday": 8,
+        "thursday": 8,
+        "friday": 8,
+        "saturday": 0
+      },
+      "hoursPerDay": 8.0,
+      "workingPatternId": 900100
+    },
+    "hoursInDayNotWorked": 0.5,
+    "customColumns": {
+      "column_9000000000003": null
+    }
+  },
+  {
+    "employeeId": "9000000000000000005",
+    "id": 700029,
+    "effectiveDate": "2024-04-05",
+    "endEffectiveDate": null,
+    "isCurrent": true,
+    "canBeDeleted": false,
+    "change": {
+      "reason": "Contract change",
+      "changedBy": null,
+      "changedById": "9000000000000000099"
+    },
+    "creationDate": null,
+    "modificationDate": "2024-04-14",
+    "contract": "Full time",
+    "type": "Permanent",
+    "workingPattern": null,
+    "standardWorkingPattern": null,
+    "standardWorkingPatternId": null,
+    "personalWorkingPatternType": null,
+    "siteWorkingPattern": {
+      "workingPatternType": "weekly",
+      "days": {
+        "sunday": 0,
+        "monday": 8,
+        "tuesday": 8,
+        "wednesday": 8,
+        "thursday": 8,
+        "friday": 8,
+        "saturday": 0
+      },
+      "hoursPerDay": 8.0,
+      "workingPatternId": 900101
+    },
+    "calendarName": "Test Calendar",
+    "calendarId": 900200,
+    "flsaCode": null,
+    "salaryPayType": null,
+    "fte": 100,
+    "weeklyHours": 40,
+    "activeEffectiveDate": "2024-04-05",
+    "actualWorkingPattern": {
+      "workingPatternType": "weekly",
+      "days": {
+        "sunday": 0,
+        "monday": 8,
+        "tuesday": 8,
+        "wednesday": 8,
+        "thursday": 8,
+        "friday": 8,
+        "saturday": 0
+      },
+      "hoursPerDay": 8.0,
+      "workingPatternId": 900101
+    },
+    "hoursInDayNotWorked": 0,
+    "customColumns": {
+      "column_9000000000003": null
+    }
+  },
+  {
+    "employeeId": "9000000000000000006",
+    "id": 700032,
+    "effectiveDate": "2024-01-06",
+    "endEffectiveDate": "2024-03-28",
+    "isCurrent": false,
+    "canBeDeleted": true,
+    "change": {
+      "reason": null,
+      "changedBy": null,
+      "changedById": "9000000000000000099"
+    },
+    "creationDate": null,
+    "modificationDate": "2024-01-15",
+    "contract": "Part time",
+    "type": "Permanent",
+    "workingPattern": null,
+    "standardWorkingPattern": null,
+    "standardWorkingPatternId": null,
+    "personalWorkingPatternType": null,
+    "siteWorkingPattern": {
+      "workingPatternType": "weekly",
+      "days": {
+        "sunday": 0,
+        "monday": 8,
+        "tuesday": 8,
+        "wednesday": 8,
+        "thursday": 8,
+        "friday": 8,
+        "saturday": 0
+      },
+      "hoursPerDay": 8.0,
+      "workingPatternId": 900100
+    },
+    "calendarName": null,
+    "calendarId": null,
+    "flsaCode": null,
+    "salaryPayType": null,
+    "fte": 50,
+    "weeklyHours": 20.5,
+    "activeEffectiveDate": "2024-01-06",
+    "actualWorkingPattern": {
+      "workingPatternType": "weekly",
+      "days": {
+        "sunday": 0,
+        "monday": 8,
+        "tuesday": 8,
+        "wednesday": 8,
+        "thursday": 8,
+        "friday": 8,
+        "saturday": 0
+      },
+      "hoursPerDay": 8.0,
+      "workingPatternId": 900100
+    },
+    "hoursInDayNotWorked": 0.5,
+    "customColumns": {
+      "column_9000000000003": null
+    }
+  },
+  {
+    "employeeId": "9000000000000000006",
+    "id": 700035,
+    "effectiveDate": "2024-04-06",
+    "endEffectiveDate": null,
+    "isCurrent": true,
+    "canBeDeleted": false,
+    "change": {
+      "reason": "Contract change",
+      "changedBy": null,
+      "changedById": "9000000000000000099"
+    },
+    "creationDate": "2024-04-02",
+    "modificationDate": "2024-04-15",
+    "contract": "Full time",
+    "type": "Permanent",
+    "workingPattern": null,
+    "standardWorkingPattern": null,
+    "standardWorkingPatternId": null,
+    "personalWorkingPatternType": null,
+    "siteWorkingPattern": {
+      "workingPatternType": "weekly",
+      "days": {
+        "sunday": 0,
+        "monday": 8,
+        "tuesday": 8,
+        "wednesday": 8,
+        "thursday": 8,
+        "friday": 8,
+        "saturday": 0
+      },
+      "hoursPerDay": 8.0,
+      "workingPatternId": 900101
+    },
+    "calendarName": "Test Calendar",
+    "calendarId": 900200,
+    "flsaCode": "Exempt",
+    "salaryPayType": "Salary",
+    "fte": 100,
+    "weeklyHours": 40,
+    "activeEffectiveDate": "2024-04-06",
+    "actualWorkingPattern": {
+      "workingPatternType": "weekly",
+      "days": {
+        "sunday": 0,
+        "monday": 8,
+        "tuesday": 8,
+        "wednesday": 8,
+        "thursday": 8,
+        "friday": 8,
+        "saturday": 0
+      },
+      "hoursPerDay": 8.0,
+      "workingPatternId": 900101
+    },
+    "hoursInDayNotWorked": 0,
+    "customColumns": {
+      "column_9000000000003": null
+    }
   }
 ]

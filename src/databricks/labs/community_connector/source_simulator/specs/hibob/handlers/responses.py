@@ -5,20 +5,29 @@ The corpus files hold rows in the connector's *output* shape (one row per
 table record, as generated from ``TABLE_SCHEMAS``). These handlers re-nest
 those rows into the API's wire shape:
 
-* ``serve_bulk`` — ``GET /v1/bulk/people/{work|employment|lifecycle|salaries}``:
+* ``serve_bulk`` — ``GET /v1/bulk/people/{work|employment|lifecycle}``:
   groups rows by ``employeeId`` into ``results[].values[]`` and paginates the
   employee groups with an opaque ``cursor`` + ``limit``
-  (``response_metadata.next_cursor``). Honours ``employeeIds``.
+  (``response_metadata.next_cursor``). Honours ``employeeIds``. ``errors``
+  is an object (``{}`` when empty), as in production.
 * ``serve_named_lists`` — ``GET /v1/company/named-lists``: groups rows by
-  ``list_name`` into ``{"lists": [{"name", "items": [...]}]}`` and re-nests
-  items under their ``parent_id`` as ``children`` when the parent exists.
-* ``serve_policy_types`` — ``GET /v1/timeoff/policy-types``: returns
-  ``{"policyTypes": [<name>, ...]}``.
+  ``list_name`` into a map keyed by list name,
+  ``{"<name>": {"name", "values": [...], "items": [...]}}`` (the production
+  shape; ``values`` mirrors ``items``), and re-nests items under their
+  ``parent_id`` as ``children`` when the parent exists.
+* ``serve_report_download`` — ``GET /v1/company/reports/{reportId}/download``:
+  renders the report's CSV (UTF-8 with BOM, ``text/csv``) from the
+  ``company_report_data`` corpus, a map of report ID ->
+  ``{"columns": [<header labels>], "rows": [{<label>: <value>}]}``.
+  Unknown report IDs return 404; ``format`` other than ``csv`` returns 400.
 """
 
 from __future__ import annotations
 
+import csv
+import io
 import json
+import re
 from typing import Any
 from urllib.parse import parse_qs, urlsplit
 
@@ -66,7 +75,7 @@ def serve_bulk(prep: PreparedRequest, spec: Any, corpus: Any) -> Response:
     return _json_response(prep, {
         "results": page,
         "response_metadata": {"next_cursor": next_cursor},
-        "errors": [],
+        "errors": {},
     })
 
 
@@ -80,7 +89,7 @@ def serve_named_lists(prep: PreparedRequest, spec: Any, corpus: Any) -> Response
             continue
         lists.setdefault(str(row.get("list_name")), []).append(row)
 
-    payload_lists = []
+    payload: dict[str, dict] = {}
     for name, list_rows in lists.items():
         nodes: dict[str, dict] = {}
         for row in list_rows:
@@ -99,15 +108,45 @@ def serve_named_lists(prep: PreparedRequest, spec: Any, corpus: Any) -> Response
                 nodes[str(parent)]["children"].append(node)
             else:
                 roots.append(node)
-        payload_lists.append({"name": name, "items": roots})
+        payload[name] = {"name": name, "values": roots, "items": roots}
 
-    return _json_response(prep, {"lists": payload_lists})
+    return _json_response(prep, payload)
 
 
-def serve_policy_types(prep: PreparedRequest, spec: Any, corpus: Any) -> Response:
-    rows = _rows(corpus, spec.corpus)
-    names = [r.get("name") for r in rows if r.get("name") is not None]
-    return _json_response(prep, {"policyTypes": names})
+_REPORT_DOWNLOAD_RE = re.compile(r"/company/reports/([^/?#]+)/download")
+
+
+def serve_report_download(prep: PreparedRequest, spec: Any, corpus: Any) -> Response:
+    match = _REPORT_DOWNLOAD_RE.search(urlsplit(prep.url or "").path)
+    report_id = match.group(1) if match else ""
+    fmt = (_query(prep).get("format") or "").lower()
+    if fmt != "csv":
+        return _json_response(prep, {"error": f"format {fmt!r} is not simulated"}, 400)
+
+    reports = corpus.get(spec.corpus) if spec.corpus else None
+    report = reports.get(report_id) if isinstance(reports, dict) else None
+    if not isinstance(report, dict):
+        return _json_response(prep, {"error": f"Report {report_id} not found"}, 404)
+
+    columns = list(report.get("columns") or [])
+    buf = io.StringIO(newline="")
+    writer = csv.writer(buf, lineterminator="\r\n")
+    writer.writerow(columns)
+    for row in report.get("rows") or []:
+        writer.writerow(["" if row.get(c) is None else str(row.get(c)) for c in columns])
+    rec = ResponseRecord(
+        status_code=200,
+        headers={
+            "Content-Type": "text/csv; charset=UTF-8",
+            "X-RateLimit-Limit": "50",
+            "X-RateLimit-Remaining": "49",
+        },
+        body_text="\ufeff" + buf.getvalue(),
+        body_b64=None,
+        encoding="utf-8",
+        url=prep.url,
+    )
+    return response_from_record(rec, prep)
 
 
 # ---------------------------------------------------------------------------
@@ -144,10 +183,10 @@ def _decode_cursor(cursor: Any) -> int:
         return 0
 
 
-def _json_response(prep: PreparedRequest, payload: dict) -> Response:
+def _json_response(prep: PreparedRequest, payload: dict, status_code: int = 200) -> Response:
     body = json.dumps(payload, ensure_ascii=False)
     rec = ResponseRecord(
-        status_code=200,
+        status_code=status_code,
         headers={"Content-Type": "application/json"},
         body_text=body,
         body_b64=None,

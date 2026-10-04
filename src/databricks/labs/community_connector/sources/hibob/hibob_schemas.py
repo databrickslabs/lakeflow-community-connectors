@@ -69,7 +69,6 @@ BULK_TABLE_ENDPOINTS = {
     "employee_work_history": "work",
     "employee_employment_history": "employment",
     "employee_lifecycle_history": "lifecycle",
-    "employee_salary_history": "salaries",
 }
 
 # Bulk entry fields that hold opaque objects and are serialised to JSON strings.
@@ -97,21 +96,16 @@ CHANGE_STRUCT = StructType(
     ]
 )
 
-CURRENCY_STRUCT = StructType(
-    [
-        StructField("value", DoubleType(), True),
-        StructField("currency", StringType(), True),
-    ]
-)
-
 _BULK_COMMON_FIELDS = [
     StructField("employeeId", StringType(), False),
     StructField("id", LongType(), False),
     StructField("effectiveDate", DateType(), True),
     StructField("activeEffectiveDate", DateType(), True),
     StructField("isCurrent", BooleanType(), True),
-    StructField("creationDate", TimestampType(), True),
-    StructField("modificationDate", TimestampType(), True),
+    StructField("canBeDeleted", BooleanType(), True),
+    # Date-only ("YYYY-MM-DD") in production responses, not timestamps.
+    StructField("creationDate", DateType(), True),
+    StructField("modificationDate", DateType(), True),
     StructField("change", CHANGE_STRUCT, True),
     # Opaque object keyed by backend column IDs; stored as JSON string.
     StructField("customColumns", StringType(), True),
@@ -178,7 +172,6 @@ EMPLOYEE_WORK_HISTORY_SCHEMA = StructType(
         StructField("site", StringType(), True),
         StructField("siteId", LongType(), True),
         StructField("reportsTo", EMPLOYEE_REF_STRUCT, True),
-        StructField("canBeDeleted", BooleanType(), True),
     ]
 )
 
@@ -209,16 +202,6 @@ EMPLOYEE_LIFECYCLE_HISTORY_SCHEMA = StructType(
         StructField("employeeStatus", StringType(), True),
         StructField("reasonType", StringType(), True),
         StructField("leaveReason", StringType(), True),
-    ]
-)
-
-EMPLOYEE_SALARY_HISTORY_SCHEMA = StructType(
-    _BULK_COMMON_FIELDS
-    + [
-        StructField("endEffectiveDate", DateType(), True),
-        StructField("base", CURRENCY_STRUCT, True),
-        StructField("payPeriod", StringType(), True),
-        StructField("payFrequency", StringType(), True),
     ]
 )
 
@@ -256,10 +239,6 @@ NAMED_LISTS_SCHEMA = StructType(
         StructField("archived", BooleanType(), True),
         StructField("parent_id", StringType(), True),
     ]
-)
-
-TIME_OFF_POLICY_TYPES_SCHEMA = StructType(
-    [StructField("name", StringType(), False)]
 )
 
 EMPLOYEE_FIELDS_SCHEMA = StructType(
@@ -303,10 +282,8 @@ TABLE_SCHEMAS: dict[str, StructType] = {
     "employee_work_history": EMPLOYEE_WORK_HISTORY_SCHEMA,
     "employee_employment_history": EMPLOYEE_EMPLOYMENT_HISTORY_SCHEMA,
     "employee_lifecycle_history": EMPLOYEE_LIFECYCLE_HISTORY_SCHEMA,
-    "employee_salary_history": EMPLOYEE_SALARY_HISTORY_SCHEMA,
     "time_off_request_changes": TIME_OFF_REQUEST_CHANGES_SCHEMA,
     "named_lists": NAMED_LISTS_SCHEMA,
-    "time_off_policy_types": TIME_OFF_POLICY_TYPES_SCHEMA,
     "employee_fields": EMPLOYEE_FIELDS_SCHEMA,
     "custom_tables_metadata": CUSTOM_TABLES_METADATA_SCHEMA,
 }
@@ -318,19 +295,27 @@ TABLE_METADATA: dict[str, dict] = {
     "employee_work_history": {"primary_keys": _BULK_PK, "ingestion_type": "snapshot"},
     "employee_employment_history": {"primary_keys": _BULK_PK, "ingestion_type": "snapshot"},
     "employee_lifecycle_history": {"primary_keys": _BULK_PK, "ingestion_type": "snapshot"},
-    "employee_salary_history": {"primary_keys": _BULK_PK, "ingestion_type": "snapshot"},
     "time_off_request_changes": {
         "primary_keys": ["requestId", "changeType"],
         "cursor_field": "createdOn",
         "ingestion_type": "append",
     },
     "named_lists": {"primary_keys": ["list_name", "item_id"], "ingestion_type": "snapshot"},
-    "time_off_policy_types": {"primary_keys": ["name"], "ingestion_type": "snapshot"},
     "employee_fields": {"primary_keys": ["id"], "ingestion_type": "snapshot"},
     "custom_tables_metadata": {"primary_keys": ["id"], "ingestion_type": "snapshot"},
 }
 
-SUPPORTED_TABLES = list(TABLE_SCHEMAS.keys())
+# ---------------------------------------------------------------------------
+# company_report: dynamic schema (derived from the configured report's CSV
+# header at runtime), so it has no entry in TABLE_SCHEMAS / TABLE_METADATA.
+# ---------------------------------------------------------------------------
+
+COMPANY_REPORT_TABLE = "company_report"
+DYNAMIC_SCHEMA_TABLES = {COMPANY_REPORT_TABLE}
+# Report downloads can be several MB and are generated server-side on demand.
+REPORT_DOWNLOAD_TIMEOUT_SECONDS = 300
+
+SUPPORTED_TABLES = list(TABLE_SCHEMAS.keys()) + [COMPANY_REPORT_TABLE]
 
 # Tables read through the partitioned-stream path.
 PARTITIONED_TABLES = {"time_off_request_changes"}
