@@ -73,7 +73,7 @@ jobs:
           # Mirror the path filters previously enforced by
           # tj-actions/changed-files: source/library/interface/registration .py
           # files, excluding generated outputs and test directories.
-          all_changed=$(echo "$DIFF" | grep -E '^src/databricks/labs/community_connector/(sources/.+\.py|libs/utils\.py|interface/lakeflow_connect\.py|sparkpds/lakeflow_datasource\.py)$' \
+          all_changed=$(echo "$DIFF" | grep -E '^src/databricks/labs/community_connector/(sources/.+\.py|libs/utils\.py|libs/resumable\.py|interface/lakeflow_connect\.py|sparkpds/lakeflow_datasource\.py)$' \
               | grep -vE '/sources/.*/_generated_.*\.py$' \
               | grep -vE '/sources/.*/test/' || true)
 
@@ -109,6 +109,7 @@ jobs:
           SHARED_CHANGED="false"
           for file in $ALL_CHANGED_FILES; do
             if [[ "$file" == "src/databricks/labs/community_connector/libs/utils.py" ]] || \
+               [[ "$file" == "src/databricks/labs/community_connector/libs/resumable.py" ]] || \
                [[ "$file" == "src/databricks/labs/community_connector/interface/lakeflow_connect.py" ]] || \
                [[ "$file" == "src/databricks/labs/community_connector/sparkpds/lakeflow_datasource.py" ]]; then
               SHARED_CHANGED="true"

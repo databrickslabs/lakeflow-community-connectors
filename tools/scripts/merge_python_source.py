@@ -37,6 +37,45 @@ SCRIPT_DIR = Path(__file__).parent
 PROJECT_ROOT = SCRIPT_DIR.parent.parent
 EXCLUDE_CONFIG_PATH = SCRIPT_DIR / "merge_exclude_config.json"
 
+# Reusable framework helpers under libs/ that are inlined ONLY into sources that
+# import them (unlike libs/utils.py, which is always inlined). Lets connectors
+# share framework code despite SDP's no-import limitation, without bloating the
+# merged file of every source that doesn't use it. Each name maps to
+# src/databricks/labs/community_connector/libs/<name>.py.
+OPTIONAL_SHARED_LIBS = ("resumable",)
+
+
+def get_referenced_shared_libs(file_contents: List[str]) -> List[str]:
+    """Return the OPTIONAL_SHARED_LIBS a source (transitively) imports.
+
+    Scans the given file contents (the main source plus its library files) for
+    ``from ...libs.<name> import`` of any optional shared lib, then follows
+    shared-lib -> shared-lib imports so that a lib which itself imports another
+    shared lib pulls that dependency in too (otherwise the dependency's code
+    would be referenced but never inlined -> NameError at SDP runtime). Only
+    libs a source actually uses get inlined into its merged file.
+
+    The result is ordered by OPTIONAL_SHARED_LIBS declaration order, so declare
+    a shared lib before any other that depends on it to keep the inlined
+    definitions in dependency order.
+    """
+    libs_dir = PROJECT_ROOT / "src" / "databricks" / "labs" / "community_connector" / "libs"
+    referenced = set()
+    pending = list(file_contents)
+    while pending:
+        content = pending.pop()
+        for lib in OPTIONAL_SHARED_LIBS:
+            if lib in referenced:
+                continue
+            needle = f"from databricks.labs.community_connector.libs.{lib} import"
+            if needle in content:
+                referenced.add(lib)
+                # Follow this lib's own imports to catch transitive shared libs.
+                lib_path = libs_dir / f"{lib}.py"
+                if lib_path.exists():
+                    pending.append(read_file_content(lib_path))
+    return [lib for lib in OPTIONAL_SHARED_LIBS if lib in referenced]
+
 
 def load_exclude_config() -> Dict:
     """
@@ -440,6 +479,11 @@ def deduplicate_imports(
         "from databricks.labs.community_connector.sparkpds.lakeflow_datasource import",
         "from databricks.labs.community_connector.sources.",
         "from databricks.labs.community_connector.interface",
+    ] + [
+        # Optional shared libs are inlined when a source imports them, so their
+        # imports must be stripped like the always-inlined libs.utils above.
+        f"from databricks.labs.community_connector.libs.{lib} import"
+        for lib in OPTIONAL_SHARED_LIBS
     ]
 
     # Track 'from X import Y' style imports to merge them
@@ -646,6 +690,16 @@ def merge_files(source_name: str, output_path: Optional[Path] = None) -> str:
         lib_contents = []
         for lib_file in lib_files:
             lib_contents.append((lib_file, read_file_content(lib_file)))
+
+        # Detect and read optional shared libs (libs/<name>.py) imported by the
+        # source or its library files. Only imported ones are inlined.
+        shared_lib_names = get_referenced_shared_libs(
+            [source_content] + [content for _, content in lib_contents]
+        )
+        shared_lib_contents = [
+            (name, read_file_content(src_base / "libs" / f"{name}.py"))
+            for name in shared_lib_names
+        ]
     except FileNotFoundError as e:
         print(f"Error: {e}", file=sys.stderr)
         sys.exit(1)
@@ -679,6 +733,12 @@ def merge_files(source_name: str, output_path: Optional[Path] = None) -> str:
     for lib_file, content in lib_contents:
         lib_imports, lib_code = extract_imports_and_code(content)
         lib_imports_and_code.append((lib_file, lib_imports, lib_code))
+
+    # Extract imports and code from optional shared libs.
+    shared_lib_imports_and_code = []
+    for name, content in shared_lib_contents:
+        shared_imports, shared_code = extract_imports_and_code(content)
+        shared_lib_imports_and_code.append((name, shared_imports, shared_code))
 
     # Replace the LakeflowConnectImpl alias with the actual implementation class.
     # The placeholder line in lakeflow_datasource.py is:
@@ -720,6 +780,8 @@ def merge_files(source_name: str, output_path: Optional[Path] = None) -> str:
 
     # Deduplicate and organize all imports
     all_import_lists = [utils_imports, interface_imports, partition_imports, namespaces_imports]
+    for _, shared_imports, _ in shared_lib_imports_and_code:
+        all_import_lists.append(shared_imports)
     for _, lib_imports, _ in lib_imports_and_code:
         all_import_lists.append(lib_imports)
     all_import_lists.extend([source_imports, lakeflow_imports])
@@ -766,6 +828,23 @@ def merge_files(source_name: str, output_path: Optional[Path] = None) -> str:
             merged_lines.append("")
     merged_lines.append("")
     merged_lines.append("")
+
+    # Section 1b: optional shared libs (inlined only when the source imports
+    # them). Placed after utils.py so their top-level names are defined before
+    # the source code that references them.
+    for name, _, shared_code in shared_lib_imports_and_code:
+        rel_path = f"src/databricks/labs/community_connector/libs/{name}.py"
+        merged_lines.append("    " + "#" * 56)
+        merged_lines.append(f"    # {rel_path}")
+        merged_lines.append("    " + "#" * 56)
+        merged_lines.append("")
+        for line in shared_code.strip().split("\n"):
+            if line.strip():
+                merged_lines.append("    " + line)
+            else:
+                merged_lines.append("")
+        merged_lines.append("")
+        merged_lines.append("")
 
     # Section 2: src/databricks/labs/community_connector/interface/lakeflow_connect.py code
     merged_lines.append("    " + "#" * 56)
