@@ -1341,7 +1341,6 @@ def register_lakeflow_source(spark):
         # ------------------------------------------------------------------
 
         def _company_report_metadata(self, table_options: dict[str, str]) -> dict:
-            report_id = _require_report_id(table_options)
             metadata: dict[str, Any] = {"ingestion_type": "snapshot"}
             raw_pks = table_options.get("primary_keys")
             pks = _parse_name_list(raw_pks)
@@ -1349,6 +1348,14 @@ def register_lakeflow_source(spark):
                 raise ValueError(
                     f"company_report: 'primary_keys' option {raw_pks!r} contains no column names."
                 )
+            report_id = str(table_options.get("report_id") or "").strip()
+            if not report_id:
+                # Managed ingestion may call metadata without the connector options;
+                # the pipeline spec's primary_keys take over, and report_id is
+                # enforced on the schema/read paths that actually download the report.
+                if pks:
+                    metadata["primary_keys"] = pks
+                return metadata
             if pks:
                 columns = self._report_columns(table_options)
                 missing = [pk for pk in pks if pk not in columns]
@@ -1548,7 +1555,7 @@ def register_lakeflow_source(spark):
             raise ValueError(
                 "Table 'company_report' requires the 'report_id' table option (the ID of a "
                 "saved HiBob report shared with the service user; list them with "
-                "GET /company/reports)."
+                f"GET /company/reports). Options received: {sorted(table_options)}"
             )
         return report_id
 
