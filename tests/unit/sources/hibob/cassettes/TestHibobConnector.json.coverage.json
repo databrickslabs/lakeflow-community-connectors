@@ -1,0 +1,109 @@
+{
+  "version": 1,
+  "endpoints": [
+    {
+      "method": "GET",
+      "url": "https://api.hibob.com/v1/bulk/people/employment",
+      "count": 62,
+      "param_shapes": [
+        [
+          "includeArchived",
+          "limit"
+        ],
+        [
+          "cursor",
+          "includeArchived",
+          "limit"
+        ]
+      ]
+    },
+    {
+      "method": "GET",
+      "url": "https://api.hibob.com/v1/bulk/people/lifecycle",
+      "count": 101,
+      "param_shapes": [
+        [
+          "includeArchived",
+          "limit"
+        ],
+        [
+          "cursor",
+          "includeArchived",
+          "limit"
+        ]
+      ]
+    },
+    {
+      "method": "GET",
+      "url": "https://api.hibob.com/v1/bulk/people/work",
+      "count": 227,
+      "param_shapes": [
+        [
+          "includeArchived",
+          "limit"
+        ],
+        [
+          "cursor",
+          "includeArchived",
+          "limit"
+        ]
+      ]
+    },
+    {
+      "method": "GET",
+      "url": "https://api.hibob.com/v1/company/named-lists",
+      "count": 3,
+      "param_shapes": [
+        [
+          "includeArchived"
+        ]
+      ]
+    },
+    {
+      "method": "GET",
+      "url": "https://api.hibob.com/v1/company/people/fields",
+      "count": 3,
+      "param_shapes": [
+        []
+      ]
+    },
+    {
+      "method": "GET",
+      "url": "https://api.hibob.com/v1/company/reports/31115110/download",
+      "count": 1,
+      "param_shapes": [
+        [
+          "format"
+        ]
+      ]
+    },
+    {
+      "method": "GET",
+      "url": "https://api.hibob.com/v1/people/custom-tables/metadata",
+      "count": 3,
+      "param_shapes": [
+        []
+      ]
+    },
+    {
+      "method": "POST",
+      "url": "https://api.hibob.com/v1/people/search",
+      "count": 3,
+      "param_shapes": [
+        []
+      ]
+    },
+    {
+      "method": "GET",
+      "url": "https://api.hibob.com/v1/timeoff/requests/changes",
+      "count": 14,
+      "param_shapes": [
+        [
+          "includePending",
+          "since",
+          "to"
+        ]
+      ]
+    }
+  ]
+}
