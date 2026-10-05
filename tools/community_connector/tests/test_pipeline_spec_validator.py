@@ -345,6 +345,33 @@ class TestWarnings:
         assert len(warnings) == 1
         assert "unknown_field" in warnings[0]
 
+    def test_connector_options_is_a_known_table_key(self):
+        """Source-specific options nested under connector_options must not warn.
+
+        The correct placement for per-connector options is
+        ``connector_options.community_connector_options.options`` — recognized
+        as a known table key, so a spec using it produces no spurious
+        "will be ignored" warning.
+        """
+        spec = {
+            "connection_name": "my_connection",
+            "objects": [
+                {
+                    "table": {
+                        "source_table": "issues",
+                        "source_schema": "default",
+                        "connector_options": {
+                            "community_connector_options": {
+                                "options": {"owner": "octocat", "repo": "hello"}
+                            }
+                        },
+                    }
+                }
+            ],
+        }
+        warnings = validate_pipeline_spec(spec)
+        assert not warnings
+
     def test_unknown_object_keys(self):
         """Test warning for unknown keys in object."""
         spec = {
