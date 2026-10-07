@@ -1,7 +1,6 @@
-import json
 import time
 from datetime import datetime, timezone
-from typing import Dict, Iterator, List, Tuple
+from typing import Dict, Iterator, List
 
 import requests
 from pyspark.sql.types import (
@@ -689,7 +688,7 @@ class HubspotLakeflowConnect(LakeflowConnect):
                 datetime.fromisoformat(last_updated.replace("Z", "+00:00")).timestamp()
                 * 1000
             )
-        except:
+        except ValueError:
             last_updated_ms = 0
 
         search_body = {
