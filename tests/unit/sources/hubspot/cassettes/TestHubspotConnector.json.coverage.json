@@ -1,0 +1,333 @@
+{
+  "version": 1,
+  "endpoints": [
+    {
+      "method": "GET",
+      "url": "https://api.hubapi.com/crm/v3/objects/calls",
+      "count": 2,
+      "param_shapes": [
+        [
+          "archived",
+          "associations",
+          "limit",
+          "properties"
+        ]
+      ]
+    },
+    {
+      "method": "POST",
+      "url": "https://api.hubapi.com/crm/v3/objects/calls/search",
+      "count": 1,
+      "param_shapes": [
+        []
+      ]
+    },
+    {
+      "method": "GET",
+      "url": "https://api.hubapi.com/crm/v3/objects/companies",
+      "count": 3,
+      "param_shapes": [
+        [
+          "archived",
+          "associations",
+          "limit",
+          "properties"
+        ],
+        [
+          "archived",
+          "limit",
+          "properties"
+        ]
+      ]
+    },
+    {
+      "method": "POST",
+      "url": "https://api.hubapi.com/crm/v3/objects/companies/batch/read",
+      "count": 3,
+      "param_shapes": [
+        [
+          "archived"
+        ]
+      ]
+    },
+    {
+      "method": "POST",
+      "url": "https://api.hubapi.com/crm/v3/objects/companies/search",
+      "count": 4,
+      "param_shapes": [
+        []
+      ]
+    },
+    {
+      "method": "GET",
+      "url": "https://api.hubapi.com/crm/v3/objects/contacts",
+      "count": 3,
+      "param_shapes": [
+        [
+          "archived",
+          "associations",
+          "limit",
+          "properties"
+        ],
+        [
+          "archived",
+          "limit",
+          "properties"
+        ]
+      ]
+    },
+    {
+      "method": "POST",
+      "url": "https://api.hubapi.com/crm/v3/objects/contacts/batch/read",
+      "count": 3,
+      "param_shapes": [
+        [
+          "archived"
+        ]
+      ]
+    },
+    {
+      "method": "POST",
+      "url": "https://api.hubapi.com/crm/v3/objects/contacts/search",
+      "count": 4,
+      "param_shapes": [
+        []
+      ]
+    },
+    {
+      "method": "GET",
+      "url": "https://api.hubapi.com/crm/v3/objects/deals",
+      "count": 3,
+      "param_shapes": [
+        [
+          "archived",
+          "associations",
+          "limit",
+          "properties"
+        ],
+        [
+          "archived",
+          "limit",
+          "properties"
+        ]
+      ]
+    },
+    {
+      "method": "POST",
+      "url": "https://api.hubapi.com/crm/v3/objects/deals/batch/read",
+      "count": 3,
+      "param_shapes": [
+        [
+          "archived"
+        ]
+      ]
+    },
+    {
+      "method": "POST",
+      "url": "https://api.hubapi.com/crm/v3/objects/deals/search",
+      "count": 4,
+      "param_shapes": [
+        []
+      ]
+    },
+    {
+      "method": "GET",
+      "url": "https://api.hubapi.com/crm/v3/objects/emails",
+      "count": 3,
+      "param_shapes": [
+        [
+          "archived",
+          "associations",
+          "limit",
+          "properties"
+        ],
+        [
+          "archived",
+          "limit",
+          "properties"
+        ]
+      ]
+    },
+    {
+      "method": "POST",
+      "url": "https://api.hubapi.com/crm/v3/objects/emails/search",
+      "count": 1,
+      "param_shapes": [
+        []
+      ]
+    },
+    {
+      "method": "GET",
+      "url": "https://api.hubapi.com/crm/v3/objects/meetings",
+      "count": 2,
+      "param_shapes": [
+        [
+          "archived",
+          "associations",
+          "limit",
+          "properties"
+        ]
+      ]
+    },
+    {
+      "method": "GET",
+      "url": "https://api.hubapi.com/crm/v3/objects/notes",
+      "count": 4,
+      "param_shapes": [
+        [
+          "archived",
+          "associations",
+          "limit",
+          "properties"
+        ],
+        [
+          "archived",
+          "limit",
+          "properties"
+        ]
+      ]
+    },
+    {
+      "method": "GET",
+      "url": "https://api.hubapi.com/crm/v3/objects/tasks",
+      "count": 3,
+      "param_shapes": [
+        [
+          "archived",
+          "associations",
+          "limit",
+          "properties"
+        ],
+        [
+          "archived",
+          "limit",
+          "properties"
+        ]
+      ]
+    },
+    {
+      "method": "POST",
+      "url": "https://api.hubapi.com/crm/v3/objects/tasks/search",
+      "count": 1,
+      "param_shapes": [
+        []
+      ]
+    },
+    {
+      "method": "GET",
+      "url": "https://api.hubapi.com/crm/v3/objects/tickets",
+      "count": 3,
+      "param_shapes": [
+        [
+          "archived",
+          "associations",
+          "limit",
+          "properties"
+        ],
+        [
+          "archived",
+          "limit",
+          "properties"
+        ]
+      ]
+    },
+    {
+      "method": "POST",
+      "url": "https://api.hubapi.com/crm/v3/objects/tickets/batch/read",
+      "count": 3,
+      "param_shapes": [
+        [
+          "archived"
+        ]
+      ]
+    },
+    {
+      "method": "POST",
+      "url": "https://api.hubapi.com/crm/v3/objects/tickets/search",
+      "count": 4,
+      "param_shapes": [
+        []
+      ]
+    },
+    {
+      "method": "GET",
+      "url": "https://api.hubapi.com/crm/v3/schemas",
+      "count": 233,
+      "param_shapes": [
+        []
+      ]
+    },
+    {
+      "method": "GET",
+      "url": "https://api.hubapi.com/properties/v2/calls/properties",
+      "count": 2,
+      "param_shapes": [
+        []
+      ]
+    },
+    {
+      "method": "GET",
+      "url": "https://api.hubapi.com/properties/v2/companies/properties",
+      "count": 5,
+      "param_shapes": [
+        []
+      ]
+    },
+    {
+      "method": "GET",
+      "url": "https://api.hubapi.com/properties/v2/contacts/properties",
+      "count": 5,
+      "param_shapes": [
+        []
+      ]
+    },
+    {
+      "method": "GET",
+      "url": "https://api.hubapi.com/properties/v2/deals/properties",
+      "count": 5,
+      "param_shapes": [
+        []
+      ]
+    },
+    {
+      "method": "GET",
+      "url": "https://api.hubapi.com/properties/v2/emails/properties",
+      "count": 2,
+      "param_shapes": [
+        []
+      ]
+    },
+    {
+      "method": "GET",
+      "url": "https://api.hubapi.com/properties/v2/meetings/properties",
+      "count": 2,
+      "param_shapes": [
+        []
+      ]
+    },
+    {
+      "method": "GET",
+      "url": "https://api.hubapi.com/properties/v2/notes/properties",
+      "count": 2,
+      "param_shapes": [
+        []
+      ]
+    },
+    {
+      "method": "GET",
+      "url": "https://api.hubapi.com/properties/v2/tasks/properties",
+      "count": 2,
+      "param_shapes": [
+        []
+      ]
+    },
+    {
+      "method": "GET",
+      "url": "https://api.hubapi.com/properties/v2/tickets/properties",
+      "count": 5,
+      "param_shapes": [
+        []
+      ]
+    }
+  ]
+}

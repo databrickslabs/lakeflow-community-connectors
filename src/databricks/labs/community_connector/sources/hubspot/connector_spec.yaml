@@ -24,4 +24,4 @@ connection:
 # Use a comma-separated string of option names.
 # If no table-specific options are needed, set to empty string or omit.
 # ============================================================================
-external_options_allowlist: "max_records_per_batch"
+external_options_allowlist: "max_records_per_batch,history_properties,history_since,history_lookback_minutes,include_properties,exclude_properties"

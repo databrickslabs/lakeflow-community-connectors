@@ -9,6 +9,9 @@
 #   schema with just id/createdAt/updatedAt/archived/associations/properties).
 # * ``read_table`` → GET ``/crm/v3/objects/{table}`` first call;
 #   POST ``/crm/v3/objects/{table}/search`` for incremental reads.
+# * ``{object}_property_history`` tables → POST ``.../search`` for changed IDs,
+#   then POST ``/crm/v3/objects/{object}/batch/read`` (custom handler) served
+#   from the ``{object}_history`` corpus.
 #
 # Response wrapper for listing endpoints: ``{"results": [...], "paging": {}}``
 # with paging empty so the connector terminates after one page.
@@ -105,3 +108,10 @@ endpoints:
     method: POST
     corpus: notes
     response: {pagination_style: none, wrapper: {records_key: results, extras: {paging: {}, total: 0}}}
+
+  # Batch read (POST) — used by the {object}_property_history tables to fetch
+  # propertiesWithHistory for the IDs found via search. Inputs live in the
+  # JSON body, so a custom handler filters the {object}_history corpus by ID.
+  - path: /crm/v3/objects/{object_type}/batch/read
+    method: POST
+    handler: databricks.labs.community_connector.source_simulator.specs.hubspot.handlers.batch_read:serve_batch_read

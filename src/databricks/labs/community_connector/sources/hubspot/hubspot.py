@@ -1,7 +1,6 @@
-import json
 import time
 from datetime import datetime, timezone
-from typing import Dict, Iterator, List, Tuple
+from typing import Dict, Iterator, List
 
 import requests
 from pyspark.sql.types import (
@@ -15,6 +14,13 @@ from pyspark.sql.types import (
 )
 
 from databricks.labs.community_connector.interface import LakeflowConnect
+from databricks.labs.community_connector.sources.hubspot.hubspot_property_history import (
+    HISTORY_STANDARD_OBJECTS,
+    HubspotPropertyHistory,
+    filter_property_names,
+    history_table_name,
+    is_history_table,
+)
 
 
 class HubspotLakeflowConnect(LakeflowConnect):
@@ -118,6 +124,19 @@ class HubspotLakeflowConnect(LakeflowConnect):
             "supports_deletes": False,  # Custom objects don't support archived queries by default
         }
 
+        # {object}_property_history tables (see hubspot_property_history.py)
+        self._history = HubspotPropertyHistory(
+            base_url=self.base_url,
+            auth_header=self.auth_header,
+            init_ts=self._init_ts,
+            get_property_names=lambda obj: [
+                p["name"] for p in self._get_object_properties(obj) if p.get("name")
+            ],
+            get_cursor_property=lambda obj: self._get_object_config(obj)[
+                "cursor_property_field"
+            ],
+        )
+
     def list_tables(self) -> list[str]:
         """
         List available tables including standard CRM objects and custom objects.
@@ -136,13 +155,18 @@ class HubspotLakeflowConnect(LakeflowConnect):
         ]
 
         # Add dynamic discovery of custom objects
+        custom_objects = []
         try:
             custom_objects = self._discover_custom_objects()
             standard_tables.extend(custom_objects)
         except Exception as e:
             print(f"Warning: Could not discover custom objects: {e}")
 
-        return standard_tables
+        # Property history tables for the core CRM objects and custom objects
+        history_tables = [
+            history_table_name(obj) for obj in HISTORY_STANDARD_OBJECTS + custom_objects
+        ]
+        return standard_tables + history_tables
 
     def _discover_custom_objects(self) -> List[str]:
         """
@@ -195,15 +219,21 @@ class HubspotLakeflowConnect(LakeflowConnect):
                 f"Supported tables are: {supported_tables}"
             )
 
-        # Check cache first
-        if table_name in self._schema_cache:
-            return self._schema_cache[table_name]
+        if is_history_table(table_name):
+            return self._history.get_table_schema()
+
+        # Cache key includes the property filters — the schema is a function of
+        # (table_name, table_options), so cached entries must not leak across
+        # different include_properties / exclude_properties values.
+        cache_key = self._options_cache_key(table_name, table_options)
+        if cache_key in self._schema_cache:
+            return self._schema_cache[cache_key]
 
         # Discover schema via API
-        schema = self._discover_table_schema(table_name)
+        schema = self._discover_table_schema(table_name, table_options)
 
         # Cache the result
-        self._schema_cache[table_name] = schema
+        self._schema_cache[cache_key] = schema
 
         return schema
 
@@ -247,40 +277,63 @@ class HubspotLakeflowConnect(LakeflowConnect):
                 f"Supported tables are: {supported_tables}"
             )
 
-        # Check cache first
-        if table_name in self._metadata_cache:
-            return self._metadata_cache[table_name]
+        if is_history_table(table_name):
+            return self._history.get_table_metadata()
+
+        cache_key = self._options_cache_key(table_name, table_options)
+        if cache_key in self._metadata_cache:
+            return self._metadata_cache[cache_key]
 
         # Get metadata from object configuration
-        metadata = self._get_table_metadata(table_name)
+        metadata = self._get_table_metadata(table_name, table_options)
 
         # Cache the result
-        self._metadata_cache[table_name] = metadata
+        self._metadata_cache[cache_key] = metadata
 
         return metadata
 
-    def _discover_table_schema(self, table_name: str) -> StructType:
+    @staticmethod
+    def _options_cache_key(table_name: str, table_options: Dict[str, str] | None) -> tuple:
+        """Cache key covering the options that change schema/metadata output."""
+        opts = table_options or {}
+        return (
+            table_name,
+            opts.get("include_properties"),
+            opts.get("exclude_properties"),
+        )
+
+    def _discover_table_schema(self, table_name: str, table_options: Dict[str, str]) -> StructType:
         """
         Discover table schema by calling HubSpot Properties API.
 
         Args:
             table_name: Name of the table/object to discover schema for
+            table_options: Table options (include_properties / exclude_properties)
 
         Returns:
             StructType representing the table schema
         """
         # All CRM objects follow the same schema pattern
-        return self._discover_crm_object_schema(table_name)
+        return self._discover_crm_object_schema(table_name, table_options)
 
-    def _get_table_metadata(self, table_name: str) -> dict:
+    def _get_table_metadata(
+        self, table_name: str, table_options: Dict[str, str] | None = None
+    ) -> dict:
         """
         Get metadata for a table based on object configuration.
         """
+        table_options = table_options or {}
         config = self._get_object_config(table_name)
 
-        # Get property names and cursor property field for API calls
+        # Get property names and cursor property field for API calls.
+        # include_properties / exclude_properties bound the requested set;
+        # the cursor property is always retained so incremental reads work.
         properties = self._get_object_properties(table_name)
-        property_names = [prop["name"] for prop in properties]
+        property_names = filter_property_names(
+            [prop["name"] for prop in properties],
+            table_options,
+            cursor_property=config["cursor_property_field"],
+        )
 
         # Use cdc_with_deletes only for tables that support archived queries
         supports_deletes = config.get("supports_deletes", False)
@@ -295,14 +348,22 @@ class HubspotLakeflowConnect(LakeflowConnect):
             "ingestion_type": ingestion_type,
         }
 
-    def _discover_crm_object_schema(self, table_name: str) -> StructType:
+    def _discover_crm_object_schema(
+        self, table_name: str, table_options: Dict[str, str] | None = None
+    ) -> StructType:
         """
         Discover CRM object schema using HubSpot Properties API.
         Works for contacts, companies, deals, tickets, and custom objects.
         """
-        # Get object configuration and properties
+        # Get object configuration and properties (filtered by table options)
         config = self._get_object_config(table_name)
         properties = self._get_object_properties(table_name)
+        property_names = filter_property_names(
+            [prop.get("name", "") for prop in properties],
+            table_options,
+            cursor_property=config["cursor_property_field"],
+        )
+        property_by_name = {prop.get("name", ""): prop for prop in properties}
 
         # Build base schema fields (these are always present for CRM objects)
         base_fields = [
@@ -319,14 +380,13 @@ class HubspotLakeflowConnect(LakeflowConnect):
         # Build nested properties schema based on API response
         properties_fields = []
 
-        if isinstance(properties, list):
-            for prop in properties:
-                prop_name = prop.get("name", "")
-                prop_type = prop.get("type", "string")
+        for prop_name in property_names:
+            prop = property_by_name.get(prop_name, {})
+            prop_type = prop.get("type", "string")
 
-                # Map HubSpot property types to Spark types
-                spark_type = self._map_hubspot_type_to_spark(prop_type)
-                properties_fields.append(StructField(prop_name, spark_type, True))
+            # Map HubSpot property types to Spark types
+            spark_type = self._map_hubspot_type_to_spark(prop_type)
+            properties_fields.append(StructField(prop_name, spark_type, True))
 
         # Create nested properties StructType
         properties_struct = StructType(properties_fields) if properties_fields else StructType([])
@@ -406,6 +466,9 @@ class HubspotLakeflowConnect(LakeflowConnect):
                 f"Unsupported table: {table_name}. "
                 f"Supported tables are: {supported_tables}"
             )
+
+        if is_history_table(table_name):
+            return self._history.read_table(table_name, start_offset, table_options)
 
         # Determine if this is an incremental read
         is_incremental = (
@@ -557,6 +620,19 @@ class HubspotLakeflowConnect(LakeflowConnect):
                     not latest_updated or updated_time > latest_updated
                 ):
                     latest_updated = updated_time
+                # Strict > boundary: the search filter is GTE-inclusive, so the
+                # record that set the watermark is returned again. Re-emitting it
+                # without advancing the offset violates the
+                # SimpleDataSourceStreamReader contract (a non-empty batch MUST
+                # advance the end offset past the start) and the managed pipeline
+                # aborts with SIMPLE_STREAM_READER_OFFSET_DID_NOT_ADVANCE.
+                # HubSpot updatedAt has millisecond precision, so distinct
+                # updates effectively never share the exact boundary value.
+                if checkpoint:
+                    records = [
+                        r for r in records
+                        if (r.get("updatedAt") or "") > checkpoint
+                    ]
             else:
                 # Use objects API for full refresh
                 records, after = self._fetch_full_refresh_batch(
@@ -643,7 +719,7 @@ class HubspotLakeflowConnect(LakeflowConnect):
                 datetime.fromisoformat(last_updated.replace("Z", "+00:00")).timestamp()
                 * 1000
             )
-        except:
+        except ValueError:
             last_updated_ms = 0
 
         search_body = {

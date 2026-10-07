@@ -109,9 +109,102 @@ The high-value bound (`<init_ts>`) is captured once per connector instance to
 guarantee `Trigger.AvailableNow` termination — without it, the read window
 chases incoming updates forever.
 
+## Property history (`{object}_property_history`)
+
+HubSpot returns a property's previous values when it is listed in
+`propertiesWithHistory`. Which endpoints accept it (verified against
+HubSpot's OpenAPI specs for the CRM objects API):
+
+| Endpoint | `propertiesWithHistory` | Notes |
+|---|---|---|
+| `GET /crm/v3/objects/{type}/{id}` | yes (query) | one object |
+| `GET /crm/v3/objects/{type}` (list) | yes (query) | "will reduce the maximum number of [objects] that can be read by a single request"; long property lists hit URL-length limits |
+| `POST /crm/v3/objects/{type}/batch/read` | yes (body) | up to 100 IDs; may return `207` with per-ID errors |
+| `POST /crm/v3/objects/{type}/search` | **no** | request schema is `after`, `filterGroups`, `limit`, `properties`, `query`, `sorts` |
+
+Each history entry (`ValueWithTimestamp`) has `value`, `timestamp`,
+`sourceType` (required) and `sourceId`, `sourceLabel`, `updatedByUserId`
+(optional).
+
+### Read pattern
+
+1. `POST /crm/v3/objects/{type}/search` with `GTE <cursor - lookback>` and
+   `LTE <init_ts>` on the cursor property, ascending, `limit: 200`, returning
+   only IDs and `updatedAt`.
+2. `POST /crm/v3/objects/{type}/batch/read` with up to 50 IDs and
+   `propertiesWithHistory` (all properties from the Properties API, or the
+   `history_properties` table option).
+3. One output row per history entry; entries older than the query's lower
+   bound (or `history_since`) are dropped.
+
+Offset: `{"updatedAt": <max parent updatedAt processed>}`. The lookback is
+applied once per connector instance (one pipeline update), not stored in the
+offset.
+
+### Limits that shape the implementation
+
+- Search: **5 requests/second per account**, max 200 results per page, max
+  **10,000 results per query** (paging past it returns 400). The reader spaces
+  search calls 250 ms apart and ends a read before the cap, re-anchoring the
+  next search at the latest `updatedAt`.
+- General burst limits for privately distributed apps: 100 requests / 10 s
+  (Free/Starter), 190 / 10 s (Professional/Enterprise), 250 / 10 s with the API
+  limit increase. Daily: 250k / 625k / 1M per account.
+- 429 responses: retried up to 5 times, honouring `Retry-After` when present,
+  else exponential backoff (1, 2, 4, 8, 16 s; capped at 30 s). Retry applies to
+  the property history tables only.
+
+### Known gaps (to confirm in live testing)
+
+- HubSpot does not document the per-request cap for batch read *with* history;
+  the reader uses 50 IDs per call.
+- Calculated / rollup properties may change without updating the object's
+  last-modified date (Airbyte documents this as cursor drift); such changes are
+  not picked up until the object is next modified.
+
+## Property filtering (`include_properties` / `exclude_properties`)
+
+By default every table discovers and requests **all** properties. Two table
+options bound that set (both are applied to object tables and to
+`*_property_history` tables):
+
+- `include_properties` — comma-separated allowlist; unknown names are ignored
+  (HubSpot itself ignores unrecognised property names).
+- `exclude_properties` — removed after `include_properties` is applied.
+
+The object's cursor property (`lastmodifieddate` / `hs_lastmodifieddate`) is
+always retained so incremental reads keep working. Changing the options
+changes the schema and future ingestion; previously ingested rows remain
+until the table is re-ingested. To force a re-ingest after changing options,
+change any connector option value on the table (even trivially) — this
+recreates the table's ingestion flow and re-reads the source from the
+beginning. On serverless managed ingestion, a full refresh alone resumes
+from the pipeline's stored cursor and may not re-read the source for tables
+whose options did not change.
+
+**Why this matters — verified against a live HubSpot portal (2026-10-07):**
+
+- **Full refresh (list endpoint)** takes `properties=` in the URL. Requests fail
+  with **HTTP 414 Request-URI Too Large** once the URL passes roughly **22,000
+  characters** (~630 property parameters). Objects with 1,000+ properties
+  produce ~35,000-character URLs — full refresh fails on them, always.
+- **Incremental (Search API)** accepts large `properties` bodies (verified
+  HTTP 200 at ~29,700 characters / 1,099 entries); HubSpot's documented
+  3,000-character "query" limit did not reject the properties array in
+  testing. Still, requesting every property inflates every page of every
+  response.
+
+Use `include_properties` / `exclude_properties` to bound wide objects to the
+properties you need — for 1,000+-property objects it is currently the only
+way to ingest them at all. Chunking the all-properties path across multiple
+requests (Airbyte-style) is a possible follow-up.
+
 ## References
 
 - HubSpot CRM v3 API: https://developers.hubspot.com/docs/api/crm
 - Search API: https://developers.hubspot.com/docs/api/crm/search
 - Properties API: https://developers.hubspot.com/docs/api/crm/properties
 - Rate limits: https://developers.hubspot.com/docs/api/usage-details
+- Search limits: https://developers.hubspot.com/docs/api-reference/latest/crm/search-the-crm#limits
+- Batch read (contacts example, same shape for all CRM objects): https://developers.hubspot.com/docs/api-reference/legacy/crm/objects/contacts/batch/get-contacts
+- Usage guidelines (current limits table): https://developers.hubspot.com/docs/developer-tooling/platform/usage-guidelines
