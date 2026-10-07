@@ -1,27 +1,65 @@
 [
   {
     "id": "1000",
-    "createdAt": "2024-01-01T00:00:00Z",
-    "updatedAt": "2024-02-01T00:00:00Z",
+    "createdAt": "2026-10-07T02:39:15.723Z",
+    "updatedAt": "2026-10-07T02:39:28.906Z",
     "archived": false,
     "properties": {
-      "name": "Sample 0 v2"
+      "content": null,
+      "hs_pipeline": "0",
+      "hs_pipeline_stage": "1",
+      "hs_ticket_category": null,
+      "hs_ticket_priority": "HIGH",
+      "subject": "GCB Seed Ticket 1"
     },
     "propertiesWithHistory": {
-      "name": [
+      "hs_lastmodifieddate": [
         {
-          "value": "Sample 0 v2",
-          "timestamp": "2024-02-01T00:00:00Z",
-          "sourceType": "CRM_UI",
-          "sourceId": "userId:5001",
-          "sourceLabel": "Jane Admin",
+          "value": "2026-10-07T02:39:28.906Z",
+          "timestamp": "2026-10-07T02:39:28.906Z",
+          "sourceType": "INTEGRATION",
+          "sourceId": "56047876",
+          "sourceLabel": "Seed User 1",
           "updatedByUserId": 5001
         },
         {
-          "value": "Sample 0",
-          "timestamp": "2024-01-01T00:00:00Z",
-          "sourceType": "IMPORT",
-          "sourceId": "import-77",
+          "value": "2026-10-07T02:39:19.921Z",
+          "timestamp": "2026-10-07T02:39:19.921Z",
+          "sourceType": "API",
+          "sourceLabel": "Seed User 2",
+          "updatedByUserId": 5002
+        },
+        {
+          "value": "2026-10-07T02:39:16.091Z",
+          "timestamp": "2026-10-07T02:39:16.091Z",
+          "sourceType": "INTERNAL_PROCESSING",
+          "sourceId": "RecordSourceDetailsWriterWorker",
+          "sourceLabel": "Seed User 3",
+          "updatedByUserId": 5003
+        },
+        {
+          "value": "2026-10-07T02:39:15.723Z",
+          "timestamp": "2026-10-07T02:39:15.723Z",
+          "sourceType": "INTEGRATION",
+          "sourceId": "56047876",
+          "sourceLabel": "Seed User 1",
+          "updatedByUserId": 5001
+        }
+      ],
+      "hs_ticket_priority": [
+        {
+          "value": "HIGH",
+          "timestamp": "2026-10-07T02:39:28.906Z",
+          "sourceType": "INTEGRATION",
+          "sourceId": "56047876",
+          "sourceLabel": "Seed User 1",
+          "updatedByUserId": 5001
+        },
+        {
+          "value": "MEDIUM",
+          "timestamp": "2026-10-07T02:39:15.723Z",
+          "sourceType": "INTEGRATION",
+          "sourceId": "56047876",
           "sourceLabel": "Seed User 2",
           "updatedByUserId": 5002
         }
@@ -30,27 +68,65 @@
   },
   {
     "id": "1001",
-    "createdAt": "2024-01-02T00:00:00Z",
-    "updatedAt": "2024-02-02T00:00:00Z",
+    "createdAt": "2026-10-07T02:39:16.050Z",
+    "updatedAt": "2026-10-07T02:39:29.218Z",
     "archived": false,
     "properties": {
-      "name": "Sample 1 v2"
+      "content": null,
+      "hs_pipeline": "0",
+      "hs_pipeline_stage": "1",
+      "hs_ticket_category": null,
+      "hs_ticket_priority": "HIGH",
+      "subject": "GCB Seed Ticket 2"
     },
     "propertiesWithHistory": {
-      "name": [
+      "hs_lastmodifieddate": [
         {
-          "value": "Sample 1 v2",
-          "timestamp": "2024-02-02T00:00:00Z",
-          "sourceType": "CRM_UI",
-          "sourceId": "userId:5001",
-          "sourceLabel": "Jane Admin",
+          "value": "2026-10-07T02:39:29.218Z",
+          "timestamp": "2026-10-07T02:39:29.218Z",
+          "sourceType": "INTEGRATION",
+          "sourceId": "56047876",
+          "sourceLabel": "Seed User 1",
           "updatedByUserId": 5001
         },
         {
-          "value": "Sample 1",
-          "timestamp": "2024-01-01T00:00:00Z",
-          "sourceType": "IMPORT",
-          "sourceId": "import-77",
+          "value": "2026-10-07T02:39:19.979Z",
+          "timestamp": "2026-10-07T02:39:19.979Z",
+          "sourceType": "API",
+          "sourceLabel": "Seed User 2",
+          "updatedByUserId": 5002
+        },
+        {
+          "value": "2026-10-07T02:39:16.311Z",
+          "timestamp": "2026-10-07T02:39:16.311Z",
+          "sourceType": "INTERNAL_PROCESSING",
+          "sourceId": "RecordSourceDetailsWriterWorker",
+          "sourceLabel": "Seed User 3",
+          "updatedByUserId": 5003
+        },
+        {
+          "value": "2026-10-07T02:39:16.050Z",
+          "timestamp": "2026-10-07T02:39:16.050Z",
+          "sourceType": "INTEGRATION",
+          "sourceId": "56047876",
+          "sourceLabel": "Seed User 1",
+          "updatedByUserId": 5001
+        }
+      ],
+      "hs_ticket_priority": [
+        {
+          "value": "HIGH",
+          "timestamp": "2026-10-07T02:39:29.218Z",
+          "sourceType": "INTEGRATION",
+          "sourceId": "56047876",
+          "sourceLabel": "Seed User 1",
+          "updatedByUserId": 5001
+        },
+        {
+          "value": "MEDIUM",
+          "timestamp": "2026-10-07T02:39:16.050Z",
+          "sourceType": "INTEGRATION",
+          "sourceId": "56047876",
           "sourceLabel": "Seed User 2",
           "updatedByUserId": 5002
         }
@@ -59,27 +135,65 @@
   },
   {
     "id": "1002",
-    "createdAt": "2024-01-03T00:00:00Z",
-    "updatedAt": "2024-02-03T00:00:00Z",
+    "createdAt": "2026-10-07T02:39:16.404Z",
+    "updatedAt": "2026-10-07T02:39:29.627Z",
     "archived": false,
     "properties": {
-      "name": "Sample 2 v2"
+      "content": null,
+      "hs_pipeline": "0",
+      "hs_pipeline_stage": "1",
+      "hs_ticket_category": null,
+      "hs_ticket_priority": "HIGH",
+      "subject": "GCB Seed Ticket 3"
     },
     "propertiesWithHistory": {
-      "name": [
+      "hs_lastmodifieddate": [
         {
-          "value": "Sample 2 v2",
-          "timestamp": "2024-02-03T00:00:00Z",
-          "sourceType": "CRM_UI",
-          "sourceId": "userId:5001",
-          "sourceLabel": "Jane Admin",
+          "value": "2026-10-07T02:39:29.627Z",
+          "timestamp": "2026-10-07T02:39:29.627Z",
+          "sourceType": "INTEGRATION",
+          "sourceId": "56047876",
+          "sourceLabel": "Seed User 1",
           "updatedByUserId": 5001
         },
         {
-          "value": "Sample 2",
-          "timestamp": "2024-01-01T00:00:00Z",
-          "sourceType": "IMPORT",
-          "sourceId": "import-77",
+          "value": "2026-10-07T02:39:22.864Z",
+          "timestamp": "2026-10-07T02:39:22.864Z",
+          "sourceType": "API",
+          "sourceLabel": "Seed User 2",
+          "updatedByUserId": 5002
+        },
+        {
+          "value": "2026-10-07T02:39:16.796Z",
+          "timestamp": "2026-10-07T02:39:16.796Z",
+          "sourceType": "INTERNAL_PROCESSING",
+          "sourceId": "RecordSourceDetailsWriterWorker",
+          "sourceLabel": "Seed User 3",
+          "updatedByUserId": 5003
+        },
+        {
+          "value": "2026-10-07T02:39:16.404Z",
+          "timestamp": "2026-10-07T02:39:16.404Z",
+          "sourceType": "INTEGRATION",
+          "sourceId": "56047876",
+          "sourceLabel": "Seed User 1",
+          "updatedByUserId": 5001
+        }
+      ],
+      "hs_ticket_priority": [
+        {
+          "value": "HIGH",
+          "timestamp": "2026-10-07T02:39:29.627Z",
+          "sourceType": "INTEGRATION",
+          "sourceId": "56047876",
+          "sourceLabel": "Seed User 1",
+          "updatedByUserId": 5001
+        },
+        {
+          "value": "MEDIUM",
+          "timestamp": "2026-10-07T02:39:16.404Z",
+          "sourceType": "INTEGRATION",
+          "sourceId": "56047876",
           "sourceLabel": "Seed User 2",
           "updatedByUserId": 5002
         }
@@ -88,27 +202,65 @@
   },
   {
     "id": "1003",
-    "createdAt": "2024-01-04T00:00:00Z",
-    "updatedAt": "2024-02-04T00:00:00Z",
+    "createdAt": "2026-10-07T02:39:15.255Z",
+    "updatedAt": "2026-10-07T02:39:28.600Z",
     "archived": false,
     "properties": {
-      "name": "Sample 3 v2"
+      "content": null,
+      "hs_pipeline": "0",
+      "hs_pipeline_stage": "1",
+      "hs_ticket_category": null,
+      "hs_ticket_priority": "HIGH",
+      "subject": "GCB Seed Ticket 0"
     },
     "propertiesWithHistory": {
-      "name": [
+      "hs_lastmodifieddate": [
         {
-          "value": "Sample 3 v2",
-          "timestamp": "2024-02-04T00:00:00Z",
-          "sourceType": "CRM_UI",
-          "sourceId": "userId:5001",
-          "sourceLabel": "Jane Admin",
+          "value": "2026-10-07T02:39:28.600Z",
+          "timestamp": "2026-10-07T02:39:28.600Z",
+          "sourceType": "INTEGRATION",
+          "sourceId": "56047876",
+          "sourceLabel": "Seed User 1",
           "updatedByUserId": 5001
         },
         {
-          "value": "Sample 3",
-          "timestamp": "2024-01-01T00:00:00Z",
-          "sourceType": "IMPORT",
-          "sourceId": "import-77",
+          "value": "2026-10-07T02:39:20.035Z",
+          "timestamp": "2026-10-07T02:39:20.035Z",
+          "sourceType": "API",
+          "sourceLabel": "Seed User 2",
+          "updatedByUserId": 5002
+        },
+        {
+          "value": "2026-10-07T02:39:15.783Z",
+          "timestamp": "2026-10-07T02:39:15.783Z",
+          "sourceType": "INTERNAL_PROCESSING",
+          "sourceId": "RecordSourceDetailsWriterWorker",
+          "sourceLabel": "Seed User 3",
+          "updatedByUserId": 5003
+        },
+        {
+          "value": "2026-10-07T02:39:15.255Z",
+          "timestamp": "2026-10-07T02:39:15.255Z",
+          "sourceType": "INTEGRATION",
+          "sourceId": "56047876",
+          "sourceLabel": "Seed User 1",
+          "updatedByUserId": 5001
+        }
+      ],
+      "hs_ticket_priority": [
+        {
+          "value": "HIGH",
+          "timestamp": "2026-10-07T02:39:28.600Z",
+          "sourceType": "INTEGRATION",
+          "sourceId": "56047876",
+          "sourceLabel": "Seed User 1",
+          "updatedByUserId": 5001
+        },
+        {
+          "value": "MEDIUM",
+          "timestamp": "2026-10-07T02:39:15.255Z",
+          "sourceType": "INTEGRATION",
+          "sourceId": "56047876",
           "sourceLabel": "Seed User 2",
           "updatedByUserId": 5002
         }

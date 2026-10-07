@@ -216,7 +216,7 @@
     {
       "method": "GET",
       "url": "https://api.hubapi.com/crm/v3/objects/tickets",
-      "count": 4,
+      "count": 3,
       "param_shapes": [
         [
           "archived",
@@ -233,8 +233,18 @@
     },
     {
       "method": "POST",
-      "url": "https://api.hubapi.com/crm/v3/objects/tickets/search",
+      "url": "https://api.hubapi.com/crm/v3/objects/tickets/batch/read",
       "count": 3,
+      "param_shapes": [
+        [
+          "archived"
+        ]
+      ]
+    },
+    {
+      "method": "POST",
+      "url": "https://api.hubapi.com/crm/v3/objects/tickets/search",
+      "count": 4,
       "param_shapes": [
         []
       ]

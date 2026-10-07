@@ -108,6 +108,10 @@
     "type": "string"
   },
   {
+    "name": "hs_ticket_priority",
+    "type": "string"
+  },
+  {
     "name": "hs_weighted_pipeline_in_company_currency",
     "type": "string"
   },

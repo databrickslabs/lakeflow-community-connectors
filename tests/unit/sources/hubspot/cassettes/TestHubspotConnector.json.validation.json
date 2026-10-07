@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated_at": "2026-10-07T01:03:06.473496Z",
+  "generated_at": "2026-10-07T02:41:11.654570Z",
   "endpoints": [
     {
       "method": "GET",
@@ -186,31 +186,35 @@
       "method": "GET",
       "spec_path": "/crm/v3/objects/tickets",
       "sample_url": "https://api.hubapi.com/crm/v3/objects/tickets?limit=100&archived=false&properties=closed_date,content,created_by,createdate,first_agent_reply_date,hs_all_accessible_team_ids,hs_all_associated_contact_companies,hs_all_associated_contact_emails,hs_all_associated_contact_firstnames,hs_all_associated_contact_lastnames,hs_all_associated_contact_mobilephones,hs_all_associated_contact_phones,hs_all_conversation_mentions,hs_all_owner_ids,hs_all_team_ids,hs_applied_sla_rule_config_at,hs_applied_sla_rule_config_id,hs_applied_sla_schedule_at,hs_applied_sla_schedule_id,hs_assigned_team_ids,hs_assignment_method,hs_auto_generated_from_thread_id,hs_conversations_originating_message_id,hs_conversations_originating_thread_id,hs_created_by_user_id,hs_createdate,hs_current_generic_channel_id,hs_custom_inbox,hs_customer_agent_escalated_time,hs_customer_agent_matched_segment,hs_customer_agent_status_updated_time,hs_customer_agent_ticket_status,hs_cx_negative_signals,hs_cx_negative_signals_v1,hs_cx_positive_signals,hs_cx_positive_signals_v1,hs_draft_user_ids,hs_email_subject,hs_exclude_from_cx_score,hs_exclude_from_qa_score,hs_external_object_ids,hs_file_upload,hs_first_agent_message_sent_at,hs_first_assignee_type,hs_form_id,hs_form_submission_conversion_id,hs_has_live_chat_ended_or_email_sent,hs_helpdesk_sort_timestamp,hs_in_helpdesk,hs_inbox_id,hs_is_closed,hs_is_latest_message_failed,hs_is_latest_message_hidden_from_all,hs_is_visible_in_help_desk,hs_last_closed_date,hs_last_csat_comment,hs_last_csat_date,hs_last_csat_rating,hs_last_email_activity,hs_last_email_date,hs_last_email_details,hs_last_email_type,hs_last_message_from_visitor,hs_last_message_received_at,hs_last_message_sent_at,hs_last_nps_survey_comment,hs_lastactivitydate,hs_lastcontacted,hs_lastmodifieddate,hs_latest_message_attachment_types,hs_latest_message_is_forwarded_email,hs_latest_message_is_thread_comment,hs_latest_message_seen_by_agent_ids,hs_latest_message_visible_to_visitor,hs_latest_message_visible_to_visitor_sent_at,hs_mentioned_note_user_ids,hs_mentions_resolved_user_ids,hs_mentions_user_ids,hs_merged_object_ids,hs_most_relevant_sla_status,hs_most_relevant_sla_type,hs_msteams_message_id,hs_nextactivitydate,hs_notes_last_activity,hs_notes_next_activity,hs_notes_next_activity_type,hs_num_associated_companies,hs_num_associated_conversations,hs_num_times_contacted,hs_object_id,hs_object_source,hs_object_source_detail_1,hs_object_source_detail_2,hs_object_source_detail_3,hs_object_source_id,hs_object_source_label,hs_object_source_user_id,hs_originating_channel_instance_id,hs_originating_email_engagement_id,hs_originating_generic_channel_id,hs_outbound_ticket,hs_owning_teams,hs_pinned_engagement_id,hs_pipeline,hs_pipeline_stage,hs_primary_company,hs_primary_company_id,hs_primary_company_name,hs_read_only,hs_resolution,hs_retroactive_sla_update_at,hs_sales_email_last_replied,hs_seen_by_agent_ids,hs_sla_operating_hours,hs_sla_pause_status,hs_snoozed_for_portal,hs_source_object_id,hs_source_url,hs_summarized_ticket_owner_type,hs_thread_ids_to_restore,hs_ticket_category,hs_ticket_id,hs_ticket_owner_type,hs_ticket_priority,hs_ticket_reopened_at,hs_time_to_close_in_operating_hours,hs_time_to_first_assign,hs_time_to_first_rep_assignment,hs_time_to_first_response_in_operating_hours,hs_unique_creation_key,hs_updated_by_user_id,hs_user_ids_of_all_notification_followers,hs_user_ids_of_all_notification_unfollowers,hs_user_ids_of_all_owners,hs_waitlist_routing_targets,hs_waitlist_sort_value,hs_was_imported,hubspot_owner_assigneddate,hubspot_owner_id,hubspot_team_id,last_engagement_date,last_reply_date,notes_last_contacted,notes_last_updated,notes_next_activity_date,nps_follow_up_answer,nps_follow_up_question_version,nps_score,num_contacted_notes,num_notes,source_ref,source_thread_id,source_type,subject,tags,time_to_close,time_to_first_agent_reply&associations=contacts,companies,deals",
-      "status": "validated",
-      "calls": 4,
-      "matched": 4,
-      "mismatched": 0,
+      "status": "mismatched",
+      "calls": 3,
+      "matched": 1,
+      "mismatched": 2,
       "no_spec": 0,
-      "issues": []
+      "issues": [
+        "record fields in live missing from corpus: ['url']"
+      ]
     },
     {
       "method": "POST",
       "spec_path": "/crm/v3/objects/tickets/search",
       "sample_url": "https://api.hubapi.com/crm/v3/objects/tickets/search",
-      "status": "validated",
-      "calls": 3,
-      "matched": 3,
-      "mismatched": 0,
+      "status": "mismatched",
+      "calls": 4,
+      "matched": 0,
+      "mismatched": 4,
       "no_spec": 0,
-      "issues": []
+      "issues": [
+        "record fields in live missing from corpus: ['url']"
+      ]
     },
     {
       "method": "POST",
       "spec_path": "/crm/v3/objects/{object_type}/batch/read",
       "sample_url": "https://api.hubapi.com/crm/v3/objects/contacts/batch/read?archived=false",
       "status": "validated",
-      "calls": 9,
-      "matched": 9,
+      "calls": 12,
+      "matched": 12,
       "mismatched": 0,
       "no_spec": 0,
       "issues": []
@@ -242,8 +246,8 @@
   ],
   "summary": {
     "endpoints_total": 19,
-    "endpoints_validated": 5,
-    "endpoints_mismatched": 14,
+    "endpoints_validated": 3,
+    "endpoints_mismatched": 16,
     "endpoints_missing_spec": 0
   }
 }
