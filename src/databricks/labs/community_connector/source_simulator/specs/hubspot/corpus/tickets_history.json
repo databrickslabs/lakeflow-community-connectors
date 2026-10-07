@@ -1,0 +1,110 @@
+[
+  {
+    "id": "1000",
+    "createdAt": "2024-01-01T00:00:00Z",
+    "updatedAt": "2024-02-01T00:00:00Z",
+    "archived": false,
+    "properties": {
+      "name": "Sample 0 v2"
+    },
+    "propertiesWithHistory": {
+      "name": [
+        {
+          "value": "Sample 0 v2",
+          "timestamp": "2024-02-01T00:00:00Z",
+          "sourceType": "CRM_UI",
+          "sourceId": "userId:5001",
+          "sourceLabel": "Jane Admin",
+          "updatedByUserId": 5001
+        },
+        {
+          "value": "Sample 0",
+          "timestamp": "2024-01-01T00:00:00Z",
+          "sourceType": "IMPORT",
+          "sourceId": "import-77"
+        }
+      ]
+    }
+  },
+  {
+    "id": "1001",
+    "createdAt": "2024-01-02T00:00:00Z",
+    "updatedAt": "2024-02-02T00:00:00Z",
+    "archived": false,
+    "properties": {
+      "name": "Sample 1 v2"
+    },
+    "propertiesWithHistory": {
+      "name": [
+        {
+          "value": "Sample 1 v2",
+          "timestamp": "2024-02-02T00:00:00Z",
+          "sourceType": "CRM_UI",
+          "sourceId": "userId:5001",
+          "sourceLabel": "Jane Admin",
+          "updatedByUserId": 5001
+        },
+        {
+          "value": "Sample 1",
+          "timestamp": "2024-01-01T00:00:00Z",
+          "sourceType": "IMPORT",
+          "sourceId": "import-77"
+        }
+      ]
+    }
+  },
+  {
+    "id": "1002",
+    "createdAt": "2024-01-03T00:00:00Z",
+    "updatedAt": "2024-02-03T00:00:00Z",
+    "archived": false,
+    "properties": {
+      "name": "Sample 2 v2"
+    },
+    "propertiesWithHistory": {
+      "name": [
+        {
+          "value": "Sample 2 v2",
+          "timestamp": "2024-02-03T00:00:00Z",
+          "sourceType": "CRM_UI",
+          "sourceId": "userId:5001",
+          "sourceLabel": "Jane Admin",
+          "updatedByUserId": 5001
+        },
+        {
+          "value": "Sample 2",
+          "timestamp": "2024-01-01T00:00:00Z",
+          "sourceType": "IMPORT",
+          "sourceId": "import-77"
+        }
+      ]
+    }
+  },
+  {
+    "id": "1003",
+    "createdAt": "2024-01-04T00:00:00Z",
+    "updatedAt": "2024-02-04T00:00:00Z",
+    "archived": false,
+    "properties": {
+      "name": "Sample 3 v2"
+    },
+    "propertiesWithHistory": {
+      "name": [
+        {
+          "value": "Sample 3 v2",
+          "timestamp": "2024-02-04T00:00:00Z",
+          "sourceType": "CRM_UI",
+          "sourceId": "userId:5001",
+          "sourceLabel": "Jane Admin",
+          "updatedByUserId": 5001
+        },
+        {
+          "value": "Sample 3",
+          "timestamp": "2024-01-01T00:00:00Z",
+          "sourceType": "IMPORT",
+          "sourceId": "import-77"
+        }
+      ]
+    }
+  }
+]
