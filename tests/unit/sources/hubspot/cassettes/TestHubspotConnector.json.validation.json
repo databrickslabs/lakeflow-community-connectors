@@ -1,0 +1,249 @@
+{
+  "version": 1,
+  "generated_at": "2026-10-07T01:03:06.473496Z",
+  "endpoints": [
+    {
+      "method": "GET",
+      "spec_path": "/crm/v3/objects/calls",
+      "sample_url": "https://api.hubapi.com/crm/v3/objects/calls?limit=100&archived=false&properties=hs_activity_type,hs_all_accessible_team_ids,hs_all_assigned_business_unit_ids,hs_all_owner_ids,hs_all_team_ids,hs_at_mentioned_owner_ids,hs_attachment_ids,hs_body_preview,hs_body_preview_html,hs_body_preview_is_truncated,hs_call_app_id,hs_call_authed_url_provider,hs_call_body,hs_call_callee_object_id,hs_call_callee_object_type,hs_call_deal_stage_during_call,hs_call_direction,hs_call_disposition,hs_call_duration,hs_call_external_account_id,hs_call_external_id,hs_call_from_number,hs_call_from_number_nickname,hs_call_has_transcript,hs_call_has_voicemail,hs_call_location,hs_call_meeting_event_id,hs_call_meeting_id,hs_call_ms_teams_payload,hs_call_phone_number_source,hs_call_primary_deal,hs_call_recording_url,hs_call_routing_strategy_type,hs_call_source,hs_call_status,hs_call_suggested_next_actions,hs_call_summary,hs_call_summary_execution_id,hs_call_title,hs_call_to_number,hs_call_to_number_nickname,hs_call_transcript_audio_num_channels,hs_call_transcript_tracked_terms,hs_call_transcription_id,hs_call_unified_phone_number_id,hs_call_unique_external_id,hs_call_video_meeting_type,hs_call_video_recording_url,hs_call_voice_agent_total_ms,hs_call_zoom_meeting_uuid,hs_calls_follow_ups_dismissed,hs_calls_service_call_id,hs_campaign_guid,hs_campaign_guids,hs_connected_count,hs_conversation_thread_id,hs_created_by,hs_created_by_user_id,hs_createdate,hs_engagement_source,hs_engagement_source_id,hs_engagements_last_contacted,hs_follow_up_action,hs_gdpr_deleted,hs_has_call_notes,hs_hosted_video_conference_url,hs_inbound_call_answer_disposition,hs_inbound_call_answer_status,hs_is_voice_agent_call,hs_lastmodifieddate,hs_merged_object_ids,hs_modified_by,hs_obj_coords,hs_object_id,hs_object_source,hs_object_source_detail_1,hs_object_source_detail_2,hs_object_source_detail_3,hs_object_source_id,hs_object_source_label,hs_object_source_user_id,hs_origin_object_coordinates,hs_owning_teams,hs_pinned_engagement_id,hs_product_name,hs_queue_membership_ids,hs_read_only,hs_timestamp,hs_unique_creation_key,hs_unique_id,hs_unknown_visitor_conversation,hs_updated_by_user_id,hs_user_ids_of_all_notification_followers,hs_user_ids_of_all_notification_unfollowers,hs_user_ids_of_all_owners,hs_voice_agent_caller_requested_live_agent,hs_voice_agent_customer_engagement_status,hs_voice_agent_escalated_to_live_agent,hs_voice_agent_is_most_recent_customer_feedback_positive,hs_voice_agent_resolved,hs_voicemail_count,hs_was_imported,hubspot_owner_assigneddate,hubspot_owner_id,hubspot_team_id&associations=contacts,companies,deals,tickets",
+      "status": "mismatched",
+      "calls": 2,
+      "matched": 0,
+      "mismatched": 2,
+      "no_spec": 0,
+      "issues": [
+        "record fields in live missing from corpus: ['associations', 'url']"
+      ]
+    },
+    {
+      "method": "POST",
+      "spec_path": "/crm/v3/objects/calls/search",
+      "sample_url": "https://api.hubapi.com/crm/v3/objects/calls/search",
+      "status": "mismatched",
+      "calls": 1,
+      "matched": 0,
+      "mismatched": 1,
+      "no_spec": 0,
+      "issues": [
+        "record fields in live missing from corpus: ['url']"
+      ]
+    },
+    {
+      "method": "GET",
+      "spec_path": "/crm/v3/objects/companies",
+      "sample_url": "https://api.hubapi.com/crm/v3/objects/companies?limit=100&archived=false&properties=about_us,address,address2,annualrevenue,city,closedate,country,createdate,days_to_close,description,domain,engagements_last_meeting_booked,engagements_last_meeting_booked_campaign,engagements_last_meeting_booked_medium,engagements_last_meeting_booked_source,facebook_company_page,facebookfans,first_contact_createdate,first_contact_createdate_timestamp_earliest_value_78b50eea,first_conversion_date,first_conversion_event_name,first_deal_created_date,founded_year,googleplus_page,hs_additional_domains,hs_all_accessible_team_ids,hs_all_owner_ids,hs_all_team_ids,hs_analytics_first_timestamp,hs_analytics_first_touch_converting_campaign,hs_analytics_first_visit_timestamp,hs_analytics_last_timestamp,hs_analytics_last_timestamp_timestamp_latest_value_4e16365a,hs_analytics_last_touch_converting_campaign,hs_analytics_last_touch_converting_campaign_timestamp_latest_value_81a64e30,hs_analytics_last_visit_timestamp,hs_analytics_last_visit_timestamp_timestamp_latest_value_999a0fce,hs_analytics_latest_source,hs_analytics_latest_source_data_1,hs_analytics_latest_source_data_2,hs_analytics_latest_source_timestamp,hs_analytics_num_page_views,hs_analytics_num_page_views_cardinality_sum_e46e85b0,hs_analytics_num_visits,hs_analytics_num_visits_cardinality_sum_53d952a6,hs_analytics_source,hs_analytics_source_data_1,hs_analytics_source_data_2,hs_annual_revenue_currency_code,hs_avatar_filemanager_key,hs_calculated_phone_number,hs_count_intent_signals_created_last_14_days,hs_count_intent_signals_created_last_30_days,hs_count_intent_signals_created_last_7_days,hs_country_code,hs_created_by_user_id,hs_createdate,hs_current_customer,hs_domain_status,hs_employee_range,hs_excluded_from_cross_account_data_mirroring,hs_geohash_1,hs_geohash_2,hs_geohash_3,hs_geohash_4,hs_geohash_5,hs_geohash_6,hs_ideal_customer_profile,hs_industry_group,hs_inferred_domain,hs_intent_paid_up_to_date,hs_intent_signals_enabled,hs_is_enriched,hs_is_target_account,hs_keywords,hs_last_booked_meeting_date,hs_last_logged_call_date,hs_last_logged_outgoing_email_date,hs_last_metered_enrichment_timestamp,hs_last_open_task_date,hs_last_sales_activity_date,hs_last_sales_activity_timestamp,hs_last_sales_activity_type,hs_lastmodifieddate,hs_latest_createdate_of_active_subscriptions,hs_latest_intent_signal_occurred_at,hs_latest_intent_signal_timestamp,hs_latest_meeting_activity,hs_latest_prospecting_agent_monitoring_date,hs_latest_suggested_contact_date,hs_latest_suggested_contact_timestamp,hs_lead_status,hs_linkedin_handle,hs_live_enrichment_deadline,hs_logo_url,hs_max_recommendation_score,hs_merged_object_ids,hs_next_renewal_date,hs_notes_last_activity,hs_notes_next_activity,hs_notes_next_activity_type,hs_num_active_contracts,hs_num_blockers,hs_num_child_companies,hs_num_contacts_with_buying_roles,hs_num_decision_makers,hs_num_open_deals,hs_object_id,hs_object_source,hs_object_source_detail_1,hs_object_source_detail_2,hs_object_source_detail_3,hs_object_source_id,hs_object_source_label,hs_object_source_user_id,hs_owning_teams,hs_paid_for_intent_signals,hs_parent_company_id,hs_pinned_engagement_id,hs_pipeline,hs_plays,hs_predictivecontactscore_v2_next_max_max_d4e58c1e,hs_quick_context,hs_read_only,hs_reason_to_reach_out,hs_recent_intent_signals,hs_redirect_domain,hs_redirect_url,hs_research_agent_execution_id,hs_research_agent_id,hs_revenue_range,hs_sales_email_last_replied,hs_searchable_calculated_international_phone_number,hs_searchable_calculated_phone_number,hs_source_object_id,hs_state_code,hs_suggested_contact_count,hs_target_account,hs_target_account_probability,hs_target_account_recommendation_snooze_time,hs_target_account_recommendation_state,hs_task_label,hs_tax_id,hs_total_deal_value,hs_unique_creation_key,hs_updated_by_user_id,hs_user_ids_of_all_notification_followers,hs_user_ids_of_all_notification_unfollowers,hs_user_ids_of_all_owners,hs_was_imported,hubspot_owner_assigneddate,hubspot_owner_id,hubspot_team_id,hubspotscore,industry,is_public,lifecyclestage,linkedin_company_page,linkedinbio,name,notes_last_contacted,notes_last_updated,notes_next_activity_date,num_associated_contacts,num_associated_deals,num_contacted_notes,num_conversion_events,num_conversion_events_cardinality_sum_d095f14b,num_notes,numberofemployees,phone,recent_conversion_date,recent_conversion_date_timestamp_latest_value_72856da1,recent_conversion_event_name,recent_conversion_event_name_timestamp_latest_value_66c820bf,recent_deal_amount,recent_deal_close_date,state,timezone,total_money_raised,total_revenue,twitterbio,twitterfollowers,twitterhandle,type,web_technologies,website,zip&associations=contacts",
+      "status": "mismatched",
+      "calls": 3,
+      "matched": 1,
+      "mismatched": 2,
+      "no_spec": 0,
+      "issues": [
+        "record fields in live missing from corpus: ['associations', 'url']"
+      ]
+    },
+    {
+      "method": "POST",
+      "spec_path": "/crm/v3/objects/companies/search",
+      "sample_url": "https://api.hubapi.com/crm/v3/objects/companies/search",
+      "status": "mismatched",
+      "calls": 4,
+      "matched": 0,
+      "mismatched": 4,
+      "no_spec": 0,
+      "issues": [
+        "record fields in live missing from corpus: ['url']"
+      ]
+    },
+    {
+      "method": "GET",
+      "spec_path": "/crm/v3/objects/contacts",
+      "sample_url": "https://api.hubapi.com/crm/v3/objects/contacts?limit=100&archived=false&properties=address,annualrevenue,associatedcompanyid,associatedcompanylastupdated,city,closedate,company,company_size,country,createdate,currentlyinworkflow,date_of_birth,days_to_close,degree,email,engagements_last_meeting_booked,engagements_last_meeting_booked_campaign,engagements_last_meeting_booked_medium,engagements_last_meeting_booked_source,fax,field_of_study,first_conversion_date,first_conversion_event_name,first_deal_created_date,firstname,gender,graduation_date,hs_additional_emails,hs_all_accessible_team_ids,hs_all_contact_vids,hs_all_owner_ids,hs_all_team_ids,hs_analytics_average_page_views,hs_analytics_first_referrer,hs_analytics_first_timestamp,hs_analytics_first_touch_converting_campaign,hs_analytics_first_url,hs_analytics_first_visit_timestamp,hs_analytics_last_referrer,hs_analytics_last_timestamp,hs_analytics_last_touch_converting_campaign,hs_analytics_last_url,hs_analytics_last_visit_timestamp,hs_analytics_num_event_completions,hs_analytics_num_page_views,hs_analytics_num_visits,hs_analytics_revenue,hs_analytics_source,hs_analytics_source_data_1,hs_analytics_source_data_2,hs_associated_target_accounts,hs_avatar_filemanager_key,hs_bing_ad_clicked,hs_bing_click_id,hs_buying_role,hs_calculated_form_submissions,hs_calculated_merged_vids,hs_calculated_mobile_number,hs_calculated_phone_number,hs_calculated_phone_number_area_code,hs_calculated_phone_number_country_code,hs_calculated_phone_number_region_code,hs_chat_assistant_iql_date,hs_chat_assistant_source,hs_chat_assistant_summary,hs_chatgpt_ad_clicked,hs_chatgpt_click_id,hs_clicked_linkedin_ad,hs_contact_enrichment_opt_out,hs_contact_enrichment_opt_out_timestamp,hs_content_membership_email,hs_content_membership_email_confirmed,hs_content_membership_follow_up_enqueued_at,hs_content_membership_notes,hs_content_membership_registered_at,hs_content_membership_registration_domain_sent_to,hs_content_membership_registration_email_sent_at,hs_content_membership_status,hs_conversations_visitor_email,hs_count_is_unworked,hs_count_is_worked,hs_country_region_code,hs_created_by_conversations,hs_created_by_user_id,hs_createdate,hs_cross_account_note,hs_cross_sell_opportunity,hs_current_customer,hs_data_privacy_ads_consent,hs_document_last_revisited,hs_email_bad_address,hs_email_bounce,hs_email_click,hs_email_customer_quarantined_reason,hs_email_delivered,hs_email_domain,hs_email_first_click_date,hs_email_first_open_date,hs_email_first_reply_date,hs_email_first_send_date,hs_email_hard_bounce_reason,hs_email_hard_bounce_reason_enum,hs_email_is_ineligible,hs_email_last_click_date,hs_email_last_email_name,hs_email_last_open_date,hs_email_last_reply_date,hs_email_last_send_date,hs_email_live_sourcing_restricted,hs_email_open,hs_email_optimal_send_day_of_week,hs_email_optimal_send_time_of_day,hs_email_optout,hs_email_optout_3812705820,hs_email_optout_3812705821,hs_email_quarantined,hs_email_quarantined_reason,hs_email_replied,hs_email_sends_since_last_engagement,hs_email_type,hs_emailconfirmationstatus,hs_enriched_email_bounce_detected,hs_excluded_from_cross_account_data_mirroring,hs_facebook_ad_clicked,hs_facebook_click_id,hs_first_closed_order_id,hs_first_engagement_object_id,hs_first_order_closed_date,hs_first_outreach_date,hs_first_subscription_create_date,hs_full_name_or_email,hs_geohash_1,hs_geohash_2,hs_geohash_3,hs_geohash_4,hs_geohash_5,hs_geohash_6,hs_google_click_id,hs_has_active_subscription,hs_inferred_language_codes,hs_intent_paid_up_to_date,hs_intent_signals_enabled,hs_ip_timezone,hs_is_contact,hs_is_enriched,hs_is_mass_marketing_activation_disallowed,hs_is_unworked,hs_language,hs_last_metered_enrichment_timestamp,hs_last_sales_activity_date,hs_last_sales_activity_timestamp,hs_last_sales_activity_type,hs_last_sms_send_date,hs_last_sms_send_name,hs_lastmodifieddate,hs_latest_disqualified_lead_date,hs_latest_meeting_activity,hs_latest_open_lead_date,hs_latest_qualified_lead_date,hs_latest_sequence_ended_date,hs_latest_sequence_enrolled,hs_latest_sequence_enrolled_date,hs_latest_sequence_finished_date,hs_latest_sequence_unenrolled_date,hs_latest_source,hs_latest_source_data_1,hs_latest_source_data_2,hs_latest_source_timestamp,hs_latest_subscription_create_date,hs_lead_status,hs_legal_basis,hs_linkedin_ad_clicked,hs_linkedin_click_id,hs_linkedin_url,hs_live_enrichment_deadline,hs_manual_campaign_ids,hs_membership_has_accessed_private_content,hs_membership_last_private_content_access_date,hs_merged_object_ids,hs_messaging_engagement_score,hs_mobile_sdk_push_tokens,hs_next_renewal_date,hs_notes_last_activity,hs_notes_next_activity,hs_notes_next_activity_type,hs_num_active_contracts,hs_object_id,hs_object_source,hs_object_source_detail_1,hs_object_source_detail_2,hs_object_source_detail_3,hs_object_source_id,hs_object_source_label,hs_object_source_user_id,hs_owning_teams,hs_persona,hs_pinned_engagement_id,hs_pipeline,hs_prospecting_agent_activation_email_id,hs_prospecting_agent_activation_status,hs_prospecting_agent_actively_enrolled_count,hs_prospecting_agent_enrollment_status,hs_prospecting_agent_enrollment_status_raw,hs_prospecting_agent_last_enrolled,hs_prospecting_agent_sender,hs_prospecting_agent_total_enrolled_count,hs_quarantined_emails,hs_read_only,hs_recent_closed_order_date,hs_registered_member,hs_registration_method,hs_role,hs_sa_first_engagement_date,hs_sa_first_engagement_descr,hs_sa_first_engagement_object_type,hs_sales_email_last_clicked,hs_sales_email_last_opened,hs_sales_email_last_replied,hs_searchable_calculated_international_mobile_number,hs_searchable_calculated_international_phone_number,hs_searchable_calculated_mobile_number,hs_searchable_calculated_phone_number,hs_seniority,hs_sequences_actively_enrolled_count,hs_sequences_enrolled_count,hs_sequences_is_enrolled,hs_source_object_id,hs_source_portal_id,hs_sourced_contact_origin,hs_state_code,hs_sub_role,hs_testrollback,hs_tiktok_ad_clicked,hs_tiktok_click_id,hs_time_to_first_engagement,hs_timezone,hs_unique_creation_key,hs_updated_by_user_id,hs_user_ids_of_all_notification_followers,hs_user_ids_of_all_notification_unfollowers,hs_user_ids_of_all_owners,hs_v2_date_entered_customer,hs_v2_date_entered_evangelist,hs_v2_date_entered_lead,hs_v2_date_entered_marketingqualifiedlead,hs_v2_date_entered_opportunity,hs_v2_date_entered_other,hs_v2_date_entered_salesqualifiedlead,hs_v2_date_entered_subscriber,hs_v2_date_exited_customer,hs_v2_date_exited_evangelist,hs_v2_date_exited_lead,hs_v2_date_exited_marketingqualifiedlead,hs_v2_date_exited_opportunity,hs_v2_date_exited_other,hs_v2_date_exited_salesqualifiedlead,hs_v2_date_exited_subscriber,hs_was_imported,hs_whatsapp_bsuids,hs_whatsapp_phone_number,hs_why_this_contact,hubspot_owner_assigneddate,hubspot_owner_id,hubspot_team_id,industry,ip_city,ip_country,ip_country_code,ip_latlon,ip_state,ip_state_code,ip_zipcode,job_function,jobtitle,lastmodifieddate,lastname,lifecyclestage,marital_status,message,military_status,mobilephone,notes_last_contacted,notes_last_updated,notes_next_activity_date,num_associated_deals,num_contacted_notes,num_conversion_events,num_notes,num_unique_conversion_events,numemployees,phone,recent_conversion_date,recent_conversion_event_name,recent_deal_amount,recent_deal_close_date,relationship_status,salutation,school,seniority,start_date,state,surveymonkeyeventlastupdated,total_revenue,twitterhandle,webinareventlastupdated,website,work_email,zip&associations=companies",
+      "status": "mismatched",
+      "calls": 3,
+      "matched": 1,
+      "mismatched": 2,
+      "no_spec": 0,
+      "issues": [
+        "record fields in live missing from corpus: ['associations', 'url']"
+      ]
+    },
+    {
+      "method": "POST",
+      "spec_path": "/crm/v3/objects/contacts/search",
+      "sample_url": "https://api.hubapi.com/crm/v3/objects/contacts/search",
+      "status": "mismatched",
+      "calls": 4,
+      "matched": 0,
+      "mismatched": 4,
+      "no_spec": 0,
+      "issues": [
+        "record fields in live missing from corpus: ['url']"
+      ]
+    },
+    {
+      "method": "GET",
+      "spec_path": "/crm/v3/objects/deals",
+      "sample_url": "https://api.hubapi.com/crm/v3/objects/deals?limit=100&archived=false&properties=amount,amount_in_home_currency,closed_lost_reason,closed_won_reason,closedate,createdate,days_to_close,dealname,dealstage,dealtype,description,engagements_last_meeting_booked,engagements_last_meeting_booked_campaign,engagements_last_meeting_booked_medium,engagements_last_meeting_booked_source,hs_acv,hs_all_accessible_team_ids,hs_all_collaborator_owner_ids,hs_all_owner_ids,hs_all_team_ids,hs_analytics_latest_source,hs_analytics_latest_source_company,hs_analytics_latest_source_contact,hs_analytics_latest_source_data_1,hs_analytics_latest_source_data_1_company,hs_analytics_latest_source_data_1_contact,hs_analytics_latest_source_data_2,hs_analytics_latest_source_data_2_company,hs_analytics_latest_source_data_2_contact,hs_analytics_latest_source_timestamp,hs_analytics_latest_source_timestamp_company,hs_analytics_latest_source_timestamp_contact,hs_analytics_source,hs_analytics_source_data_1,hs_analytics_source_data_2,hs_arr,hs_attributed_team_ids,hs_average_call_duration,hs_campaign,hs_closed_amount,hs_closed_amount_in_home_currency,hs_closed_deal_close_date,hs_closed_deal_create_date,hs_closed_won_count,hs_closed_won_date,hs_created_by_user_id,hs_createdate,hs_cross_account_note,hs_cross_sell_opportunity,hs_days_to_close_raw,hs_deal_amount_calculation_preference,hs_deal_stage_probability,hs_deal_stage_probability_shadow,hs_exchange_rate,hs_forecast_amount,hs_forecast_probability,hs_has_empty_conditional_stage_properties,hs_has_last_conversation_follow_ups,hs_has_last_meeting_followups,hs_is_closed,hs_is_closed_count,hs_is_closed_lost,hs_is_closed_won,hs_is_in_first_deal_stage,hs_is_open_count,hs_last_call_id_with_followups,hs_last_conversation_with_followups_object_coordinates,hs_last_email_with_followups_object_coordinates,hs_last_gs_shared_message,hs_last_meeting_id_with_followups,hs_last_partner_shared_message_date,hs_last_shared_message_create_date,hs_lastmodifieddate,hs_latest_approval_status,hs_latest_approval_status_approval_id,hs_latest_marketing_email_click_date,hs_latest_marketing_email_open_date,hs_latest_marketing_email_reply_date,hs_latest_meeting_activity,hs_latest_sales_email_click_date,hs_latest_sales_email_open_date,hs_latest_sales_email_reply_date,hs_likelihood_to_close,hs_line_item_global_term_hs_discount_percentage,hs_line_item_global_term_hs_discount_percentage_enabled,hs_line_item_global_term_hs_recurring_billing_period,hs_line_item_global_term_hs_recurring_billing_period_enabled,hs_line_item_global_term_hs_recurring_billing_start_date,hs_line_item_global_term_hs_recurring_billing_start_date_enabled,hs_line_item_global_term_recurringbillingfrequency,hs_line_item_global_term_recurringbillingfrequency_enabled,hs_manual_campaign_ids,hs_manual_forecast_category,hs_merged_object_ids,hs_mrr,hs_net_pipeline_impact,hs_next_meeting_id,hs_next_meeting_name,hs_next_meeting_start_time,hs_next_step,hs_next_step_updated_at,hs_notes_last_activity,hs_notes_next_activity,hs_notes_next_activity_type,hs_num_of_associated_line_items,hs_num_target_accounts,hs_number_of_call_engagements,hs_number_of_inbound_calls,hs_number_of_outbound_calls,hs_number_of_overdue_tasks,hs_number_of_scheduled_meetings,hs_object_id,hs_object_source,hs_object_source_detail_1,hs_object_source_detail_2,hs_object_source_detail_3,hs_object_source_id,hs_object_source_label,hs_object_source_user_id,hs_open_amount_in_home_currency,hs_open_deal_create_date,hs_owning_teams,hs_pinned_engagement_id,hs_predicted_amount,hs_predicted_amount_in_home_currency,hs_price_book_reassignment_status,hs_primary_associated_company,hs_primary_quote_data_updated_at,hs_priority,hs_projected_amount,hs_projected_amount_in_home_currency,hs_read_only,hs_sales_email_last_replied,hs_source_object_id,hs_tcv,hs_unique_creation_key,hs_updated_by_user_id,hs_user_ids_of_all_notification_followers,hs_user_ids_of_all_notification_unfollowers,hs_user_ids_of_all_owners,hs_was_imported,hs_weighted_pipeline_in_company_currency,hubspot_owner_assigneddate,hubspot_owner_id,hubspot_team_id,notes_last_contacted,notes_last_updated,notes_next_activity_date,num_associated_contacts,num_contacted_notes,num_notes,pipeline&associations=contacts,companies,tickets",
+      "status": "mismatched",
+      "calls": 3,
+      "matched": 1,
+      "mismatched": 2,
+      "no_spec": 0,
+      "issues": [
+        "record fields in live missing from corpus: ['url']"
+      ]
+    },
+    {
+      "method": "POST",
+      "spec_path": "/crm/v3/objects/deals/search",
+      "sample_url": "https://api.hubapi.com/crm/v3/objects/deals/search",
+      "status": "mismatched",
+      "calls": 4,
+      "matched": 0,
+      "mismatched": 4,
+      "no_spec": 0,
+      "issues": [
+        "record fields in live missing from corpus: ['url']"
+      ]
+    },
+    {
+      "method": "GET",
+      "spec_path": "/crm/v3/objects/emails",
+      "sample_url": "https://api.hubapi.com/crm/v3/objects/emails?limit=100&archived=false&properties=hs_all_accessible_team_ids,hs_all_assigned_business_unit_ids,hs_all_owner_ids,hs_all_team_ids,hs_app_id,hs_at_mentioned_owner_ids,hs_attachment_ids,hs_body_preview,hs_body_preview_html,hs_body_preview_is_truncated,hs_campaign_guid,hs_campaign_guids,hs_created_by,hs_created_by_user_id,hs_createdate,hs_direction_and_unique_id,hs_email_associated_contact_id,hs_email_bcc_email,hs_email_bcc_firstname,hs_email_bcc_lastname,hs_email_bcc_raw,hs_email_body_redacted,hs_email_bounce_error_detail_message,hs_email_bounce_error_detail_status_code,hs_email_cc_email,hs_email_cc_firstname,hs_email_cc_lastname,hs_email_cc_raw,hs_email_click_count,hs_email_click_rate,hs_email_details,hs_email_direction,hs_email_encoded_email_associations_request,hs_email_error_message,hs_email_facsimile_send_id,hs_email_from_email,hs_email_from_firstname,hs_email_from_lastname,hs_email_from_raw,hs_email_has_inline_images_stripped,hs_email_headers,hs_email_html,hs_email_logged_from,hs_email_media_processing_status,hs_email_member_of_forwarded_subthread,hs_email_message_id,hs_email_migrated_via_portal_data_migration,hs_email_ms_teams_payload,hs_email_open_count,hs_email_open_rate,hs_email_pending_inline_image_ids,hs_email_post_send_status,hs_email_recipient_drop_reasons,hs_email_reply_count,hs_email_reply_rate,hs_email_send_event_id,hs_email_send_event_id_created,hs_email_sender_email,hs_email_sender_firstname,hs_email_sender_lastname,hs_email_sender_raw,hs_email_sent_count,hs_email_sent_via,hs_email_status,hs_email_stripped_attachment_count,hs_email_subject,hs_email_text,hs_email_thread_id,hs_email_thread_summary,hs_email_to_email,hs_email_to_firstname,hs_email_to_lastname,hs_email_to_raw,hs_email_tracker_key,hs_email_validation_skipped,hs_engagement_source,hs_engagement_source_id,hs_engagements_last_contacted,hs_follow_up_action,hs_gdpr_deleted,hs_in_reply_to_engagement_id,hs_incoming_email_is_out_of_office,hs_lastmodifieddate,hs_merged_object_ids,hs_modified_by,hs_not_tracking_opens_or_clicks,hs_obj_coords,hs_object_id,hs_object_source,hs_object_source_detail_1,hs_object_source_detail_2,hs_object_source_detail_3,hs_object_source_id,hs_object_source_label,hs_object_source_user_id,hs_origin_object_coordinates,hs_owner_ids_bcc,hs_owner_ids_cc,hs_owner_ids_from,hs_owner_ids_to,hs_owning_teams,hs_pinned_engagement_id,hs_product_name,hs_queue_membership_ids,hs_read_only,hs_scs_association_status,hs_scs_audit_id,hs_sequence_id,hs_skip_ticket_auto_association,hs_template_id,hs_ticket_create_date,hs_timestamp,hs_unique_creation_key,hs_unique_id,hs_updated_by_user_id,hs_user_ids_of_all_notification_followers,hs_user_ids_of_all_notification_unfollowers,hs_user_ids_of_all_owners,hs_was_imported,hubspot_owner_assigneddate,hubspot_owner_id,hubspot_team_id&associations=contacts,companies,deals,tickets",
+      "status": "mismatched",
+      "calls": 3,
+      "matched": 1,
+      "mismatched": 2,
+      "no_spec": 0,
+      "issues": [
+        "record fields in live missing from corpus: ['associations', 'url']"
+      ]
+    },
+    {
+      "method": "POST",
+      "spec_path": "/crm/v3/objects/emails/search",
+      "sample_url": "https://api.hubapi.com/crm/v3/objects/emails/search",
+      "status": "mismatched",
+      "calls": 1,
+      "matched": 0,
+      "mismatched": 1,
+      "no_spec": 0,
+      "issues": [
+        "record fields in live missing from corpus: ['url']"
+      ]
+    },
+    {
+      "method": "GET",
+      "spec_path": "/crm/v3/objects/meetings",
+      "sample_url": "https://api.hubapi.com/crm/v3/objects/meetings?limit=100&archived=false&properties=hs_activity_type,hs_all_accessible_team_ids,hs_all_assigned_business_unit_ids,hs_all_attendee_emails,hs_all_owner_ids,hs_all_team_ids,hs_associated_call_source,hs_at_mentioned_owner_ids,hs_attachment_ids,hs_attendee_owner_ids,hs_body_preview,hs_body_preview_html,hs_body_preview_is_truncated,hs_booking_instance_id,hs_campaign_guid,hs_campaign_guids,hs_contact_first_outreach_date,hs_created_by,hs_created_by_scheduling_page,hs_created_by_user_id,hs_createdate,hs_customized_reminder_body_format,hs_customized_reminder_subject_format,hs_engagement_source,hs_engagement_source_id,hs_engagements_last_contacted,hs_follow_up_action,hs_follow_up_context,hs_follow_up_tasks_remaining,hs_gdpr_deleted,hs_guest_emails,hs_has_associated_notetaker_call_transcript,hs_has_call_with_transcript,hs_has_internal_meeting_notes,hs_has_meeting_transcript,hs_i_cal_uid,hs_include_description_in_reminder,hs_internal_meeting_notes,hs_lastmodifieddate,hs_meeting_body,hs_meeting_calendar_event_hash,hs_meeting_capture_source,hs_meeting_change_id,hs_meeting_created_from_link_id,hs_meeting_end_time,hs_meeting_external_url,hs_meeting_location,hs_meeting_location_type,hs_meeting_ms_teams_payload,hs_meeting_notetaker_id,hs_meeting_notetaker_source,hs_meeting_outcome,hs_meeting_payments_session_id,hs_meeting_pre_meeting_prospect_reminders,hs_meeting_recording_duration,hs_meeting_recording_url,hs_meeting_source,hs_meeting_source_id,hs_meeting_start_time,hs_meeting_title,hs_meeting_transcript_tracked_terms,hs_meeting_transcription_id,hs_meeting_web_conference_meeting_id,hs_meetings_follow_ups_dismissed,hs_merged_object_ids,hs_modified_by,hs_notetaker_attendance_duration,hs_obj_coords,hs_object_id,hs_object_source,hs_object_source_detail_1,hs_object_source_detail_2,hs_object_source_detail_3,hs_object_source_id,hs_object_source_label,hs_object_source_user_id,hs_organizer_email,hs_origin_object_coordinates,hs_outcome_canceled_count,hs_outcome_completed_count,hs_outcome_no_show_count,hs_outcome_rescheduled_count,hs_outcome_scheduled_count,hs_owning_teams,hs_pinned_engagement_id,hs_product_name,hs_queue_membership_ids,hs_read_only,hs_recurring_event_schedule,hs_recurring_event_series_id,hs_recurring_event_type,hs_recurring_event_unique_lookup,hs_roster_object_coordinates,hs_scheduled_tasks,hs_time_to_book_meeting_from_first_contact,hs_timestamp,hs_timezone,hs_unique_creation_key,hs_unique_id,hs_updated_by_user_id,hs_user_ids_of_all_notification_followers,hs_user_ids_of_all_notification_unfollowers,hs_user_ids_of_all_owners,hs_video_conference_platform,hs_video_conference_url,hs_was_imported,hubspot_owner_assigneddate,hubspot_owner_id,hubspot_team_id&associations=contacts,companies,deals,tickets",
+      "status": "mismatched",
+      "calls": 2,
+      "matched": 0,
+      "mismatched": 2,
+      "no_spec": 0,
+      "issues": [
+        "record fields in live missing from corpus: ['associations', 'url']"
+      ]
+    },
+    {
+      "method": "GET",
+      "spec_path": "/crm/v3/objects/notes",
+      "sample_url": "https://api.hubapi.com/crm/v3/objects/notes?limit=100&archived=false&properties=hs_all_accessible_team_ids,hs_all_assigned_business_unit_ids,hs_all_owner_ids,hs_all_team_ids,hs_at_mentioned_owner_ids,hs_attachment_from_form_submission,hs_attachment_ids,hs_body_preview,hs_body_preview_html,hs_body_preview_is_truncated,hs_created_by,hs_created_by_user_id,hs_createdate,hs_engagement_source,hs_engagement_source_id,hs_follow_up_action,hs_gdpr_deleted,hs_hd_ticket_ids,hs_lastmodifieddate,hs_merged_object_ids,hs_modified_by,hs_note_body,hs_note_ms_teams_payload,hs_obj_coords,hs_object_id,hs_object_source,hs_object_source_detail_1,hs_object_source_detail_2,hs_object_source_detail_3,hs_object_source_id,hs_object_source_label,hs_object_source_user_id,hs_origin_object_coordinates,hs_owning_teams,hs_pinned_engagement_id,hs_product_name,hs_queue_membership_ids,hs_read_only,hs_timestamp,hs_unique_creation_key,hs_unique_id,hs_updated_by_user_id,hs_user_ids_of_all_notification_followers,hs_user_ids_of_all_notification_unfollowers,hs_user_ids_of_all_owners,hs_was_imported,hubspot_owner_assigneddate,hubspot_owner_id,hubspot_team_id&associations=contacts,companies,deals,tickets",
+      "status": "validated",
+      "calls": 4,
+      "matched": 4,
+      "mismatched": 0,
+      "no_spec": 0,
+      "issues": []
+    },
+    {
+      "method": "GET",
+      "spec_path": "/crm/v3/objects/tasks",
+      "sample_url": "https://api.hubapi.com/crm/v3/objects/tasks?limit=100&archived=false&properties=hs_all_accessible_team_ids,hs_all_assigned_business_unit_ids,hs_all_owner_ids,hs_all_team_ids,hs_associated_company_labels,hs_associated_contact_labels,hs_at_mentioned_owner_ids,hs_attachment_ids,hs_body_preview,hs_body_preview_html,hs_body_preview_is_truncated,hs_calendar_event_id,hs_created_by,hs_created_by_user_id,hs_createdate,hs_engagement_source,hs_engagement_source_id,hs_engagements_last_contacted,hs_follow_up_action,hs_gdpr_deleted,hs_lastmodifieddate,hs_marketing_studio_node_id,hs_marketing_task_category,hs_marketing_task_category_id,hs_merged_object_ids,hs_modified_by,hs_msteams_message_id,hs_obj_coords,hs_object_id,hs_object_source,hs_object_source_detail_1,hs_object_source_detail_2,hs_object_source_detail_3,hs_object_source_id,hs_object_source_label,hs_object_source_user_id,hs_origin_object_coordinates,hs_owning_teams,hs_partner_map_category,hs_partner_map_year,hs_pinned_engagement_id,hs_pipeline,hs_pipeline_stage,hs_product_name,hs_queue_membership_ids,hs_read_only,hs_recommendation_id,hs_repeat_status,hs_scheduled_tasks,hs_start_date,hs_task_assigned_by_user_id,hs_task_body,hs_task_campaign_guid,hs_task_company_domain,hs_task_company_industry,hs_task_company_is_target_account,hs_task_completion_count,hs_task_completion_date,hs_task_contact_email,hs_task_contact_job_title,hs_task_contact_phone,hs_task_contact_timezone,hs_task_family,hs_task_for_object_type,hs_task_is_all_day,hs_task_is_completed,hs_task_is_completed_call,hs_task_is_completed_email,hs_task_is_completed_linked_in,hs_task_is_completed_sequence,hs_task_is_open,hs_task_is_overdue,hs_task_is_past_due_date,hs_task_is_sub_task,hs_task_last_contact_outreach,hs_task_last_sales_activity_timestamp,hs_task_missed_due_date,hs_task_missed_due_date_count,hs_task_ms_teams_payload,hs_task_parent_task_associated_objects,hs_task_parent_task_id,hs_task_parent_task_owner_ids,hs_task_priority,hs_task_probability_to_complete,hs_task_relative_reminders,hs_task_reminders,hs_task_repeat_interval,hs_task_send_default_reminder,hs_task_sequence_enrollment_active,hs_task_sequence_id,hs_task_sequence_step_enrollment_contact_id,hs_task_sequence_step_enrollment_id,hs_task_sequence_step_number,hs_task_sequence_step_order,hs_task_status,hs_task_sub_task_at_mentioned_owner_ids,hs_task_sub_task_ids,hs_task_sub_task_owner_ids,hs_task_subject,hs_task_template_id,hs_task_type,hs_task_uncompleted_sub_task_ids,hs_timestamp,hs_unique_creation_key,hs_unique_id,hs_updated_by_user_id,hs_user_ids_of_all_notification_followers,hs_user_ids_of_all_notification_unfollowers,hs_user_ids_of_all_owners,hs_was_imported,hubspot_owner_assigneddate,hubspot_owner_id,hubspot_team_id&associations=contacts,companies,deals,tickets",
+      "status": "mismatched",
+      "calls": 3,
+      "matched": 1,
+      "mismatched": 2,
+      "no_spec": 0,
+      "issues": [
+        "record fields in live missing from corpus: ['associations', 'url']"
+      ]
+    },
+    {
+      "method": "POST",
+      "spec_path": "/crm/v3/objects/tasks/search",
+      "sample_url": "https://api.hubapi.com/crm/v3/objects/tasks/search",
+      "status": "mismatched",
+      "calls": 1,
+      "matched": 0,
+      "mismatched": 1,
+      "no_spec": 0,
+      "issues": [
+        "record fields in live missing from corpus: ['url']"
+      ]
+    },
+    {
+      "method": "GET",
+      "spec_path": "/crm/v3/objects/tickets",
+      "sample_url": "https://api.hubapi.com/crm/v3/objects/tickets?limit=100&archived=false&properties=closed_date,content,created_by,createdate,first_agent_reply_date,hs_all_accessible_team_ids,hs_all_associated_contact_companies,hs_all_associated_contact_emails,hs_all_associated_contact_firstnames,hs_all_associated_contact_lastnames,hs_all_associated_contact_mobilephones,hs_all_associated_contact_phones,hs_all_conversation_mentions,hs_all_owner_ids,hs_all_team_ids,hs_applied_sla_rule_config_at,hs_applied_sla_rule_config_id,hs_applied_sla_schedule_at,hs_applied_sla_schedule_id,hs_assigned_team_ids,hs_assignment_method,hs_auto_generated_from_thread_id,hs_conversations_originating_message_id,hs_conversations_originating_thread_id,hs_created_by_user_id,hs_createdate,hs_current_generic_channel_id,hs_custom_inbox,hs_customer_agent_escalated_time,hs_customer_agent_matched_segment,hs_customer_agent_status_updated_time,hs_customer_agent_ticket_status,hs_cx_negative_signals,hs_cx_negative_signals_v1,hs_cx_positive_signals,hs_cx_positive_signals_v1,hs_draft_user_ids,hs_email_subject,hs_exclude_from_cx_score,hs_exclude_from_qa_score,hs_external_object_ids,hs_file_upload,hs_first_agent_message_sent_at,hs_first_assignee_type,hs_form_id,hs_form_submission_conversion_id,hs_has_live_chat_ended_or_email_sent,hs_helpdesk_sort_timestamp,hs_in_helpdesk,hs_inbox_id,hs_is_closed,hs_is_latest_message_failed,hs_is_latest_message_hidden_from_all,hs_is_visible_in_help_desk,hs_last_closed_date,hs_last_csat_comment,hs_last_csat_date,hs_last_csat_rating,hs_last_email_activity,hs_last_email_date,hs_last_email_details,hs_last_email_type,hs_last_message_from_visitor,hs_last_message_received_at,hs_last_message_sent_at,hs_last_nps_survey_comment,hs_lastactivitydate,hs_lastcontacted,hs_lastmodifieddate,hs_latest_message_attachment_types,hs_latest_message_is_forwarded_email,hs_latest_message_is_thread_comment,hs_latest_message_seen_by_agent_ids,hs_latest_message_visible_to_visitor,hs_latest_message_visible_to_visitor_sent_at,hs_mentioned_note_user_ids,hs_mentions_resolved_user_ids,hs_mentions_user_ids,hs_merged_object_ids,hs_most_relevant_sla_status,hs_most_relevant_sla_type,hs_msteams_message_id,hs_nextactivitydate,hs_notes_last_activity,hs_notes_next_activity,hs_notes_next_activity_type,hs_num_associated_companies,hs_num_associated_conversations,hs_num_times_contacted,hs_object_id,hs_object_source,hs_object_source_detail_1,hs_object_source_detail_2,hs_object_source_detail_3,hs_object_source_id,hs_object_source_label,hs_object_source_user_id,hs_originating_channel_instance_id,hs_originating_email_engagement_id,hs_originating_generic_channel_id,hs_outbound_ticket,hs_owning_teams,hs_pinned_engagement_id,hs_pipeline,hs_pipeline_stage,hs_primary_company,hs_primary_company_id,hs_primary_company_name,hs_read_only,hs_resolution,hs_retroactive_sla_update_at,hs_sales_email_last_replied,hs_seen_by_agent_ids,hs_sla_operating_hours,hs_sla_pause_status,hs_snoozed_for_portal,hs_source_object_id,hs_source_url,hs_summarized_ticket_owner_type,hs_thread_ids_to_restore,hs_ticket_category,hs_ticket_id,hs_ticket_owner_type,hs_ticket_priority,hs_ticket_reopened_at,hs_time_to_close_in_operating_hours,hs_time_to_first_assign,hs_time_to_first_rep_assignment,hs_time_to_first_response_in_operating_hours,hs_unique_creation_key,hs_updated_by_user_id,hs_user_ids_of_all_notification_followers,hs_user_ids_of_all_notification_unfollowers,hs_user_ids_of_all_owners,hs_waitlist_routing_targets,hs_waitlist_sort_value,hs_was_imported,hubspot_owner_assigneddate,hubspot_owner_id,hubspot_team_id,last_engagement_date,last_reply_date,notes_last_contacted,notes_last_updated,notes_next_activity_date,nps_follow_up_answer,nps_follow_up_question_version,nps_score,num_contacted_notes,num_notes,source_ref,source_thread_id,source_type,subject,tags,time_to_close,time_to_first_agent_reply&associations=contacts,companies,deals",
+      "status": "validated",
+      "calls": 4,
+      "matched": 4,
+      "mismatched": 0,
+      "no_spec": 0,
+      "issues": []
+    },
+    {
+      "method": "POST",
+      "spec_path": "/crm/v3/objects/tickets/search",
+      "sample_url": "https://api.hubapi.com/crm/v3/objects/tickets/search",
+      "status": "validated",
+      "calls": 3,
+      "matched": 3,
+      "mismatched": 0,
+      "no_spec": 0,
+      "issues": []
+    },
+    {
+      "method": "POST",
+      "spec_path": "/crm/v3/objects/{object_type}/batch/read",
+      "sample_url": "https://api.hubapi.com/crm/v3/objects/contacts/batch/read?archived=false",
+      "status": "validated",
+      "calls": 9,
+      "matched": 9,
+      "mismatched": 0,
+      "no_spec": 0,
+      "issues": []
+    },
+    {
+      "method": "GET",
+      "spec_path": "/crm/v3/schemas",
+      "sample_url": "https://api.hubapi.com/crm/v3/schemas",
+      "status": "validated",
+      "calls": 233,
+      "matched": 233,
+      "mismatched": 0,
+      "no_spec": 0,
+      "issues": []
+    },
+    {
+      "method": "GET",
+      "spec_path": "/properties/v2/{object_type}/properties",
+      "sample_url": "https://api.hubapi.com/properties/v2/contacts/properties",
+      "status": "mismatched",
+      "calls": 30,
+      "matched": 0,
+      "mismatched": 30,
+      "no_spec": 0,
+      "issues": [
+        "record fields in live missing from corpus: ['calculated', 'createdAt', 'createdUserId', 'currencyPropertyName', 'dataSensitivity']"
+      ]
+    }
+  ],
+  "summary": {
+    "endpoints_total": 19,
+    "endpoints_validated": 5,
+    "endpoints_mismatched": 14,
+    "endpoints_missing_spec": 0
+  }
+}
