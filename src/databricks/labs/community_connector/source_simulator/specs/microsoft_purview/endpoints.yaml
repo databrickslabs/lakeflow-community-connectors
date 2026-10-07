@@ -1,0 +1,77 @@
+# Microsoft Purview Unified Catalog Data Governance data-plane endpoints
+# exercised by the connector (api-version=2026-03-20-preview).
+#
+# Connector flow:
+#   * read_table(business_domains) -> GET /datagovernance/catalog/businessdomains
+#   * read_table(data_products)    -> GET /datagovernance/catalog/dataProducts
+#   * read_table(terms)            -> GET /datagovernance/catalog/terms
+#
+# Pagination:
+#   All three list endpoints wrap records in a ``value`` array and return a
+#   ``nextLink`` URL until the last page. The connector follows ``nextLink``
+#   (see ``next_link_paginate``). The simulator has no nextLink style, so we
+#   use ``pagination_style: none`` and return the whole corpus in one response
+#   with the ``value`` wrapper (and no ``nextLink``); the connector's loop
+#   terminates after one page when ``nextLink`` is absent — the same modeling
+#   the Collibra spec uses for its cursor endpoints.
+#
+# Cursor / termination:
+#   The incremental cursor is ``systemData.lastModifiedAt`` (ISO-8601 UTC
+#   string). The connector caps its returned cursor at an init-time ISO
+#   snapshot. ``synthesize_future_records`` injects a few records with a
+#   post-now ``lastModifiedAt`` on the two cdc endpoints so the init-time cap
+#   is actually exercised and Trigger.AvailableNow termination converges.
+#   ``business_domains`` is a snapshot (no cursor, no synthesis).
+
+endpoints:
+  # ---- /businessdomains (snapshot, $skipToken paginated -> nextLink) ----
+  - path: "/datagovernance/catalog/businessdomains"
+    method: GET
+    corpus: business_domains
+    response:
+      pagination_style: none
+      wrapper: {records_key: value}
+    params:
+      api-version:  {role: ignore}
+      $skipToken:   {role: ignore}
+      writeOnly:    {role: ignore}
+
+  # ---- /dataProducts (cdc, systemData.lastModifiedAt, skip/top -> nextLink) ----
+  - path: "/datagovernance/catalog/dataProducts"
+    method: GET
+    corpus: data_products
+    response:
+      pagination_style: none
+      default_sort: "systemData.lastModifiedAt asc"
+      wrapper: {records_key: value}
+    params:
+      api-version:  {role: ignore}
+      skip:         {role: ignore}
+      top:          {role: ignore}
+      orderBy:      {role: ignore}
+      domainId:     {role: filter, field: domain, op: eq}
+    synthesize_future_records:
+      cursor_field: systemData.lastModifiedAt
+      count: 3
+
+  # ---- /terms (cdc, systemData.lastModifiedAt, skip/top -> nextLink) ----
+  - path: "/datagovernance/catalog/terms"
+    method: GET
+    corpus: terms
+    response:
+      pagination_style: none
+      default_sort: "systemData.lastModifiedAt asc"
+      wrapper: {records_key: value}
+    params:
+      api-version:  {role: ignore}
+      skip:         {role: ignore}
+      top:          {role: ignore}
+      orderBy:      {role: ignore}
+      keyword:      {role: ignore}
+      depth:        {role: ignore}
+      domainId:     {role: filter, field: domain, op: eq}
+      parentId:     {role: filter, field: parentId, op: eq}
+    synthesize_future_records:
+      cursor_field: systemData.lastModifiedAt
+      count: 3
+
