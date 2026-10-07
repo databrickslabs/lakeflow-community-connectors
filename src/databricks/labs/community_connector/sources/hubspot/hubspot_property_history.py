@@ -55,6 +55,8 @@ OPT_PROPERTIES = "history_properties"
 OPT_SINCE = "history_since"
 OPT_LOOKBACK_MINUTES = "history_lookback_minutes"
 OPT_MAX_RECORDS = "max_records_per_batch"
+OPT_INCLUDE = "include_properties"
+OPT_EXCLUDE = "exclude_properties"
 
 DEFAULT_LOOKBACK_MINUTES = 10
 
@@ -93,6 +95,45 @@ def _parse_ts(value: Optional[str]) -> Optional[datetime]:
     except (TypeError, ValueError):
         return None
     return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+
+
+def _parse_property_list(raw: Optional[str]) -> Optional[List[str]]:
+    """Parse a comma-separated table-option value into a list (None if unset)."""
+    if not raw:
+        return None
+    return [p.strip() for p in raw.split(",") if p.strip()]
+
+
+def filter_property_names(
+    names: List[str],
+    table_options: Optional[Dict[str, str]],
+    cursor_property: Optional[str] = None,
+) -> List[str]:
+    """Apply the ``include_properties`` / ``exclude_properties`` options.
+
+    Semantics (documented in the README):
+      * ``include_properties`` (comma-separated) — if set, only these
+        discovered properties are kept (unknown names are ignored, matching
+        HubSpot's own behavior for unrecognised property names).
+      * ``exclude_properties`` — removed from the remaining set.
+      * The object's cursor property is always retained so incremental
+        reads keep working, even if explicitly excluded.
+    Discovery order is preserved and the result is a pure function of
+    (names, table_options).
+    """
+    opts = table_options or {}
+    include = _parse_property_list(opts.get(OPT_INCLUDE))
+    exclude = set(_parse_property_list(opts.get(OPT_EXCLUDE)) or [])
+    if include is not None:
+        include_set = set(include)
+        selected = [n for n in names if n in include_set]
+    else:
+        selected = list(names)
+    if exclude:
+        selected = [n for n in selected if n not in exclude]
+    if cursor_property and cursor_property not in selected:
+        selected.append(cursor_property)
+    return selected
 
 
 def _to_ms(dt: datetime) -> int:
@@ -264,8 +305,12 @@ class HubspotPropertyHistory:  # pylint: disable=too-many-instance-attributes
     def _resolve_properties(self, object_type: str, table_options: Dict[str, str]) -> List[str]:
         raw = table_options.get(OPT_PROPERTIES)
         if raw:
-            return [p.strip() for p in raw.split(",") if p.strip()]
-        return self._get_property_names(object_type)
+            names = _parse_property_list(raw) or []
+        else:
+            names = self._get_property_names(object_type)
+        # include_properties / exclude_properties apply to history tables too:
+        # they bound which properties are requested in propertiesWithHistory.
+        return filter_property_names(names, table_options)
 
     @staticmethod
     def _advanced(max_dt: Optional[datetime], watermark_dt: Optional[datetime]) -> bool:

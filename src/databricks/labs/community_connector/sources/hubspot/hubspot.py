@@ -17,6 +17,7 @@ from databricks.labs.community_connector.interface import LakeflowConnect
 from databricks.labs.community_connector.sources.hubspot.hubspot_property_history import (
     HISTORY_STANDARD_OBJECTS,
     HubspotPropertyHistory,
+    filter_property_names,
     history_table_name,
     is_history_table,
 )
@@ -221,15 +222,18 @@ class HubspotLakeflowConnect(LakeflowConnect):
         if is_history_table(table_name):
             return self._history.get_table_schema()
 
-        # Check cache first
-        if table_name in self._schema_cache:
-            return self._schema_cache[table_name]
+        # Cache key includes the property filters — the schema is a function of
+        # (table_name, table_options), so cached entries must not leak across
+        # different include_properties / exclude_properties values.
+        cache_key = self._options_cache_key(table_name, table_options)
+        if cache_key in self._schema_cache:
+            return self._schema_cache[cache_key]
 
         # Discover schema via API
-        schema = self._discover_table_schema(table_name)
+        schema = self._discover_table_schema(table_name, table_options)
 
         # Cache the result
-        self._schema_cache[table_name] = schema
+        self._schema_cache[cache_key] = schema
 
         return schema
 
@@ -276,40 +280,60 @@ class HubspotLakeflowConnect(LakeflowConnect):
         if is_history_table(table_name):
             return self._history.get_table_metadata()
 
-        # Check cache first
-        if table_name in self._metadata_cache:
-            return self._metadata_cache[table_name]
+        cache_key = self._options_cache_key(table_name, table_options)
+        if cache_key in self._metadata_cache:
+            return self._metadata_cache[cache_key]
 
         # Get metadata from object configuration
-        metadata = self._get_table_metadata(table_name)
+        metadata = self._get_table_metadata(table_name, table_options)
 
         # Cache the result
-        self._metadata_cache[table_name] = metadata
+        self._metadata_cache[cache_key] = metadata
 
         return metadata
 
-    def _discover_table_schema(self, table_name: str) -> StructType:
+    @staticmethod
+    def _options_cache_key(table_name: str, table_options: Dict[str, str] | None) -> tuple:
+        """Cache key covering the options that change schema/metadata output."""
+        opts = table_options or {}
+        return (
+            table_name,
+            opts.get("include_properties"),
+            opts.get("exclude_properties"),
+        )
+
+    def _discover_table_schema(self, table_name: str, table_options: Dict[str, str]) -> StructType:
         """
         Discover table schema by calling HubSpot Properties API.
 
         Args:
             table_name: Name of the table/object to discover schema for
+            table_options: Table options (include_properties / exclude_properties)
 
         Returns:
             StructType representing the table schema
         """
         # All CRM objects follow the same schema pattern
-        return self._discover_crm_object_schema(table_name)
+        return self._discover_crm_object_schema(table_name, table_options)
 
-    def _get_table_metadata(self, table_name: str) -> dict:
+    def _get_table_metadata(
+        self, table_name: str, table_options: Dict[str, str] | None = None
+    ) -> dict:
         """
         Get metadata for a table based on object configuration.
         """
+        table_options = table_options or {}
         config = self._get_object_config(table_name)
 
-        # Get property names and cursor property field for API calls
+        # Get property names and cursor property field for API calls.
+        # include_properties / exclude_properties bound the requested set;
+        # the cursor property is always retained so incremental reads work.
         properties = self._get_object_properties(table_name)
-        property_names = [prop["name"] for prop in properties]
+        property_names = filter_property_names(
+            [prop["name"] for prop in properties],
+            table_options,
+            cursor_property=config["cursor_property_field"],
+        )
 
         # Use cdc_with_deletes only for tables that support archived queries
         supports_deletes = config.get("supports_deletes", False)
@@ -324,14 +348,22 @@ class HubspotLakeflowConnect(LakeflowConnect):
             "ingestion_type": ingestion_type,
         }
 
-    def _discover_crm_object_schema(self, table_name: str) -> StructType:
+    def _discover_crm_object_schema(
+        self, table_name: str, table_options: Dict[str, str] | None = None
+    ) -> StructType:
         """
         Discover CRM object schema using HubSpot Properties API.
         Works for contacts, companies, deals, tickets, and custom objects.
         """
-        # Get object configuration and properties
+        # Get object configuration and properties (filtered by table options)
         config = self._get_object_config(table_name)
         properties = self._get_object_properties(table_name)
+        property_names = filter_property_names(
+            [prop.get("name", "") for prop in properties],
+            table_options,
+            cursor_property=config["cursor_property_field"],
+        )
+        property_by_name = {prop.get("name", ""): prop for prop in properties}
 
         # Build base schema fields (these are always present for CRM objects)
         base_fields = [
@@ -348,14 +380,13 @@ class HubspotLakeflowConnect(LakeflowConnect):
         # Build nested properties schema based on API response
         properties_fields = []
 
-        if isinstance(properties, list):
-            for prop in properties:
-                prop_name = prop.get("name", "")
-                prop_type = prop.get("type", "string")
+        for prop_name in property_names:
+            prop = property_by_name.get(prop_name, {})
+            prop_type = prop.get("type", "string")
 
-                # Map HubSpot property types to Spark types
-                spark_type = self._map_hubspot_type_to_spark(prop_type)
-                properties_fields.append(StructField(prop_name, spark_type, True))
+            # Map HubSpot property types to Spark types
+            spark_type = self._map_hubspot_type_to_spark(prop_type)
+            properties_fields.append(StructField(prop_name, spark_type, True))
 
         # Create nested properties StructType
         properties_struct = StructType(properties_fields) if properties_fields else StructType([])

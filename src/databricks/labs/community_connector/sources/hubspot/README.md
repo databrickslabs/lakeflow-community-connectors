@@ -171,8 +171,12 @@ These are set inside the `table_configuration` map alongside any source-specific
 |---|---|---|---|
 | `max_records_per_batch` | all incremental tables | no cap | Maximum records returned per microbatch. For property history tables the cap is checked after each Batch Read call, so a microbatch can exceed it by up to one call's worth of rows. |
 | `history_properties` | `*_property_history` | all properties | Comma-separated property names to fetch history for (e.g. `lifecyclestage,hs_lead_status,dealstage`). Recommended for portals with many properties, because requesting history for every property makes each Batch Read response larger. |
+| `include_properties` | all tables | all properties | Comma-separated allowlist of properties to ingest. If set, only these discovered properties are read and exposed in the schema (unknown names are ignored, matching HubSpot's behavior). Required for objects with very many properties — HubSpot's Search API rejects requests over 3,000 characters, which unfiltered wide objects exceed. The object's cursor property is always retained. |
+| `exclude_properties` | all tables | none | Comma-separated list of properties to drop from ingestion. Applied after `include_properties`. |
 | `history_since` | `*_property_history` | none | ISO-8601 timestamp (e.g. `2025-01-01T00:00:00Z`). Only objects modified on or after this time are read, and older history entries are dropped. Caps the initial backfill. |
 | `history_lookback_minutes` | `*_property_history` | `10` | Minutes subtracted from the saved cursor once per pipeline update, to pick up objects that were not yet indexed by the Search API in the previous run. Set to `0` to disable. |
+
+`include_properties` / `exclude_properties` also apply to `*_property_history` tables (they bound which properties are requested in `propertiesWithHistory`; `history_properties` still narrows further for history reads). Changing either option changes the target table's columns and future ingestion only — previously ingested rows remain until the table is full-refreshed.
 
 These options must be included in the connection's `externalOptionsAllowList` (see `connector_spec.yaml`).
 

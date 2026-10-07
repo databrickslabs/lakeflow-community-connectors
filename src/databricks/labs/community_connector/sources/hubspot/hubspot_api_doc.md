@@ -162,6 +162,35 @@ offset.
   last-modified date (Airbyte documents this as cursor drift); such changes are
   not picked up until the object is next modified.
 
+## Property filtering (`include_properties` / `exclude_properties`)
+
+By default every table discovers and requests **all** properties. Two table
+options bound that set (both are applied to object tables and to
+`*_property_history` tables):
+
+- `include_properties` — comma-separated allowlist; unknown names are ignored
+  (HubSpot itself ignores unrecognised property names).
+- `exclude_properties` — removed after `include_properties` is applied.
+
+The object's cursor property (`lastmodifieddate` / `hs_lastmodifieddate`) is
+always retained so incremental reads keep working. Changing the options
+changes the schema and future ingestion; previously ingested rows remain until
+a full refresh.
+
+**Why this matters — HubSpot request-size limits (verified in the Search API
+guide):**
+
+- Search request bodies are capped at **3,000 characters**; larger bodies
+  return HTTP 400. Property names average ~20 characters, so unfiltered
+  incremental reads fail on objects with roughly **150+ properties** — and
+  custom objects with 1,000+ properties always fail.
+- The list endpoint takes `properties=` in the URL, which hits URL-length
+  limits (HTTP 414) for wide objects on full refresh.
+
+Use `include_properties` to bound wide objects to the properties you need;
+chunking the all-properties path across multiple requests is a possible
+follow-up.
+
 ## References
 
 - HubSpot CRM v3 API: https://developers.hubspot.com/docs/api/crm

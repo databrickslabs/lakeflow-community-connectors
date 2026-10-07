@@ -629,6 +629,8 @@ def register_lakeflow_source(spark):
     OPT_SINCE = "history_since"
     OPT_LOOKBACK_MINUTES = "history_lookback_minutes"
     OPT_MAX_RECORDS = "max_records_per_batch"
+    OPT_INCLUDE = "include_properties"
+    OPT_EXCLUDE = "exclude_properties"
 
     DEFAULT_LOOKBACK_MINUTES = 10
 
@@ -667,6 +669,45 @@ def register_lakeflow_source(spark):
         except (TypeError, ValueError):
             return None
         return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+
+
+    def _parse_property_list(raw: Optional[str]) -> Optional[List[str]]:
+        """Parse a comma-separated table-option value into a list (None if unset)."""
+        if not raw:
+            return None
+        return [p.strip() for p in raw.split(",") if p.strip()]
+
+
+    def filter_property_names(
+        names: List[str],
+        table_options: Optional[Dict[str, str]],
+        cursor_property: Optional[str] = None,
+    ) -> List[str]:
+        """Apply the ``include_properties`` / ``exclude_properties`` options.
+
+        Semantics (documented in the README):
+          * ``include_properties`` (comma-separated) — if set, only these
+            discovered properties are kept (unknown names are ignored, matching
+            HubSpot's own behavior for unrecognised property names).
+          * ``exclude_properties`` — removed from the remaining set.
+          * The object's cursor property is always retained so incremental
+            reads keep working, even if explicitly excluded.
+        Discovery order is preserved and the result is a pure function of
+        (names, table_options).
+        """
+        opts = table_options or {}
+        include = _parse_property_list(opts.get(OPT_INCLUDE))
+        exclude = set(_parse_property_list(opts.get(OPT_EXCLUDE)) or [])
+        if include is not None:
+            include_set = set(include)
+            selected = [n for n in names if n in include_set]
+        else:
+            selected = list(names)
+        if exclude:
+            selected = [n for n in selected if n not in exclude]
+        if cursor_property and cursor_property not in selected:
+            selected.append(cursor_property)
+        return selected
 
 
     def _to_ms(dt: datetime) -> int:
@@ -838,8 +879,12 @@ def register_lakeflow_source(spark):
         def _resolve_properties(self, object_type: str, table_options: Dict[str, str]) -> List[str]:
             raw = table_options.get(OPT_PROPERTIES)
             if raw:
-                return [p.strip() for p in raw.split(",") if p.strip()]
-            return self._get_property_names(object_type)
+                names = _parse_property_list(raw) or []
+            else:
+                names = self._get_property_names(object_type)
+            # include_properties / exclude_properties apply to history tables too:
+            # they bound which properties are requested in propertiesWithHistory.
+            return filter_property_names(names, table_options)
 
         @staticmethod
         def _advanced(max_dt: Optional[datetime], watermark_dt: Optional[datetime]) -> bool:
@@ -1183,15 +1228,18 @@ def register_lakeflow_source(spark):
             if is_history_table(table_name):
                 return self._history.get_table_schema()
 
-            # Check cache first
-            if table_name in self._schema_cache:
-                return self._schema_cache[table_name]
+            # Cache key includes the property filters — the schema is a function of
+            # (table_name, table_options), so cached entries must not leak across
+            # different include_properties / exclude_properties values.
+            cache_key = self._options_cache_key(table_name, table_options)
+            if cache_key in self._schema_cache:
+                return self._schema_cache[cache_key]
 
             # Discover schema via API
-            schema = self._discover_table_schema(table_name)
+            schema = self._discover_table_schema(table_name, table_options)
 
             # Cache the result
-            self._schema_cache[table_name] = schema
+            self._schema_cache[cache_key] = schema
 
             return schema
 
@@ -1238,40 +1286,60 @@ def register_lakeflow_source(spark):
             if is_history_table(table_name):
                 return self._history.get_table_metadata()
 
-            # Check cache first
-            if table_name in self._metadata_cache:
-                return self._metadata_cache[table_name]
+            cache_key = self._options_cache_key(table_name, table_options)
+            if cache_key in self._metadata_cache:
+                return self._metadata_cache[cache_key]
 
             # Get metadata from object configuration
-            metadata = self._get_table_metadata(table_name)
+            metadata = self._get_table_metadata(table_name, table_options)
 
             # Cache the result
-            self._metadata_cache[table_name] = metadata
+            self._metadata_cache[cache_key] = metadata
 
             return metadata
 
-        def _discover_table_schema(self, table_name: str) -> StructType:
+        @staticmethod
+        def _options_cache_key(table_name: str, table_options: Dict[str, str] | None) -> tuple:
+            """Cache key covering the options that change schema/metadata output."""
+            opts = table_options or {}
+            return (
+                table_name,
+                opts.get("include_properties"),
+                opts.get("exclude_properties"),
+            )
+
+        def _discover_table_schema(self, table_name: str, table_options: Dict[str, str]) -> StructType:
             """
             Discover table schema by calling HubSpot Properties API.
 
             Args:
                 table_name: Name of the table/object to discover schema for
+                table_options: Table options (include_properties / exclude_properties)
 
             Returns:
                 StructType representing the table schema
             """
             # All CRM objects follow the same schema pattern
-            return self._discover_crm_object_schema(table_name)
+            return self._discover_crm_object_schema(table_name, table_options)
 
-        def _get_table_metadata(self, table_name: str) -> dict:
+        def _get_table_metadata(
+            self, table_name: str, table_options: Dict[str, str] | None = None
+        ) -> dict:
             """
             Get metadata for a table based on object configuration.
             """
+            table_options = table_options or {}
             config = self._get_object_config(table_name)
 
-            # Get property names and cursor property field for API calls
+            # Get property names and cursor property field for API calls.
+            # include_properties / exclude_properties bound the requested set;
+            # the cursor property is always retained so incremental reads work.
             properties = self._get_object_properties(table_name)
-            property_names = [prop["name"] for prop in properties]
+            property_names = filter_property_names(
+                [prop["name"] for prop in properties],
+                table_options,
+                cursor_property=config["cursor_property_field"],
+            )
 
             # Use cdc_with_deletes only for tables that support archived queries
             supports_deletes = config.get("supports_deletes", False)
@@ -1286,14 +1354,22 @@ def register_lakeflow_source(spark):
                 "ingestion_type": ingestion_type,
             }
 
-        def _discover_crm_object_schema(self, table_name: str) -> StructType:
+        def _discover_crm_object_schema(
+            self, table_name: str, table_options: Dict[str, str] | None = None
+        ) -> StructType:
             """
             Discover CRM object schema using HubSpot Properties API.
             Works for contacts, companies, deals, tickets, and custom objects.
             """
-            # Get object configuration and properties
+            # Get object configuration and properties (filtered by table options)
             config = self._get_object_config(table_name)
             properties = self._get_object_properties(table_name)
+            property_names = filter_property_names(
+                [prop.get("name", "") for prop in properties],
+                table_options,
+                cursor_property=config["cursor_property_field"],
+            )
+            property_by_name = {prop.get("name", ""): prop for prop in properties}
 
             # Build base schema fields (these are always present for CRM objects)
             base_fields = [
@@ -1310,14 +1386,13 @@ def register_lakeflow_source(spark):
             # Build nested properties schema based on API response
             properties_fields = []
 
-            if isinstance(properties, list):
-                for prop in properties:
-                    prop_name = prop.get("name", "")
-                    prop_type = prop.get("type", "string")
+            for prop_name in property_names:
+                prop = property_by_name.get(prop_name, {})
+                prop_type = prop.get("type", "string")
 
-                    # Map HubSpot property types to Spark types
-                    spark_type = self._map_hubspot_type_to_spark(prop_type)
-                    properties_fields.append(StructField(prop_name, spark_type, True))
+                # Map HubSpot property types to Spark types
+                spark_type = self._map_hubspot_type_to_spark(prop_type)
+                properties_fields.append(StructField(prop_name, spark_type, True))
 
             # Create nested properties StructType
             properties_struct = StructType(properties_fields) if properties_fields else StructType([])
