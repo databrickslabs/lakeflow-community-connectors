@@ -176,7 +176,10 @@ These are set inside the `table_configuration` map alongside any source-specific
 | `history_since` | `*_property_history` | none | ISO-8601 timestamp (e.g. `2025-01-01T00:00:00Z`). Only objects modified on or after this time are read, and older history entries are dropped. Caps the initial backfill. |
 | `history_lookback_minutes` | `*_property_history` | `10` | Minutes subtracted from the saved cursor once per pipeline update, to pick up objects that were not yet indexed by the Search API in the previous run. Set to `0` to disable. |
 
-`include_properties` / `exclude_properties` also apply to `*_property_history` tables (they bound which properties are requested in `propertiesWithHistory`; `history_properties` still narrows further for history reads). Changing either option changes the target table's columns and future ingestion only — previously ingested rows remain until the table is full-refreshed.
+`include_properties` / `exclude_properties` also apply to `*_property_history` tables (they bound which properties are requested in `propertiesWithHistory`; `history_properties` still narrows further for history reads). Two operational notes:
+
+- Rows ingested before a filter change are not retroactively removed. To rebuild a table so its contents match the new filter, force a re-ingest (below).
+- **Forcing a re-ingest:** changing any connector option value on a table — even trivially, e.g. bumping `history_lookback_minutes` by 1 — recreates that table's ingestion flow and re-reads the source from the beginning with the new settings. This is the reliable way to rebuild a table after changing filters: on serverless managed ingestion, a full refresh alone re-processes from the pipeline's stored cursor and may not re-read the source for tables whose options did not change.
 
 These options must be included in the connection's `externalOptionsAllowList` (see `connector_spec.yaml`).
 

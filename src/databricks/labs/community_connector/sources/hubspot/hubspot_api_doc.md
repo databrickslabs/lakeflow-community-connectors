@@ -174,8 +174,13 @@ options bound that set (both are applied to object tables and to
 
 The object's cursor property (`lastmodifieddate` / `hs_lastmodifieddate`) is
 always retained so incremental reads keep working. Changing the options
-changes the schema and future ingestion; previously ingested rows remain until
-a full refresh.
+changes the schema and future ingestion; previously ingested rows remain
+until the table is re-ingested. To force a re-ingest after changing options,
+change any connector option value on the table (even trivially) — this
+recreates the table's ingestion flow and re-reads the source from the
+beginning. On serverless managed ingestion, a full refresh alone resumes
+from the pipeline's stored cursor and may not re-read the source for tables
+whose options did not change.
 
 **Why this matters — verified against a live HubSpot portal (2026-10-07):**
 
