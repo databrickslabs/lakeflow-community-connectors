@@ -754,6 +754,24 @@ def register_lakeflow_source(spark):
                 )
                 if not parents:
                     break
+                # Strict > boundary: the search filter is GTE-inclusive (plus the
+                # per-trigger lookback), so parents at or below the start watermark
+                # come back again. Emitting their rows without advancing the offset
+                # violates the SimpleDataSourceStreamReader contract (a non-empty
+                # batch MUST advance the end offset past the start) and the managed
+                # pipeline aborts with SIMPLE_STREAM_READER_OFFSET_DID_NOT_ADVANCE.
+                # Their history was already ingested when the watermark was set, so
+                # skipping them here loses nothing.
+                if watermark_dt is not None:
+                    parents = [
+                        p for p in parents
+                        if (d := _parse_ts(p.get("updatedAt"))) is not None
+                        and d > watermark_dt
+                    ]
+                    if not parents and after:
+                        continue
+                    if not parents:
+                        break
                 fetched += len(parents)
 
                 for chunk_start in range(0, len(parents), BATCH_READ_SIZE):
@@ -1533,6 +1551,19 @@ def register_lakeflow_source(spark):
                         not latest_updated or updated_time > latest_updated
                     ):
                         latest_updated = updated_time
+                    # Strict > boundary: the search filter is GTE-inclusive, so the
+                    # record that set the watermark is returned again. Re-emitting it
+                    # without advancing the offset violates the
+                    # SimpleDataSourceStreamReader contract (a non-empty batch MUST
+                    # advance the end offset past the start) and the managed pipeline
+                    # aborts with SIMPLE_STREAM_READER_OFFSET_DID_NOT_ADVANCE.
+                    # HubSpot updatedAt has millisecond precision, so distinct
+                    # updates effectively never share the exact boundary value.
+                    if checkpoint:
+                        records = [
+                            r for r in records
+                            if (r.get("updatedAt") or "") > checkpoint
+                        ]
                 else:
                     # Use objects API for full refresh
                     records, after = self._fetch_full_refresh_batch(

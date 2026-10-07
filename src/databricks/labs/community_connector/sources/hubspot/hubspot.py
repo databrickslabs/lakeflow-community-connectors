@@ -590,6 +590,19 @@ class HubspotLakeflowConnect(LakeflowConnect):
                     not latest_updated or updated_time > latest_updated
                 ):
                     latest_updated = updated_time
+                # Strict > boundary: the search filter is GTE-inclusive, so the
+                # record that set the watermark is returned again. Re-emitting it
+                # without advancing the offset violates the
+                # SimpleDataSourceStreamReader contract (a non-empty batch MUST
+                # advance the end offset past the start) and the managed pipeline
+                # aborts with SIMPLE_STREAM_READER_OFFSET_DID_NOT_ADVANCE.
+                # HubSpot updatedAt has millisecond precision, so distinct
+                # updates effectively never share the exact boundary value.
+                if checkpoint:
+                    records = [
+                        r for r in records
+                        if (r.get("updatedAt") or "") > checkpoint
+                    ]
             else:
                 # Use objects API for full refresh
                 records, after = self._fetch_full_refresh_batch(

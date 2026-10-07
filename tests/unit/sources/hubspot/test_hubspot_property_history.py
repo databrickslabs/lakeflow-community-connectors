@@ -299,6 +299,16 @@ def test_search_result_cap_reanchors(monkeypatch):
     assert offset == {"updatedAt": parents[len(rows) - 1]["updatedAt"]}
 
 
+def test_base_tables_offset_advance_contract(connector):
+    """Base tables: resuming from the max updatedAt returns an empty batch
+    with the same offset (boundary record dropped, strict > filter)."""
+    rows, offset = connector.read_table("contacts", {}, {})
+    assert list(rows) and offset.get("updatedAt")
+    rows2, offset2 = connector.read_table("contacts", offset, {})
+    assert list(rows2) == []
+    assert offset2 == offset
+
+
 def test_short_circuit_at_init_time():
     reader = _reader()
     start = {"updatedAt": "2030-01-01T00:00:00.000Z"}
@@ -306,3 +316,41 @@ def test_short_circuit_at_init_time():
         rows, offset = reader.read_table("contacts_property_history", start, {})
     assert list(rows) == [] and offset == start
     post.assert_not_called()
+
+
+# ----------------------------------------------------------------------
+# Offset-advance contract (SIMPLE_STREAM_READER_OFFSET_DID_NOT_ADVANCE)
+# ----------------------------------------------------------------------
+
+
+def test_history_offset_advance_contract():
+    """A non-empty batch must advance the offset past its start.
+
+    The GTE-inclusive search re-returns the parent that set the watermark;
+    those rows must be dropped so the batch is empty when nothing new exists,
+    and the offset must strictly advance whenever rows are emitted.
+    """
+    parents = [
+        _parent(1, "2024-03-01T00:00:00.000Z"),
+        _parent(2, "2024-03-02T00:00:00.000Z"),
+    ]
+    fake = _FakeHubspot(parents)
+    reader = _reader()
+    with mock.patch.object(hph.requests, "post", side_effect=fake.post):
+        rows, offset = reader.read_table("contacts_property_history", {}, {})
+        assert len(list(rows)) == 2
+        assert offset == {"updatedAt": "2024-03-02T00:00:00.000Z"}
+
+        # Resume from the watermark: only the boundary parent comes back; it
+        # must be dropped, giving an EMPTY batch with the same offset.
+        rows, offset2 = reader.read_table("contacts_property_history", offset, {})
+        assert list(rows) == []
+        assert offset2 == offset
+
+        # A new update (parent 2 moves forward): rows emitted AND offset advances.
+        parents[1]["updatedAt"] = "2024-03-03T00:00:00.000Z"
+        rows, offset3 = reader.read_table("contacts_property_history", offset, {})
+        rows = list(rows)
+        assert rows and all(r["object_id"] == "2" for r in rows)
+        assert offset3 == {"updatedAt": "2024-03-03T00:00:00.000Z"}
+        assert offset3 != offset
