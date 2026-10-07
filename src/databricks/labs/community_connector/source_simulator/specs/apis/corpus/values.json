@@ -1,0 +1,42 @@
+[
+  {
+    "item_name": "Worker.Signal1",
+    "value": {
+      "v": "papa-965",
+      "q": "good",
+      "t": "2024-01-01 00:00:00"
+    }
+  },
+  {
+    "item_name": "Worker.Signal2",
+    "value": {
+      "v": "hotel-761",
+      "q": "good",
+      "t": "2024-01-01 01:00:00"
+    }
+  },
+  {
+    "item_name": "Logger.Temperature",
+    "value": {
+      "v": "zulu-651",
+      "q": "uncertain",
+      "t": "2024-01-01 02:00:00"
+    }
+  },
+  {
+    "item_name": "Logger.Pressure",
+    "value": {
+      "v": "yankee-899",
+      "q": "good",
+      "t": "2024-01-01 03:00:00"
+    }
+  },
+  {
+    "item_name": "Simulator.Sine1",
+    "value": {
+      "v": "sierra-632",
+      "q": "bad",
+      "t": "2024-01-01 04:00:00"
+    }
+  }
+]
