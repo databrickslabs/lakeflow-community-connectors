@@ -1,3 +1,150 @@
 [
-  {"name": "name", "type": "string"}
+  {
+    "name": "amount",
+    "type": "string"
+  },
+  {
+    "name": "amount_in_home_currency",
+    "type": "string"
+  },
+  {
+    "name": "dealstage",
+    "type": "string"
+  },
+  {
+    "name": "description",
+    "type": "string"
+  },
+  {
+    "name": "hs_closed_amount",
+    "type": "string"
+  },
+  {
+    "name": "hs_closed_amount_in_home_currency",
+    "type": "string"
+  },
+  {
+    "name": "hs_closed_deal_close_date",
+    "type": "string"
+  },
+  {
+    "name": "hs_closed_deal_create_date",
+    "type": "string"
+  },
+  {
+    "name": "hs_closed_won_count",
+    "type": "string"
+  },
+  {
+    "name": "hs_days_to_close_raw",
+    "type": "string"
+  },
+  {
+    "name": "hs_deal_stage_probability",
+    "type": "string"
+  },
+  {
+    "name": "hs_deal_stage_probability_shadow",
+    "type": "string"
+  },
+  {
+    "name": "hs_forecast_amount",
+    "type": "string"
+  },
+  {
+    "name": "hs_is_closed",
+    "type": "string"
+  },
+  {
+    "name": "hs_is_closed_count",
+    "type": "string"
+  },
+  {
+    "name": "hs_is_closed_won",
+    "type": "string"
+  },
+  {
+    "name": "hs_is_in_first_deal_stage",
+    "type": "string"
+  },
+  {
+    "name": "hs_is_open_count",
+    "type": "string"
+  },
+  {
+    "name": "hs_lastmodifieddate",
+    "type": "string"
+  },
+  {
+    "name": "hs_notes_last_activity",
+    "type": "string"
+  },
+  {
+    "name": "hs_notes_next_activity",
+    "type": "string"
+  },
+  {
+    "name": "hs_notes_next_activity_type",
+    "type": "string"
+  },
+  {
+    "name": "hs_open_amount_in_home_currency",
+    "type": "string"
+  },
+  {
+    "name": "hs_open_deal_create_date",
+    "type": "string"
+  },
+  {
+    "name": "hs_projected_amount",
+    "type": "string"
+  },
+  {
+    "name": "hs_projected_amount_in_home_currency",
+    "type": "string"
+  },
+  {
+    "name": "hs_task_label",
+    "type": "string"
+  },
+  {
+    "name": "hs_weighted_pipeline_in_company_currency",
+    "type": "string"
+  },
+  {
+    "name": "jobtitle",
+    "type": "string"
+  },
+  {
+    "name": "lastmodifieddate",
+    "type": "string"
+  },
+  {
+    "name": "lifecyclestage",
+    "type": "string"
+  },
+  {
+    "name": "name",
+    "type": "string"
+  },
+  {
+    "name": "notes_last_updated",
+    "type": "string"
+  },
+  {
+    "name": "notes_next_activity_date",
+    "type": "string"
+  },
+  {
+    "name": "num_associated_contacts",
+    "type": "string"
+  },
+  {
+    "name": "num_notes",
+    "type": "string"
+  },
+  {
+    "name": "numberofemployees",
+    "type": "string"
+  }
 ]

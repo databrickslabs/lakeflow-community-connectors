@@ -65,31 +65,66 @@ def test_history_initial_read_flattens_entries(connector):
     rows, offset = connector.read_table("contacts_property_history", {}, {})
     rows = list(rows)
     corpus = json.loads((SPEC_DIR / "corpus" / "contacts_history.json").read_text())
-    expected = sum(len(r["propertiesWithHistory"]["name"]) for r in corpus)
+    expected = sum(
+        len(entries)
+        for r in corpus
+        for entries in r["propertiesWithHistory"].values()
+    )
     assert len(rows) == expected
-    assert offset == {"updatedAt": "2024-02-04T00:00:00Z"}
-    first = next(r for r in rows if r["object_id"] == "1000" and r["source_type"] == "CRM_UI")
-    assert first == {
-        "object_id": "1000",
-        "property": "name",
-        "value": "Sample 0 v2",
-        "timestamp": "2024-02-01T00:00:00Z",
-        "source_type": "CRM_UI",
-        "source_id": "userId:5001",
-        "source_label": "Jane Admin",
-        "updated_by_user_id": 5001,
+    base_corpus = json.loads((SPEC_DIR / "corpus" / "contacts.json").read_text())
+    # The offset tracks the max updatedAt of the parent objects found via
+    # search, which is served from the base object corpus in simulate mode.
+    assert offset == {"updatedAt": max(r["updatedAt"] for r in base_corpus)}
+    assert rows
+    for r in rows:
+        assert set(r) == {
+            "object_id", "property", "value", "timestamp", "source_type",
+            "source_id", "source_label", "updated_by_user_id",
+        }
+    # Every corpus entry appears as a row with its source metadata.
+    corpus_tuples = {
+        (
+            r["id"], prop,
+            e.get("value") if e.get("value") != "" else None,  # connector maps "" -> None
+            e.get("timestamp"),
+            e.get("sourceType"), e.get("updatedByUserId"),
+        )
+        for r in corpus
+        for prop, entries in r["propertiesWithHistory"].items()
+        for e in entries if isinstance(e, dict)
     }
+    row_tuples = {
+        (r["object_id"], r["property"], r["value"], r["timestamp"],
+         r["source_type"], r["updated_by_user_id"])
+        for r in rows
+    }
+    assert row_tuples == corpus_tuples
     # Keys are unique on the declared primary key.
     keys = {(r["object_id"], r["property"], r["timestamp"]) for r in rows}
     assert len(keys) == len(rows)
 
 
 def test_history_since_filters_old_entries(connector):
+    corpus = json.loads((SPEC_DIR / "corpus" / "deals_history.json").read_text())
+    stamps = [
+        e["timestamp"]
+        for r in corpus
+        for entries in r["propertiesWithHistory"].values()
+        for e in entries
+        if isinstance(e, dict) and e.get("timestamp")
+    ]
+    cutoff = sorted(stamps)[len(stamps) // 2]
     rows, _ = connector.read_table(
-        "deals_property_history", {}, {"history_since": "2024-01-15T00:00:00Z"}
+        "deals_property_history", {}, {"history_since": cutoff}
     )
     rows = list(rows)
-    assert rows and all(r["timestamp"] >= "2024-01-15" for r in rows)
+    assert rows
+    assert all(r["timestamp"] >= cutoff for r in rows)
+    assert len(rows) < sum(
+        len(entries)
+        for r in corpus
+        for entries in r["propertiesWithHistory"].values()
+    )
 
 
 def test_history_properties_option_limits_request(connector):

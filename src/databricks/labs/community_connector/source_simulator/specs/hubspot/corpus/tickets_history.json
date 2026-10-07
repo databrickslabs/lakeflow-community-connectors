@@ -21,7 +21,9 @@
           "value": "Sample 0",
           "timestamp": "2024-01-01T00:00:00Z",
           "sourceType": "IMPORT",
-          "sourceId": "import-77"
+          "sourceId": "import-77",
+          "sourceLabel": "Seed User 2",
+          "updatedByUserId": 5002
         }
       ]
     }
@@ -48,7 +50,9 @@
           "value": "Sample 1",
           "timestamp": "2024-01-01T00:00:00Z",
           "sourceType": "IMPORT",
-          "sourceId": "import-77"
+          "sourceId": "import-77",
+          "sourceLabel": "Seed User 2",
+          "updatedByUserId": 5002
         }
       ]
     }
@@ -75,7 +79,9 @@
           "value": "Sample 2",
           "timestamp": "2024-01-01T00:00:00Z",
           "sourceType": "IMPORT",
-          "sourceId": "import-77"
+          "sourceId": "import-77",
+          "sourceLabel": "Seed User 2",
+          "updatedByUserId": 5002
         }
       ]
     }
@@ -102,7 +108,9 @@
           "value": "Sample 3",
           "timestamp": "2024-01-01T00:00:00Z",
           "sourceType": "IMPORT",
-          "sourceId": "import-77"
+          "sourceId": "import-77",
+          "sourceLabel": "Seed User 2",
+          "updatedByUserId": 5002
         }
       ]
     }
