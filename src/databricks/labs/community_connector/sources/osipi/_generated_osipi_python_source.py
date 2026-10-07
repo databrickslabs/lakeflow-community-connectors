@@ -3310,8 +3310,24 @@ def register_lakeflow_source(spark):
             return data.get("Items", []) or []
 
         def _read_assetdatabases(self, assetserver_webid: str) -> List[dict]:
-            """Read asset databases for a given asset server."""
-            data = self._client.get_json(f"/piwebapi/assetservers/{assetserver_webid}/assetdatabases")
+            """Read asset databases for a given asset server.
+
+            An asset server the credential cannot see (401/403) is skipped with a
+            warning rather than failing the whole read, so one locked-down server
+            does not take down AF/event-frame ingestion for the rest.
+            """
+            url = f"/piwebapi/assetservers/{assetserver_webid}/assetdatabases"
+            try:
+                data = self._client.get_json(url)
+            except requests.exceptions.HTTPError as e:
+                status = getattr(e.response, "status_code", None)
+                if status in (401, 403):
+                    print(
+                        f"⚠️  Skipping asset server {assetserver_webid}: "
+                        f"PI Web API returned {status} (access denied)."
+                    )
+                    return []
+                raise
             return data.get("Items", []) or []
 
         def _read_assetservers_table(self) -> List[dict]:
@@ -3832,9 +3848,23 @@ def register_lakeflow_source(spark):
                             "startIndex": str(start_index),
                             "maxCount": str(page_size),
                         }
-                        resp = self._client.get_json(
-                            f"/piwebapi/assetdatabases/{db_webid}/eventframes", params=params
-                        )
+                        try:
+                            resp = self._client.get_json(
+                                f"/piwebapi/assetdatabases/{db_webid}/eventframes", params=params
+                            )
+                        except requests.exceptions.HTTPError as e:
+                            status = getattr(e.response, "status_code", None)
+                            if status == 404:
+                                break
+                            if status and 500 <= status < 600:
+                                db_name = db.get("Name", db_webid)
+                                srv_name = srv.get("Name", srv_webid)
+                                print(
+                                    f"⚠️  Skipping asset database '{db_name}' (WebId={db_webid}) "
+                                    f"on server '{srv_name}': PI Web API returned {status}."
+                                )
+                                break
+                            raise
                         items = resp.get("Items", []) or []
                         all_events.extend(items)
                         if len(items) < page_size:
