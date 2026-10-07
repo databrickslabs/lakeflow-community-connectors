@@ -15,6 +15,12 @@ from pyspark.sql.types import (
 )
 
 from databricks.labs.community_connector.interface import LakeflowConnect
+from databricks.labs.community_connector.sources.hubspot.hubspot_property_history import (
+    HISTORY_STANDARD_OBJECTS,
+    HubspotPropertyHistory,
+    history_table_name,
+    is_history_table,
+)
 
 
 class HubspotLakeflowConnect(LakeflowConnect):
@@ -118,6 +124,19 @@ class HubspotLakeflowConnect(LakeflowConnect):
             "supports_deletes": False,  # Custom objects don't support archived queries by default
         }
 
+        # {object}_property_history tables (see hubspot_property_history.py)
+        self._history = HubspotPropertyHistory(
+            base_url=self.base_url,
+            auth_header=self.auth_header,
+            init_ts=self._init_ts,
+            get_property_names=lambda obj: [
+                p["name"] for p in self._get_object_properties(obj) if p.get("name")
+            ],
+            get_cursor_property=lambda obj: self._get_object_config(obj)[
+                "cursor_property_field"
+            ],
+        )
+
     def list_tables(self) -> list[str]:
         """
         List available tables including standard CRM objects and custom objects.
@@ -136,13 +155,18 @@ class HubspotLakeflowConnect(LakeflowConnect):
         ]
 
         # Add dynamic discovery of custom objects
+        custom_objects = []
         try:
             custom_objects = self._discover_custom_objects()
             standard_tables.extend(custom_objects)
         except Exception as e:
             print(f"Warning: Could not discover custom objects: {e}")
 
-        return standard_tables
+        # Property history tables for the core CRM objects and custom objects
+        history_tables = [
+            history_table_name(obj) for obj in HISTORY_STANDARD_OBJECTS + custom_objects
+        ]
+        return standard_tables + history_tables
 
     def _discover_custom_objects(self) -> List[str]:
         """
@@ -195,6 +219,9 @@ class HubspotLakeflowConnect(LakeflowConnect):
                 f"Supported tables are: {supported_tables}"
             )
 
+        if is_history_table(table_name):
+            return self._history.get_table_schema()
+
         # Check cache first
         if table_name in self._schema_cache:
             return self._schema_cache[table_name]
@@ -246,6 +273,9 @@ class HubspotLakeflowConnect(LakeflowConnect):
                 f"Unsupported table: {table_name}. "
                 f"Supported tables are: {supported_tables}"
             )
+
+        if is_history_table(table_name):
+            return self._history.get_table_metadata()
 
         # Check cache first
         if table_name in self._metadata_cache:
@@ -406,6 +436,9 @@ class HubspotLakeflowConnect(LakeflowConnect):
                 f"Unsupported table: {table_name}. "
                 f"Supported tables are: {supported_tables}"
             )
+
+        if is_history_table(table_name):
+            return self._history.read_table(table_name, start_offset, table_options)
 
         # Determine if this is an incremental read
         is_incremental = (
