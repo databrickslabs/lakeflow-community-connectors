@@ -177,19 +177,22 @@ always retained so incremental reads keep working. Changing the options
 changes the schema and future ingestion; previously ingested rows remain until
 a full refresh.
 
-**Why this matters — HubSpot request-size limits (verified in the Search API
-guide):**
+**Why this matters — verified against a live HubSpot portal (2026-10-07):**
 
-- Search request bodies are capped at **3,000 characters**; larger bodies
-  return HTTP 400. Property names average ~20 characters, so unfiltered
-  incremental reads fail on objects with roughly **150+ properties** — and
-  custom objects with 1,000+ properties always fail.
-- The list endpoint takes `properties=` in the URL, which hits URL-length
-  limits (HTTP 414) for wide objects on full refresh.
+- **Full refresh (list endpoint)** takes `properties=` in the URL. Requests fail
+  with **HTTP 414 Request-URI Too Large** once the URL passes roughly **22,000
+  characters** (~630 property parameters). Objects with 1,000+ properties
+  produce ~35,000-character URLs — full refresh fails on them, always.
+- **Incremental (Search API)** accepts large `properties` bodies (verified
+  HTTP 200 at ~29,700 characters / 1,099 entries); HubSpot's documented
+  3,000-character "query" limit did not reject the properties array in
+  testing. Still, requesting every property inflates every page of every
+  response.
 
-Use `include_properties` to bound wide objects to the properties you need;
-chunking the all-properties path across multiple requests is a possible
-follow-up.
+Use `include_properties` / `exclude_properties` to bound wide objects to the
+properties you need — for 1,000+-property objects it is currently the only
+way to ingest them at all. Chunking the all-properties path across multiple
+requests (Airbyte-style) is a possible follow-up.
 
 ## References
 
