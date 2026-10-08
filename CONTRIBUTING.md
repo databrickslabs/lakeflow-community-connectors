@@ -25,3 +25,28 @@ Before applying `safe-to-test`, scan the diff for surfaces that execute in the p
 If anything looks off, do not label — ask the contributor to clean it up first. Once you apply `safe-to-test`, the labeled commit is executed on the protected runner with OIDC in scope; treat the click like merging unreviewed code into a privileged context, because that's what it is.
 
 Internal contributors pushing branches inside `databrickslabs/lakeflow-community-connectors` are not affected — their PRs run CI automatically on every push.
+
+## Prebuilt connector wheels (`wheelhouse/`)
+
+The Databricks managed ingestion wizard installs connectors from prebuilt wheels committed under `wheelhouse/`. When a pipeline is created or edited, it sparse-checks out `wheelhouse/_framework/` and `wheelhouse/<source_name>/` and installs both wheels as pipeline dependencies, so they must stay in sync with the source.
+
+```
+wheelhouse/
+├── _framework/      # exactly one wheel: lakeflow-community-connectors (repo root pyproject.toml)
+└── <source_name>/   # exactly one wheel: lakeflow-community-connectors-<source_name>
+```
+
+- **Changing a connector:** in the same PR, rebuild its wheel into `wheelhouse/<source_name>/` and delete the previous wheel there.
+- **Changing the framework** (anything under `src/databricks/labs/community_connector/` outside `sources/`, e.g. `interface/`, `libs/`, `pipeline/`, `sparkpds/`): also rebuild `wheelhouse/_framework/`. Every connector wheel depends on it, and it isn't published to PyPI.
+- Keep **exactly one** `.whl` per directory, with its standard filename (`<name>-<version>-py3-none-any.whl`). Don't rename it: pip rejects non-standard wheel filenames.
+- The directory is `wheelhouse/`, not `wheels/`, because `wheels/` is ignored by `.gitignore`.
+
+Build with the same command the repo CLI uses:
+
+```bash
+pip install build
+python -m build --wheel src/databricks/labs/community_connector/sources/<source_name> --outdir wheelhouse/<source_name>/
+python -m build --wheel . --outdir wheelhouse/_framework/   # only when framework code changed
+```
+
+Reviewers: wheels are binary and don't show up in the diff. To check one, rebuild from the PR's source with the commands above and confirm the wheel contents match.
