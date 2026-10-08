@@ -1,0 +1,82 @@
+[
+  {
+    "workspace_id": "delta-440",
+    "dataset_id": "hotel-15-pk0",
+    "table_name": "november-pk0",
+    "name": "oscar-21-pk0",
+    "expression": "lima-797",
+    "description": "romeo-940",
+    "formatString": "kilo-712",
+    "isHidden": false
+  },
+  {
+    "workspace_id": "uniform-543",
+    "dataset_id": "delta-17-pk1",
+    "table_name": "romeo-44-pk1",
+    "name": "lima-447-pk1",
+    "expression": "delta-983",
+    "description": "uniform-137",
+    "formatString": "quebec-866",
+    "isHidden": true
+  },
+  {
+    "workspace_id": "uniform-263",
+    "dataset_id": "november-pk2",
+    "table_name": "quebec-6-pk2",
+    "name": "mike-343-pk2",
+    "expression": "whiskey-790",
+    "description": "kilo-802",
+    "formatString": "yankee-933",
+    "isHidden": false
+  },
+  {
+    "workspace_id": "papa-849",
+    "dataset_id": "lima-165-pk3",
+    "table_name": "mike-439-pk3",
+    "name": "quebec-9-pk3",
+    "expression": "delta-649",
+    "description": "oscar-290",
+    "formatString": "quebec-171",
+    "isHidden": false
+  },
+  {
+    "workspace_id": "zulu-147",
+    "dataset_id": "india-13-pk4",
+    "table_name": "uniform--pk4",
+    "name": "quebec-3-pk4",
+    "expression": "victor-359",
+    "description": "yankee-945",
+    "formatString": "mike-267",
+    "isHidden": false
+  },
+  {
+    "workspace_id": "kilo-173",
+    "dataset_id": "yankee-3-pk5",
+    "table_name": "delta-52-pk5",
+    "name": "uniform--pk5",
+    "expression": "kilo-720",
+    "description": "golf-808",
+    "formatString": "sierra-227",
+    "isHidden": true
+  },
+  {
+    "workspace_id": "yankee-444",
+    "dataset_id": "xray-541-pk6",
+    "table_name": "golf-773-pk6",
+    "name": "yankee-8-pk6",
+    "expression": "whiskey-803",
+    "description": "oscar-348",
+    "formatString": "delta-761",
+    "isHidden": false
+  },
+  {
+    "workspace_id": "papa-158",
+    "dataset_id": "yankee-4-pk7",
+    "table_name": "november-pk7",
+    "name": "xray-938-pk7",
+    "expression": "tango-813",
+    "description": "romeo-148",
+    "formatString": "sierra-543",
+    "isHidden": false
+  }
+]
