@@ -1650,7 +1650,13 @@ def register_lakeflow_source(spark):
                     self.base_url = scheme_host.rstrip("/")
 
             self.session = requests.Session()
-            self.session.headers.update({"Accept": "application/json"})
+            # PI Web API rejects POST /piwebapi/batch with 403 when CSRF defense is
+            # enabled (EnableCSRFDefense=true, the default on many installs) unless the
+            # request identifies itself as an XHR. Sending X-Requested-With on every
+            # call keeps the batch endpoints working without disabling server security.
+            self.session.headers.update(
+                {"Accept": "application/json", "X-Requested-With": "XMLHttpRequest"}
+            )
             self.verify_ssl = as_bool(options.get("verify_ssl"), default=True)
             self._auth_resolved = False
 
@@ -2546,6 +2552,17 @@ def register_lakeflow_source(spark):
                 start_offset, table_options, apply_window_seconds=False, init_time=self._init_time
             )
 
+            # Guard against a zero-width (or inverted) window. When the stream has
+            # already caught up, start and end collapse to the same instant; emitting
+            # an unchanged offset here would otherwise trip the framework's
+            # SIMPLE_STREAM_READER_OFFSET_DID_NOT_ADVANCE termination on the first
+            # backfill. Return an empty batch and hold the offset instead.
+            try:
+                if parse_ts(start_str) >= parse_ts(end_str):
+                    return iter(()), dict(start_offset or {"offset": end_str})
+            except Exception:  # pylint: disable=broad-except
+                pass
+
             interval = (
                 table_options.get("interval") or table_options.get("sampleInterval") or "1m"
             ).strip()
@@ -2608,26 +2625,45 @@ def register_lakeflow_source(spark):
                             else:
                                 raise
 
-                    # Fallback: per-tag interpolated via batch
+                    # Fallback: per-tag interpolated. Prefer a single batch call, but
+                    # degrade to individual GETs when the server refuses batch
+                    # (CSRF/permissions/CORS) so the table still loads.
+                    params = {
+                        "startTime": start_str,
+                        "endTime": end_str,
+                        "interval": interval,
+                        "maxCount": str(max_count),
+                    }
                     reqs = [
                         {
                             "Method": "GET",
                             "Resource": f"/piwebapi/streams/{wid}/interpolated",
-                            "Parameters": {
-                                "startTime": start_str,
-                                "endTime": end_str,
-                                "interval": interval,
-                                "maxCount": str(max_count),
-                            },
+                            "Parameters": dict(params),
                         }
                         for wid in group
                     ]
+                    batch_refused = False
                     try:
                         responses = self._client.batch_execute(reqs)
                     except requests.exceptions.HTTPError as e:
                         if getattr(e.response, "status_code", None) == 404:
                             return
-                        raise
+                        batch_refused = True
+
+                    if batch_refused:
+                        # Degrade to per-tag GETs.
+                        for wid in group:
+                            try:
+                                data = self._client.get_json(
+                                    f"/piwebapi/streams/{wid}/interpolated", params=dict(params)
+                                )
+                            except requests.exceptions.HTTPError as e:
+                                if getattr(e.response, "status_code", None) == 404:
+                                    continue
+                                raise
+                            yield from emit_items(wid, data.get("Items", []) or [])
+                        continue
+
                     for idx, (_rid, resp) in enumerate(responses):
                         if resp.get("Status") != 200:
                             continue
@@ -2928,6 +2964,43 @@ def register_lakeflow_source(spark):
 
             return iterator(), {"offset": end_str}
 
+        def _value_row(self, wid: str, v: dict, ingest_ts: datetime) -> dict:
+            """Shape a single /streams/{webid}/value payload into an output row."""
+            ts = v.get("Timestamp")
+            return {
+                "tag_webid": wid,
+                "timestamp": parse_ts(ts) if ts else None,
+                "value": try_float(v.get("Value")),
+                "good": as_bool(v.get("Good"), default=True),
+                "questionable": as_bool(v.get("Questionable"), default=False),
+                "substituted": as_bool(v.get("Substituted"), default=False),
+                "annotated": as_bool(v.get("Annotated"), default=False),
+                "units": v.get("UnitsAbbreviation", ""),
+                "ingestion_timestamp": ingest_ts,
+            }
+
+        def _read_stream_values_individually(
+            self, tag_webids: List[str], params: Dict[str, str], ingest_ts: datetime
+        ) -> List[dict]:
+            """Fetch /streams/{webid}/value one tag at a time.
+
+            Used as a graceful fallback when POST /piwebapi/batch is refused (e.g. a
+            403 from CSRF defense or per-endpoint permissions). Slower than batch but
+            keeps the value tables loading regardless of the server's batch posture.
+            """
+            out: List[dict] = []
+            for wid in tag_webids:
+                try:
+                    v = self._client.get_json(
+                        f"/piwebapi/streams/{wid}/value", params=dict(params)
+                    )
+                except requests.exceptions.HTTPError as e:
+                    if getattr(e.response, "status_code", None) == 404:
+                        continue
+                    raise
+                out.append(self._value_row(wid, v or {}, ingest_ts))
+            return out
+
         def _read_current_value(self, table_options: Dict[str, str]) -> List[dict]:
             """Read current values."""
             tag_webids = self._resolve_tag_webids(table_options)
@@ -2936,6 +3009,7 @@ def register_lakeflow_source(spark):
                 chunks(tag_webids, tags_per_request) if tags_per_request else [tag_webids]
             )
             time_param = table_options.get("time")
+            params: Dict[str, str] = {"time": str(time_param)} if time_param else {}
 
             ingest_ts = utcnow()
             out: List[dict] = []
@@ -2943,40 +3017,27 @@ def register_lakeflow_source(spark):
             for group in tag_webid_groups:
                 if not group:
                     continue
-                group_reqs: List[dict] = []
-                for w in group:
-                    params: Dict[str, str] = {}
-                    if time_param:
-                        params["time"] = str(time_param)
-                    group_reqs.append(
-                        {
-                            "Method": "GET",
-                            "Resource": f"/piwebapi/streams/{w}/value",
-                            "Parameters": params,
-                        }
-                    )
-                responses = self._client.batch_execute(group_reqs)
+                group_reqs: List[dict] = [
+                    {
+                        "Method": "GET",
+                        "Resource": f"/piwebapi/streams/{w}/value",
+                        "Parameters": dict(params),
+                    }
+                    for w in group
+                ]
+                try:
+                    responses = self._client.batch_execute(group_reqs)
+                except requests.exceptions.HTTPError:
+                    # Batch refused (CSRF/permissions/CORS) — degrade to per-tag GETs.
+                    out.extend(self._read_stream_values_individually(group, params, ingest_ts))
+                    continue
                 for idx, (_rid, resp) in enumerate(responses):
                     if resp.get("Status") != 200:
                         continue
                     webid = group[idx] if idx < len(group) else None
                     if not webid:
                         continue
-                    v = resp.get("Content", {}) or {}
-                    ts = v.get("Timestamp")
-                    out.append(
-                        {
-                            "tag_webid": webid,
-                            "timestamp": parse_ts(ts) if ts else None,
-                            "value": try_float(v.get("Value")),
-                            "good": as_bool(v.get("Good"), default=True),
-                            "questionable": as_bool(v.get("Questionable"), default=False),
-                            "substituted": as_bool(v.get("Substituted"), default=False),
-                            "annotated": as_bool(v.get("Annotated"), default=False),
-                            "units": v.get("UnitsAbbreviation", ""),
-                            "ingestion_timestamp": ingest_ts,
-                        }
-                    )
+                    out.append(self._value_row(webid, resp.get("Content", {}) or {}, ingest_ts))
 
             return out
 
@@ -2984,6 +3045,7 @@ def register_lakeflow_source(spark):
             """Read value at specified time."""
             tag_webids = self._resolve_tag_webids(table_options)
             time_param = table_options.get("time") or "*"
+            params: Dict[str, str] = {"time": str(time_param)}
             ingest_ts = utcnow()
             tags_per_request = int(table_options.get("tags_per_request", 0) or 0)
             groups = chunks(tag_webids, tags_per_request) if tags_per_request else [tag_webids]
@@ -2996,32 +3058,23 @@ def register_lakeflow_source(spark):
                     {
                         "Method": "GET",
                         "Resource": f"/piwebapi/streams/{w}/value",
-                        "Parameters": {"time": str(time_param)},
+                        "Parameters": dict(params),
                     }
                     for w in group
                 ]
-                responses = self._client.batch_execute(reqs)
+                try:
+                    responses = self._client.batch_execute(reqs)
+                except requests.exceptions.HTTPError:
+                    # Batch refused (CSRF/permissions/CORS) — degrade to per-tag GETs.
+                    out.extend(self._read_stream_values_individually(group, params, ingest_ts))
+                    continue
                 for idx, (_rid, resp) in enumerate(responses):
                     if resp.get("Status") != 200:
                         continue
                     wid = group[idx] if idx < len(group) else None
                     if not wid:
                         continue
-                    v = resp.get("Content", {}) or {}
-                    ts = v.get("Timestamp")
-                    out.append(
-                        {
-                            "tag_webid": wid,
-                            "timestamp": parse_ts(ts) if ts else None,
-                            "value": try_float(v.get("Value")),
-                            "good": as_bool(v.get("Good"), default=True),
-                            "questionable": as_bool(v.get("Questionable"), default=False),
-                            "substituted": as_bool(v.get("Substituted"), default=False),
-                            "annotated": as_bool(v.get("Annotated"), default=False),
-                            "units": v.get("UnitsAbbreviation", ""),
-                            "ingestion_timestamp": ingest_ts,
-                        }
-                    )
+                    out.append(self._value_row(wid, resp.get("Content", {}) or {}, ingest_ts))
             return out
 
         def _read_recorded_at_time(self, table_options: Dict[str, str]) -> List[dict]:
@@ -3257,8 +3310,24 @@ def register_lakeflow_source(spark):
             return data.get("Items", []) or []
 
         def _read_assetdatabases(self, assetserver_webid: str) -> List[dict]:
-            """Read asset databases for a given asset server."""
-            data = self._client.get_json(f"/piwebapi/assetservers/{assetserver_webid}/assetdatabases")
+            """Read asset databases for a given asset server.
+
+            An asset server the credential cannot see (401/403) is skipped with a
+            warning rather than failing the whole read, so one locked-down server
+            does not take down AF/event-frame ingestion for the rest.
+            """
+            url = f"/piwebapi/assetservers/{assetserver_webid}/assetdatabases"
+            try:
+                data = self._client.get_json(url)
+            except requests.exceptions.HTTPError as e:
+                status = getattr(e.response, "status_code", None)
+                if status in (401, 403):
+                    print(
+                        f"⚠️  Skipping asset server {assetserver_webid}: "
+                        f"PI Web API returned {status} (access denied)."
+                    )
+                    return []
+                raise
             return data.get("Items", []) or []
 
         def _read_assetservers_table(self) -> List[dict]:
@@ -3779,9 +3848,23 @@ def register_lakeflow_source(spark):
                             "startIndex": str(start_index),
                             "maxCount": str(page_size),
                         }
-                        resp = self._client.get_json(
-                            f"/piwebapi/assetdatabases/{db_webid}/eventframes", params=params
-                        )
+                        try:
+                            resp = self._client.get_json(
+                                f"/piwebapi/assetdatabases/{db_webid}/eventframes", params=params
+                            )
+                        except requests.exceptions.HTTPError as e:
+                            status = getattr(e.response, "status_code", None)
+                            if status == 404:
+                                break
+                            if status and 500 <= status < 600:
+                                db_name = db.get("Name", db_webid)
+                                srv_name = srv.get("Name", srv_webid)
+                                print(
+                                    f"⚠️  Skipping asset database '{db_name}' (WebId={db_webid}) "
+                                    f"on server '{srv_name}': PI Web API returned {status}."
+                                )
+                                break
+                            raise
                         items = resp.get("Items", []) or []
                         all_events.extend(items)
                         if len(items) < page_size:
