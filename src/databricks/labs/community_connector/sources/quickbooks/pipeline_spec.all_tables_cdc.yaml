@@ -1,0 +1,27 @@
+# M3 six-table CDC pipeline. Keep this isolated from the proven M2 snapshot
+# pipeline and the Customer-only M3 acceptance pipeline.
+connection_name: quickbooks_sandbox
+objects:
+  - table:
+      source_table: customers
+      table_configuration: &cdc_configuration
+        scd_type: SCD_TYPE_1
+        primary_keys: [realm_id, id]
+        sequence_by: last_updated_at
+        incremental_overlap_seconds: "60"
+        max_incremental_window_seconds: "86400"
+  - table:
+      source_table: vendors
+      table_configuration: *cdc_configuration
+  - table:
+      source_table: accounts
+      table_configuration: *cdc_configuration
+  - table:
+      source_table: items
+      table_configuration: *cdc_configuration
+  - table:
+      source_table: invoices
+      table_configuration: *cdc_configuration
+  - table:
+      source_table: bills
+      table_configuration: *cdc_configuration

@@ -1,0 +1,44 @@
+display_name: QuickBooks Online
+
+connection:
+  parameters:
+    - name: client_id
+      type: string
+      required: true
+      secret: true
+      description: OAuth 2.0 client ID from the Intuit Developer Portal.
+
+    - name: client_secret
+      type: string
+      required: true
+      secret: true
+      description: OAuth 2.0 client secret from the Intuit Developer Portal.
+
+    - name: realm_id
+      type: string
+      required: true
+      description: >
+        QuickBooks Online company ID. One Unity Catalog connection represents
+        exactly one realm.
+
+    - name: environment
+      type: string
+      required: false
+      description: >
+        QuickBooks API environment: production or sandbox. The connector
+        defaults to production.
+
+    - name: minor_version
+      type: string
+      required: false
+      description: QuickBooks Accounting API minor version. Defaults to 75.
+
+  oauth:
+    flow: u2m
+    pkce: false
+    scopes: com.intuit.quickbooks.accounting
+    authorization_url: https://appcenter.intuit.com/connect/oauth2
+    token_url: https://oauth.platform.intuit.com/oauth2/v1/tokens/bearer
+    oauth_credential_exchange_method: header_only
+
+external_options_allowlist: "delete_overlap_seconds,incremental_overlap_seconds,initial_delete_lookback_seconds,max_incremental_window_seconds,max_records_per_batch,page_size"

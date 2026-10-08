@@ -1,0 +1,28 @@
+{
+  "version": 1,
+  "endpoints": [
+    {
+      "method": "GET",
+      "url": "https://sandbox-quickbooks.api.intuit.com/v3/company/{realm_id}/cdc",
+      "count": 2,
+      "param_shapes": [
+        [
+          "changedSince",
+          "entities",
+          "minorversion"
+        ]
+      ]
+    },
+    {
+      "method": "GET",
+      "url": "https://sandbox-quickbooks.api.intuit.com/v3/company/{realm_id}/query",
+      "count": 18,
+      "param_shapes": [
+        [
+          "minorversion",
+          "query"
+        ]
+      ]
+    }
+  ]
+}

@@ -1,0 +1,13 @@
+# M3 Customer CDC pilot. Keep this isolated from the proven M1/M2 snapshot
+# pipelines until live insert/update replay acceptance is complete.
+connection_name: quickbooks_sandbox
+objects:
+  - table:
+      source_table: customers
+      destination_table: customers
+      table_configuration:
+        scd_type: SCD_TYPE_1
+        primary_keys: [realm_id, id]
+        sequence_by: last_updated_at
+        incremental_overlap_seconds: "60"
+        max_incremental_window_seconds: "86400"
