@@ -126,8 +126,9 @@ These are set on the UC connection (alongside the auth fields above).
 | `timeout_seconds` | string | No | `180` | HTTP timeout per request, in seconds. |
 | `extra_headers` | string | No | — | Extra request headers as `Key:Value,Key2:Value2`. Useful for tenant IDs, CSRF tokens, or non-standard server discriminators. The list splits on `,`, so header values containing commas (e.g. HTTP-dates) can't be expressed. Header names are validated eagerly as RFC 7230 tokens (malformed names fail at setup with the option named, not on the wire). |
 | `metadata_cache_ttl_seconds` | string | No | `60` | TTL of the shared `$metadata` cache — both the process dict and the on-disk pickle honour it; `0` disables both. |
-| `max_retries` | string | No | `5` | Retry budget for transient failures (408/429/5xx, network errors) on source requests. Backoff is exponential with 50–100 % jitter; server `Retry-After` hints are honoured un-jittered. |
+| `max_retries` | string | No | `5` | Retry budget for transient failures (408/429/5xx + network errors) on source requests, plus any operator-configured `retry_extra_errors`. Backoff is exponential with 50–100 % jitter; server `Retry-After` hints are honoured un-jittered. |
 | `retry_max_delay_seconds` | string | No | `60` | Cap on any single retry sleep (exponential backoff / `Retry-After`). |
+| `retry_extra_errors` | string | No | *(unset)* | Extra HTTP errors to retry for a source that spuriously fails under load. CSV of status codes (`"400,403"`) or a JSON array of `{"code","signature"}` objects (status match + optional case-insensitive body substring). Joins the backoff path, capped by `max_retries`. Page reads only — not the `$batch` envelope POST, capability probes, delta walk, or `$metadata` fetch. Codes 400–599, excluding 404/410 (vanished-parent recovery). Off by default (400/403 terminal). |
 | `verbose_http_logging` | string | No | `false` | Log every request and response line at INFO. Source data lands in the log stream — debugging only. |
 | `verbose_http_log_body_chars` | string | No | `500` | Response-body prefix length included in verbose logs. |
 

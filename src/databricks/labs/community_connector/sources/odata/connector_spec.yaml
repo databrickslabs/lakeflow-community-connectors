@@ -211,10 +211,11 @@ connection:
       description: >
         Retry budget for transient failures — HTTP 408, 429, 500, 502,
         503, 504 (honouring ``Retry-After`` where the server sends it,
-        with jittered exponential backoff otherwise) and
-        connection-level errors (TCP reset, timeout, chunked-encoding
-        failure). Default 5. Set to ``0`` to disable retries (any
-        transient failure surfaces immediately).
+        with jittered exponential backoff otherwise) and connection-level
+        errors (TCP reset, timeout, chunked-encoding failure). Default 5.
+        Set to ``0`` to disable retries (any transient failure surfaces
+        immediately). Also caps the retries of any operator-configured
+        ``retry_extra_errors``.
 
     - name: retry_max_delay_seconds
       type: string
@@ -226,6 +227,33 @@ connection:
         sleeps longer than this — protects against misbehaving servers
         emitting hour-long ``Retry-After`` values that would pin a
         Spark task.
+
+    - name: retry_extra_errors
+      type: string
+      required: false
+      description: >
+        Extra HTTP errors to retry, for a source that spuriously fails a
+        well-formed request under load (e.g. Hexagon SCApi). Off by default:
+        only the built-in transient statuses (408/429/5xx + network) are
+        retried and 400/403 stay terminal. Two forms:
+        (1) a comma-separated list of status codes — ``"400,403"`` retries
+        any response with those statuses; or
+        (2) a JSON array (or single object) of ``{"code": <int>,
+        "signature": <optional substring>}`` — retries when the status
+        matches and, if a ``signature`` is given, the response body contains
+        it (case-insensitive). Rules are OR-ed. Matching responses join the
+        same exponential-backoff path as the built-in transient statuses, up
+        to ``max_retries``. Applies to data page reads only — NOT to the
+        ``$batch`` envelope POST (its "too many parts" 400 must still trigger
+        the adaptive shrink), the capability probes (a 401/403 there records
+        no verdict), the delta-tracking walk, or the ``$metadata`` fetch.
+        Codes must be 400–599 and not 404/410 (those drive contained-walk
+        vanished-parent recovery). 401 can be listed but
+        retrying it cannot refresh a UC-injected token. Example (the two
+        Hexagon 400 shapes, matched narrowly)::
+
+          [{"code": 400, "signature": "context uri"},
+           {"code": 400, "signature": "specified argument was out of the range"}]
 
     - name: extra_headers
       type: string

@@ -9,6 +9,7 @@ import logging
 import re
 
 import pytest
+import requests
 import responses
 
 from tests.unit.sources.odata._odata_test_helpers import (
@@ -1277,6 +1278,206 @@ def test_retry_disabled_when_max_retries_zero(monkeypatch):
     with pytest.raises(RuntimeError):
         list(rows)
     assert sleeps == []
+
+
+# ---------------------------------------------------------------------------
+# retry_extra_errors: operator-configured retry of spurious 4xx under load
+# ---------------------------------------------------------------------------
+
+# Two spurious-400 bodies Hexagon SCApi emits under load on well-formed
+# requests, plus a spurious 403 — all confirmed to clear on replay. Used to
+# exercise retry_extra_errors (the connector hard-codes none of these).
+_CONTEXT_MISMATCH_400 = {
+    "error": {
+        "code": "400",
+        "message": (
+            "The context URI 'https://host/svc/$metadata#Instances(4)/Assets' "
+            "references the entity type with name 'Com.Ingr.SCApi.V1.Asset'; "
+            "however, the name of the expected entity type is "
+            "'Com.Ingr.SCApi.V1.WorkflowList'."
+        ),
+    }
+}
+_ARG_OUT_OF_RANGE_400 = {
+    "error": {"code": "400", "message": "Specified argument was out of the range of valid values."}
+}
+_FORBIDDEN_403 = {
+    "error": {"code": "403", "message": "The current user is unauthorized to access this resource."}
+}
+
+
+@responses.activate
+def test_no_extra_retry_by_default_400_terminal(monkeypatch):
+    """Default (option unset): a 400 is terminal and not retried — behaviour
+    unchanged from before the feature."""
+    _mock_metadata()
+    sleeps = _patch_sleep(monkeypatch)
+    responses.add(responses.GET, f"{SERVICE_URL}Customers", json=_CONTEXT_MISMATCH_400, status=400)
+    c = _make({"token": "t"})
+    rows, _ = c.read_table("Customers", None, {})
+    with pytest.raises(requests.HTTPError):
+        list(rows)
+    assert sleeps == []
+
+
+@responses.activate
+def test_no_extra_retry_by_default_403_terminal(monkeypatch):
+    """Default: a 403 is a terminal PermissionError, no retries."""
+    _mock_metadata()
+    sleeps = _patch_sleep(monkeypatch)
+    responses.add(responses.GET, f"{SERVICE_URL}Customers", json=_FORBIDDEN_403, status=403)
+    c = _make({"token": "t"})
+    rows, _ = c.read_table("Customers", None, {})
+    with pytest.raises(PermissionError, match=r"403"):
+        list(rows)
+    assert sleeps == []
+
+
+@responses.activate
+def test_retry_extra_errors_csv_retries_400(monkeypatch):
+    """CSV form '400,403' retries any 400 on backoff and recovers."""
+    _mock_metadata()
+    sleeps = _patch_sleep(monkeypatch)
+    responses.add(responses.GET, f"{SERVICE_URL}Customers", json=_ARG_OUT_OF_RANGE_400, status=400)
+    responses.add(responses.GET, f"{SERVICE_URL}Customers", json={"value": [{"Id": 7}]}, status=200)
+    c = _make({"token": "t", "retry_extra_errors": "400,403"})
+    rows, _ = c.read_table("Customers", None, {})
+    assert [r["Id"] for r in rows] == [7]
+    assert sleeps == [1.0]
+
+
+@responses.activate
+def test_retry_extra_errors_csv_retries_403(monkeypatch):
+    """CSV form retries a spurious 403 (returned by _http_get_once under the
+    rule) and recovers — instead of the default terminal PermissionError."""
+    _mock_metadata()
+    sleeps = _patch_sleep(monkeypatch)
+    responses.add(responses.GET, f"{SERVICE_URL}Customers", json=_FORBIDDEN_403, status=403)
+    responses.add(responses.GET, f"{SERVICE_URL}Customers", json={"value": [{"Id": 5}]}, status=200)
+    c = _make({"token": "t", "retry_extra_errors": "400,403"})
+    rows, _ = c.read_table("Customers", None, {})
+    assert [r["Id"] for r in rows] == [5]
+    assert sleeps == [1.0]
+
+
+@responses.activate
+def test_retry_extra_errors_json_signature_matches(monkeypatch):
+    """JSON rule with a signature retries only when the body contains it."""
+    _mock_metadata()
+    sleeps = _patch_sleep(monkeypatch)
+    responses.add(responses.GET, f"{SERVICE_URL}Customers", json=_CONTEXT_MISMATCH_400, status=400)
+    responses.add(responses.GET, f"{SERVICE_URL}Customers", json={"value": [{"Id": 3}]}, status=200)
+    c = _make({"token": "t", "retry_extra_errors": '[{"code": 400, "signature": "context uri"}]'})
+    rows, _ = c.read_table("Customers", None, {})
+    assert [r["Id"] for r in rows] == [3]
+    assert sleeps == [1.0]
+
+
+@responses.activate
+def test_retry_extra_errors_json_signature_no_match_is_terminal(monkeypatch):
+    """A signature rule does NOT retry a 400 whose body lacks the signature —
+    a genuine client 400 stays terminal even with the option set."""
+    _mock_metadata()
+    sleeps = _patch_sleep(monkeypatch)
+    responses.add(
+        responses.GET,
+        f"{SERVICE_URL}Customers",
+        json={"error": {"code": "400", "message": "Property 'Bogus' not found."}},
+        status=400,
+    )
+    c = _make({"token": "t", "retry_extra_errors": '[{"code": 400, "signature": "context uri"}]'})
+    rows, _ = c.read_table("Customers", None, {})
+    with pytest.raises(requests.HTTPError):
+        list(rows)
+    assert sleeps == []
+
+
+@responses.activate
+def test_retry_extra_errors_400_exhaustion_raises_runtimeerror(monkeypatch):
+    """A configured 400 that never clears raises an actionable RuntimeError
+    naming retry_extra_errors, after the full backoff sequence."""
+    _mock_metadata()
+    sleeps = _patch_sleep(monkeypatch)
+    responses.add(responses.GET, f"{SERVICE_URL}Customers", json=_ARG_OUT_OF_RANGE_400, status=400)
+    c = _make({"token": "t", "retry_extra_errors": "400"})  # default max_retries=5
+    rows, _ = c.read_table("Customers", None, {})
+    with pytest.raises(RuntimeError, match=r"retry_extra_errors"):
+        list(rows)
+    assert sleeps == [1.0, 2.0, 4.0, 8.0, 16.0]
+
+
+@responses.activate
+def test_retry_extra_errors_403_exhaustion_keeps_permission_error(monkeypatch):
+    """A configured 403 that never clears still surfaces the actionable
+    PermissionError (a genuine permission gap the operator opted to retry),
+    not a generic RuntimeError."""
+    _mock_metadata()
+    sleeps = _patch_sleep(monkeypatch)
+    responses.add(responses.GET, f"{SERVICE_URL}Customers", json=_FORBIDDEN_403, status=403)
+    c = _make({"token": "t", "retry_extra_errors": "403"})
+    rows, _ = c.read_table("Customers", None, {})
+    with pytest.raises(PermissionError, match=r"403"):
+        list(rows)
+    assert sleeps == [1.0, 2.0, 4.0, 8.0, 16.0]
+
+
+@responses.activate
+def test_builtin_transient_retry_unaffected_by_extra_errors(monkeypatch):
+    """The built-in 429/5xx handling runs ahead of and independent of
+    retry_extra_errors — a 503 is still retried honouring Retry-After even
+    when the option lists only 400."""
+    _mock_metadata()
+    sleeps = _patch_sleep(monkeypatch)
+    responses.add(responses.GET, f"{SERVICE_URL}Customers", body="busy", status=503)
+    responses.add(responses.GET, f"{SERVICE_URL}Customers", json={"value": [{"Id": 1}]}, status=200)
+    c = _make({"token": "t", "retry_extra_errors": "400"})
+    rows, _ = c.read_table("Customers", None, {})
+    assert [r["Id"] for r in rows] == [1]
+    assert sleeps == [1.0]
+
+
+def test_parse_retry_extra_errors():
+    """Unit-level guard on the parser: CSV, JSON (array/object/bare-int),
+    signature normalisation, empty, and every rejection path."""
+    from databricks.labs.community_connector.sources.odata.odata import (
+        _parse_retry_extra_errors,
+    )
+
+    assert _parse_retry_extra_errors(None) == []
+    assert _parse_retry_extra_errors("") == []
+    assert _parse_retry_extra_errors("  ") == []
+    # CSV of codes (whitespace tolerated), no signatures.
+    assert _parse_retry_extra_errors("400, 403") == [(400, None), (403, None)]
+    # JSON array of objects; signature lower-cased; bare int allowed.
+    assert _parse_retry_extra_errors('[{"code": 400, "signature": "Context URI"}, 403]') == [
+        (400, "context uri"),
+        (403, None),
+    ]
+    # Single JSON object.
+    assert _parse_retry_extra_errors('{"code": 429}') == [(429, None)]
+    # Empty/blank signature normalises to None.
+    assert _parse_retry_extra_errors('[{"code": 400, "signature": "  "}]') == [(400, None)]
+
+    for bad in [
+        "abc",  # not a code
+        "200",  # out of retryable range
+        "600",  # out of range
+        "404",  # reserved for vanished-parent recovery
+        "410",  # reserved
+        "[{'code': 1}]",  # not valid JSON (single quotes)
+        '[{"signature": "x"}]',  # missing code (None -> not int)
+        '["nope"]',  # entry neither int nor object
+        "[true]",  # bool is not a valid code
+    ]:
+        with pytest.raises(ValueError, match=r"retry_extra_errors"):
+            _parse_retry_extra_errors(bad)
+
+
+def test_retry_extra_errors_invalid_value_raises_at_construction():
+    """A bad retry_extra_errors fails the connector build up front, not
+    mid-read."""
+    with pytest.raises(ValueError, match=r"retry_extra_errors"):
+        _make({"token": "t", "retry_extra_errors": "404"})
 
 
 # ---------------------------------------------------------------------------

@@ -926,6 +926,19 @@ def test_or_filter_probe_auth_401_not_mislabeled_as_unsupported():
 
 
 @responses.activate
+def test_or_filter_probe_403_with_retry_extra_errors_not_mislabeled():
+    """PR #280 review: ``retry_extra_errors="403"`` must not leak into the OR
+    probe. The probe calls ``_http_get_once`` without opting in, so the 403
+    still raises PermissionError → fail open, nothing cached — instead of being
+    returned and misread as a definitive 'OR rejected' 4xx."""
+    responses.add_callback(responses.GET, f"{SERVICE_URL}Coll", callback=lambda _r: (403, {}, ""))
+    c = _make({"retry_extra_errors": "403"})
+    assert c._verify_or_filter_support(f"{SERVICE_URL}Coll", ["a", "b"], {"a": 1, "b": 2}) is True
+    assert "_or_filter_ok" not in c.__dict__
+    assert c._cached_capability("or_filter_ok") is None
+
+
+@responses.activate
 def test_or_filter_probe_definitive_400_still_falls_back_and_persists():
     """Regression: a genuine non-transient 4xx (the 'only AND operators are
     supported' 400) is still a definitive rejection — cached False on the
