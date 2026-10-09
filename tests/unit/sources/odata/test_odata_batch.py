@@ -473,6 +473,45 @@ def test_batch_too_many_parts_shrinks_and_records_size():
 
 
 @responses.activate
+def test_batch_too_many_parts_still_shrinks_with_retry_extra_errors_400():
+    """PR #280 review: ``retry_extra_errors="400"`` must NOT swallow the $batch
+    envelope's "too many parts" 400. That 400 is the adaptive-shrink trigger —
+    if the extra-retry rule applied to the POST, the oversized payload would be
+    re-sent to exhaustion and hard-fail instead of shrinking. The rule only
+    applies to plain page reads, so the shrink still converges."""
+    _mock_nested_metadata()
+    parents = [{"Id": i} for i in range(1, 6)]
+    responses.get(f"{SERVICE_URL}Parents", json={"value": parents})
+    responder = _too_many_parts_responder(
+        [(f"Parents({i})/Children", {"value": [{"Id": i * 10 + 1}]}) for i in range(1, 6)]
+        + [("Parents", {"value": [{"Id": 1}]})],
+        max_parts=2,
+    )
+    responses.add_callback(responses.POST, f"{SERVICE_URL}$batch", callback=responder)
+
+    c = _make({"retry_extra_errors": "400"})
+    recs, _ = c.read_table("Parents__Children", {}, {})
+    assert sorted(r["Id"] for r in recs) == [11, 21, 31, 41, 51]
+    assert responder.rejections[0] >= 1
+    assert all(n <= 2 for n in responder.accepted)
+    assert c.__dict__["_batch_size_cap"] == 2
+
+
+@responses.activate
+def test_batch_probe_403_with_retry_extra_errors_records_no_verdict():
+    """PR #280 review: with ``retry_extra_errors="403"`` the $batch capability
+    probe must still see a 403 as a transient auth failure (PermissionError,
+    swallowed → no verdict), not as a returned 403 response it would read as a
+    definitive ``batch_ok=False`` and cache — pinning every worker to the slow
+    plain walk for the cache TTL on one spurious 403."""
+    responses.post(f"{SERVICE_URL}$batch", json={"error": "forbidden"}, status=403)
+    c = _make({"token": "t", "retry_extra_errors": "403"})
+    assert c._verify_batch_support(["Roots"], {}) is False
+    assert "_batch_supported" not in c.__dict__  # no definitive verdict pinned
+    assert c._cached_capability("batch_ok") is None  # nothing persisted
+
+
+@responses.activate
 def test_batch_too_many_parts_falls_back_to_single_gets():
     """A server that rejects *any* multi-part ``$batch`` drives the cap down to 1
     and falls back to a plain per-leaf-parent GET — every row still arrives."""

@@ -243,8 +243,12 @@ connection:
         matches and, if a ``signature`` is given, the response body contains
         it (case-insensitive). Rules are OR-ed. Matching responses join the
         same exponential-backoff path as the built-in transient statuses, up
-        to ``max_retries``. Codes must be 400–599 and not 404/410 (those
-        drive contained-walk vanished-parent recovery). 401 can be listed but
+        to ``max_retries``. Applies to data page reads only — NOT to the
+        ``$batch`` envelope POST (its "too many parts" 400 must still trigger
+        the adaptive shrink), the capability probes (a 401/403 there records
+        no verdict), the delta-tracking walk, or the ``$metadata`` fetch.
+        Codes must be 400–599 and not 404/410 (those drive contained-walk
+        vanished-parent recovery). 401 can be listed but
         retrying it cannot refresh a UC-injected token. Example (the two
         Hexagon 400 shapes, matched narrowly)::
 

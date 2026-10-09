@@ -11714,7 +11714,9 @@ def register_lakeflow_source(spark):
             url = _pg_strip_query(url, "__pgbase")
             attempts = self.max_retries + 1
             for attempt in range(attempts):
-                resp = self._http_get(session, url)
+                # The one caller that opts into ``retry_extra_errors``: plain
+                # page reads, where retrying a spurious 4xx is safe.
+                resp = self._http_get(session, url, extra_retry=True)
                 _raise_for_status_with_body(resp, url)
                 try:
                     return resp, _decode_json_with_body(resp, url)
@@ -11741,7 +11743,13 @@ def register_lakeflow_source(spark):
             )
 
         def _http_get(
-            self, session: requests.Session, url: str, method: str = "GET", **kwargs: Any
+            self,
+            session: requests.Session,
+            url: str,
+            method: str = "GET",
+            *,
+            extra_retry: bool = False,
+            **kwargs: Any,
         ) -> requests.Response:
             """GET (or other ``method``) with terminal auth handling and transient retries.
 
@@ -11780,7 +11788,9 @@ def register_lakeflow_source(spark):
             attempts = self.max_retries + 1
             for attempt in range(attempts):
                 try:
-                    resp = self._http_get_once(session, url, method=method, **kwargs)
+                    resp = self._http_get_once(
+                        session, url, method=method, extra_retry=extra_retry, **kwargs
+                    )
                 except _TRANSIENT_NETWORK_ERRORS as exc:
                     # Server closed the TCP connection / DNS failed / read
                     # timed out — no HTTP response, so no Retry-After to
@@ -11820,12 +11830,18 @@ def register_lakeflow_source(spark):
                     continue
                 # Operator-configured extra retryable errors (``retry_extra_errors``
                 # — off unless set, so this is a no-op by default and the built-in
-                # transient handling above is unchanged). A 401/403 reaches here
+                # transient handling above is unchanged). Applied ONLY when the
+                # caller opts in with ``extra_retry=True`` — the plain page-read
+                # path (``_fetch_page_payload``). Every other caller keeps the
+                # primitive's raw contract: the ``$batch`` envelope POST needs its
+                # "too many parts" 400 back to trigger the adaptive shrink, and the
+                # capability probes need a 401/403 raised (not returned) so a
+                # transient auth blip records no verdict. A 401/403 reaches here
                 # only because ``_http_get_once`` returned it under a matching
-                # rule. No ``Retry-After`` on these, so pure exponential backoff;
-                # the identical request succeeds on a later attempt when the
-                # failure was a spurious under-load glitch.
-                if self._is_user_retryable(resp):
+                # rule with ``extra_retry`` set. No ``Retry-After`` on these, so
+                # pure exponential backoff; the identical request succeeds on a
+                # later attempt when the failure was a spurious under-load glitch.
+                if extra_retry and self._is_user_retryable(resp):
                     if attempt >= self.max_retries:
                         if resp.status_code in (401, 403):
                             # Preserve the actionable auth remediation for an
@@ -11992,7 +12008,13 @@ def register_lakeflow_source(spark):
             return False
 
         def _http_get_once(
-            self, session: requests.Session, url: str, method: str = "GET", **kwargs: Any
+            self,
+            session: requests.Session,
+            url: str,
+            method: str = "GET",
+            *,
+            extra_retry: bool = False,
+            **kwargs: Any,
         ) -> requests.Response:
             """One auth-aware request attempt; throttle handling lives in `_http_get`.
 
@@ -12002,10 +12024,13 @@ def register_lakeflow_source(spark):
             triggers one re-mint + retry. Otherwise a 401/403 is terminal —
             including the UC-injected ``access_token`` path, where the COMMUNITY
             connection layer owns refresh — and surfaces the per-auth-mode
-            remediation, EXCEPT that a 401/403 matching a ``retry_extra_errors``
-            rule is returned to ``_http_get`` so its backoff loop can retry it
-            (an operator opting a spuriously-failing source's auth error into
-            retry)."""
+            remediation, EXCEPT that when the caller passes ``extra_retry=True``
+            (only ``_http_get`` on the page-read path does) a 401/403 matching a
+            ``retry_extra_errors`` rule is returned so its backoff loop can retry
+            it. The capability probes call this directly WITHOUT the flag and
+            rely on the 401/403 raising: they swallow the ``PermissionError`` so
+            a transient auth blip records no ``batch_ok``/``expand_ok``/
+            ``or_filter_ok`` verdict."""
             self._require_same_origin(url)
             if self._should_preemptively_refresh():
                 session.headers["Authorization"] = f"Bearer {self._oauth2_token()}"
@@ -12035,7 +12060,7 @@ def register_lakeflow_source(spark):
                     )
                 return resp
             if resp.status_code in (401, 403):
-                if self._is_user_retryable(resp):
+                if extra_retry and self._is_user_retryable(resp):
                     return resp
                 raise PermissionError(self._no_refresh_auth_error(resp, url))
             return resp
