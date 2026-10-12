@@ -1,0 +1,95 @@
+{
+  "_comment": "AESO Pipeline Specification Examples",
+
+  "minimal_example": {
+    "_description": "Minimal configuration with defaults",
+    "connection_name": "aeso_connection",
+    "objects": [
+      {
+        "table": {
+          "source_table": "pool_price"
+        }
+      }
+    ]
+  },
+  
+  "standard_example": {
+    "_description": "Standard configuration with common options",
+    "connection_name": "aeso_connection",
+    "objects": [
+      {
+        "table": {
+          "source_table": "pool_price",
+          "destination_catalog": "main",
+          "destination_schema": "energy",
+          "destination_table": "pool_price",
+          "table_configuration": {
+            "scd_type": "SCD_TYPE_1",
+            "start_date": "2024-01-01",
+            "lookback_hours": "24"
+          }
+        }
+      }
+    ]
+  },
+  
+  "continuous_mode": {
+    "_description": "For sub-minute latency with continuous workflow",
+    "connection_name": "aeso_realtime",
+    "objects": [
+      {
+        "table": {
+          "source_table": "pool_price",
+          "destination_schema": "energy_realtime",
+          "destination_table": "pool_price_live",
+          "table_configuration": {
+            "scd_type": "SCD_TYPE_1",
+            "lookback_hours": "2",
+            "batch_size_days": "7",
+            "rate_limit_delay": "0.1"
+          }
+        }
+      }
+    ]
+  },
+  
+  "historical_backfill": {
+    "_description": "For loading large historical datasets",
+    "connection_name": "aeso_history",
+    "objects": [
+      {
+        "table": {
+          "source_table": "pool_price",
+          "destination_catalog": "main",
+          "destination_schema": "energy_historical",
+          "destination_table": "pool_price",
+          "table_configuration": {
+            "scd_type": "SCD_TYPE_1",
+            "start_date": "2020-01-01",
+            "lookback_hours": "72",
+            "batch_size_days": "30",
+            "rate_limit_delay": "0.1"
+          }
+        }
+      }
+    ]
+  },
+  
+  "_configuration_notes": {
+    "connection_level": {
+      "api_key": "Required. Set in Unity Catalog connection."
+    },
+    "table_configuration": {
+      "scd_type": "Required. Must be 'SCD_TYPE_1' (only supported type).",
+      "start_date": "Optional. Format: YYYY-MM-DD. Default: 30 days ago. Used for initial load only.",
+      "lookback_hours": "Optional. Default: 24. Minimum: 24. Hours to look back for CDC updates and settlement adjustments.",
+      "batch_size_days": "Optional. Default: 30. Days per API batch (reduce for memory constraints).",
+      "rate_limit_delay": "Optional. Default: 0.1. Seconds between API calls (increase if rate limited)."
+    },
+    "auto_configured": {
+      "sequence_by": "Automatically set to 'ingestion_time' by connector metadata. No need to specify.",
+      "cursor_field": "Automatically set by connector. No need to specify.",
+      "primary_keys": "Automatically set by connector. No need to specify."
+    }
+  }
+}
