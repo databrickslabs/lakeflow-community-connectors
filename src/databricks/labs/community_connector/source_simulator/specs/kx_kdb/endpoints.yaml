@@ -1,0 +1,7 @@
+# KX KDB HDB is a filesystem source and makes no HTTP requests.
+#
+# The simulator is intentionally idle, matching the HL7 v2 connector's
+# Unity Catalog Volume test mode. Offline tests create an HDB-shaped temporary
+# directory and use corpus/hdb_records.json at the PyKX boundary.
+
+endpoints: []

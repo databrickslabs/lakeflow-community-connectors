@@ -1,0 +1,8 @@
+{
+  "version": 1,
+  "source_kind": "filesystem",
+  "endpoints": [],
+  "endpoints_in_spec": [],
+  "endpoints_hit": [],
+  "coverage_percent": 100
+}
