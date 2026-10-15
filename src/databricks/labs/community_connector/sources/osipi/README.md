@@ -250,6 +250,7 @@ This notebook provides:
 - Set `tags_per_request=25` to batch tag queries
 - Set `window_seconds=300` to limit time windows per batch
 - Use `prefer_streamset=true` for multi-tag efficiency
+- Value reads use `/piwebapi/batch` where possible (the connector sends `X-Requested-With` so this works under PI Web API CSRF defense) and fall back to slower per-tag GETs if batch is refused. If value reads are slow, confirm your PI Web API allows the batch endpoint (CSRF, CORS, and account permissions).
 
 **For large-scale deployments:**
 - Group tables by category and ingestion type
@@ -272,6 +273,7 @@ This notebook provides:
 - Verify `tag_webids` are valid and accessible
 - Check time ranges (`startTime`, `endTime`) are correct
 - Confirm PI Web API permissions for data access
+- For Asset Framework / Event Frame tables, also check the pipeline driver logs for `Skipping asset server ...` (401/403) or `Skipping asset database ...` (5xx) warnings. Those sources are skipped with a warning rather than a failure, so their data is silently omitted; grant the connection account access, or resolve the server error, and re-run for complete data.
 
 **Schema Changes:**
 - Re-run discovery to update table metadata
