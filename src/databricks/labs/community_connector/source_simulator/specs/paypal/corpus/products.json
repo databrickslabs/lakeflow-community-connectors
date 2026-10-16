@@ -1,0 +1,65 @@
+[
+  {
+    "id": "hotel-66-pk0",
+    "name": "whiskey-638",
+    "description": "lima-908",
+    "create_time": "2024-01-30T21:21:21Z",
+    "links": [
+      {
+        "href": "whiskey-685",
+        "rel": "romeo-123",
+        "method": "uniform-896"
+      },
+      {
+        "href": "hotel-667",
+        "rel": "quebec-437",
+        "method": "yankee-561"
+      }
+    ]
+  },
+  {
+    "id": "charlie--pk1",
+    "name": "lima-655",
+    "description": "golf-922",
+    "create_time": "2024-01-21T01:36:09Z",
+    "links": [
+      {
+        "href": "whiskey-329",
+        "rel": "echo-572",
+        "method": "romeo-560"
+      }
+    ]
+  },
+  {
+    "id": "golf-699-pk2",
+    "name": "oscar-295",
+    "description": "oscar-551",
+    "create_time": "2024-01-11T15:51:11Z",
+    "links": []
+  },
+  {
+    "id": "quebec-6-pk3",
+    "name": "charlie-891",
+    "description": "sierra-151",
+    "create_time": "2024-01-13T14:03:18Z",
+    "links": [
+      {
+        "href": "charlie-273",
+        "rel": "quebec-725",
+        "method": "romeo-222"
+      },
+      {
+        "href": "sierra-930",
+        "rel": "zulu-298",
+        "method": "delta-612"
+      }
+    ]
+  },
+  {
+    "id": "zulu-276-pk4",
+    "name": "alpha-978",
+    "description": "quebec-714",
+    "create_time": "2024-01-04T21:53:58Z",
+    "links": []
+  }
+]

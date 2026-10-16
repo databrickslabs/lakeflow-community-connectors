@@ -1,0 +1,59 @@
+# PayPal Community Connector Spec
+# This file defines the specification for the PayPal connector including
+# connection parameters and allowlist options.
+
+# ============================================================================
+# Connection Parameters
+# OAuth 2.0 client credentials grant (m2m) for server-to-server authentication
+# ============================================================================
+connection:
+  parameters:
+    - name: client_id
+      type: string
+      required: true
+      secret: true
+      description: >
+        OAuth 2.0 client ID for the PayPal app. Create an app in PayPal's
+        Developer Dashboard to obtain this.
+
+    - name: client_secret
+      type: string
+      required: true
+      secret: true
+      description: >
+        OAuth 2.0 client secret issued alongside the client_id. Keep this
+        secret and never commit it to version control.
+
+    - name: environment
+      type: string
+      required: false
+      description: >
+        PayPal API environment: 'production' (default) or 'sandbox'.
+        Use 'sandbox' for testing and development.
+
+    - name: base_url
+      type: string
+      required: false
+      description: >
+        Custom base URL for the PayPal API. Overrides the environment setting.
+        Use this only if using a non-standard endpoint.
+
+  oauth:
+    flow: m2m
+    pkce: false
+    scopes: ""
+    token_url: "https://api-m.paypal.com/v1/oauth2/token"
+
+# ============================================================================
+# External Options Allowlist
+# These table-specific options are available for use in Lakeflow queries.
+# Users can pass these via externalOptionsAllowList in the UC connection.
+# ============================================================================
+external_options_allowlist: >
+  start_date,
+  window_seconds,
+  page_size,
+  max_records_per_batch,
+  lookback_seconds,
+  currency_code,
+  as_of_time

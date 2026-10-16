@@ -1,0 +1,1142 @@
+[
+  {
+    "id": "india-82-pk0",
+    "status": "foxtrot-999",
+    "detail": {
+      "invoice_number": "papa-571",
+      "reference": "foxtrot-164",
+      "invoice_date": null,
+      "currency_code": "papa-580",
+      "note": "delta-129",
+      "term": "victor-613",
+      "memo": "juliet-347",
+      "payment_term": {
+        "term_type": "tango-580",
+        "due_date": null
+      },
+      "metadata": {
+        "create_time": "2024-01-11T10:45:26Z",
+        "created_by": "november-809",
+        "last_update_time": "2024-01-30T14:27:03Z",
+        "last_updated_by": "charlie-264",
+        "cancel_time": "2024-01-30T15:12:31Z",
+        "cancelled_by": "mike-239",
+        "first_sent_time": "2024-01-30T18:33:04Z",
+        "last_sent_time": "2024-01-26T17:11:10Z",
+        "last_sent_by": "lima-625",
+        "created_by_flow": "tango-873",
+        "recipient_view_url": "bravo-808",
+        "invoicer_view_url": "sierra-333"
+      }
+    },
+    "invoicer": {
+      "name": {
+        "prefix": "mike-542",
+        "given_name": "alpha-976",
+        "surname": "quebec-999",
+        "middle_name": "mike-422",
+        "suffix": "charlie-395",
+        "alternate_full_name": "victor-384",
+        "full_name": "xray-855"
+      },
+      "email_address": "uniform-845",
+      "website": "charlie-203",
+      "tax_id": "sierra-917",
+      "logo_url": "mike-699",
+      "additional_notes": "papa-397"
+    },
+    "primary_recipients": [
+      {
+        "billing_info": {
+          "name": {
+            "prefix": "papa-791",
+            "given_name": "whiskey-118",
+            "surname": "quebec-960",
+            "middle_name": "echo-405",
+            "suffix": "zulu-486",
+            "alternate_full_name": "zulu-713",
+            "full_name": "echo-830"
+          },
+          "email_address": "victor-869",
+          "language": "sierra-652",
+          "additional_info": "whiskey-541",
+          "address": {
+            "line1": "delta-527",
+            "line2": "romeo-329",
+            "city": "foxtrot-657",
+            "state": "golf-803",
+            "country_code": "uniform-659",
+            "postal_code": "sierra-450"
+          }
+        },
+        "shipping_info": {
+          "name": {
+            "prefix": "november-782",
+            "given_name": "hotel-903",
+            "surname": "delta-961",
+            "middle_name": "foxtrot-793",
+            "suffix": "delta-358",
+            "alternate_full_name": "xray-402",
+            "full_name": "golf-202"
+          },
+          "address": {
+            "line1": "zulu-157",
+            "line2": "bravo-576",
+            "city": "alpha-400",
+            "state": "hotel-601",
+            "country_code": "oscar-208",
+            "postal_code": "xray-753"
+          }
+        }
+      },
+      {
+        "billing_info": {
+          "name": {
+            "prefix": "tango-693",
+            "given_name": "hotel-203",
+            "surname": "bravo-724",
+            "middle_name": "zulu-962",
+            "suffix": "uniform-605",
+            "alternate_full_name": "yankee-847",
+            "full_name": "xray-787"
+          },
+          "email_address": "mike-927",
+          "language": "victor-469",
+          "additional_info": "quebec-340",
+          "address": {
+            "line1": "charlie-105",
+            "line2": "romeo-525",
+            "city": "charlie-133",
+            "state": "charlie-685",
+            "country_code": "bravo-166",
+            "postal_code": "golf-967"
+          }
+        },
+        "shipping_info": {
+          "name": {
+            "prefix": "foxtrot-561",
+            "given_name": "mike-383",
+            "surname": "india-376",
+            "middle_name": "delta-509",
+            "suffix": "echo-592",
+            "alternate_full_name": "oscar-735",
+            "full_name": "romeo-950"
+          },
+          "address": {
+            "line1": "charlie-322",
+            "line2": "xray-831",
+            "city": "kilo-157",
+            "state": "india-489",
+            "country_code": "xray-627",
+            "postal_code": "victor-189"
+          }
+        }
+      }
+    ],
+    "amount": {
+      "currency_code": "november-394",
+      "value": "tango-618",
+      "breakdown": {
+        "item_total": {
+          "currency_code": "hotel-907",
+          "value": "whiskey-865"
+        },
+        "discount": {
+          "invoice_discount": {
+            "percent": "oscar-195",
+            "amount": {
+              "currency_code": "oscar-234",
+              "value": "kilo-662"
+            }
+          },
+          "item_discount": {
+            "currency_code": "papa-626",
+            "value": "zulu-144"
+          }
+        },
+        "tax_total": {
+          "currency_code": "whiskey-987",
+          "value": "tango-787"
+        },
+        "shipping": {
+          "amount": {
+            "currency_code": "charlie-265",
+            "value": "yankee-422"
+          },
+          "tax": {
+            "name": "uniform-522",
+            "percent": "charlie-415",
+            "amount": {
+              "currency_code": "hotel-493",
+              "value": "november-622"
+            }
+          }
+        },
+        "custom": {
+          "label": "zulu-687",
+          "amount": {
+            "currency_code": "tango-952",
+            "value": "oscar-690"
+          }
+        }
+      }
+    },
+    "due_amount": {
+      "currency_code": "lima-306",
+      "value": "tango-581"
+    },
+    "gratuity": {
+      "currency_code": "tango-461",
+      "value": "alpha-977"
+    },
+    "items": [
+      {
+        "id": "uniform-874",
+        "name": "lima-637",
+        "description": "mike-403",
+        "quantity": "quebec-183",
+        "unit_amount": {
+          "currency_code": "juliet-352",
+          "value": "yankee-788"
+        },
+        "tax": {
+          "name": "hotel-717",
+          "percent": "whiskey-156",
+          "amount": {
+            "currency_code": "echo-396",
+            "value": "quebec-723"
+          }
+        },
+        "item_date": null,
+        "discount": {
+          "percent": "juliet-487",
+          "amount": {
+            "currency_code": "november-632",
+            "value": "sierra-369"
+          }
+        },
+        "unit_of_measure": "uniform-301"
+      }
+    ],
+    "payments": {
+      "paid_amount": {
+        "currency_code": "foxtrot-482",
+        "value": "india-713"
+      },
+      "transactions": []
+    },
+    "refunds": {
+      "refund_amount": {
+        "currency_code": "oscar-488",
+        "value": "lima-458"
+      },
+      "transactions": [
+        {
+          "refund_id": "papa-258",
+          "type": "sierra-608",
+          "method": "papa-845",
+          "refund_date": null,
+          "amount": {
+            "currency_code": "lima-389",
+            "value": "romeo-950"
+          }
+        },
+        {
+          "refund_id": "golf-943",
+          "type": "delta-342",
+          "method": "zulu-340",
+          "refund_date": null,
+          "amount": {
+            "currency_code": "charlie-985",
+            "value": "whiskey-554"
+          }
+        }
+      ]
+    },
+    "links": [
+      {
+        "href": "hotel-148",
+        "rel": "lima-554",
+        "method": "tango-570"
+      },
+      {
+        "href": "lima-323",
+        "rel": "sierra-564",
+        "method": "hotel-700"
+      }
+    ]
+  },
+  {
+    "id": "xray-318-pk1",
+    "status": "romeo-674",
+    "detail": {
+      "invoice_number": "november-818",
+      "reference": "papa-543",
+      "invoice_date": null,
+      "currency_code": "zulu-502",
+      "note": "golf-273",
+      "term": "oscar-101",
+      "memo": "papa-140",
+      "payment_term": {
+        "term_type": "juliet-877",
+        "due_date": null
+      },
+      "metadata": {
+        "create_time": "2024-01-31T07:41:52Z",
+        "created_by": "november-608",
+        "last_update_time": "2024-01-27T23:03:01Z",
+        "last_updated_by": "zulu-752",
+        "cancel_time": "2024-01-07T04:02:28Z",
+        "cancelled_by": "delta-745",
+        "first_sent_time": "2024-01-11T14:51:16Z",
+        "last_sent_time": "2024-01-05T23:04:10Z",
+        "last_sent_by": "uniform-583",
+        "created_by_flow": "kilo-519",
+        "recipient_view_url": "whiskey-191",
+        "invoicer_view_url": "xray-120"
+      }
+    },
+    "invoicer": {
+      "name": {
+        "prefix": "delta-390",
+        "given_name": "uniform-958",
+        "surname": "oscar-577",
+        "middle_name": "foxtrot-417",
+        "suffix": "echo-146",
+        "alternate_full_name": "golf-632",
+        "full_name": "bravo-732"
+      },
+      "email_address": "india-915",
+      "website": "tango-319",
+      "tax_id": "mike-414",
+      "logo_url": "november-816",
+      "additional_notes": "quebec-933"
+    },
+    "primary_recipients": [
+      {
+        "billing_info": {
+          "name": {
+            "prefix": "romeo-424",
+            "given_name": "papa-362",
+            "surname": "mike-277",
+            "middle_name": "victor-240",
+            "suffix": "foxtrot-919",
+            "alternate_full_name": "quebec-113",
+            "full_name": "charlie-659"
+          },
+          "email_address": "zulu-245",
+          "language": "delta-886",
+          "additional_info": "bravo-554",
+          "address": {
+            "line1": "oscar-933",
+            "line2": "juliet-964",
+            "city": "delta-726",
+            "state": "lima-431",
+            "country_code": "papa-162",
+            "postal_code": "sierra-395"
+          }
+        },
+        "shipping_info": {
+          "name": {
+            "prefix": "charlie-684",
+            "given_name": "echo-543",
+            "surname": "tango-376",
+            "middle_name": "victor-885",
+            "suffix": "juliet-189",
+            "alternate_full_name": "kilo-860",
+            "full_name": "sierra-353"
+          },
+          "address": {
+            "line1": "golf-439",
+            "line2": "november-789",
+            "city": "delta-160",
+            "state": "november-995",
+            "country_code": "zulu-765",
+            "postal_code": "foxtrot-428"
+          }
+        }
+      }
+    ],
+    "amount": {
+      "currency_code": "november-256",
+      "value": "tango-777",
+      "breakdown": {
+        "item_total": {
+          "currency_code": "november-377",
+          "value": "papa-348"
+        },
+        "discount": {
+          "invoice_discount": {
+            "percent": "quebec-537",
+            "amount": {
+              "currency_code": "golf-291",
+              "value": "charlie-379"
+            }
+          },
+          "item_discount": {
+            "currency_code": "mike-620",
+            "value": "papa-947"
+          }
+        },
+        "tax_total": {
+          "currency_code": "mike-224",
+          "value": "zulu-573"
+        },
+        "shipping": {
+          "amount": {
+            "currency_code": "foxtrot-935",
+            "value": "oscar-663"
+          },
+          "tax": {
+            "name": "golf-541",
+            "percent": "xray-440",
+            "amount": {
+              "currency_code": "quebec-198",
+              "value": "uniform-423"
+            }
+          }
+        },
+        "custom": {
+          "label": "alpha-161",
+          "amount": {
+            "currency_code": "romeo-542",
+            "value": "uniform-275"
+          }
+        }
+      }
+    },
+    "due_amount": {
+      "currency_code": "echo-211",
+      "value": "oscar-346"
+    },
+    "gratuity": {
+      "currency_code": "whiskey-250",
+      "value": "victor-566"
+    },
+    "items": [
+      {
+        "id": "whiskey-447",
+        "name": "sierra-789",
+        "description": "golf-644",
+        "quantity": "hotel-516",
+        "unit_amount": {
+          "currency_code": "india-835",
+          "value": "zulu-274"
+        },
+        "tax": {
+          "name": "tango-627",
+          "percent": "sierra-981",
+          "amount": {
+            "currency_code": "xray-386",
+            "value": "papa-832"
+          }
+        },
+        "item_date": null,
+        "discount": {
+          "percent": "uniform-800",
+          "amount": {
+            "currency_code": "lima-379",
+            "value": "uniform-868"
+          }
+        },
+        "unit_of_measure": "golf-740"
+      }
+    ],
+    "payments": {
+      "paid_amount": {
+        "currency_code": "charlie-195",
+        "value": "alpha-314"
+      },
+      "transactions": [
+        {
+          "payment_id": "sierra-347",
+          "type": "november-174",
+          "method": "oscar-740",
+          "payment_date": null,
+          "note": "india-914",
+          "amount": {
+            "currency_code": "tango-359",
+            "value": "charlie-114"
+          }
+        },
+        {
+          "payment_id": "bravo-604",
+          "type": "hotel-372",
+          "method": "xray-513",
+          "payment_date": null,
+          "note": "india-360",
+          "amount": {
+            "currency_code": "zulu-649",
+            "value": "bravo-601"
+          }
+        }
+      ]
+    },
+    "refunds": {
+      "refund_amount": {
+        "currency_code": "bravo-166",
+        "value": "juliet-415"
+      },
+      "transactions": [
+        {
+          "refund_id": "delta-640",
+          "type": "yankee-917",
+          "method": "zulu-646",
+          "refund_date": null,
+          "amount": {
+            "currency_code": "india-538",
+            "value": "tango-820"
+          }
+        }
+      ]
+    },
+    "links": [
+      {
+        "href": "lima-793",
+        "rel": "victor-381",
+        "method": "foxtrot-829"
+      }
+    ]
+  },
+  {
+    "id": "delta-93-pk2",
+    "status": "juliet-987",
+    "detail": {
+      "invoice_number": "whiskey-735",
+      "reference": "victor-536",
+      "invoice_date": null,
+      "currency_code": "alpha-717",
+      "note": "echo-169",
+      "term": "golf-733",
+      "memo": "xray-442",
+      "payment_term": {
+        "term_type": "tango-228",
+        "due_date": null
+      },
+      "metadata": {
+        "create_time": "2024-01-11T03:50:15Z",
+        "created_by": "victor-346",
+        "last_update_time": "2024-01-04T17:08:00Z",
+        "last_updated_by": "zulu-336",
+        "cancel_time": "2024-01-15T23:50:35Z",
+        "cancelled_by": "india-143",
+        "first_sent_time": "2024-01-03T10:45:20Z",
+        "last_sent_time": "2024-01-28T23:40:43Z",
+        "last_sent_by": "xray-895",
+        "created_by_flow": "hotel-805",
+        "recipient_view_url": "yankee-322",
+        "invoicer_view_url": "papa-162"
+      }
+    },
+    "invoicer": {
+      "name": {
+        "prefix": "quebec-881",
+        "given_name": "charlie-651",
+        "surname": "kilo-226",
+        "middle_name": "sierra-666",
+        "suffix": "echo-767",
+        "alternate_full_name": "alpha-225",
+        "full_name": "bravo-841"
+      },
+      "email_address": "uniform-311",
+      "website": "foxtrot-875",
+      "tax_id": "charlie-281",
+      "logo_url": "quebec-136",
+      "additional_notes": "romeo-266"
+    },
+    "primary_recipients": [
+      {
+        "billing_info": {
+          "name": {
+            "prefix": "mike-358",
+            "given_name": "hotel-424",
+            "surname": "uniform-606",
+            "middle_name": "hotel-629",
+            "suffix": "mike-771",
+            "alternate_full_name": "november-501",
+            "full_name": "uniform-190"
+          },
+          "email_address": "sierra-645",
+          "language": "lima-871",
+          "additional_info": "foxtrot-266",
+          "address": {
+            "line1": "oscar-188",
+            "line2": "quebec-466",
+            "city": "xray-878",
+            "state": "november-290",
+            "country_code": "whiskey-374",
+            "postal_code": "romeo-522"
+          }
+        },
+        "shipping_info": {
+          "name": {
+            "prefix": "xray-807",
+            "given_name": "kilo-486",
+            "surname": "lima-725",
+            "middle_name": "yankee-963",
+            "suffix": "zulu-258",
+            "alternate_full_name": "kilo-840",
+            "full_name": "india-366"
+          },
+          "address": {
+            "line1": "hotel-617",
+            "line2": "yankee-164",
+            "city": "mike-512",
+            "state": "november-607",
+            "country_code": "foxtrot-617",
+            "postal_code": "yankee-244"
+          }
+        }
+      },
+      {
+        "billing_info": {
+          "name": {
+            "prefix": "juliet-709",
+            "given_name": "whiskey-433",
+            "surname": "hotel-367",
+            "middle_name": "tango-102",
+            "suffix": "delta-700",
+            "alternate_full_name": "delta-420",
+            "full_name": "romeo-238"
+          },
+          "email_address": "tango-927",
+          "language": "delta-872",
+          "additional_info": "alpha-681",
+          "address": {
+            "line1": "xray-437",
+            "line2": "mike-417",
+            "city": "yankee-152",
+            "state": "india-448",
+            "country_code": "romeo-393",
+            "postal_code": "tango-705"
+          }
+        },
+        "shipping_info": {
+          "name": {
+            "prefix": "alpha-652",
+            "given_name": "charlie-950",
+            "surname": "xray-874",
+            "middle_name": "echo-932",
+            "suffix": "kilo-171",
+            "alternate_full_name": "romeo-990",
+            "full_name": "juliet-974"
+          },
+          "address": {
+            "line1": "sierra-850",
+            "line2": "sierra-164",
+            "city": "charlie-456",
+            "state": "golf-956",
+            "country_code": "bravo-816",
+            "postal_code": "november-446"
+          }
+        }
+      }
+    ],
+    "amount": {
+      "currency_code": "romeo-970",
+      "value": "tango-647",
+      "breakdown": {
+        "item_total": {
+          "currency_code": "sierra-275",
+          "value": "sierra-602"
+        },
+        "discount": {
+          "invoice_discount": {
+            "percent": "india-735",
+            "amount": {
+              "currency_code": "romeo-392",
+              "value": "zulu-525"
+            }
+          },
+          "item_discount": {
+            "currency_code": "hotel-199",
+            "value": "delta-635"
+          }
+        },
+        "tax_total": {
+          "currency_code": "sierra-704",
+          "value": "whiskey-663"
+        },
+        "shipping": {
+          "amount": {
+            "currency_code": "romeo-466",
+            "value": "yankee-930"
+          },
+          "tax": {
+            "name": "yankee-616",
+            "percent": "whiskey-561",
+            "amount": {
+              "currency_code": "mike-532",
+              "value": "mike-271"
+            }
+          }
+        },
+        "custom": {
+          "label": "quebec-371",
+          "amount": {
+            "currency_code": "papa-290",
+            "value": "whiskey-778"
+          }
+        }
+      }
+    },
+    "due_amount": {
+      "currency_code": "delta-701",
+      "value": "hotel-724"
+    },
+    "gratuity": {
+      "currency_code": "foxtrot-821",
+      "value": "foxtrot-510"
+    },
+    "items": [
+      {
+        "id": "november-519",
+        "name": "quebec-127",
+        "description": "juliet-242",
+        "quantity": "oscar-762",
+        "unit_amount": {
+          "currency_code": "echo-244",
+          "value": "lima-186"
+        },
+        "tax": {
+          "name": "yankee-587",
+          "percent": "oscar-268",
+          "amount": {
+            "currency_code": "lima-970",
+            "value": "tango-992"
+          }
+        },
+        "item_date": null,
+        "discount": {
+          "percent": "oscar-266",
+          "amount": {
+            "currency_code": "kilo-577",
+            "value": "kilo-489"
+          }
+        },
+        "unit_of_measure": "tango-394"
+      },
+      {
+        "id": "lima-518",
+        "name": "delta-227",
+        "description": "india-658",
+        "quantity": "foxtrot-266",
+        "unit_amount": {
+          "currency_code": "quebec-358",
+          "value": "tango-378"
+        },
+        "tax": {
+          "name": "foxtrot-825",
+          "percent": "tango-892",
+          "amount": {
+            "currency_code": "delta-124",
+            "value": "foxtrot-945"
+          }
+        },
+        "item_date": null,
+        "discount": {
+          "percent": "sierra-287",
+          "amount": {
+            "currency_code": "kilo-115",
+            "value": "kilo-661"
+          }
+        },
+        "unit_of_measure": "yankee-341"
+      }
+    ],
+    "payments": {
+      "paid_amount": {
+        "currency_code": "foxtrot-760",
+        "value": "whiskey-545"
+      },
+      "transactions": []
+    },
+    "refunds": {
+      "refund_amount": {
+        "currency_code": "lima-600",
+        "value": "echo-725"
+      },
+      "transactions": [
+        {
+          "refund_id": "golf-670",
+          "type": "uniform-450",
+          "method": "papa-697",
+          "refund_date": null,
+          "amount": {
+            "currency_code": "mike-969",
+            "value": "yankee-209"
+          }
+        }
+      ]
+    },
+    "links": []
+  },
+  {
+    "id": "zulu-513-pk3",
+    "status": "victor-553",
+    "detail": {
+      "invoice_number": "juliet-372",
+      "reference": "tango-797",
+      "invoice_date": null,
+      "currency_code": "kilo-899",
+      "note": "echo-123",
+      "term": "zulu-398",
+      "memo": "romeo-250",
+      "payment_term": {
+        "term_type": "papa-707",
+        "due_date": null
+      },
+      "metadata": {
+        "create_time": "2024-01-28T17:41:08Z",
+        "created_by": "delta-147",
+        "last_update_time": "2024-01-26T09:24:23Z",
+        "last_updated_by": "echo-862",
+        "cancel_time": "2024-01-12T18:17:38Z",
+        "cancelled_by": "lima-454",
+        "first_sent_time": "2024-01-07T07:15:34Z",
+        "last_sent_time": "2024-01-16T14:47:25Z",
+        "last_sent_by": "victor-903",
+        "created_by_flow": "whiskey-388",
+        "recipient_view_url": "echo-577",
+        "invoicer_view_url": "alpha-415"
+      }
+    },
+    "invoicer": {
+      "name": {
+        "prefix": "charlie-824",
+        "given_name": "romeo-272",
+        "surname": "papa-677",
+        "middle_name": "sierra-862",
+        "suffix": "xray-705",
+        "alternate_full_name": "oscar-969",
+        "full_name": "november-909"
+      },
+      "email_address": "kilo-253",
+      "website": "charlie-420",
+      "tax_id": "zulu-880",
+      "logo_url": "november-135",
+      "additional_notes": "quebec-907"
+    },
+    "primary_recipients": [],
+    "amount": {
+      "currency_code": "kilo-518",
+      "value": "hotel-101",
+      "breakdown": {
+        "item_total": {
+          "currency_code": "echo-390",
+          "value": "alpha-157"
+        },
+        "discount": {
+          "invoice_discount": {
+            "percent": "bravo-260",
+            "amount": {
+              "currency_code": "echo-832",
+              "value": "tango-662"
+            }
+          },
+          "item_discount": {
+            "currency_code": "charlie-185",
+            "value": "delta-368"
+          }
+        },
+        "tax_total": {
+          "currency_code": "hotel-465",
+          "value": "mike-151"
+        },
+        "shipping": {
+          "amount": {
+            "currency_code": "yankee-787",
+            "value": "mike-789"
+          },
+          "tax": {
+            "name": "foxtrot-231",
+            "percent": "november-666",
+            "amount": {
+              "currency_code": "quebec-305",
+              "value": "india-105"
+            }
+          }
+        },
+        "custom": {
+          "label": "papa-970",
+          "amount": {
+            "currency_code": "echo-412",
+            "value": "kilo-108"
+          }
+        }
+      }
+    },
+    "due_amount": {
+      "currency_code": "foxtrot-629",
+      "value": "oscar-450"
+    },
+    "gratuity": {
+      "currency_code": "uniform-857",
+      "value": "juliet-804"
+    },
+    "items": [],
+    "payments": {
+      "paid_amount": {
+        "currency_code": "victor-999",
+        "value": "oscar-311"
+      },
+      "transactions": [
+        {
+          "payment_id": "zulu-468",
+          "type": "whiskey-202",
+          "method": "papa-748",
+          "payment_date": null,
+          "note": "tango-354",
+          "amount": {
+            "currency_code": "golf-915",
+            "value": "oscar-554"
+          }
+        },
+        {
+          "payment_id": "oscar-427",
+          "type": "alpha-714",
+          "method": "alpha-873",
+          "payment_date": null,
+          "note": "romeo-842",
+          "amount": {
+            "currency_code": "mike-801",
+            "value": "kilo-642"
+          }
+        }
+      ]
+    },
+    "refunds": {
+      "refund_amount": {
+        "currency_code": "xray-371",
+        "value": "juliet-338"
+      },
+      "transactions": [
+        {
+          "refund_id": "echo-617",
+          "type": "mike-895",
+          "method": "papa-238",
+          "refund_date": null,
+          "amount": {
+            "currency_code": "uniform-418",
+            "value": "bravo-769"
+          }
+        },
+        {
+          "refund_id": "zulu-693",
+          "type": "sierra-313",
+          "method": "kilo-666",
+          "refund_date": null,
+          "amount": {
+            "currency_code": "sierra-629",
+            "value": "bravo-905"
+          }
+        }
+      ]
+    },
+    "links": [
+      {
+        "href": "yankee-547",
+        "rel": "november-899",
+        "method": "november-505"
+      }
+    ]
+  },
+  {
+    "id": "xray-966-pk4",
+    "status": "november-587",
+    "detail": {
+      "invoice_number": "quebec-553",
+      "reference": "mike-984",
+      "invoice_date": null,
+      "currency_code": "golf-552",
+      "note": "xray-301",
+      "term": "xray-247",
+      "memo": "sierra-685",
+      "payment_term": {
+        "term_type": "delta-272",
+        "due_date": null
+      },
+      "metadata": {
+        "create_time": "2024-01-05T02:07:21Z",
+        "created_by": "whiskey-215",
+        "last_update_time": "2024-01-08T05:38:20Z",
+        "last_updated_by": "kilo-391",
+        "cancel_time": "2024-01-16T06:08:50Z",
+        "cancelled_by": "uniform-946",
+        "first_sent_time": "2024-01-29T09:49:27Z",
+        "last_sent_time": "2024-01-14T12:21:42Z",
+        "last_sent_by": "uniform-737",
+        "created_by_flow": "romeo-130",
+        "recipient_view_url": "foxtrot-229",
+        "invoicer_view_url": "lima-520"
+      }
+    },
+    "invoicer": {
+      "name": {
+        "prefix": "india-698",
+        "given_name": "quebec-460",
+        "surname": "echo-546",
+        "middle_name": "zulu-378",
+        "suffix": "sierra-442",
+        "alternate_full_name": "hotel-478",
+        "full_name": "tango-564"
+      },
+      "email_address": "echo-156",
+      "website": "india-604",
+      "tax_id": "juliet-719",
+      "logo_url": "india-731",
+      "additional_notes": "xray-934"
+    },
+    "primary_recipients": [
+      {
+        "billing_info": {
+          "name": {
+            "prefix": "whiskey-726",
+            "given_name": "zulu-904",
+            "surname": "papa-436",
+            "middle_name": "xray-229",
+            "suffix": "charlie-489",
+            "alternate_full_name": "romeo-377",
+            "full_name": "delta-144"
+          },
+          "email_address": "juliet-571",
+          "language": "victor-733",
+          "additional_info": "victor-529",
+          "address": {
+            "line1": "charlie-264",
+            "line2": "papa-208",
+            "city": "golf-175",
+            "state": "bravo-381",
+            "country_code": "golf-476",
+            "postal_code": "india-399"
+          }
+        },
+        "shipping_info": {
+          "name": {
+            "prefix": "uniform-515",
+            "given_name": "oscar-223",
+            "surname": "alpha-725",
+            "middle_name": "uniform-416",
+            "suffix": "echo-251",
+            "alternate_full_name": "quebec-856",
+            "full_name": "sierra-847"
+          },
+          "address": {
+            "line1": "kilo-731",
+            "line2": "mike-539",
+            "city": "delta-401",
+            "state": "lima-791",
+            "country_code": "romeo-318",
+            "postal_code": "charlie-237"
+          }
+        }
+      }
+    ],
+    "amount": {
+      "currency_code": "tango-279",
+      "value": "alpha-100",
+      "breakdown": {
+        "item_total": {
+          "currency_code": "xray-121",
+          "value": "november-733"
+        },
+        "discount": {
+          "invoice_discount": {
+            "percent": "golf-431",
+            "amount": {
+              "currency_code": "yankee-663",
+              "value": "oscar-541"
+            }
+          },
+          "item_discount": {
+            "currency_code": "golf-106",
+            "value": "quebec-624"
+          }
+        },
+        "tax_total": {
+          "currency_code": "juliet-106",
+          "value": "echo-664"
+        },
+        "shipping": {
+          "amount": {
+            "currency_code": "hotel-405",
+            "value": "alpha-500"
+          },
+          "tax": {
+            "name": "delta-416",
+            "percent": "delta-786",
+            "amount": {
+              "currency_code": "foxtrot-871",
+              "value": "whiskey-793"
+            }
+          }
+        },
+        "custom": {
+          "label": "lima-907",
+          "amount": {
+            "currency_code": "november-599",
+            "value": "xray-549"
+          }
+        }
+      }
+    },
+    "due_amount": {
+      "currency_code": "echo-184",
+      "value": "romeo-650"
+    },
+    "gratuity": {
+      "currency_code": "kilo-965",
+      "value": "bravo-851"
+    },
+    "items": [],
+    "payments": {
+      "paid_amount": {
+        "currency_code": "lima-756",
+        "value": "quebec-577"
+      },
+      "transactions": [
+        {
+          "payment_id": "echo-883",
+          "type": "juliet-951",
+          "method": "delta-629",
+          "payment_date": null,
+          "note": "romeo-406",
+          "amount": {
+            "currency_code": "mike-699",
+            "value": "romeo-690"
+          }
+        }
+      ]
+    },
+    "refunds": {
+      "refund_amount": {
+        "currency_code": "romeo-925",
+        "value": "echo-917"
+      },
+      "transactions": [
+        {
+          "refund_id": "india-749",
+          "type": "oscar-573",
+          "method": "echo-350",
+          "refund_date": null,
+          "amount": {
+            "currency_code": "mike-342",
+            "value": "alpha-250"
+          }
+        }
+      ]
+    },
+    "links": [
+      {
+        "href": "alpha-389",
+        "rel": "kilo-485",
+        "method": "mike-371"
+      },
+      {
+        "href": "sierra-143",
+        "rel": "india-124",
+        "method": "victor-273"
+      }
+    ]
+  }
+]

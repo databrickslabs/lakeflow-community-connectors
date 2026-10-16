@@ -1,0 +1,97 @@
+[
+  {
+    "currency": "lima-626-pk0",
+    "primary": false,
+    "total_balance": {
+      "currency_code": "alpha-159",
+      "value": "papa-330"
+    },
+    "available_balance": {
+      "currency_code": "alpha-465",
+      "value": "echo-535"
+    },
+    "withheld_balance": {
+      "currency_code": "kilo-672",
+      "value": "india-109"
+    },
+    "account_id": "alpha-277",
+    "as_of_time": "2024-01-03T12:31:21Z",
+    "last_refresh_time": "2024-01-02T16:37:08Z"
+  },
+  {
+    "currency": "bravo-39-pk1",
+    "primary": true,
+    "total_balance": {
+      "currency_code": "kilo-111",
+      "value": "juliet-359"
+    },
+    "available_balance": {
+      "currency_code": "romeo-428",
+      "value": "golf-270"
+    },
+    "withheld_balance": {
+      "currency_code": "sierra-859",
+      "value": "romeo-770"
+    },
+    "account_id": "kilo-339",
+    "as_of_time": "2024-01-07T23:14:09Z",
+    "last_refresh_time": "2024-01-21T07:28:06Z"
+  },
+  {
+    "currency": "tango-70-pk2",
+    "primary": false,
+    "total_balance": {
+      "currency_code": "mike-170",
+      "value": "foxtrot-415"
+    },
+    "available_balance": {
+      "currency_code": "tango-752",
+      "value": "bravo-206"
+    },
+    "withheld_balance": {
+      "currency_code": "victor-804",
+      "value": "echo-307"
+    },
+    "account_id": "bravo-359",
+    "as_of_time": "2024-01-02T00:02:38Z",
+    "last_refresh_time": "2024-01-07T02:31:08Z"
+  },
+  {
+    "currency": "hotel-55-pk3",
+    "primary": true,
+    "total_balance": {
+      "currency_code": "delta-537",
+      "value": "mike-848"
+    },
+    "available_balance": {
+      "currency_code": "bravo-524",
+      "value": "golf-967"
+    },
+    "withheld_balance": {
+      "currency_code": "india-628",
+      "value": "tango-232"
+    },
+    "account_id": "hotel-307",
+    "as_of_time": "2024-01-10T11:55:55Z",
+    "last_refresh_time": "2024-01-28T01:41:11Z"
+  },
+  {
+    "currency": "yankee-2-pk4",
+    "primary": false,
+    "total_balance": {
+      "currency_code": "november-607",
+      "value": "uniform-357"
+    },
+    "available_balance": {
+      "currency_code": "india-118",
+      "value": "alpha-267"
+    },
+    "withheld_balance": {
+      "currency_code": "delta-961",
+      "value": "alpha-382"
+    },
+    "account_id": "alpha-784",
+    "as_of_time": "2024-01-31T14:28:52Z",
+    "last_refresh_time": "2024-01-18T21:12:18Z"
+  }
+]

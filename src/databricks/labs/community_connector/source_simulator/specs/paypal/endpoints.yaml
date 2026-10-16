@@ -1,0 +1,99 @@
+# PayPal REST APIs (Transaction Search v1, Customer Disputes v1,
+# Invoicing v2, Catalog Products v1).
+#
+# Connector flow:
+#   * POST /v1/oauth2/token — client-credentials exchange, called lazily
+#     before the first data request. Stubbed by a custom handler.
+#   * transactions — sliding start_date/end_date window, page/page_size
+#     pagination. The connector caps every window at its init time, so
+#     future-dated records are synthesized to exercise that cap.
+#   * disputes — start_time filter + next_page_token in the `links` array;
+#     needs a custom handler because the token lives in the response body.
+#   * invoices — POST search with page/page_size query params; the JSON body
+#     (fields, creation_date_range) is accepted but not modeled.
+#   * products — page/page_size list; product_details fetches each product
+#     by id through a custom handler.
+#
+# The connector stops paginating when a page is shorter than page_size, so
+# total_pages is intentionally not emitted as a static wrapper extra.
+
+endpoints:
+  - path: /v1/oauth2/token
+    method: POST
+    handler: databricks.labs.community_connector.source_simulator.specs.paypal.handlers.api:oauth_token
+
+  - path: /v1/reporting/transactions
+    method: GET
+    corpus: transactions
+    response:
+      pagination_style: page_number
+      default_sort: "transaction_info.transaction_updated_date asc"
+      wrapper:
+        records_key: transaction_details
+        extras:
+          account_number: SIMULATEDACCT001
+          links: []
+    params:
+      start_date: {role: filter, field: transaction_info.transaction_updated_date, op: gte}
+      end_date:   {role: filter, field: transaction_info.transaction_updated_date, op: lte}
+      page:       {role: page}
+      page_size:  {role: per_page, default: 100, max: 500}
+      fields:     {role: ignore}
+    synthesize_future_records:
+      cursor_field: transaction_info.transaction_updated_date
+      count: 3
+
+  - path: /v1/reporting/balances
+    method: GET
+    corpus: balances
+    response:
+      pagination_style: none
+      wrapper:
+        records_key: balances
+        extras:
+          account_id: SIMULATEDACCT001
+          as_of_time: "2024-01-31T00:00:00Z"
+          last_refresh_time: "2024-01-31T00:00:00Z"
+    params:
+      currency_code: {role: filter, field: currency, op: eq}
+      as_of_time:    {role: ignore}
+
+  - path: /v1/customer/disputes
+    method: GET
+    corpus: disputes
+    handler: databricks.labs.community_connector.source_simulator.specs.paypal.handlers.api:disputes
+
+  - path: /v2/invoicing/search-invoices
+    method: POST
+    corpus: invoices
+    response:
+      pagination_style: page_number
+      default_sort: "id asc"
+      wrapper:
+        records_key: items
+        extras:
+          links: []
+    params:
+      page:           {role: page}
+      page_size:      {role: per_page, default: 10, max: 100}
+      total_required: {role: ignore}
+
+  - path: /v1/catalogs/products
+    method: GET
+    corpus: products
+    response:
+      pagination_style: page_number
+      default_sort: "id asc"
+      wrapper:
+        records_key: products
+        extras:
+          links: []
+    params:
+      page:           {role: page}
+      page_size:      {role: per_page, default: 10, max: 20}
+      total_required: {role: ignore}
+
+  - path: /v1/catalogs/products/{product_id}
+    method: GET
+    corpus: product_details
+    handler: databricks.labs.community_connector.source_simulator.specs.paypal.handlers.api:product_detail

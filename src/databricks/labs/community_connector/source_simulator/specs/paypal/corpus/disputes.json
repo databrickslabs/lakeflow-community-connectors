@@ -1,0 +1,104 @@
+[
+  {
+    "dispute_id": "romeo-99-pk0",
+    "create_time": "2024-01-10T08:08:00Z",
+    "update_time": "2024-01-01T00:00:00Z",
+    "reason": "kilo-778",
+    "status": "india-858",
+    "dispute_state": "bravo-924",
+    "dispute_life_cycle_stage": "alpha-305",
+    "dispute_channel": "xray-995",
+    "dispute_amount": {
+      "currency_code": "romeo-275",
+      "value": "charlie-430"
+    },
+    "buyer_response_due_date": "2024-01-29T04:27:11Z",
+    "seller_response_due_date": "2024-01-30T23:45:02Z",
+    "links": []
+  },
+  {
+    "dispute_id": "whiskey--pk1",
+    "create_time": "2024-01-08T20:38:22Z",
+    "update_time": "2024-01-01T01:00:00Z",
+    "reason": "tango-727",
+    "status": "victor-649",
+    "dispute_state": "juliet-621",
+    "dispute_life_cycle_stage": "papa-693",
+    "dispute_channel": "mike-419",
+    "dispute_amount": {
+      "currency_code": "november-596",
+      "value": "foxtrot-132"
+    },
+    "buyer_response_due_date": "2024-01-13T09:52:49Z",
+    "seller_response_due_date": "2024-01-24T09:15:42Z",
+    "links": [
+      {
+        "href": "hotel-169",
+        "rel": "zulu-691",
+        "method": "hotel-424"
+      }
+    ]
+  },
+  {
+    "dispute_id": "juliet-2-pk2",
+    "create_time": "2024-01-31T04:10:53Z",
+    "update_time": "2024-01-01T02:00:00Z",
+    "reason": "zulu-467",
+    "status": "tango-568",
+    "dispute_state": "zulu-313",
+    "dispute_life_cycle_stage": "kilo-570",
+    "dispute_channel": "xray-569",
+    "dispute_amount": {
+      "currency_code": "papa-426",
+      "value": "hotel-508"
+    },
+    "buyer_response_due_date": "2024-01-22T22:41:59Z",
+    "seller_response_due_date": "2024-01-12T19:17:47Z",
+    "links": []
+  },
+  {
+    "dispute_id": "xray-466-pk3",
+    "create_time": "2024-01-26T09:00:10Z",
+    "update_time": "2024-01-01T03:00:00Z",
+    "reason": "tango-539",
+    "status": "xray-426",
+    "dispute_state": "whiskey-376",
+    "dispute_life_cycle_stage": "india-950",
+    "dispute_channel": "foxtrot-386",
+    "dispute_amount": {
+      "currency_code": "uniform-118",
+      "value": "echo-780"
+    },
+    "buyer_response_due_date": "2024-01-26T21:03:52Z",
+    "seller_response_due_date": "2024-01-31T02:18:16Z",
+    "links": []
+  },
+  {
+    "dispute_id": "bravo-70-pk4",
+    "create_time": "2024-01-03T18:54:23Z",
+    "update_time": "2024-01-01T04:00:00Z",
+    "reason": "whiskey-520",
+    "status": "golf-321",
+    "dispute_state": "whiskey-454",
+    "dispute_life_cycle_stage": "november-944",
+    "dispute_channel": "papa-574",
+    "dispute_amount": {
+      "currency_code": "charlie-455",
+      "value": "lima-737"
+    },
+    "buyer_response_due_date": "2024-01-11T17:40:17Z",
+    "seller_response_due_date": "2024-01-21T00:03:31Z",
+    "links": [
+      {
+        "href": "foxtrot-310",
+        "rel": "charlie-286",
+        "method": "mike-102"
+      },
+      {
+        "href": "kilo-946",
+        "rel": "lima-977",
+        "method": "sierra-913"
+      }
+    ]
+  }
+]
