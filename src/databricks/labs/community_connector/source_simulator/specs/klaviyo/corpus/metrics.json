@@ -1,0 +1,137 @@
+[
+  {
+    "type": "metric",
+    "id": "RH4NzG",
+    "attributes": {
+      "name": "Received SMS",
+      "created": "2025-12-28T21:51:50+00:00",
+      "updated": "2025-12-28T21:51:50+00:00",
+      "integration": {
+        "object": "integration",
+        "id": "0rG4eQ",
+        "key": "klaviyo",
+        "name": "Klaviyo",
+        "category": "Internal"
+      }
+    },
+    "relationships": {
+      "flow-triggers": {
+        "links": {
+          "self": "https://a.klaviyo.com/api/metrics/RH4NzG/relationships/flow-triggers/",
+          "related": "https://a.klaviyo.com/api/metrics/RH4NzG/flow-triggers/"
+        }
+      }
+    },
+    "links": {
+      "self": "https://a.klaviyo.com/api/metrics/RH4NzG/"
+    }
+  },
+  {
+    "type": "metric",
+    "id": "RMG4V6",
+    "attributes": {
+      "name": "Clicked Email",
+      "created": "2025-12-28T21:51:46+00:00",
+      "updated": "2025-12-28T21:51:46+00:00",
+      "integration": {
+        "object": "integration",
+        "id": "0rG4eQ",
+        "key": "klaviyo",
+        "name": "Klaviyo",
+        "category": "Internal"
+      }
+    },
+    "relationships": {
+      "flow-triggers": {
+        "links": {
+          "self": "https://a.klaviyo.com/api/metrics/RMG4V6/relationships/flow-triggers/",
+          "related": "https://a.klaviyo.com/api/metrics/RMG4V6/flow-triggers/"
+        }
+      }
+    },
+    "links": {
+      "self": "https://a.klaviyo.com/api/metrics/RMG4V6/"
+    }
+  },
+  {
+    "type": "metric",
+    "id": "RaF2it",
+    "attributes": {
+      "name": "Dropped Email",
+      "created": "2025-12-28T21:51:46+00:00",
+      "updated": "2025-12-28T21:51:46+00:00",
+      "integration": {
+        "object": "integration",
+        "id": "0rG4eQ",
+        "key": "klaviyo",
+        "name": "Klaviyo",
+        "category": "Internal"
+      }
+    },
+    "relationships": {
+      "flow-triggers": {
+        "links": {
+          "self": "https://a.klaviyo.com/api/metrics/RaF2it/relationships/flow-triggers/",
+          "related": "https://a.klaviyo.com/api/metrics/RaF2it/flow-triggers/"
+        }
+      }
+    },
+    "links": {
+      "self": "https://a.klaviyo.com/api/metrics/RaF2it/"
+    }
+  },
+  {
+    "type": "metric",
+    "id": "SStDty",
+    "attributes": {
+      "name": "Subscribed to SMS Marketing",
+      "created": "2025-12-28T21:51:50+00:00",
+      "updated": "2025-12-28T21:51:50+00:00",
+      "integration": {
+        "object": "integration",
+        "id": "0rG4eQ",
+        "key": "klaviyo",
+        "name": "Klaviyo",
+        "category": "Internal"
+      }
+    },
+    "relationships": {
+      "flow-triggers": {
+        "links": {
+          "self": "https://a.klaviyo.com/api/metrics/SStDty/relationships/flow-triggers/",
+          "related": "https://a.klaviyo.com/api/metrics/SStDty/flow-triggers/"
+        }
+      }
+    },
+    "links": {
+      "self": "https://a.klaviyo.com/api/metrics/SStDty/"
+    }
+  },
+  {
+    "type": "metric",
+    "id": "SfsAQV",
+    "attributes": {
+      "name": "Relayed SMS",
+      "created": "2025-12-28T21:51:50+00:00",
+      "updated": "2025-12-28T21:51:50+00:00",
+      "integration": {
+        "object": "integration",
+        "id": "0rG4eQ",
+        "key": "klaviyo",
+        "name": "Klaviyo",
+        "category": "Internal"
+      }
+    },
+    "relationships": {
+      "flow-triggers": {
+        "links": {
+          "self": "https://a.klaviyo.com/api/metrics/SfsAQV/relationships/flow-triggers/",
+          "related": "https://a.klaviyo.com/api/metrics/SfsAQV/flow-triggers/"
+        }
+      }
+    },
+    "links": {
+      "self": "https://a.klaviyo.com/api/metrics/SfsAQV/"
+    }
+  }
+]
