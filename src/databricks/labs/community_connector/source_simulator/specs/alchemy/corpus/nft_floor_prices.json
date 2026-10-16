@@ -1,0 +1,14 @@
+{
+  "openSea": {
+    "floorPrice": 12.34,
+    "priceCurrency": "ETH",
+    "collectionUrl": "https://opensea.io/collection/example",
+    "retrievedAt": "2024-01-01T00:00:00Z"
+  },
+  "looksRare": {
+    "floorPrice": 11.78,
+    "priceCurrency": "ETH",
+    "collectionUrl": "https://looksrare.org/collections/0xexample",
+    "retrievedAt": "2024-01-01T00:00:00Z"
+  }
+}
