@@ -1,0 +1,81 @@
+[
+  {
+    "name": "romeo-144",
+    "slug": "bravo-31-pk0",
+    "description": "quebec-772",
+    "types": [
+      "golf-762"
+    ],
+    "hierarchical": false,
+    "rest_base": "papa-463"
+  },
+  {
+    "name": "lima-408",
+    "slug": "charlie--pk1",
+    "description": "papa-864",
+    "types": [],
+    "hierarchical": false,
+    "rest_base": "india-836"
+  },
+  {
+    "name": "echo-412",
+    "slug": "echo-291-pk2",
+    "description": "juliet-587",
+    "types": [],
+    "hierarchical": true,
+    "rest_base": "yankee-720"
+  },
+  {
+    "name": "sierra-697",
+    "slug": "sierra-4-pk3",
+    "description": "november-774",
+    "types": [
+      "romeo-406"
+    ],
+    "hierarchical": true,
+    "rest_base": "hotel-171"
+  },
+  {
+    "name": "hotel-119",
+    "slug": "juliet-5-pk4",
+    "description": "delta-248",
+    "types": [
+      "foxtrot-482",
+      "sierra-769"
+    ],
+    "hierarchical": true,
+    "rest_base": "zulu-136"
+  },
+  {
+    "name": "papa-791",
+    "slug": "kilo-165-pk5",
+    "description": "hotel-399",
+    "types": [
+      "quebec-173",
+      "delta-858"
+    ],
+    "hierarchical": true,
+    "rest_base": "sierra-237"
+  },
+  {
+    "name": "oscar-572",
+    "slug": "charlie--pk6",
+    "description": "oscar-652",
+    "types": [
+      "uniform-466",
+      "juliet-210"
+    ],
+    "hierarchical": false,
+    "rest_base": "uniform-173"
+  },
+  {
+    "name": "quebec-411",
+    "slug": "juliet-6-pk7",
+    "description": "charlie-607",
+    "types": [
+      "mike-212"
+    ],
+    "hierarchical": false,
+    "rest_base": "papa-866"
+  }
+]

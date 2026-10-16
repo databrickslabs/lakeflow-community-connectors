@@ -1,0 +1,9 @@
+{
+  "name": "Simulator Site",
+  "description": "WordPress REST API index served by the connector simulator.",
+  "url": "https://simulator.example.com",
+  "home": "https://simulator.example.com",
+  "gmt_offset": 0,
+  "timezone_string": "",
+  "namespaces": ["wp/v2"]
+}

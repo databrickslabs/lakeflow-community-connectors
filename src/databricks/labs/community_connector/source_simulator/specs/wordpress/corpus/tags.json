@@ -1,0 +1,74 @@
+[
+  {
+    "id": 1000,
+    "count": 14319,
+    "description": "zulu-629",
+    "link": "echo-230",
+    "name": "xray-953",
+    "slug": "hotel-547",
+    "taxonomy": "delta-749"
+  },
+  {
+    "id": 1001,
+    "count": 54523,
+    "description": "bravo-171",
+    "link": "hotel-216",
+    "name": "romeo-680",
+    "slug": "uniform-101",
+    "taxonomy": "whiskey-902"
+  },
+  {
+    "id": 1002,
+    "count": 61330,
+    "description": "zulu-230",
+    "link": "whiskey-246",
+    "name": "lima-953",
+    "slug": "tango-492",
+    "taxonomy": "bravo-632"
+  },
+  {
+    "id": 1003,
+    "count": 2111,
+    "description": "victor-337",
+    "link": "mike-786",
+    "name": "golf-650",
+    "slug": "echo-732",
+    "taxonomy": "bravo-866"
+  },
+  {
+    "id": 1004,
+    "count": 12951,
+    "description": "lima-287",
+    "link": "hotel-142",
+    "name": "november-890",
+    "slug": "xray-156",
+    "taxonomy": "whiskey-914"
+  },
+  {
+    "id": 1005,
+    "count": 27516,
+    "description": "kilo-961",
+    "link": "foxtrot-563",
+    "name": "juliet-915",
+    "slug": "uniform-962",
+    "taxonomy": "india-690"
+  },
+  {
+    "id": 1006,
+    "count": 41495,
+    "description": "november-493",
+    "link": "november-163",
+    "name": "yankee-458",
+    "slug": "foxtrot-823",
+    "taxonomy": "lima-397"
+  },
+  {
+    "id": 1007,
+    "count": 60494,
+    "description": "november-187",
+    "link": "victor-754",
+    "name": "november-409",
+    "slug": "tango-119",
+    "taxonomy": "papa-949"
+  }
+]
