@@ -1,0 +1,57 @@
+{
+  "total_items": 2,
+  "total_pages": 1,
+  "item_per_page": 2,
+  "pages": [
+    {
+      "page_index": 1,
+      "item_per_page": 2,
+      "total_items": 2,
+      "total_pages": 1,
+      "items": [
+        {
+          "id": "a1b2c3d4-e5f6-7890-abcd-111111111111",
+          "date": "2025-02-10",
+          "start_time": "09:00",
+          "end_time": "17:30",
+          "status": "approved",
+          "units": 7.5,
+          "unit_type": "hours",
+          "break_units": 0.5,
+          "breaks": [
+            {"start_time": "12:30", "end_time": "13:00"}
+          ],
+          "reason": null,
+          "comment": "Regular work day",
+          "time": 27000000,
+          "cost_centre": {"id": "cc-1", "name": "IT"},
+          "work_site_id": "ws-001",
+          "work_site_name": "Sydney HQ",
+          "position_id": "pos-001",
+          "position_name": "Developer"
+        },
+        {
+          "id": "b2c3d4e5-f6a7-8901-bcde-222222222222",
+          "date": "2025-02-11",
+          "start_time": "08:30",
+          "end_time": "16:00",
+          "status": "pending",
+          "units": 6.5,
+          "unit_type": "hours",
+          "break_units": 1.0,
+          "breaks": [
+            {"start_time": "12:00", "end_time": "13:00"}
+          ],
+          "reason": null,
+          "comment": null,
+          "time": 23400000,
+          "cost_centre": {"id": "cc-2", "name": "Engineering"},
+          "work_site_id": "ws-002",
+          "work_site_name": "Melbourne Office",
+          "position_id": "pos-002",
+          "position_name": "Senior Developer"
+        }
+      ]
+    }
+  ]
+}
