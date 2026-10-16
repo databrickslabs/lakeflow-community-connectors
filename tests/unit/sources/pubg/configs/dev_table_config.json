@@ -1,0 +1,30 @@
+{
+  "samples": {
+    "created_at_start": ""
+  },
+  "leaderboards": {
+    "game_modes": "squad"
+  },
+  "players": {
+    "player_names": "__SEED_FROM_SAMPLES__"
+  },
+  "matches": {
+    "match_ids": "__SEED_FROM_SAMPLES__"
+  },
+  "season_stats": {
+    "player_ids": "__SEED_FROM_SAMPLES__"
+  },
+  "lifetime_stats": {
+    "player_ids": "__SEED_FROM_SAMPLES__"
+  },
+  "mastery": {
+    "player_ids": "__SEED_FROM_SAMPLES__",
+    "mastery_types": "weapon,survival"
+  },
+  "clans": {
+    "clan_ids": "__SEED_FROM_PLAYERS__"
+  },
+  "telemetry": {
+    "match_ids": "__SEED_FROM_SAMPLES__"
+  }
+}
