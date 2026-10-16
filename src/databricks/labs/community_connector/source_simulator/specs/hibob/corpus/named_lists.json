@@ -1,0 +1,82 @@
+[
+  {
+    "list_name": "department",
+    "item_id": "900301",
+    "value": "Engineering",
+    "name": "Engineering",
+    "archived": false,
+    "parent_id": null
+  },
+  {
+    "list_name": "department",
+    "item_id": "900302",
+    "value": "Sales",
+    "name": "Sales",
+    "archived": false,
+    "parent_id": null
+  },
+  {
+    "list_name": "department",
+    "item_id": "900303",
+    "value": "Finance",
+    "name": "Finance",
+    "archived": false,
+    "parent_id": null
+  },
+  {
+    "list_name": "site",
+    "item_id": "900311",
+    "value": "Test Site A",
+    "name": "Test Site A",
+    "archived": false,
+    "parent_id": null
+  },
+  {
+    "list_name": "site",
+    "item_id": "900312",
+    "value": "Test Site B",
+    "name": "Test Site B",
+    "archived": false,
+    "parent_id": null
+  },
+  {
+    "list_name": "custom.field_9000000000010",
+    "item_id": "Option A",
+    "value": "Option A",
+    "name": "Option A",
+    "archived": false,
+    "parent_id": null
+  },
+  {
+    "list_name": "custom.field_9000000000010",
+    "item_id": "Option B",
+    "value": "Option B",
+    "name": "Option B",
+    "archived": false,
+    "parent_id": null
+  },
+  {
+    "list_name": "department",
+    "item_id": "900304",
+    "value": "Backend",
+    "name": "Backend",
+    "archived": false,
+    "parent_id": "900301"
+  },
+  {
+    "list_name": "department",
+    "item_id": "900305",
+    "value": "Platform",
+    "name": "Platform",
+    "archived": false,
+    "parent_id": "900304"
+  },
+  {
+    "list_name": "site",
+    "item_id": "900313",
+    "value": "Old Test Site",
+    "name": "Old Test Site",
+    "archived": true,
+    "parent_id": null
+  }
+]

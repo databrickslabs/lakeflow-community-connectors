@@ -1,0 +1,256 @@
+[
+  {
+    "employeeId": "9000000000000000001",
+    "id": 700003,
+    "effectiveDate": "2024-01-01",
+    "endEffectiveDate": "2024-03-28",
+    "isCurrent": false,
+    "canBeDeleted": true,
+    "change": {
+      "reason": null,
+      "changedBy": "Test Admin",
+      "changedById": "9000000000000000099"
+    },
+    "creationDate": "2024-01-01",
+    "modificationDate": null,
+    "activeEffectiveDate": null,
+    "status": "Employed",
+    "employeeStatus": "Active",
+    "reasonType": null,
+    "leaveReason": null,
+    "customColumns": {}
+  },
+  {
+    "employeeId": "9000000000000000001",
+    "id": 700006,
+    "effectiveDate": "2024-04-01",
+    "endEffectiveDate": null,
+    "isCurrent": true,
+    "canBeDeleted": false,
+    "change": {
+      "reason": null,
+      "changedBy": "Test Admin",
+      "changedById": "9000000000000000099"
+    },
+    "creationDate": "2024-04-01",
+    "modificationDate": "2024-05-01",
+    "activeEffectiveDate": null,
+    "status": "Employed",
+    "employeeStatus": "Active",
+    "reasonType": "Test reason type",
+    "leaveReason": "Test leave reason",
+    "customColumns": {}
+  },
+  {
+    "employeeId": "9000000000000000002",
+    "id": 700009,
+    "effectiveDate": "2024-01-02",
+    "endEffectiveDate": "2024-03-28",
+    "isCurrent": false,
+    "canBeDeleted": true,
+    "change": {
+      "reason": null,
+      "changedBy": "Test Admin",
+      "changedById": "9000000000000000099"
+    },
+    "creationDate": "2024-01-02",
+    "modificationDate": null,
+    "activeEffectiveDate": null,
+    "status": "Employed",
+    "employeeStatus": "Active",
+    "reasonType": null,
+    "leaveReason": null,
+    "customColumns": {}
+  },
+  {
+    "employeeId": "9000000000000000002",
+    "id": 700012,
+    "effectiveDate": "2024-04-02",
+    "endEffectiveDate": null,
+    "isCurrent": true,
+    "canBeDeleted": false,
+    "change": {
+      "reason": null,
+      "changedBy": "Test Admin",
+      "changedById": "9000000000000000099"
+    },
+    "creationDate": "2024-04-02",
+    "modificationDate": "2024-05-01",
+    "activeEffectiveDate": null,
+    "status": "Employed",
+    "employeeStatus": "Active",
+    "reasonType": "Test reason type",
+    "leaveReason": "Test leave reason",
+    "customColumns": {}
+  },
+  {
+    "employeeId": "9000000000000000003",
+    "id": 700015,
+    "effectiveDate": "2024-01-03",
+    "endEffectiveDate": "2024-03-28",
+    "isCurrent": false,
+    "canBeDeleted": true,
+    "change": {
+      "reason": null,
+      "changedBy": "Test Admin",
+      "changedById": "9000000000000000099"
+    },
+    "creationDate": "2024-01-03",
+    "modificationDate": null,
+    "activeEffectiveDate": null,
+    "status": "Employed",
+    "employeeStatus": "Active",
+    "reasonType": null,
+    "leaveReason": null,
+    "customColumns": {}
+  },
+  {
+    "employeeId": "9000000000000000003",
+    "id": 700018,
+    "effectiveDate": "2024-04-03",
+    "endEffectiveDate": null,
+    "isCurrent": true,
+    "canBeDeleted": false,
+    "change": {
+      "reason": null,
+      "changedBy": "Test Admin",
+      "changedById": "9000000000000000099"
+    },
+    "creationDate": "2024-04-03",
+    "modificationDate": "2024-05-01",
+    "activeEffectiveDate": null,
+    "status": "Employed",
+    "employeeStatus": "Active",
+    "reasonType": "Test reason type",
+    "leaveReason": "Test leave reason",
+    "customColumns": {}
+  },
+  {
+    "employeeId": "9000000000000000004",
+    "id": 700021,
+    "effectiveDate": "2024-01-04",
+    "endEffectiveDate": "2024-03-28",
+    "isCurrent": false,
+    "canBeDeleted": true,
+    "change": {
+      "reason": null,
+      "changedBy": "Test Admin",
+      "changedById": "9000000000000000099"
+    },
+    "creationDate": "2024-01-04",
+    "modificationDate": null,
+    "activeEffectiveDate": null,
+    "status": "Employed",
+    "employeeStatus": "Active",
+    "reasonType": null,
+    "leaveReason": null,
+    "customColumns": {}
+  },
+  {
+    "employeeId": "9000000000000000004",
+    "id": 700024,
+    "effectiveDate": "2024-04-04",
+    "endEffectiveDate": null,
+    "isCurrent": true,
+    "canBeDeleted": false,
+    "change": {
+      "reason": null,
+      "changedBy": "Test Admin",
+      "changedById": "9000000000000000099"
+    },
+    "creationDate": "2024-04-04",
+    "modificationDate": "2024-05-01",
+    "activeEffectiveDate": null,
+    "status": "Employed",
+    "employeeStatus": "Active",
+    "reasonType": "Test reason type",
+    "leaveReason": "Test leave reason",
+    "customColumns": {}
+  },
+  {
+    "employeeId": "9000000000000000005",
+    "id": 700027,
+    "effectiveDate": "2024-01-05",
+    "endEffectiveDate": "2024-03-28",
+    "isCurrent": false,
+    "canBeDeleted": true,
+    "change": {
+      "reason": null,
+      "changedBy": "Test Admin",
+      "changedById": "9000000000000000099"
+    },
+    "creationDate": "2024-01-05",
+    "modificationDate": null,
+    "activeEffectiveDate": null,
+    "status": "Employed",
+    "employeeStatus": "Active",
+    "reasonType": null,
+    "leaveReason": null,
+    "customColumns": {}
+  },
+  {
+    "employeeId": "9000000000000000005",
+    "id": 700030,
+    "effectiveDate": "2024-04-05",
+    "endEffectiveDate": null,
+    "isCurrent": true,
+    "canBeDeleted": false,
+    "change": {
+      "reason": null,
+      "changedBy": "Test Admin",
+      "changedById": "9000000000000000099"
+    },
+    "creationDate": "2024-04-05",
+    "modificationDate": "2024-05-01",
+    "activeEffectiveDate": null,
+    "status": "Employed",
+    "employeeStatus": "Active",
+    "reasonType": "Test reason type",
+    "leaveReason": "Test leave reason",
+    "customColumns": {}
+  },
+  {
+    "employeeId": "9000000000000000006",
+    "id": 700033,
+    "effectiveDate": "2024-01-06",
+    "endEffectiveDate": "2024-03-28",
+    "isCurrent": false,
+    "canBeDeleted": true,
+    "change": {
+      "reason": null,
+      "changedBy": "Test Admin",
+      "changedById": "9000000000000000099"
+    },
+    "creationDate": "2024-01-06",
+    "modificationDate": null,
+    "activeEffectiveDate": null,
+    "status": "Employed",
+    "employeeStatus": "Active",
+    "reasonType": null,
+    "leaveReason": null,
+    "customColumns": {}
+  },
+  {
+    "employeeId": "9000000000000000006",
+    "id": 700036,
+    "effectiveDate": "2024-04-06",
+    "endEffectiveDate": null,
+    "isCurrent": true,
+    "canBeDeleted": false,
+    "change": {
+      "reason": null,
+      "changedBy": "Test Admin",
+      "changedById": "9000000000000000099"
+    },
+    "creationDate": "2024-04-06",
+    "modificationDate": "2024-05-01",
+    "activeEffectiveDate": "2024-04-06",
+    "status": "Terminated",
+    "employeeStatus": "Active",
+    "reasonType": "Test reason type",
+    "leaveReason": "Test leave reason",
+    "customColumns": {
+      "column_9000000000004": "Test value"
+    }
+  }
+]

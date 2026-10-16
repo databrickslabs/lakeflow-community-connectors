@@ -1,0 +1,66 @@
+[
+  {
+    "id": "root.id",
+    "categoryId": "root",
+    "categoryDisplayName": "Root",
+    "category": "root",
+    "name": "ID",
+    "description": null,
+    "jsonPath": "root.id",
+    "type": "text",
+    "typeData": {},
+    "historical": false
+  },
+  {
+    "id": "work.department",
+    "categoryId": "work",
+    "categoryDisplayName": "Work",
+    "category": "work",
+    "name": "Department",
+    "description": "Test department field",
+    "jsonPath": "work.department",
+    "type": "list",
+    "typeData": {
+      "listId": "department"
+    },
+    "historical": true
+  },
+  {
+    "id": "work.startDate",
+    "categoryId": "work",
+    "categoryDisplayName": "Work",
+    "category": "work",
+    "name": "Start date",
+    "description": null,
+    "jsonPath": "work.startDate",
+    "type": "date",
+    "typeData": {},
+    "historical": false
+  },
+  {
+    "id": "custom.field_9000000000010",
+    "categoryId": "custom",
+    "categoryDisplayName": "Test Custom",
+    "category": "custom",
+    "name": "Test custom list",
+    "description": null,
+    "jsonPath": "custom.field_9000000000010",
+    "type": "list",
+    "typeData": {
+      "listId": "custom.field_9000000000010"
+    },
+    "historical": false
+  },
+  {
+    "id": "internal.status",
+    "categoryId": "internal",
+    "categoryDisplayName": "Internal",
+    "category": "internal",
+    "name": "Status",
+    "description": null,
+    "jsonPath": "internal.status",
+    "type": "text",
+    "typeData": {},
+    "historical": false
+  }
+]
