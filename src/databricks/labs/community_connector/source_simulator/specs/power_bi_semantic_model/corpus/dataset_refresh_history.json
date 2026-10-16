@@ -1,0 +1,150 @@
+[
+  {
+    "workspace_id": "kilo-400",
+    "dataset_id": "uniform--pk0",
+    "requestId": "november-pk0",
+    "refreshType": "yankee-445",
+    "status": "uniform-650",
+    "startTime": "2024-01-01T00:00:00Z",
+    "endTime": "2024-01-05T06:07:49Z",
+    "serviceExceptionJson": "zulu-829",
+    "refreshAttempts": [
+      {
+        "attemptId": 64259,
+        "startTime": "2024-01-05T10:08:59Z",
+        "endTime": "2024-01-12T03:33:52Z",
+        "type": "victor-208",
+        "serviceExceptionJson": "charlie-223",
+        "executionMetrics": "victor-551"
+      },
+      {
+        "attemptId": 31885,
+        "startTime": "2024-01-31T18:00:59Z",
+        "endTime": "2024-01-03T02:03:02Z",
+        "type": "xray-568",
+        "serviceExceptionJson": "zulu-202",
+        "executionMetrics": "oscar-601"
+      }
+    ]
+  },
+  {
+    "workspace_id": "uniform-864",
+    "dataset_id": "delta-94-pk1",
+    "requestId": "whiskey--pk1",
+    "refreshType": "india-408",
+    "status": "romeo-152",
+    "startTime": "2024-01-01T01:00:00Z",
+    "endTime": "2024-01-11T19:54:29Z",
+    "serviceExceptionJson": "bravo-150",
+    "refreshAttempts": []
+  },
+  {
+    "workspace_id": "romeo-663",
+    "dataset_id": "xray-431-pk2",
+    "requestId": "alpha-64-pk2",
+    "refreshType": "mike-675",
+    "status": "papa-555",
+    "startTime": "2024-01-01T02:00:00Z",
+    "endTime": "2024-01-20T20:38:18Z",
+    "serviceExceptionJson": "sierra-304",
+    "refreshAttempts": [
+      {
+        "attemptId": 78008,
+        "startTime": "2024-01-26T19:07:46Z",
+        "endTime": "2024-01-16T09:44:27Z",
+        "type": "papa-212",
+        "serviceExceptionJson": "whiskey-218",
+        "executionMetrics": "foxtrot-444"
+      },
+      {
+        "attemptId": 48135,
+        "startTime": "2024-01-04T16:02:33Z",
+        "endTime": "2024-01-09T06:16:42Z",
+        "type": "hotel-258",
+        "serviceExceptionJson": "zulu-782",
+        "executionMetrics": "mike-235"
+      }
+    ]
+  },
+  {
+    "workspace_id": "lima-747",
+    "dataset_id": "juliet-4-pk3",
+    "requestId": "india-45-pk3",
+    "refreshType": "foxtrot-215",
+    "status": "kilo-630",
+    "startTime": "2024-01-01T03:00:00Z",
+    "endTime": "2024-01-31T04:55:09Z",
+    "serviceExceptionJson": "mike-238",
+    "refreshAttempts": []
+  },
+  {
+    "workspace_id": "foxtrot-578",
+    "dataset_id": "hotel-82-pk4",
+    "requestId": "echo-754-pk4",
+    "refreshType": "hotel-114",
+    "status": "oscar-852",
+    "startTime": "2024-01-01T04:00:00Z",
+    "endTime": "2024-01-07T19:46:12Z",
+    "serviceExceptionJson": "xray-946",
+    "refreshAttempts": []
+  },
+  {
+    "workspace_id": "oscar-828",
+    "dataset_id": "hotel-67-pk5",
+    "requestId": "romeo-90-pk5",
+    "refreshType": "juliet-300",
+    "status": "romeo-738",
+    "startTime": "2024-01-01T05:00:00Z",
+    "endTime": "2024-01-20T02:42:25Z",
+    "serviceExceptionJson": "echo-638",
+    "refreshAttempts": []
+  },
+  {
+    "workspace_id": "echo-473",
+    "dataset_id": "bravo-83-pk6",
+    "requestId": "india-29-pk6",
+    "refreshType": "lima-806",
+    "status": "yankee-914",
+    "startTime": "2024-01-01T06:00:00Z",
+    "endTime": "2024-01-16T20:29:13Z",
+    "serviceExceptionJson": "hotel-673",
+    "refreshAttempts": [
+      {
+        "attemptId": 38051,
+        "startTime": "2024-01-10T08:41:50Z",
+        "endTime": "2024-01-15T03:14:28Z",
+        "type": "alpha-541",
+        "serviceExceptionJson": "uniform-100",
+        "executionMetrics": "lima-193"
+      }
+    ]
+  },
+  {
+    "workspace_id": "papa-604",
+    "dataset_id": "papa-331-pk7",
+    "requestId": "tango-52-pk7",
+    "refreshType": "november-723",
+    "status": "alpha-418",
+    "startTime": "2024-01-01T07:00:00Z",
+    "endTime": "2024-01-14T18:14:06Z",
+    "serviceExceptionJson": "yankee-203",
+    "refreshAttempts": [
+      {
+        "attemptId": 26203,
+        "startTime": "2024-01-20T14:14:49Z",
+        "endTime": "2024-01-10T08:27:27Z",
+        "type": "juliet-799",
+        "serviceExceptionJson": "golf-755",
+        "executionMetrics": "tango-901"
+      },
+      {
+        "attemptId": 51089,
+        "startTime": "2024-01-06T17:16:53Z",
+        "endTime": "2024-01-15T13:05:03Z",
+        "type": "bravo-363",
+        "serviceExceptionJson": "oscar-577",
+        "executionMetrics": "bravo-199"
+      }
+    ]
+  }
+]

@@ -1,0 +1,252 @@
+[
+  {
+    "id": "romeo-78-pk0",
+    "name": "india-198",
+    "workspaceId": "hotel-826",
+    "description": "zulu-308",
+    "configuredBy": "whiskey-849",
+    "isRefreshable": false,
+    "isEffectiveIdentityRequired": false,
+    "isEffectiveIdentityRolesRequired": true,
+    "isOnPremGatewayRequired": false,
+    "isInPlaceSharingEnabled": false,
+    "addRowsAPIEnabled": true,
+    "targetStorageMode": "whiskey-601",
+    "ContentProviderType": "mike-967",
+    "createdDate": "2024-01-26T20:32:33Z",
+    "webUrl": "mike-271",
+    "qnaEmbedURL": "foxtrot-547",
+    "upstreamDataflows": [
+      {
+        "groupId": "bravo-541",
+        "targetDataflowId": "kilo-441"
+      },
+      {
+        "groupId": "romeo-702",
+        "targetDataflowId": "foxtrot-988"
+      }
+    ],
+    "queryScaleOutSettings": {
+      "autoSyncReadOnlyReplicas": false,
+      "maxReadOnlyReplicas": 71971
+    },
+    "encryption": {
+      "encryptionStatus": "delta-513"
+    }
+  },
+  {
+    "id": "romeo-66-pk1",
+    "name": "zulu-578",
+    "workspaceId": "papa-901",
+    "description": "mike-787",
+    "configuredBy": "uniform-851",
+    "isRefreshable": true,
+    "isEffectiveIdentityRequired": true,
+    "isEffectiveIdentityRolesRequired": false,
+    "isOnPremGatewayRequired": false,
+    "isInPlaceSharingEnabled": false,
+    "addRowsAPIEnabled": true,
+    "targetStorageMode": "echo-863",
+    "ContentProviderType": "india-865",
+    "createdDate": "2024-01-21T23:02:51Z",
+    "webUrl": "tango-312",
+    "qnaEmbedURL": "romeo-108",
+    "upstreamDataflows": [
+      {
+        "groupId": "papa-512",
+        "targetDataflowId": "charlie-878"
+      }
+    ],
+    "queryScaleOutSettings": {
+      "autoSyncReadOnlyReplicas": false,
+      "maxReadOnlyReplicas": 16711
+    },
+    "encryption": {
+      "encryptionStatus": "quebec-308"
+    }
+  },
+  {
+    "id": "foxtrot--pk2",
+    "name": "lima-119",
+    "workspaceId": "xray-833",
+    "description": "hotel-589",
+    "configuredBy": "tango-964",
+    "isRefreshable": true,
+    "isEffectiveIdentityRequired": false,
+    "isEffectiveIdentityRolesRequired": false,
+    "isOnPremGatewayRequired": false,
+    "isInPlaceSharingEnabled": true,
+    "addRowsAPIEnabled": true,
+    "targetStorageMode": "romeo-595",
+    "ContentProviderType": "hotel-624",
+    "createdDate": "2024-01-22T05:47:12Z",
+    "webUrl": "echo-275",
+    "qnaEmbedURL": "foxtrot-923",
+    "upstreamDataflows": [
+      {
+        "groupId": "kilo-517",
+        "targetDataflowId": "november-229"
+      },
+      {
+        "groupId": "papa-602",
+        "targetDataflowId": "echo-705"
+      }
+    ],
+    "queryScaleOutSettings": {
+      "autoSyncReadOnlyReplicas": true,
+      "maxReadOnlyReplicas": 30727
+    },
+    "encryption": {
+      "encryptionStatus": "lima-312"
+    }
+  },
+  {
+    "id": "golf-767-pk3",
+    "name": "xray-525",
+    "workspaceId": "papa-230",
+    "description": "sierra-901",
+    "configuredBy": "lima-566",
+    "isRefreshable": true,
+    "isEffectiveIdentityRequired": true,
+    "isEffectiveIdentityRolesRequired": false,
+    "isOnPremGatewayRequired": true,
+    "isInPlaceSharingEnabled": false,
+    "addRowsAPIEnabled": true,
+    "targetStorageMode": "tango-165",
+    "ContentProviderType": "yankee-197",
+    "createdDate": "2024-01-14T00:20:43Z",
+    "webUrl": "zulu-840",
+    "qnaEmbedURL": "charlie-910",
+    "upstreamDataflows": [
+      {
+        "groupId": "oscar-299",
+        "targetDataflowId": "yankee-747"
+      }
+    ],
+    "queryScaleOutSettings": {
+      "autoSyncReadOnlyReplicas": true,
+      "maxReadOnlyReplicas": 36685
+    },
+    "encryption": {
+      "encryptionStatus": "zulu-883"
+    }
+  },
+  {
+    "id": "alpha-59-pk4",
+    "name": "foxtrot-433",
+    "workspaceId": "papa-543",
+    "description": "alpha-793",
+    "configuredBy": "oscar-240",
+    "isRefreshable": true,
+    "isEffectiveIdentityRequired": true,
+    "isEffectiveIdentityRolesRequired": true,
+    "isOnPremGatewayRequired": true,
+    "isInPlaceSharingEnabled": true,
+    "addRowsAPIEnabled": false,
+    "targetStorageMode": "kilo-136",
+    "ContentProviderType": "papa-378",
+    "createdDate": "2024-01-25T19:41:33Z",
+    "webUrl": "juliet-777",
+    "qnaEmbedURL": "foxtrot-483",
+    "upstreamDataflows": [
+      {
+        "groupId": "uniform-556",
+        "targetDataflowId": "kilo-448"
+      }
+    ],
+    "queryScaleOutSettings": {
+      "autoSyncReadOnlyReplicas": false,
+      "maxReadOnlyReplicas": 2129
+    },
+    "encryption": {
+      "encryptionStatus": "november-928"
+    }
+  },
+  {
+    "id": "lima-347-pk5",
+    "name": "juliet-122",
+    "workspaceId": "echo-797",
+    "description": "golf-907",
+    "configuredBy": "quebec-406",
+    "isRefreshable": true,
+    "isEffectiveIdentityRequired": true,
+    "isEffectiveIdentityRolesRequired": false,
+    "isOnPremGatewayRequired": false,
+    "isInPlaceSharingEnabled": true,
+    "addRowsAPIEnabled": false,
+    "targetStorageMode": "sierra-970",
+    "ContentProviderType": "november-283",
+    "createdDate": "2024-01-17T04:23:42Z",
+    "webUrl": "oscar-885",
+    "qnaEmbedURL": "juliet-160",
+    "upstreamDataflows": [],
+    "queryScaleOutSettings": {
+      "autoSyncReadOnlyReplicas": true,
+      "maxReadOnlyReplicas": 97111
+    },
+    "encryption": {
+      "encryptionStatus": "quebec-839"
+    }
+  },
+  {
+    "id": "echo-637-pk6",
+    "name": "hotel-710",
+    "workspaceId": "lima-512",
+    "description": "zulu-412",
+    "configuredBy": "alpha-287",
+    "isRefreshable": false,
+    "isEffectiveIdentityRequired": true,
+    "isEffectiveIdentityRolesRequired": false,
+    "isOnPremGatewayRequired": true,
+    "isInPlaceSharingEnabled": false,
+    "addRowsAPIEnabled": true,
+    "targetStorageMode": "juliet-448",
+    "ContentProviderType": "xray-749",
+    "createdDate": "2024-01-10T02:24:29Z",
+    "webUrl": "zulu-181",
+    "qnaEmbedURL": "yankee-894",
+    "upstreamDataflows": [
+      {
+        "groupId": "uniform-140",
+        "targetDataflowId": "victor-201"
+      },
+      {
+        "groupId": "uniform-807",
+        "targetDataflowId": "quebec-418"
+      }
+    ],
+    "queryScaleOutSettings": {
+      "autoSyncReadOnlyReplicas": false,
+      "maxReadOnlyReplicas": 26222
+    },
+    "encryption": {
+      "encryptionStatus": "delta-991"
+    }
+  },
+  {
+    "id": "bravo-14-pk7",
+    "name": "yankee-754",
+    "workspaceId": "yankee-156",
+    "description": "xray-190",
+    "configuredBy": "delta-549",
+    "isRefreshable": false,
+    "isEffectiveIdentityRequired": false,
+    "isEffectiveIdentityRolesRequired": false,
+    "isOnPremGatewayRequired": true,
+    "isInPlaceSharingEnabled": true,
+    "addRowsAPIEnabled": false,
+    "targetStorageMode": "xray-149",
+    "ContentProviderType": "november-280",
+    "createdDate": "2024-01-28T01:23:49Z",
+    "webUrl": "november-441",
+    "qnaEmbedURL": "charlie-868",
+    "upstreamDataflows": [],
+    "queryScaleOutSettings": {
+      "autoSyncReadOnlyReplicas": true,
+      "maxReadOnlyReplicas": 76275
+    },
+    "encryption": {
+      "encryptionStatus": "alpha-476"
+    }
+  }
+]

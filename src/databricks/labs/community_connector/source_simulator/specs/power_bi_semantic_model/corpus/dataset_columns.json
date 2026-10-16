@@ -1,0 +1,98 @@
+[
+  {
+    "workspace_id": "lima-523",
+    "dataset_id": "foxtrot--pk0",
+    "table_name": "zulu-589-pk0",
+    "name": "victor-4-pk0",
+    "dataType": "alpha-998",
+    "dataCategory": "zulu-485",
+    "formatString": "mike-682",
+    "isHidden": true,
+    "sortByColumn": "india-721",
+    "summarizeBy": "xray-407"
+  },
+  {
+    "workspace_id": "romeo-472",
+    "dataset_id": "foxtrot--pk1",
+    "table_name": "golf-723-pk1",
+    "name": "papa-959-pk1",
+    "dataType": "juliet-645",
+    "dataCategory": "india-646",
+    "formatString": "whiskey-143",
+    "isHidden": false,
+    "sortByColumn": "sierra-441",
+    "summarizeBy": "xray-607"
+  },
+  {
+    "workspace_id": "quebec-927",
+    "dataset_id": "mike-190-pk2",
+    "table_name": "uniform--pk2",
+    "name": "whiskey--pk2",
+    "dataType": "golf-586",
+    "dataCategory": "xray-517",
+    "formatString": "bravo-876",
+    "isHidden": true,
+    "sortByColumn": "tango-498",
+    "summarizeBy": "mike-539"
+  },
+  {
+    "workspace_id": "bravo-417",
+    "dataset_id": "juliet-2-pk3",
+    "table_name": "hotel-84-pk3",
+    "name": "papa-833-pk3",
+    "dataType": "juliet-857",
+    "dataCategory": "golf-483",
+    "formatString": "tango-309",
+    "isHidden": true,
+    "sortByColumn": "golf-972",
+    "summarizeBy": "tango-290"
+  },
+  {
+    "workspace_id": "yankee-666",
+    "dataset_id": "papa-565-pk4",
+    "table_name": "charlie--pk4",
+    "name": "alpha-70-pk4",
+    "dataType": "delta-824",
+    "dataCategory": "hotel-615",
+    "formatString": "romeo-937",
+    "isHidden": false,
+    "sortByColumn": "whiskey-458",
+    "summarizeBy": "yankee-502"
+  },
+  {
+    "workspace_id": "charlie-986",
+    "dataset_id": "uniform--pk5",
+    "table_name": "sierra-8-pk5",
+    "name": "papa-196-pk5",
+    "dataType": "bravo-991",
+    "dataCategory": "bravo-864",
+    "formatString": "juliet-623",
+    "isHidden": true,
+    "sortByColumn": "alpha-854",
+    "summarizeBy": "quebec-222"
+  },
+  {
+    "workspace_id": "juliet-613",
+    "dataset_id": "oscar-64-pk6",
+    "table_name": "romeo-41-pk6",
+    "name": "xray-308-pk6",
+    "dataType": "sierra-848",
+    "dataCategory": "whiskey-176",
+    "formatString": "romeo-697",
+    "isHidden": false,
+    "sortByColumn": "uniform-988",
+    "summarizeBy": "india-203"
+  },
+  {
+    "workspace_id": "sierra-354",
+    "dataset_id": "zulu-750-pk7",
+    "table_name": "quebec-1-pk7",
+    "name": "india-88-pk7",
+    "dataType": "bravo-984",
+    "dataCategory": "whiskey-677",
+    "formatString": "uniform-370",
+    "isHidden": false,
+    "sortByColumn": "tango-377",
+    "summarizeBy": "india-626"
+  }
+]
