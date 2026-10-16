@@ -1,0 +1,42 @@
+[
+  {
+    "item_name": "Worker.Signal1",
+    "value": {
+      "v": "oscar-973",
+      "q": "good",
+      "t": "2024-01-01 00:00:00"
+    }
+  },
+  {
+    "item_name": "Worker.Signal2",
+    "value": {
+      "v": "papa-457",
+      "q": "good",
+      "t": "2024-01-01 00:15:00"
+    }
+  },
+  {
+    "item_name": "Logger.Temperature",
+    "value": {
+      "v": "victor-411",
+      "q": "uncertain",
+      "t": "2024-01-01 00:30:00"
+    }
+  },
+  {
+    "item_name": "Logger.Pressure",
+    "value": {
+      "v": "charlie-544",
+      "q": "good",
+      "t": "2024-01-01 00:45:00"
+    }
+  },
+  {
+    "item_name": "Simulator.Sine1",
+    "value": {
+      "v": "lima-198",
+      "q": "bad",
+      "t": "2024-01-01 01:00:00"
+    }
+  }
+]

@@ -1,0 +1,223 @@
+# Apis REST Service (Prediktor "Apis Foundation" Hive historian), v0.4.0.
+#
+# Models all six operations the upstream OpenAPI document declares, so the
+# simulator's total-coverage contract holds for every code path the connector
+# can reach:
+#
+#   1. GET  /hive                          instance list (upstream lookup)
+#   2. GET  /hive/{instance}/runstate      instance health (not ingested)
+#   3. GET  /hive/{instance}/modules       module catalog (not ingested)
+#   4. GET  /hive/{instance}/items         -> table `items`      (snapshot)
+#   5. GET  /hive/{instance}/values        -> table `values`     (cdc)
+#      POST /hive/{instance}/values        write op, never called on read
+#   6. GET  /hive/{instance}/timeseries    -> table `timeseries` (append)
+#
+# ---------------------------------------------------------------------------
+# PAGINATION: `none` everywhere, on purpose.
+# ---------------------------------------------------------------------------
+# The source spec defines no `limit`, `offset`, `cursor`, `nextPageToken` or
+# `Link` header on ANY operation — even though items / values / timeseries all
+# declare a `206 Partial Content` response, which implies the server can
+# truncate with no documented way to resume. That is a real limitation of the
+# API, not a gap in this spec, and the connector is written to match: one
+# request per (instance, item pattern, time window) tuple, scope narrowed via
+# the `item` wildcard and the window size, and a warning logged on 206.
+# Giving these endpoints a pagination style here would let the connector pass
+# simulate-mode tests against a contract the live source does not offer.
+#
+# ---------------------------------------------------------------------------
+# AUTH
+# ---------------------------------------------------------------------------
+# Every operation requires `Authorization` (declared as a raw apiKey header,
+# applied both globally and per-operation). The simulator ignores auth headers
+# by design, so nothing is modelled here; the test class only needs a
+# placeholder `token` (plus `base_url`) in its `replay_config`.
+#
+# ---------------------------------------------------------------------------
+# `item` IS A REQUIRED QUERY PARAM, BUT IT IS ROLE `ignore`
+# ---------------------------------------------------------------------------
+# `item` takes an array of wildcard patterns (`style: form, explode: true`,
+# i.e. repeated `item=...&item=...`) matched with the source's own glob syntax
+# (`Work*.Sig*`). The declarative filter pipeline has no glob operator, so the
+# param is accepted-and-ignored: every request returns the whole corpus slice.
+# Keep the connector's `item` table option at its `*` default in simulate mode
+# — several narrower patterns would each return the full corpus and inflate
+# row counts.
+#
+# ---------------------------------------------------------------------------
+# CORPUS NOTES
+# ---------------------------------------------------------------------------
+# The corpus is bootstrapped from the connector's `TABLE_SCHEMAS` with
+# `tools.corpus_from_schema.write_corpus_from_schemas` (one file per ingested
+# table) and then reshaped into the API's **wire** shape, because a corpus
+# record is what the *server* returns, not what the connector emits:
+#
+#   items.json       [{instance, item_name, attributes: [{attrib_id, value}]}]
+#   values.json      [{item_name, value: {v, q, t}}]
+#   timeseries.json  [{item_name, value: {v, q, t}}]
+#
+# * `values.json` / `timeseries.json` carry the spec's one declared schema,
+#   `single_value_t`, verbatim — the `(v, q, t)` triple stays NESTED under
+#   `value`. The connector flattens it onto the row's
+#   `value`/`quality`/`timestamp` columns, so the *row* column `timestamp`
+#   and the *wire* field `value.t` are the same datum under two names. Every
+#   filter / sort / synthesize directive below therefore addresses
+#   `value.t` (the simulator's field lookup takes dotted paths), never the
+#   row-level name `timestamp`, which does not exist on the wire.
+# * `timeseries.json` holds one record per (item, point in time) rather than a
+#   per-item bundle of points, so the half-open `[starttime, endtime)` window
+#   filter applies per point. The connector's `_normalize_timeseries` accepts
+#   the bundled rendering too; the flat one is modelled here because it is
+#   the only one that makes the window filter meaningful. The real shape is
+#   INFERRED and must be re-checked in record mode.
+# * `item_name` values are module-qualified (`Worker.Signal1`), the convention
+#   the source's own parameter examples use, so the connector's client-side
+#   `module` derivation (split on the first `.`) is exercised.
+# * `items.json` records carry a `type` field (`Signal` / `Function item` /
+#   `Status`) so the connector's `item_type` column — CONFIRMED live via a
+#   manual spot-check, not just inferred — has non-null coverage in
+#   simulate mode too.
+# * `items.json` keeps an `instance` field purely so `/hive`, `runstate` and
+#   `modules` can borrow this corpus rather than reference files that the
+#   table-driven generator will not produce (a missing corpus silently serves
+#   `[]`, which would make instance discovery fail with "GET /hive returned
+#   no Hive instances"). For `/hive` the borrow is meaningful: the connector's
+#   tolerant instance parser reads a name-ish field off each record and
+#   `instance` is one of the keys it looks for. Every record names the same
+#   instance, so discovery yields exactly one and the fan-out stays small.
+#   The connector stamps `instance` onto `items` rows from the `{instance}`
+#   path segment, so the corpus field is never read on the table path.
+# * The generator forces the cursor field to monotonically increasing ISO-8601
+#   instants and the simulator compares ISO strings lexicographically — which
+#   is why the connector renders every timestamp as `%Y-%m-%dT%H:%M:%SZ`.
+# * `timeseries` reads a bounded `[starttime, endtime)` window. The generated
+#   corpus is dated from 2024-01-01, so a table config that wants rows back
+#   should set `start_timestamp` (e.g. `2023-12-01T00:00:00Z`) or leave
+#   `backfill_days` at its generous 1095-day default; a short backfill will
+#   legitimately return zero rows.
+
+endpoints:
+
+  # ---- 1. instance list: upstream lookup, NOT an ingested table ----------
+  #
+  # Resolves the `{instance}` path segment every other call needs. The
+  # response has no declared schema in the source spec; the connector accepts
+  # either a bare array of strings or an array of objects with a name-ish
+  # field, and here it takes the `instance` field off the items corpus.
+  - path: "/hive"
+    method: GET
+    corpus: items
+    response:
+      pagination_style: none
+    params:
+      format: {role: ignore}   # json (default) | csv — connector always sends json
+
+  # ---- 2. runstate: instance health check, NOT ingested ------------------
+  #
+  # Declared for coverage only — the read paths never call it. Upstream this
+  # returns a short state string ("running" / "none") with no declared schema.
+  - path: "/hive/{instance}/runstate"
+    method: GET
+    corpus: items
+    response:
+      pagination_style: none
+    params:
+      format: {role: ignore}
+
+  # ---- 3. modules: module catalog, NOT ingested --------------------------
+  #
+  # Declared for coverage only. Module-level scoping of items happens through
+  # the `item` wildcard (`ModuleName.*`), not through this endpoint, so the
+  # connector has no reason to call it.
+  - path: "/hive/{instance}/modules"
+    method: GET
+    corpus: items
+    response:
+      pagination_style: none
+    params:
+      format: {role: ignore}
+
+  # ---- 4. items -> table `items` (snapshot) ------------------------------
+  #
+  # No incremental parameter exists here: `item` narrows scope, it is not a
+  # change cursor, and no created/modified field is declared. Fully re-listed
+  # every run. Response schema is inferred (see apis_schemas.py).
+  - path: "/hive/{instance}/items"
+    method: GET
+    corpus: items
+    response:
+      pagination_style: none
+    params:
+      item:   {role: ignore}   # required upstream; array of glob patterns
+      attrib: {role: ignore}   # array of numeric Attribute IDs; no ID registry in spec
+      format: {role: ignore}
+
+  # ---- 5a. values (GET) -> table `values` (cdc, upsert-only) -------------
+  #
+  # `updatedSince` is the source's one genuine incremental signal ("return
+  # only values updated after this time") and maps onto the declared
+  # `single_value_t.value.t` — the wire field the connector flattens onto the
+  # row as `timestamp`. Note there
+  # is no matching "updatedUntil": the filter is lower-bounded only, exactly
+  # as upstream. The connector therefore does not derive its offset from the
+  # records — it returns its init-time cap
+  # — so no `synthesize_future_records` directive is needed here. (Adding one
+  # would also clone a record's primary key `(instance, item_name)` under a
+  # new timestamp, putting a duplicate key in a single batch.)
+  - path: "/hive/{instance}/values"
+    method: GET
+    corpus: values
+    response:
+      pagination_style: none
+      default_sort: "value.t asc"
+    params:
+      item:         {role: ignore}
+      updatedSince: {role: filter, field: value.t, op: gte}
+      quality:      {role: ignore}   # minimum-quality filter; not an equality match
+      format:       {role: ignore}
+
+  # ---- 5b. values (POST): write operation, out of scope for ingestion ----
+  #
+  # `operationId: writeItemValues`; request body is an array of
+  # `single_value_t`. Declared so an accidental write shows up as a served
+  # request rather than an `UnknownEndpoint`; the read paths never issue it.
+  - path: "/hive/{instance}/values"
+    method: POST
+    corpus: values
+    response:
+      pagination_style: none
+
+  # ---- 6. timeseries -> table `timeseries` (append) ---------------------
+  #
+  # The range-query endpoint, and the reason the connector implements
+  # SupportsPartitionedStream: `starttime`/`endtime` are both REQUIRED, so the
+  # requested range splits cleanly into parallel windows.
+  #
+  # `endtime` is modelled as `lt`, not `lte`, to match the connector's
+  # half-open `[starttime, endtime)` reading of the window. Consecutive
+  # windows are contiguous, so an append-only row lands in exactly one
+  # window — an inclusive upper bound would duplicate rows sitting exactly on
+  # a boundary. If live testing shows the server treats `endtime` as
+  # inclusive, flip this to `lte` and shorten the connector's windows.
+  #
+  # `synthesize_future_records` exercises the init-time cap: the clones sit
+  # past wall-clock now(), and the connector's `endtime = <init_time>` bound
+  # must exclude them. If the cap ever regressed, the extra rows would keep
+  # the returned offset advancing and termination would stop converging.
+  - path: "/hive/{instance}/timeseries"
+    method: GET
+    corpus: timeseries
+    response:
+      pagination_style: none
+      default_sort: "value.t asc"
+    params:
+      item:      {role: ignore}
+      starttime: {role: filter, field: value.t, op: gte}
+      endtime:   {role: filter, field: value.t, op: lt}
+      aggregate: {role: ignore}   # ~40-value server-side aggregation enum
+      interval:  {role: ignore}   # resample seconds, 1..86400
+      quality:   {role: ignore}
+      format:    {role: ignore}
+    synthesize_future_records:
+      cursor_field: value.t
+      count: 3
