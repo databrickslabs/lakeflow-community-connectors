@@ -1,0 +1,122 @@
+[
+  {
+    "id": 1000,
+    "userName": "uniform-693",
+    "email": "hotel-798",
+    "externalId": "uniform-510",
+    "name": {
+      "givenName": "bravo-979",
+      "familyName": "delta-545",
+      "formatted": "yankee-699"
+    },
+    "active": true,
+    "locked": false,
+    "authType": "foxtrot-244",
+    "userType": "xray-734",
+    "role": "alpha-368",
+    "idpUserId": "kilo-331",
+    "userPrincipalName": "hotel-735",
+    "isServiceAccount": false,
+    "language": "papa-496",
+    "createdDate": "2024-01-28T09:16:29Z",
+    "lastModificationDate": "2024-01-03T11:08:44Z",
+    "lastActiveDate": "2024-01-29T21:54:18Z",
+    "egnyte_domain": "xray-884"
+  },
+  {
+    "id": 1001,
+    "userName": "bravo-494",
+    "email": "november-872",
+    "externalId": "zulu-418",
+    "name": {
+      "givenName": "charlie-574",
+      "familyName": "charlie-797",
+      "formatted": "quebec-145"
+    },
+    "active": true,
+    "locked": false,
+    "authType": "romeo-427",
+    "userType": "yankee-700",
+    "role": "victor-500",
+    "idpUserId": "romeo-737",
+    "userPrincipalName": "papa-155",
+    "isServiceAccount": true,
+    "language": "india-861",
+    "createdDate": "2024-01-25T04:46:33Z",
+    "lastModificationDate": "2024-01-30T02:22:31Z",
+    "lastActiveDate": "2024-01-09T20:52:40Z",
+    "egnyte_domain": "oscar-946"
+  },
+  {
+    "id": 1002,
+    "userName": "india-446",
+    "email": "uniform-306",
+    "externalId": "papa-992",
+    "name": {
+      "givenName": "hotel-556",
+      "familyName": "quebec-222",
+      "formatted": "india-552"
+    },
+    "active": false,
+    "locked": false,
+    "authType": "foxtrot-965",
+    "userType": "oscar-918",
+    "role": "papa-881",
+    "idpUserId": "victor-778",
+    "userPrincipalName": "bravo-713",
+    "isServiceAccount": true,
+    "language": "oscar-872",
+    "createdDate": "2024-01-03T01:40:01Z",
+    "lastModificationDate": "2024-01-25T21:53:59Z",
+    "lastActiveDate": "2024-01-16T08:33:57Z",
+    "egnyte_domain": "charlie-348"
+  },
+  {
+    "id": 1003,
+    "userName": "alpha-687",
+    "email": "kilo-298",
+    "externalId": "juliet-358",
+    "name": {
+      "givenName": "uniform-310",
+      "familyName": "bravo-944",
+      "formatted": "romeo-948"
+    },
+    "active": true,
+    "locked": false,
+    "authType": "charlie-855",
+    "userType": "bravo-793",
+    "role": "golf-525",
+    "idpUserId": "charlie-580",
+    "userPrincipalName": "xray-854",
+    "isServiceAccount": false,
+    "language": "yankee-211",
+    "createdDate": "2024-01-01T08:03:38Z",
+    "lastModificationDate": "2024-01-02T16:12:45Z",
+    "lastActiveDate": "2024-01-20T04:00:32Z",
+    "egnyte_domain": "delta-500"
+  },
+  {
+    "id": 1004,
+    "userName": "juliet-647",
+    "email": "foxtrot-572",
+    "externalId": "bravo-121",
+    "name": {
+      "givenName": "echo-214",
+      "familyName": "lima-623",
+      "formatted": "india-585"
+    },
+    "active": true,
+    "locked": false,
+    "authType": "tango-398",
+    "userType": "uniform-285",
+    "role": "delta-241",
+    "idpUserId": "golf-876",
+    "userPrincipalName": "tango-759",
+    "isServiceAccount": false,
+    "language": "romeo-962",
+    "createdDate": "2024-01-20T06:05:46Z",
+    "lastModificationDate": "2024-01-14T20:34:30Z",
+    "lastActiveDate": "2024-01-11T01:47:31Z",
+    "egnyte_domain": "delta-748"
+  }
+]

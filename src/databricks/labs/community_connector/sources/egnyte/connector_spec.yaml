@@ -1,0 +1,118 @@
+# egnyte Community Connector Spec
+# This file defines the specification for the connector including
+# connection parameters and allowlist options.
+#
+# The Egnyte connector supports two authentication methods:
+# 1. direct_token       - Pre-issued OAuth access token. Simplest for quick
+#                         setup or when the token is injected by Unity Catalog.
+# 2. refresh_token      - OAuth 2.0 refresh token flow (client-credentials).
+#                         Preferred for production runs; the connector mints
+#                         a fresh access token per run and stays well below the
+#                         token endpoint's 100-requests/hour cap.
+
+display_name: Egnyte
+connection:
+  # ---------------------------------------------------------------------------
+  # Authentication Methods
+  # Choose ONE of the following authentication approaches.
+  # ---------------------------------------------------------------------------
+  auth_methods:
+    - name: direct_token
+      description: >
+        Authenticate with a pre-issued OAuth 2.0 access token. Simplest when
+        a token is already available or injected by a Unity Catalog connection.
+        The token is used directly without any refresh exchange.
+      parameters:
+        - name: access_token
+          type: string
+          required: true
+          secret: true
+          description: >
+            Pre-issued OAuth 2.0 bearer token for the Egnyte Public API.
+            Passed as "Authorization: Bearer {token}" on all requests.
+            Alias: token (both are accepted).
+
+    - name: refresh_token
+      description: >
+        Authenticate via OAuth 2.0 refresh token flow (client-credentials).
+        The connector mints a fresh access token per run using the supplied
+        client credentials and refresh token. Preferred for production runs
+        to ensure token freshness and to stay within the token endpoint's
+        100-requests/hour quota.
+      parameters:
+        - name: client_id
+          type: string
+          required: true
+          description: >
+            OAuth 2.0 client ID (API key) registered with Egnyte.
+
+        - name: client_secret
+          type: string
+          required: true
+          secret: true
+          description: >
+            OAuth 2.0 client secret associated with the client_id.
+
+        - name: refresh_token
+          type: string
+          required: true
+          secret: true
+          description: >
+            OAuth 2.0 refresh token. Obtained once during interactive setup
+            and then stored securely. The connector uses this to mint a fresh
+            access token on each run.
+
+  # ---------------------------------------------------------------------------
+  # Common Parameters (shared across all authentication methods)
+  # ---------------------------------------------------------------------------
+  parameters:
+    - name: domain
+      type: string
+      required: true
+      description: >
+        Egnyte tenant identifier. Can be:
+        - A subdomain label (e.g., "acmecorp" → https://acmecorp.egnyte.com).
+        - A full custom hostname (e.g., "files.acme.com" → https://files.acme.com).
+        - A full URL (e.g., "https://files.acme.com").
+        There is no automated discovery; supply the exact hostname for your
+        Egnyte organization.
+
+    - name: timeout
+      type: string
+      required: false
+      description: >
+        Per-request HTTP timeout in seconds. Valid range: 1 or greater.
+        Default: 30. Increase if your Egnyte instance is slow to respond or
+        you have large payloads; decrease if you want faster failure detection.
+
+    - name: min_request_interval
+      type: string
+      required: false
+      description: >
+        Minimum seconds between successive API calls on a single client.
+        Default: 0.5. Egnyte allows 2 calls/second per token; this spacing
+        ensures that a recursive tree walk or a wide partition fan-out does
+        not trip the per-second rate limit on its own. Increase if you see
+        429 throttle responses; decrease if throughput is more important than
+        rate-limit headroom.
+
+# ============================================================================
+# External Options Allowlist
+# These table-specific options must be included in the externalOptionsAllowList
+# parameter of the UC connection to allow them to be passed through.
+# Use a comma-separated string of option names.
+#
+# Organized by table and purpose:
+# - files/folders: root_paths, fs_page_size, max_depth, include_perms,
+#   include_locks
+# - users/groups: page_size, filter, include_members
+# - links: window_days, start_timestamp, link_path, link_type, accessibility
+# - events: events_api_version, events_page_size, start_event_id, event_type,
+#   folder, suppress
+# - audit: window_days, initial_backfill_days, start_date, audit_page_size,
+#   audit_poll_interval_seconds, audit_poll_max_attempts, audit_events,
+#   audit_folders, audit_users, audit_transaction_types, audit_assigners,
+#   audit_assignee_users, audit_assignee_groups
+# - general: max_records_per_batch, max_partitions_per_batch
+# ============================================================================
+external_options_allowlist: "root_paths,fs_page_size,max_depth,include_perms,include_locks,page_size,filter,include_members,window_days,start_timestamp,link_path,link_type,accessibility,events_api_version,events_page_size,start_event_id,event_type,folder,suppress,initial_backfill_days,start_date,audit_page_size,audit_poll_interval_seconds,audit_poll_max_attempts,audit_events,audit_folders,audit_users,audit_transaction_types,audit_assigners,audit_assignee_users,audit_assignee_groups,max_records_per_batch,max_partitions_per_batch"

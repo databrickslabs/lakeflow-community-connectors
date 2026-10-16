@@ -1,0 +1,281 @@
+# Egnyte Public API — every endpoint the connector can reach.
+#
+# Connector flow, table by table:
+#
+#   auth              POST /puboauth/token                    (refresh-token flow only)
+#   files / folders   GET  /pubapi/v1/fs/{path...}            recursive tree walk  [handler]
+#   users             GET  /pubapi/v2/users                   startIndex/count     [handler]
+#   groups            GET  /pubapi/v2/groups                  startIndex/count     [handler]
+#                     GET  /pubapi/v2/groups/{id}             include_members only [handler]
+#   links             GET  /pubapi/v2/links                   created_after/before + offset/count
+#   events            GET  /pubapi/v{1,2}/events/cursor       bootstrap + termination cap
+#                     GET  /pubapi/v{1,2}/events              id cursor + count
+#   audit_*           POST /pubapi/v1/audit/{type}            create report job
+#                     GET  /pubapi/v1/audit/jobs/{id}         poll until done
+#                     GET  /pubapi/v1/audit/{type}/{id}       fetch rows, offset/count
+#
+# Three endpoints use a custom handler (see handlers/egnyte_sim.py for why):
+# the fs listing returns two corpora in one composite envelope, and the SCIM
+# list/detail endpoints need 1-based startIndex paging and path-param lookup.
+#
+# The "_sim_records" wrapper key on the auth and audit-lifecycle endpoints is
+# an inert artifact of the declarative wrapper: those responses carry only
+# scalars (a token, a job id, a job status), and `wrapper.extras` is how the
+# spec expresses "no records, these fields". The connector never reads it.
+#
+# Termination: the connector caps every returned offset at an init-time
+# snapshot. `synthesize_future_records` is attached to /pubapi/v2/links only —
+# that is the one endpoint where the cap is expressed as a query filter the
+# simulator can enforce, so an uncapped connector would visibly leak the
+# future rows. It is deliberately NOT set on:
+#   * the audit fetches — their window lives in the POST body, so the
+#     simulator cannot filter on it; injecting future rows there would only
+#     inflate row counts without testing the cap (whose real proof is that
+#     the offset comes from the partition boundary, not from any row);
+#   * /pubapi/v{1,2}/events — its cursor is an integer id and the directive
+#     writes ISO-8601 strings, which would break LongType coercion.
+
+endpoints:
+
+  # ======================================================================
+  # OAuth — refresh-token exchange
+  # ======================================================================
+  #
+  # Reached lazily, on the first API call, only when the connector was given
+  # client_id/client_secret/refresh_token rather than a ready access_token.
+  - path: "/puboauth/token"
+    method: POST
+    response:
+      pagination_style: none
+      wrapper:
+        records_key: _sim_records
+        extras:
+          access_token: "simulated-egnyte-access-token"
+          refresh_token: "simulated-egnyte-refresh-token"
+          token_type: "bearer"
+          expires_in: 2592000
+
+  # ======================================================================
+  # File system — recursive tree walk (files + folders tables)
+  # ======================================================================
+  #
+  # One entry per path depth: the spec's {placeholder} matches a single
+  # segment, and Egnyte paths are multi-segment. Five levels comfortably
+  # cover the two-level tree the handler synthesizes plus room for a deeper
+  # hand-written corpus later.
+  - path: "/pubapi/v1/fs/{p1}"
+    method: GET
+    handler: databricks.labs.community_connector.source_simulator.specs.egnyte.handlers.egnyte_sim:fs_listing
+  - path: "/pubapi/v1/fs/{p1}/{p2}"
+    method: GET
+    handler: databricks.labs.community_connector.source_simulator.specs.egnyte.handlers.egnyte_sim:fs_listing
+  - path: "/pubapi/v1/fs/{p1}/{p2}/{p3}"
+    method: GET
+    handler: databricks.labs.community_connector.source_simulator.specs.egnyte.handlers.egnyte_sim:fs_listing
+  - path: "/pubapi/v1/fs/{p1}/{p2}/{p3}/{p4}"
+    method: GET
+    handler: databricks.labs.community_connector.source_simulator.specs.egnyte.handlers.egnyte_sim:fs_listing
+  - path: "/pubapi/v1/fs/{p1}/{p2}/{p3}/{p4}/{p5}"
+    method: GET
+    handler: databricks.labs.community_connector.source_simulator.specs.egnyte.handlers.egnyte_sim:fs_listing
+
+  # ======================================================================
+  # Users & groups (SCIM-style)
+  # ======================================================================
+  - path: "/pubapi/v2/users"
+    method: GET
+    corpus: users
+    handler: databricks.labs.community_connector.source_simulator.specs.egnyte.handlers.egnyte_sim:scim_list
+
+  # Must precede the {group_id} entry only if the segment counts collided —
+  # they don't, but the order also matches the connector's call sequence.
+  - path: "/pubapi/v2/groups"
+    method: GET
+    corpus: groups
+    handler: databricks.labs.community_connector.source_simulator.specs.egnyte.handlers.egnyte_sim:scim_list
+
+  # Per-group fan-out; only reached when the include_members table option is on.
+  - path: "/pubapi/v2/groups/{group_id}"
+    method: GET
+    corpus: groups
+    handler: databricks.labs.community_connector.source_simulator.specs.egnyte.handlers.egnyte_sim:group_detail
+
+  # ======================================================================
+  # Links (append, partitioned on creation_date windows)
+  # ======================================================================
+  #
+  # v2 is used because its list returns full Link objects; v1 returns bare
+  # ids and would need a GET per row. The connector always sends
+  # created_before (its init-time cap) and sends created_after on every
+  # window except the open-ended first one — so the future-dated records
+  # injected below are filtered out here, exactly as the real API would.
+  - path: "/pubapi/v2/links"
+    method: GET
+    corpus: links
+    response:
+      pagination_style: offset_limit
+      default_sort: "creation_date asc"
+      wrapper:
+        records_key: links
+    params:
+      created_after:  {role: filter, field: creation_date, op: gte}
+      created_before: {role: filter, field: creation_date, op: lte}
+      path:           {role: filter, field: path, op: eq}
+      type:           {role: filter, field: type, op: eq}
+      accessibility:  {role: filter, field: accessibility, op: eq}
+      offset:         {role: offset}
+      count:          {role: limit, default: 100, max: 500}
+    synthesize_future_records:
+      cursor_field: creation_date
+      count: 3
+
+  # ======================================================================
+  # Events (append, sequential integer id cursor)
+  # ======================================================================
+  #
+  # /cursor is called once per connector instance: oldest_event_id bootstraps
+  # a cold read and latest_event_id is the init-time termination cap. The ids
+  # below track the schema-bootstrapped corpus, whose primary keys are
+  # generated as 1000, 1001, ... — if the corpus is regenerated at a
+  # different size the connector still converges (it stops on an empty page).
+  - path: "/pubapi/v1/events/cursor"
+    method: GET
+    response:
+      pagination_style: none
+      wrapper:
+        records_key: _sim_records
+        extras:
+          latest_event_id: 1004
+          oldest_event_id: 1000
+          timestamp: "2024-01-01T00:00:00Z"
+  - path: "/pubapi/v2/events/cursor"
+    method: GET
+    response:
+      pagination_style: none
+      wrapper:
+        records_key: _sim_records
+        extras:
+          latest_event_id: 1004
+          oldest_event_id: 1000
+          timestamp: "2024-01-01T00:00:00Z"
+
+  # `id` means "strictly after this event", hence op: gt.
+  - path: "/pubapi/v1/events"
+    method: GET
+    corpus: events
+    response:
+      pagination_style: offset_limit
+      default_sort: "id asc"
+      wrapper:
+        records_key: events
+        extras:
+          latest_id: 1004
+          oldest_id: 1000
+    params:
+      id:       {role: filter, field: id, op: gt}
+      type:     {role: filter, field: type, op: eq}
+      folder:   {role: ignore}
+      suppress: {role: ignore}
+      count:    {role: limit, default: 100, max: 1000}
+  - path: "/pubapi/v2/events"
+    method: GET
+    corpus: events
+    response:
+      pagination_style: offset_limit
+      default_sort: "id asc"
+      wrapper:
+        records_key: events
+        extras:
+          latest_id: 1004
+          oldest_id: 1000
+    params:
+      id:       {role: filter, field: id, op: gt}
+      type:     {role: filter, field: type, op: eq}
+      folder:   {role: ignore}
+      suppress: {role: ignore}
+      count:    {role: limit, default: 100, max: 1000}
+
+  # ======================================================================
+  # Audit Reporting v1 — job lifecycle
+  # ======================================================================
+  #
+  # Step 1: create. The real API answers 202 with {"id": ...}; the connector
+  # accepts 200/201/202 so a plain 200 here is fine.
+  - path: "/pubapi/v1/audit/logins"
+    method: POST
+    response:
+      pagination_style: none
+      wrapper:
+        records_key: _sim_records
+        extras:
+          id: "sim-audit-job-logins"
+  - path: "/pubapi/v1/audit/files"
+    method: POST
+    response:
+      pagination_style: none
+      wrapper:
+        records_key: _sim_records
+        extras:
+          id: "sim-audit-job-files"
+  - path: "/pubapi/v1/audit/permissions"
+    method: POST
+    response:
+      pagination_style: none
+      wrapper:
+        records_key: _sim_records
+        extras:
+          id: "sim-audit-job-permissions"
+
+  # Step 2: poll. Live Egnyte signals completion with 303 + Location, which
+  # the simulator's declarative renderer cannot emit; the connector also
+  # treats any non-running `status` on a 200 as done, and that is the path
+  # exercised here. Declared before the /audit/{type}/{job_id} fetches below
+  # so "jobs" is never mistaken for a report type.
+  - path: "/pubapi/v1/audit/jobs/{job_id}"
+    method: GET
+    response:
+      pagination_style: none
+      wrapper:
+        records_key: _sim_records
+        extras:
+          status: "completed"
+
+  # Step 3: fetch. The report window lives in the POST body, so there is
+  # nothing to filter on here — every window returns the whole corpus. That
+  # is intentional: it proves the connector derives its offset from the
+  # partition boundary rather than from the rows it happened to receive.
+  - path: "/pubapi/v1/audit/logins/{job_id}"
+    method: GET
+    corpus: audit_logins
+    response:
+      pagination_style: offset_limit
+      default_sort: "time asc"
+      wrapper:
+        records_key: events
+    params:
+      offset: {role: offset}
+      count:  {role: limit, default: 100, max: 1000}
+
+  - path: "/pubapi/v1/audit/files/{job_id}"
+    method: GET
+    corpus: audit_files
+    response:
+      pagination_style: offset_limit
+      default_sort: "time asc"
+      wrapper:
+        records_key: events
+    params:
+      offset: {role: offset}
+      count:  {role: limit, default: 100, max: 1000}
+
+  - path: "/pubapi/v1/audit/permissions/{job_id}"
+    method: GET
+    corpus: audit_permissions
+    response:
+      pagination_style: offset_limit
+      default_sort: "time asc"
+      wrapper:
+        records_key: events
+    params:
+      offset: {role: offset}
+      count:  {role: limit, default: 100, max: 1000}
