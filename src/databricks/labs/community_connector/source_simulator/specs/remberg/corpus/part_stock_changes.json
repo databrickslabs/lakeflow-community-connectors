@@ -1,0 +1,37 @@
+[
+  {
+    "id": "whiskey-62-ps0",
+    "createdAt": "2024-01-20T08:00:00Z",
+    "updatedAt": "2024-01-20T08:00:00Z",
+    "change": 25,
+    "comment": "restock from supplier",
+    "action": "added",
+    "storageAsset": {
+      "id": "hotel-220-as0",
+      "assetNumber": "AS-0001",
+      "assetType": "warehouse"
+    }
+  },
+  {
+    "id": "xray-330-ps1",
+    "createdAt": "2024-01-22T13:15:00Z",
+    "updatedAt": "2024-01-22T14:02:19Z",
+    "change": -4,
+    "comment": null,
+    "action": "taken",
+    "storageAsset": {
+      "id": "mike-733-as1",
+      "assetNumber": "AS-0002",
+      "assetType": "service van"
+    }
+  },
+  {
+    "id": "yankee-15-ps2",
+    "createdAt": "2024-01-25T10:40:00Z",
+    "updatedAt": "2024-01-25T10:40:00Z",
+    "change": -1,
+    "comment": "reservation cancelled by dispatcher",
+    "action": "reservationCanceled",
+    "storageAsset": null
+  }
+]
