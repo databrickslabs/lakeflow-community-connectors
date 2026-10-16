@@ -14,8 +14,14 @@ connection:
       required: true
       secret: true
       description: >
-        Personal access token used for GitHub REST API authentication.
-        Must have appropriate scopes (public_repo or repo).
+        GitHub Personal Access Token used for REST API authentication. This
+        connector only issues read (GET) calls, so use a fine-grained PAT
+        scoped to just the repositories you want to ingest, with read-only
+        permissions: Metadata: Read (mandatory) and Contents: Read (covers
+        repository_files, commits, branches). Add Issues: Read and Pull
+        requests: Read only if you also ingest those metadata tables. Do not
+        grant any write permission. Avoid the classic 'repo' scope, which
+        grants full read+write control of private repositories.
 
     - name: base_url
       type: string
@@ -31,4 +37,4 @@ connection:
 # Use a comma-separated string of option names.
 # If no table-specific options are needed, set to empty string or omit.
 # ============================================================================
-external_options_allowlist: "owner,repo,state,per_page,lookback_seconds,start_date,org,pull_number,max_records_per_batch,window_seconds"
+external_options_allowlist: "owner,repo,state,per_page,lookback_seconds,start_date,org,pull_number,max_records_per_batch,window_seconds,ref,include_extensions,include_globs,exclude_globs,max_file_bytes,include_binary"

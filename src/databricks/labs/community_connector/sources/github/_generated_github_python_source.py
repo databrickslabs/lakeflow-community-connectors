@@ -41,6 +41,8 @@ from pyspark.sql.types import (
     VariantVal,
 )
 import base64
+import binascii
+import fnmatch
 import requests
 
 
@@ -965,6 +967,33 @@ def register_lakeflow_source(spark):
     )
     """Schema for the reviews table."""
 
+    REPOSITORY_FILES_SCHEMA = StructType(
+        [
+            StructField("repository_owner", StringType(), False),
+            StructField("repository_name", StringType(), False),
+            StructField("path", StringType(), False),
+            StructField("ref", StringType(), True),
+            StructField("commit_sha", StringType(), True),
+            StructField("blob_sha", StringType(), True),
+            StructField("size", LongType(), True),
+            StructField("mode", StringType(), True),
+            StructField("encoding", StringType(), True),
+            StructField("is_binary", BooleanType(), True),
+            StructField("skipped_reason", StringType(), True),
+            StructField("content", StringType(), True),
+            StructField("content_base64", StringType(), True),
+            StructField("html_url", StringType(), True),
+            StructField("ingested_at", StringType(), True),
+        ]
+    )
+    """Schema for the repository_files table (source code contents at a ref).
+
+    Read-only: populated entirely from GitHub GET endpoints (Git trees + blobs),
+    so a fine-grained PAT with only ``Contents: Read`` (plus mandatory
+    ``Metadata: Read``) is sufficient. ``content`` holds decoded UTF-8 text for
+    text files; binary files have ``content = null`` and ``is_binary = true``.
+    """
+
 
     # =============================================================================
     # Schema Mapping
@@ -983,6 +1012,7 @@ def register_lakeflow_source(spark):
         "collaborators": COLLABORATORS_SCHEMA,
         "branches": BRANCHES_SCHEMA,
         "reviews": REVIEWS_SCHEMA,
+        "repository_files": REPOSITORY_FILES_SCHEMA,
     }
     """Mapping of table names to their StructType schemas."""
 
@@ -1042,6 +1072,10 @@ def register_lakeflow_source(spark):
         "reviews": {
             "primary_keys": ["id"],
             "ingestion_type": "append",
+        },
+        "repository_files": {
+            "primary_keys": ["repository_owner", "repository_name", "path"],
+            "ingestion_type": "snapshot",
         },
     }
     """Metadata for each table including primary keys, cursor field, and ingestion type."""
@@ -1209,6 +1243,98 @@ def register_lakeflow_source(spark):
         return cursor
 
 
+    def _split_csv(value: str | None) -> list[str]:
+        """Split a comma-separated option string into a list of trimmed tokens.
+
+        Returns an empty list for ``None`` or blank input.
+        """
+        if not value:
+            return []
+        return [token.strip() for token in value.split(",") if token.strip()]
+
+
+    @dataclass
+    class FileFilter:
+        """Parsed include/exclude rules for the ``repository_files`` table."""
+
+        extensions: list[str]
+        include_globs: list[str]
+        exclude_globs: list[str]
+
+
+    def parse_file_filter(table_options: dict[str, str]) -> FileFilter:
+        """Parse file-selection options for the ``repository_files`` table.
+
+        Options (all optional, comma-separated):
+            - include_extensions: e.g. ``"py,java,ts"`` (leading dot optional).
+            - include_globs: e.g. ``"src/**,lib/**"`` (fnmatch semantics).
+            - exclude_globs: e.g. ``"**/vendor/**,*.min.js"``.
+        """
+        extensions = []
+        for ext in _split_csv(table_options.get("include_extensions")):
+            extensions.append(ext if ext.startswith(".") else f".{ext}")
+
+        return FileFilter(
+            extensions=extensions,
+            include_globs=_split_csv(table_options.get("include_globs")),
+            exclude_globs=_split_csv(table_options.get("exclude_globs")),
+        )
+
+
+    def should_include_file(path: str, file_filter: FileFilter) -> bool:
+        """Decide whether a file path passes the include/exclude filter.
+
+        Rules, in order:
+            1. Any matching ``exclude_globs`` pattern rejects the file.
+            2. If neither ``extensions`` nor ``include_globs`` is set, the file is
+               included (subject only to excludes).
+            3. Otherwise the file is included when it matches an allowed extension
+               OR an ``include_globs`` pattern.
+
+        Uses ``fnmatch`` semantics, where ``*`` also matches ``/``.
+        """
+        for pattern in file_filter.exclude_globs:
+            if fnmatch.fnmatch(path, pattern):
+                return False
+
+        if not file_filter.extensions and not file_filter.include_globs:
+            return True
+
+        if any(path.endswith(ext) for ext in file_filter.extensions):
+            return True
+        return any(fnmatch.fnmatch(path, pattern) for pattern in file_filter.include_globs)
+
+
+    def decode_blob_content(
+        raw_content: str | None, encoding: str | None, include_binary: bool
+    ) -> tuple[str | None, str | None, str | None, bool]:
+        """Decode a GitHub blob payload into text or (optionally) base64 bytes.
+
+        GitHub returns blob content base64-encoded. This decodes it and detects
+        binary files by attempting a strict UTF-8 decode.
+
+        Returns a tuple of ``(content, content_base64, encoding, is_binary)``:
+            - Text file: ``(text, None, "utf-8", False)``.
+            - Binary file with ``include_binary=True``: ``(None, base64, "base64", True)``.
+            - Binary file with ``include_binary=False``: ``(None, None, "base64", True)``.
+        """
+        if encoding != "base64" or raw_content is None:
+            # Unexpected shape; surface the raw value as text without guessing.
+            return raw_content, None, encoding, False
+
+        try:
+            raw_bytes = base64.b64decode(raw_content)
+        except (binascii.Error, ValueError):
+            return None, None, "base64", True
+
+        try:
+            return raw_bytes.decode("utf-8"), None, "utf-8", False
+        except UnicodeDecodeError:
+            if include_binary:
+                return None, base64.b64encode(raw_bytes).decode("ascii"), "base64", True
+            return None, None, "base64", True
+
+
     def require_owner_repo(
         table_options: dict[str, str], table_name: str
     ) -> tuple[str, str]:
@@ -1338,6 +1464,7 @@ def register_lakeflow_source(spark):
                 "teams": self._read_teams,
                 "users": self._read_users,
                 "reviews": self._read_reviews,
+                "repository_files": self._read_repository_files,
             }
 
             if table_name not in reader_map:
@@ -1482,12 +1609,18 @@ def register_lakeflow_source(spark):
             max_updated_at: str | None = None
 
             for issue in raw_issues:
+                updated_at = issue.get("updated_at")
+
+                # Skip rows at or below the stored cursor so a no-new-rows batch is
+                # empty and the offset advances.
+                if cursor and isinstance(updated_at, str) and updated_at <= cursor:
+                    continue
+
                 record: dict[str, Any] = dict(issue)
                 record["repository_owner"] = owner
                 record["repository_name"] = repo
                 records.append(record)
 
-                updated_at = record.get("updated_at")
                 if isinstance(updated_at, str):
                     if max_updated_at is None or updated_at > max_updated_at:
                         max_updated_at = updated_at
@@ -1596,12 +1729,19 @@ def register_lakeflow_source(spark):
             max_updated_at: str | None = None
 
             for pr in raw_prs:
+                updated_at = pr.get("updated_at")
+
+                # GET /pulls ignores `since`, so filter client-side: skip rows at or
+                # below the stored cursor so a no-new-rows batch is empty and the
+                # offset advances.
+                if cursor and isinstance(updated_at, str) and updated_at <= cursor:
+                    continue
+
                 record: dict[str, Any] = dict(pr)
                 record["repository_owner"] = owner
                 record["repository_name"] = repo
                 records.append(record)
 
-                updated_at = record.get("updated_at")
                 if isinstance(updated_at, str):
                     if max_updated_at is None or updated_at > max_updated_at:
                         max_updated_at = updated_at
@@ -1644,12 +1784,18 @@ def register_lakeflow_source(spark):
             max_updated_at: str | None = None
 
             for comment in raw_comments:
+                updated_at = comment.get("updated_at")
+
+                # Skip rows at or below the stored cursor so a no-new-rows batch is
+                # empty and the offset advances.
+                if cursor and isinstance(updated_at, str) and updated_at <= cursor:
+                    continue
+
                 record: dict[str, Any] = dict(comment)
                 record["repository_owner"] = owner
                 record["repository_name"] = repo
                 records.append(record)
 
-                updated_at = record.get("updated_at")
                 if isinstance(updated_at, str):
                     if max_updated_at is None or updated_at > max_updated_at:
                         max_updated_at = updated_at
@@ -2038,6 +2184,12 @@ def register_lakeflow_source(spark):
             max_records = pagination.max_records_per_batch
             records: list[dict[str, Any]] = []
 
+            # Append table with no per-record cursor: emit the full set once at a
+            # sentinel offset, then return empty so the stream terminates without
+            # re-emitting.
+            if start_offset and start_offset.get("cursor"):
+                return iter([]), start_offset
+
             def _fetch_reviews_for_pull(pull_number: int) -> None:
                 """Fetch reviews for a single pull request and append to records."""
                 url = f"{self.base_url}/repos/{owner}/{repo}/pulls/{pull_number}/reviews"
@@ -2064,7 +2216,8 @@ def register_lakeflow_source(spark):
                     ) from exc
 
                 _fetch_reviews_for_pull(pull_number_int)
-                return iter(records), {}
+                next_offset = {"cursor": self._init_time} if records else (start_offset or {})
+                return iter(records), next_offset
 
             pr_state = table_options.get("state", "all")
             url = f"{self.base_url}/repos/{owner}/{repo}/pulls"
@@ -2079,7 +2232,239 @@ def register_lakeflow_source(spark):
                 if isinstance(number, int):
                     _fetch_reviews_for_pull(number)
 
-            return iter(records), {}
+            next_offset = {"cursor": self._init_time} if records else (start_offset or {})
+            return iter(records), next_offset
+
+        # ------------------------------------------------------------------
+        # repository_files (source code contents)
+        # ------------------------------------------------------------------
+
+        def _get_default_branch(self, owner: str, repo: str) -> str:
+            """Return the repository's default branch name (falls back to 'main')."""
+            url = f"{self.base_url}/repos/{owner}/{repo}"
+            resp = self._session.get(url, timeout=30)
+            if resp.status_code != 200:
+                raise RuntimeError(
+                    f"GitHub API error resolving default branch for "
+                    f"{owner}/{repo}: {resp.status_code} {resp.text}"
+                )
+            return (resp.json() or {}).get("default_branch") or "main"
+
+        def _resolve_commit_tree(
+            self, owner: str, repo: str, ref: str
+        ) -> tuple[str | None, str]:
+            """Resolve a ref (branch, tag, or sha) to its commit sha and tree sha.
+
+            Uses ``GET /repos/{owner}/{repo}/commits/{ref}`` (Contents: Read).
+            """
+            url = f"{self.base_url}/repos/{owner}/{repo}/commits/{ref}"
+            resp = self._session.get(url, timeout=30)
+            if resp.status_code != 200:
+                raise RuntimeError(
+                    f"GitHub API error resolving ref {ref!r} for "
+                    f"{owner}/{repo}: {resp.status_code} {resp.text}"
+                )
+            data = resp.json() or {}
+            commit_sha = data.get("sha")
+            tree_sha = ((data.get("commit") or {}).get("tree") or {}).get("sha")
+            if not tree_sha:
+                raise ValueError(
+                    f"Could not resolve tree sha for ref {ref!r} in {owner}/{repo}"
+                )
+            return commit_sha, tree_sha
+
+        def _walk_tree(
+            self, owner: str, repo: str, tree_sha: str, prefix: str = ""
+        ) -> list[dict]:
+            """Recursively walk a git tree one level at a time.
+
+            Fallback used when the recursive tree response is truncated (very large
+            repos). Builds full paths from nested, single-level tree responses.
+            """
+            url = f"{self.base_url}/repos/{owner}/{repo}/git/trees/{tree_sha}"
+            resp = self._session.get(url, timeout=30)
+            if resp.status_code != 200:
+                raise RuntimeError(
+                    f"GitHub API error walking tree {tree_sha!r} for "
+                    f"{owner}/{repo}: {resp.status_code} {resp.text}"
+                )
+            data = resp.json() or {}
+            blobs: list[dict] = []
+            for entry in data.get("tree", []) or []:
+                full_path = f"{prefix}{entry.get('path')}"
+                entry_type = entry.get("type")
+                if entry_type == "blob":
+                    blob = dict(entry)
+                    blob["path"] = full_path
+                    blobs.append(blob)
+                elif entry_type == "tree" and entry.get("sha"):
+                    blobs.extend(
+                        self._walk_tree(owner, repo, entry["sha"], prefix=f"{full_path}/")
+                    )
+            return blobs
+
+        def _list_tree_blobs(self, owner: str, repo: str, tree_sha: str) -> list[dict]:
+            """List all blob entries under a tree.
+
+            Tries the single-call recursive tree endpoint first; if GitHub reports
+            the response as truncated, falls back to a per-directory walk so no
+            files are silently dropped.
+            """
+            url = f"{self.base_url}/repos/{owner}/{repo}/git/trees/{tree_sha}"
+            resp = self._session.get(url, params={"recursive": "1"}, timeout=30)
+            if resp.status_code != 200:
+                raise RuntimeError(
+                    f"GitHub API error listing tree {tree_sha!r} for "
+                    f"{owner}/{repo}: {resp.status_code} {resp.text}"
+                )
+            data = resp.json() or {}
+            if data.get("truncated"):
+                return self._walk_tree(owner, repo, tree_sha)
+            return [
+                entry
+                for entry in (data.get("tree", []) or [])
+                if entry.get("type") == "blob"
+            ]
+
+        def _fetch_blob_content(
+            self, owner: str, repo: str, blob_sha: str, include_binary: bool
+        ) -> tuple[str | None, str | None, str | None, bool]:
+            """Fetch and decode a single blob's content.
+
+            Returns ``(content, content_base64, encoding, is_binary)``. Uses
+            ``GET /repos/{owner}/{repo}/git/blobs/{sha}`` (Contents: Read).
+            """
+            url = f"{self.base_url}/repos/{owner}/{repo}/git/blobs/{blob_sha}"
+            resp = self._session.get(url, timeout=30)
+            if resp.status_code != 200:
+                raise RuntimeError(
+                    f"GitHub API error fetching blob {blob_sha!r} for "
+                    f"{owner}/{repo}: {resp.status_code} {resp.text}"
+                )
+            data = resp.json() or {}
+            return decode_blob_content(
+                data.get("content"), data.get("encoding"), include_binary
+            )
+
+        def _read_repository_files(  # pylint: disable=too-many-locals
+            self, start_offset: dict, table_options: dict[str, str]
+        ) -> (Iterator[dict], dict):
+            """
+            Read the ``repository_files`` snapshot table: source code contents at a ref.
+
+            Read-only. Enumerates the git tree at a resolved commit and fetches each
+            matching blob. All endpoints are GET, so a fine-grained PAT with only
+            ``Contents: Read`` (+ mandatory ``Metadata: Read``), scoped to the
+            selected repositories, is sufficient. Nothing here can write.
+
+            Required table_options:
+                - owner, repo.
+
+            Optional table_options:
+                - ref: Branch, tag, or commit sha. Defaults to the repo's default branch.
+                - include_extensions: Comma-separated, e.g. "py,java,ts".
+                - include_globs / exclude_globs: fnmatch patterns; excludes win.
+                - max_file_bytes: Skip files larger than this (default 1_000_000).
+                  Skipped files still emit a metadata row with content = null.
+                - include_binary: "true" to keep binary files as base64 (default false).
+                - max_records_per_batch: Page size; when set, the read is split into
+                  deterministic index-based batches.
+            """
+            owner, repo = require_owner_repo(table_options, "repository_files")
+            pagination = parse_pagination_options(table_options)
+            file_filter = parse_file_filter(table_options)
+
+            include_binary = str(
+                table_options.get("include_binary", "false")
+            ).strip().lower() in ("true", "1", "yes")
+            try:
+                max_file_bytes = int(table_options.get("max_file_bytes", 1_000_000))
+            except (TypeError, ValueError):
+                max_file_bytes = 1_000_000
+
+            ref = table_options.get("ref") or self._get_default_branch(owner, repo)
+            commit_sha, tree_sha = self._resolve_commit_tree(owner, repo, ref)
+
+            blobs = [
+                blob
+                for blob in self._list_tree_blobs(owner, repo, tree_sha)
+                if should_include_file(blob.get("path", ""), file_filter)
+            ]
+            blobs.sort(key=lambda blob: blob.get("path", ""))
+            total = len(blobs)
+
+            start_index = 0
+            if start_offset and isinstance(start_offset, dict):
+                try:
+                    start_index = int(start_offset.get("index", 0) or 0)
+                except (TypeError, ValueError):
+                    start_index = 0
+
+            max_records = pagination.max_records_per_batch
+            end_index = (
+                min(start_index + max_records, total)
+                if max_records is not None
+                else total
+            )
+
+            if start_index >= total:
+                return iter([]), start_offset if start_offset else {"index": total}
+
+            ingested_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+            host = "https://github.com" if self.base_url == "https://api.github.com" else None
+
+            records: list[dict[str, Any]] = []
+            for blob in blobs[start_index:end_index]:
+                path = blob.get("path", "")
+                blob_sha = blob.get("sha")
+                size = blob.get("size") or 0
+
+                content: str | None = None
+                content_base64: str | None = None
+                encoding: str | None = None
+                is_binary: bool | None = None
+                skipped_reason: str | None = None
+
+                if size and size > max_file_bytes:
+                    skipped_reason = "size_exceeds_max_file_bytes"
+                elif blob_sha:
+                    content, content_base64, encoding, is_binary = self._fetch_blob_content(
+                        owner, repo, blob_sha, include_binary
+                    )
+                    if is_binary and not include_binary:
+                        skipped_reason = "binary_excluded"
+
+                records.append(
+                    {
+                        "repository_owner": owner,
+                        "repository_name": repo,
+                        "path": path,
+                        "ref": ref,
+                        "commit_sha": commit_sha,
+                        "blob_sha": blob_sha,
+                        "size": size,
+                        "mode": blob.get("mode"),
+                        "encoding": encoding,
+                        "is_binary": is_binary,
+                        "skipped_reason": skipped_reason,
+                        "content": content,
+                        "content_base64": content_base64,
+                        "html_url": (
+                            f"{host}/{owner}/{repo}/blob/{commit_sha}/{path}"
+                            if host and commit_sha
+                            else None
+                        ),
+                        "ingested_at": ingested_at,
+                    }
+                )
+
+            if max_records is None:
+                return iter(records), {}
+
+            next_offset = {"index": end_index}
+            if start_offset and start_offset == next_offset:
+                return iter(records), start_offset
+            return iter(records), next_offset
 
 
     ########################################################

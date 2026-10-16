@@ -4,6 +4,9 @@ This module contains helper functions for pagination, link header parsing,
 and common option parsing used across the GitHub connector.
 """
 
+import base64
+import binascii
+import fnmatch
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 
@@ -156,6 +159,98 @@ def get_cursor_from_offset(
     if not cursor:
         cursor = table_options.get("start_date")
     return cursor
+
+
+def _split_csv(value: str | None) -> list[str]:
+    """Split a comma-separated option string into a list of trimmed tokens.
+
+    Returns an empty list for ``None`` or blank input.
+    """
+    if not value:
+        return []
+    return [token.strip() for token in value.split(",") if token.strip()]
+
+
+@dataclass
+class FileFilter:
+    """Parsed include/exclude rules for the ``repository_files`` table."""
+
+    extensions: list[str]
+    include_globs: list[str]
+    exclude_globs: list[str]
+
+
+def parse_file_filter(table_options: dict[str, str]) -> FileFilter:
+    """Parse file-selection options for the ``repository_files`` table.
+
+    Options (all optional, comma-separated):
+        - include_extensions: e.g. ``"py,java,ts"`` (leading dot optional).
+        - include_globs: e.g. ``"src/**,lib/**"`` (fnmatch semantics).
+        - exclude_globs: e.g. ``"**/vendor/**,*.min.js"``.
+    """
+    extensions = []
+    for ext in _split_csv(table_options.get("include_extensions")):
+        extensions.append(ext if ext.startswith(".") else f".{ext}")
+
+    return FileFilter(
+        extensions=extensions,
+        include_globs=_split_csv(table_options.get("include_globs")),
+        exclude_globs=_split_csv(table_options.get("exclude_globs")),
+    )
+
+
+def should_include_file(path: str, file_filter: FileFilter) -> bool:
+    """Decide whether a file path passes the include/exclude filter.
+
+    Rules, in order:
+        1. Any matching ``exclude_globs`` pattern rejects the file.
+        2. If neither ``extensions`` nor ``include_globs`` is set, the file is
+           included (subject only to excludes).
+        3. Otherwise the file is included when it matches an allowed extension
+           OR an ``include_globs`` pattern.
+
+    Uses ``fnmatch`` semantics, where ``*`` also matches ``/``.
+    """
+    for pattern in file_filter.exclude_globs:
+        if fnmatch.fnmatch(path, pattern):
+            return False
+
+    if not file_filter.extensions and not file_filter.include_globs:
+        return True
+
+    if any(path.endswith(ext) for ext in file_filter.extensions):
+        return True
+    return any(fnmatch.fnmatch(path, pattern) for pattern in file_filter.include_globs)
+
+
+def decode_blob_content(
+    raw_content: str | None, encoding: str | None, include_binary: bool
+) -> tuple[str | None, str | None, str | None, bool]:
+    """Decode a GitHub blob payload into text or (optionally) base64 bytes.
+
+    GitHub returns blob content base64-encoded. This decodes it and detects
+    binary files by attempting a strict UTF-8 decode.
+
+    Returns a tuple of ``(content, content_base64, encoding, is_binary)``:
+        - Text file: ``(text, None, "utf-8", False)``.
+        - Binary file with ``include_binary=True``: ``(None, base64, "base64", True)``.
+        - Binary file with ``include_binary=False``: ``(None, None, "base64", True)``.
+    """
+    if encoding != "base64" or raw_content is None:
+        # Unexpected shape; surface the raw value as text without guessing.
+        return raw_content, None, encoding, False
+
+    try:
+        raw_bytes = base64.b64decode(raw_content)
+    except (binascii.Error, ValueError):
+        return None, None, "base64", True
+
+    try:
+        return raw_bytes.decode("utf-8"), None, "utf-8", False
+    except UnicodeDecodeError:
+        if include_binary:
+            return None, base64.b64encode(raw_bytes).decode("ascii"), "base64", True
+        return None, None, "base64", True
 
 
 def require_owner_repo(
