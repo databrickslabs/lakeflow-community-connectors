@@ -1,0 +1,39 @@
+# Google Campaign Manager 360 Community Connector Spec
+
+display_name: Google Campaign Manager 360
+
+connection:
+  parameters:
+    - name: client_id
+      type: string
+      required: true
+      secret: true
+      description: >
+        OAuth 2.0 client ID for a Google Cloud Web application with the
+        Campaign Manager 360 API enabled.
+
+    - name: client_secret
+      type: string
+      required: true
+      secret: true
+      description: >
+        OAuth 2.0 client secret issued with the Google Cloud client ID.
+
+    - name: profile_id
+      type: string
+      required: true
+      description: >
+        Numeric Campaign Manager 360 user profile ID whose reporting data the
+        connection reads. Create one connection for each profile ID.
+
+  oauth:
+    flow: u2m
+    pkce: true
+    scopes: https://www.googleapis.com/auth/dfareporting
+    authorization_url: https://accounts.google.com/o/oauth2/v2/auth
+    token_url: https://oauth2.googleapis.com/token
+    extra_auth_params:
+      access_type: offline
+      prompt: consent
+
+external_options_allowlist: "sync_start_date,sync_end_date,initial_lookback_months,lookback_window_days,reporting_timezone,advertiser_ids,delivery_country_codes,max_records_per_batch"
