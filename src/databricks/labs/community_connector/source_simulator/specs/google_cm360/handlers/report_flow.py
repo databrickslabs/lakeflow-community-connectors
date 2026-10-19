@@ -403,6 +403,95 @@ def _render_period_csv(corpus, report: dict) -> str:
     return buffer.getvalue()
 
 
+def _insert_report(prep: PreparedRequest, state: dict) -> Response:
+    _log(state, "insert", prep)
+    body = _request_body(prep)
+    report_id = "report-1"
+    report_type = body.get("type")
+    criteria_name = "reachCriteria" if report_type == "REACH" else "criteria"
+    _validate_compatible_fields_request(prep)
+    country_filters = [
+        item
+        for item in body.get(criteria_name, {}).get("dimensionFilters", [])
+        if item.get("dimensionName") == "country"
+    ]
+    assert len(country_filters) <= 1, "report must contain at most one country filter"
+    placement = _is_placement_report(body)
+    assert not (placement and country_filters), "placement reports have no country filter"
+    delivery_country = None
+    if country_filters:
+        country_id = country_filters[0].get("id")
+        delivery_country = state.get("resolved_countries", {}).get(country_id)
+        assert delivery_country is not None, "report country ID was not resolved"
+        assert _COUNTRY_DIMENSIONS[delivery_country] == country_id, "country ID/name mismatch"
+    state["reports"][report_id] = {
+        "date": body[criteria_name]["dateRange"]["startDate"],
+        "end_date": body[criteria_name]["dateRange"]["endDate"],
+        "period_kind": _period_kind(body),
+        "campaign_id": next(
+            (
+                item["id"]
+                for item in body[criteria_name].get("dimensionFilters", [])
+                if item.get("dimensionName") == "campaign"
+            ),
+            None,
+        ),
+        "delivery_country": delivery_country,
+        "type": report_type,
+        "placement": placement,
+        "advertiser_ids": [
+            item["id"]
+            for item in body.get(criteria_name, {}).get("dimensionFilters", [])
+            if item.get("dimensionName") == "advertiser"
+        ],
+        "poll_count": 0,
+    }
+    return _response(prep, 200, json_body={"id": report_id})
+
+
+def _file_response(prep: PreparedRequest, corpus, state: dict, path: str, query: dict) -> Response:
+    report_id = _report_id_from_file_path(path)
+    report = state["reports"][report_id]
+    if query.get("alt") == ["media"]:
+        _log(state, "download", prep)
+        if report["period_kind"]:
+            csv_text = _render_period_csv(corpus, report)
+            if (
+                report["campaign_id"] == state.get("truncate_campaign_id")
+                and report["period_kind"] == "reach"
+            ):
+                csv_text = csv_text.split("Grand Total:", 1)[0]
+        elif report["type"] == "REACH":
+            csv_text = _render_reach_csv(
+                report["date"], report["delivery_country"], report["advertiser_ids"]
+            )
+        elif report["placement"]:
+            csv_text = _render_placement_csv(corpus, report["date"], report["advertiser_ids"])
+        else:
+            csv_text = _render_csv(
+                corpus, report["date"], report["delivery_country"], report["advertiser_ids"]
+            )
+        return _response(
+            prep,
+            200,
+            text_body=csv_text,
+            content_type="text/csv; charset=UTF-8",
+        )
+    _log(state, "poll", prep)
+    report["poll_count"] += 1
+    if report["poll_count"] == 1:
+        return _response(prep, 200, json_body={"id": "file-1", "status": "PROCESSING"})
+    return _response(
+        prep,
+        200,
+        json_body={
+            "id": "file-1",
+            "status": "REPORT_AVAILABLE",
+            "lastModifiedTime": report["last_modified"],
+        },
+    )
+
+
 def handle_request(prep: PreparedRequest, spec, corpus) -> Response:  # noqa: ARG001
     parsed = urlsplit(prep.url)
     path = parsed.path
@@ -463,49 +552,7 @@ def handle_request(prep: PreparedRequest, spec, corpus) -> Response:  # noqa: AR
         )
 
     if method == "POST" and path.endswith("/reports"):
-        _log(state, "insert", prep)
-        body = _request_body(prep)
-        report_id = "report-1"
-        report_type = body.get("type")
-        criteria_name = "reachCriteria" if report_type == "REACH" else "criteria"
-        _validate_compatible_fields_request(prep)
-        country_filters = [
-            item
-            for item in body.get(criteria_name, {}).get("dimensionFilters", [])
-            if item.get("dimensionName") == "country"
-        ]
-        assert len(country_filters) <= 1, "report must contain at most one country filter"
-        placement = _is_placement_report(body)
-        assert not (placement and country_filters), "placement reports have no country filter"
-        delivery_country = None
-        if country_filters:
-            country_id = country_filters[0].get("id")
-            delivery_country = state.get("resolved_countries", {}).get(country_id)
-            assert delivery_country is not None, "report country ID was not resolved"
-            assert _COUNTRY_DIMENSIONS[delivery_country] == country_id, "country ID/name mismatch"
-        reports[report_id] = {
-            "date": body[criteria_name]["dateRange"]["startDate"],
-            "end_date": body[criteria_name]["dateRange"]["endDate"],
-            "period_kind": _period_kind(body),
-            "campaign_id": next(
-                (
-                    item["id"]
-                    for item in body[criteria_name].get("dimensionFilters", [])
-                    if item.get("dimensionName") == "campaign"
-                ),
-                None,
-            ),
-            "delivery_country": delivery_country,
-            "type": report_type,
-            "placement": placement,
-            "advertiser_ids": [
-                item["id"]
-                for item in body.get(criteria_name, {}).get("dimensionFilters", [])
-                if item.get("dimensionName") == "advertiser"
-            ],
-            "poll_count": 0,
-        }
-        return _response(prep, 200, json_body={"id": report_id})
+        return _insert_report(prep, state)
 
     if method == "POST" and path.endswith("/run"):
         _log(state, "run", prep)
@@ -519,46 +566,7 @@ def handle_request(prep: PreparedRequest, spec, corpus) -> Response:  # noqa: AR
         return _response(prep, 200, json_body={"id": "file-1", "status": "PROCESSING"})
 
     if method == "GET" and "/files/" in path:
-        report_id = _report_id_from_file_path(path)
-        report = reports[report_id]
-        if query.get("alt") == ["media"]:
-            _log(state, "download", prep)
-            if report["period_kind"]:
-                csv_text = _render_period_csv(corpus, report)
-                if (
-                    report["campaign_id"] == state.get("truncate_campaign_id")
-                    and report["period_kind"] == "reach"
-                ):
-                    csv_text = csv_text.split("Grand Total:", 1)[0]
-            elif report["type"] == "REACH":
-                csv_text = _render_reach_csv(
-                    report["date"], report["delivery_country"], report["advertiser_ids"]
-                )
-            elif report["placement"]:
-                csv_text = _render_placement_csv(corpus, report["date"], report["advertiser_ids"])
-            else:
-                csv_text = _render_csv(
-                    corpus, report["date"], report["delivery_country"], report["advertiser_ids"]
-                )
-            return _response(
-                prep,
-                200,
-                text_body=csv_text,
-                content_type="text/csv; charset=UTF-8",
-            )
-        _log(state, "poll", prep)
-        report["poll_count"] += 1
-        if report["poll_count"] == 1:
-            return _response(prep, 200, json_body={"id": "file-1", "status": "PROCESSING"})
-        return _response(
-            prep,
-            200,
-            json_body={
-                "id": "file-1",
-                "status": "REPORT_AVAILABLE",
-                "lastModifiedTime": report["last_modified"],
-            },
-        )
+        return _file_response(prep, corpus, state, path, query)
 
     if method == "DELETE" and "/reports/" in path:
         _log(state, "delete", prep)

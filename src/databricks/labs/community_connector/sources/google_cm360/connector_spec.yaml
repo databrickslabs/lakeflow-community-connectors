@@ -36,4 +36,4 @@ connection:
       access_type: offline
       prompt: consent
 
-external_options_allowlist: "sync_start_date,sync_end_date,initial_lookback_months,lookback_window_days,reporting_timezone,advertiser_ids,delivery_country_codes,max_records_per_batch"
+external_options_allowlist: "sync_start_date,sync_end_date,initial_lookback_months,lookback_window_days,reporting_timezone,advertiser_ids,delivery_country_codes,max_records_per_batch,emit_request_telemetry"

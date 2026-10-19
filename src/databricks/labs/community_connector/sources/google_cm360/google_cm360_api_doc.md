@@ -130,6 +130,25 @@ contains `next_date`, `upper_bound` and `initial_start`. Recent source revisions
 are upserted using the file revision timestamp. Disappeared daily rows remain
 because there is no delete feed.
 
+A nonempty one-day replay whose completed checkpoint would equal its input
+returns the existing in-progress form with `next_date` one day beyond the
+bound. The next call returns an empty completed checkpoint, followed by stable
+empty termination. Resuming that in-progress checkpoint does not re-read the day.
+
+### Request Telemetry
+
+`emit_request_telemetry` defaults to the string `false`; only lowercase strings
+`true` and `false` are valid. When enabled, daily checkpoints add
+`request_telemetry` with `http_attempts`, `http_retries`, `file_poll_calls`,
+`transport_errors`, `response_status_counts`, `retry_status_counts` and
+`daily_reports_completed` (reports whose cleanup succeeded). Counters persist
+across in-progress reads and reset on a new read from a completed checkpoint.
+An instrumented daily checkpoint cannot be resumed with the option disabled.
+Enabling it on an uninstrumented checkpoint is supported. Counters contain no
+identifiers, credentials, rows or response bodies and are not sent to a separate
+service. No destination columns change. Period snapshots ignore the option and
+never emit request telemetry.
+
 ## Campaign Period Snapshots
 
 Require explicit metadata anchor (`sync_start_date`), completed cutoff

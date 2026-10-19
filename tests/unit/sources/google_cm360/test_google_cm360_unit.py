@@ -39,6 +39,7 @@ from databricks.labs.community_connector.sources.google_cm360.google_cm360 impor
     ProfileMetadata,
     ReadState,
     RequestTelemetry,
+    _TABLE_OPTION_NAMES,
     _build_placement_report_definition,
     _build_profile_metadata,
     _build_reach_report_definition,
@@ -2283,8 +2284,23 @@ def test_connector_spec_matches_oauth_and_option_contract():
     }
     assert spec["external_options_allowlist"] == (
         "sync_start_date,sync_end_date,initial_lookback_months,lookback_window_days,"
-        "reporting_timezone,advertiser_ids,delivery_country_codes,max_records_per_batch"
+        "reporting_timezone,advertiser_ids,delivery_country_codes,max_records_per_batch,"
+        "emit_request_telemetry"
     )
+
+
+def test_public_table_options_match_allowlist_and_documentation():
+    spec = yaml.safe_load((SOURCE_DIR / "connector_spec.yaml").read_text(encoding="utf-8"))
+    readme = (SOURCE_DIR / "README.md").read_text(encoding="utf-8")
+    api_doc = (SOURCE_DIR / "google_cm360_api_doc.md").read_text(encoding="utf-8")
+
+    assert set(spec["external_options_allowlist"].split(",")) == _TABLE_OPTION_NAMES
+    assert spec["external_options_allowlist"] in readme
+    for option in _TABLE_OPTION_NAMES:
+        assert f"`{option}`" in readme
+    for document in (readme, api_doc):
+        assert "`emit_request_telemetry`" in document
+        assert "`request_telemetry`" in document
 
 
 def test_connector_spec_requests_reporting_scope_only():
@@ -2324,6 +2340,7 @@ def test_public_readme_documents_required_user_contract():
         "12",
         "sync_end_date",
         "lookback_window_days",
+        "emit_request_telemetry",
         "30",
         "advertiser_ids",
         "delivery_country_codes",
@@ -2342,7 +2359,6 @@ def test_public_readme_documents_required_user_contract():
         "cannot create this connector's user-to-machine connection",
         "It keeps the client secret out of shell history and terminal output",
         "https://www.googleapis.com/auth/dfatrafficking",
-        "emit_request_telemetry",
     ):
         assert obsolete_claim not in readme
 

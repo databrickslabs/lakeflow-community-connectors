@@ -6,7 +6,10 @@ import os
 import pytest
 from datetime import date
 from decimal import Decimal
+from pyspark.sql.datasource_internal import _SimpleStreamReaderWrapper
+from pyspark.sql.streaming.datasource import ReadAllAvailable
 
+from databricks.labs.community_connector.sparkpds.lakeflow_datasource import LakeflowStreamReader
 from databricks.labs.community_connector.sources.google_cm360 import (
     GoogleCm360LakeflowConnect,
 )
@@ -253,6 +256,52 @@ class TestGoogleCm360Connector(LakeflowConnectTests):
             "download",
             "delete",
         ]
+
+    @pytest.mark.parametrize(
+        "table_name", ["ad_report_daily", "reach_report_daily", "ad_report_placement_daily"]
+    )
+    @pytest.mark.parametrize("lookback", [None, "1"])
+    @pytest.mark.parametrize("telemetry", ["false", "true"])
+    def test_simulator_one_day_checkpoint_replay_advances_spark_offset(
+        self, table_name, lookback, telemetry
+    ):
+        state = self._simulator_state()
+        state.clear()
+        options = {
+            "sync_start_date": "2026-08-20" if lookback is None else "2026-08-01",
+            "sync_end_date": "2026-08-20",
+            "emit_request_telemetry": telemetry,
+        }
+        if lookback is not None:
+            options["lookback_window_days"] = lookback
+        first = self.connector_class(self.config)
+        original_rows, checkpoint = first.read_table(
+            table_name, None, {**options, "sync_start_date": "2026-08-20"}
+        )
+        original_rows = list(original_rows)
+        assert original_rows
+
+        replay = self.connector_class(self.config)
+        reader = LakeflowStreamReader(
+            {**options, "tableName": table_name}, replay.get_table_schema(table_name, {}), replay
+        )
+        wrapper = _SimpleStreamReaderWrapper(reader)
+        progress = wrapper.latestOffset(checkpoint, ReadAllAvailable())
+        assert progress != checkpoint
+        assert len(list(wrapper.getCache(checkpoint, progress))) == len(original_rows)
+        operations = list(state["request_log"])
+
+        completed = wrapper.latestOffset(progress, ReadAllAvailable())
+        assert completed == checkpoint
+        assert list(wrapper.getCache(progress, completed)) == []
+        assert wrapper.latestOffset(completed, ReadAllAvailable()) == completed
+        assert state["request_log"] == operations
+
+        resumed = self.connector_class(self.config)
+        rows, resumed_offset = resumed.read_table(table_name, progress, options)
+        assert list(rows) == []
+        assert resumed_offset == completed
+        assert state["request_log"] == operations
 
     def test_replay_same_date_keeps_keys_and_advances_file_timestamp(self):
         state = self._simulator_state()

@@ -30,7 +30,7 @@ The connector creates and deletes temporary reporting definitions. It does not c
 The complete source-specific value for `externalOptionsAllowList` is:
 
 ```text
-sync_start_date,sync_end_date,initial_lookback_months,lookback_window_days,reporting_timezone,advertiser_ids,delivery_country_codes,max_records_per_batch
+sync_start_date,sync_end_date,initial_lookback_months,lookback_window_days,reporting_timezone,advertiser_ids,delivery_country_codes,max_records_per_batch,emit_request_telemetry
 ```
 
 Creating the connection opens a browser for Google sign-in and consent. Databricks stores and refreshes the credentials. Users supply the OAuth application identity and profile ID; they do not paste access or refresh tokens.
@@ -150,8 +150,15 @@ Values passed to the connector are strings. JSON lists are encoded as strings.
 | `advertiser_ids` | `[]` | JSON list of advertiser ID strings. An empty list reads all advertisers accessible through the profile. |
 | `delivery_country_codes` | Unfiltered for daily tables | Optional single-item JSON list containing `US`, `DE` or `CH`. Required for period reach. Other filters are currently rejected. Placement validates the option but does not apply it. |
 | `max_records_per_batch` | `100000` | Best-effort daily row target. The whole day's rows are returned even above the target. Period snapshots also return all rows together. |
+| `emit_request_telemetry` | `false` | Set the string `true` to include sanitized request counters in daily-table checkpoints. Only lowercase strings `true` and `false` are accepted. Period snapshots do not emit these counters. |
 
 Omitting `delivery_country_codes` allows the daily campaign tables to return other delivery countries. The three-country restriction applies to explicit filters, not to all source data. A different country filter or multiple countries requires an implementation change.
+
+### Request Telemetry
+
+With `emit_request_telemetry` set to `true`, daily offsets include a `request_telemetry` object containing HTTP attempt/retry counts, response/retry counts by status, file-poll calls, transport errors, and daily reports completed with successful cleanup. These are counters only, not report rows, identifiers, credentials or response bodies. The connector does not send them to a separate telemetry service or add columns to destination tables.
+
+Counters accumulate while resuming an in-progress checkpoint and reset when a new read starts from a completed checkpoint. Once a daily checkpoint contains `request_telemetry`, keep the option enabled when resuming it; changing it to `false` raises an error. Enabling the option on a checkpoint that has no counters is supported. The `reach_report_period` snapshot ignores this option and returns no telemetry.
 
 ## Data Type Mapping
 

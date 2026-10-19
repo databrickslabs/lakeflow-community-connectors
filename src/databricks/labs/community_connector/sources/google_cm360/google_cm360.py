@@ -1440,8 +1440,10 @@ class GoogleCm360LakeflowConnect(LakeflowConnect):
 
         if state.next_date == state.upper_bound:
             completed_offset = _completed_offset(state, telemetry)
-            self._terminal_offsets[table_name] = completed_offset
-            return iter(rows), completed_offset
+            # A nonempty replay must advance even when its watermark is unchanged.
+            if completed_offset != start_offset or not rows:
+                self._terminal_offsets[table_name] = completed_offset
+                return iter(rows), completed_offset
 
         next_state = ReadState(
             high_watermark=state.high_watermark,
