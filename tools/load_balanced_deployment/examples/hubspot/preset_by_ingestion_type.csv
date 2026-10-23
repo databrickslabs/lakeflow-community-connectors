@@ -1,0 +1,11 @@
+source_table,category,table_configuration_json
+contacts,cdc,{}
+companies,cdc,{}
+deals,cdc,{}
+tickets,cdc,{}
+calls,cdc,{}
+emails,cdc,{}
+meetings,cdc,{}
+tasks,cdc,{}
+notes,cdc,{}
+deal_split,cdc,{}
