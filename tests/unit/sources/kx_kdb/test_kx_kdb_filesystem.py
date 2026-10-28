@@ -1,5 +1,6 @@
 """Tests for filesystem discovery in the KX KDB Lakeflow connector."""
 
+import os
 import pickle
 
 import pytest
@@ -146,3 +147,54 @@ def test_discovery_cache_serializes_without_driver_metadata(tmp_path):
     assert restored._roots == {}
     assert restored._tables == {}
     assert restored._table_lists == {}
+    with restored._lock:
+        pass
+
+
+def test_expired_table_entry_is_rebuilt_from_a_fresh_root_listing(monkeypatch, tmp_path):
+    hdb_root = _build_hdb(tmp_path)
+    scans = []
+    original_dates = filesystem._scan_date_partitions
+    monkeypatch.setattr(
+        filesystem,
+        "_scan_date_partitions",
+        lambda root_path: scans.append(root_path) or original_dates(root_path),
+    )
+    assert discover_table_partitions(str(hdb_root), "trades")[-1] == "2024.01.03"
+
+    (hdb_root / "2024.01.04" / "TRADES").mkdir(parents=True)
+    with filesystem._DISCOVERY_CACHE._lock:
+        table_key = (str(hdb_root), "trades")
+        entry = filesystem._DISCOVERY_CACHE._tables[table_key]
+        expired = entry.created_at - filesystem._DISCOVERY_CACHE_TTL_SECONDS - 1
+        filesystem._DISCOVERY_CACHE._tables[table_key] = filesystem._TableDiscovery(
+            created_at=expired,
+            actual_name=entry.actual_name,
+            first_partition=entry.first_partition,
+            latest_partition=entry.latest_partition,
+            partitions=entry.partitions,
+        )
+
+    assert discover_table_partitions(str(hdb_root), "trades")[-1] == "2024.01.04"
+    assert len(scans) == 2
+
+
+def test_latest_table_partition_ignores_later_dates_without_the_table(tmp_path):
+    hdb_root = _build_hdb(tmp_path)
+    (hdb_root / "2024.01.04" / "QUOTES").mkdir(parents=True)
+
+    assert filesystem.latest_table_partition(str(hdb_root), "trades") == "2024.01.03"
+    assert filesystem.latest_table_partition(str(hdb_root), "quotes") == "2024.01.04"
+
+
+def test_partition_last_modified_is_the_newest_file_time(tmp_path):
+    partition = tmp_path / "2024.01.01" / "TRADES"
+    partition.mkdir(parents=True)
+    for name, mtime in (("sym", 1_000), ("price", 2_000), (".d", 1_500)):
+        (partition / name).write_bytes(b"stub")
+        os.utime(partition / name, (mtime, mtime))
+
+    entries = filesystem.scan_partition_table(str(tmp_path), "2024.01.01", "TRADES")
+
+    assert filesystem.partition_last_modified(entries) == 2_000
+    assert filesystem.partition_last_modified({}) == 0.0

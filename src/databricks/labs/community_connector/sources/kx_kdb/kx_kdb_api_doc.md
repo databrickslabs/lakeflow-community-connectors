@@ -87,37 +87,62 @@ Offsets are exclusive at the start and inclusive at the end. Given start
 `2024.01.02` and `2024.01.03`. Equal start and end offsets return no
 partitions.
 
+## Date admission
+
+`latest_offset()` walks the dates after the committed offset in order and
+admits a date only when its table partition is complete:
+
+- `.d` exists and every column it lists has a file;
+- for the table's newest date, every column has the same length;
+- when `min_partition_age_minutes` is set, no file of a date not yet admitted
+  changed within that time.
+
+If the newest date, or a date that changed within the minimum age, is not
+complete, the batch stops before it and the offset does not move past it. Any
+other incomplete date fails the batch with the partition path and reason; it
+is never skipped. A date without the table's directory (a sparse table) is
+admitted as empty and checked again in later batches.
+
+These checks rely on the writer creating `.d` after the column files, as
+`.Q.dpft` does. For a writer that creates `.d` first or rewrites columns in
+place, set `min_partition_age_minutes`; executors also fail a task when any
+column's length differs from the planned row count.
+
+Admission stops at `max_dates_per_batch` dates or when the next date would
+exceed `max_tasks_per_batch` tasks. The first date is always admitted, so a
+single date with more tasks than the cap is read in a batch of its own and a
+warning is logged. Batch reads (no offsets) apply the same completeness rules
+without the caps.
+
 ## Partition model
 
-The only supported partition strategy is `date_sym`. The driver reads the
-root `sym` enumeration once and emits one descriptor for every selected
-date and symbol:
+`get_partitions()` takes each admitted date's row count on the driver (q
+`count` of the first column in `.d`, of every column for the newest date) and
+splits the date into contiguous row ranges of at most `max_rows_per_task`
+rows:
 
 ```json
 {
   "date_partition": "2024.01.02",
-  "sym": "AAPL",
-  "sym_index": 0
+  "row_offset": 2000000,
+  "row_count": 2000000,
+  "total_rows": 5123456
 }
 ```
 
-`sym_index` is the symbol's position in the root `sym` file. The empty
-symbol and symbols containing `/` keep their positions. Each date also gets
-one descriptor with `sym_index: null` and `sym_count` (the number of symbols
-in the root `sym` file). It reads the rows whose enumeration index is null or
-not below `sym_count`; those rows are ingested with an empty `sym`.
+Dates with no rows produce no descriptors. Row counts of older complete dates
+are cached on the driver; the newest date is checked again each batch.
 
-`sym_column` must name an enumerated symbol column of the table.
-
-Executors load the root `sym` domain, then filter the table's symbol column by
-integer enumeration index. The physical symbol column defaults to `sym` and
-can be changed per table with `sym_column`. The root enumeration file remains
-`sym`.
-
-Matching rows are read in chunks of at most 10,000 rows so a single active
-symbol does not require the whole date partition to fit in Python memory. The
-last chunk reads exactly the remaining rows. `read_partition()` yields one
-Python `dict` per row, keyed by the schema column names.
+`read_partition()` loads the root `sym` domain, then fails if any schema
+column is missing or does not have `total_rows` rows. It reads rows
+`row_offset + til row_count` of every column in chunks of at most 10,000 rows,
+so a task touches only its own rows and does not need the whole date in
+Python memory. Rows keep their on-disk order. Every row of the date is read
+exactly once, including rows whose symbol index is null or beyond the root
+`sym` file; those symbols are ingested as an empty string. Copy or sync the
+root `sym` file before the date directories that use it.
+`read_partition()` yields one Python `dict` per row, keyed by the schema
+column names.
 
 Symbolic links inside the HDB root are rejected for date partitions, table
 directories, every file in a table partition (including `.d` and
@@ -128,58 +153,64 @@ nested-column companion files), and `sym`.
 | Parameter | Required | Purpose |
 | --- | --- | --- |
 | `hdb_root_path` | Yes | Absolute FUSE path containing `sym` and date directories |
-| `license_volume_path` | Yes | Directory used for `QLIC` and KDB-X runtime files |
-| `kdbx_install_mode` | No | `auto`, `offline`, or `online` |
-| `kdbx_offline_bundle_path` | No | Explicit KDB-X bundle in the license Volume: `l64arm-bundle.zip` for current serverless ARM64, `l64-bundle.zip` for x86_64 |
-| `kdbx_license_file_path` | No | KX license file or directory in the license Volume; `k4.lic` selects a commercial k4 license |
+| `license_volume_path` | Yes | Directory holding `kc.lic` or `k4.lic`; bounds every bootstrap file to its Unity Catalog Volume |
+| `kdbx_offline_bundle_path` | No | KDB-X offline bundle in the license Volume: `l64arm-bundle.zip` for current serverless ARM64, `l64-bundle.zip` for x86_64; defaults to a bundle in `license_volume_path` or its sibling `kdbx` directory |
+| `kdbx_offline_bundle_sha256` | No | Recommended SHA-256 of the offline bundle |
+| `kdbx_license_file_path` | No | KX license file or directory in the license Volume; defaults to `license_volume_path`; `k4.lic` selects a commercial k4 license |
 | `kdbx_license_kind` | No | `k4` or `kc`; selects `--k4b64lic`/`k4.lic` or `--b64lic`/`kc.lic`; defaults to the license file name, otherwise `kc` |
-| `kdbx_install_bearer_token` | No | Secret-valued online installer token |
-| `kdbx_license_b64` | No | Secret-valued base64 KX license |
-| `kdbx_secret_scope` | No | Legacy Databricks secret-scope lookup |
-| `kdbx_install_bearer_secret_key` | No | Legacy installer-token secret key |
-| `kdbx_license_b64_secret_key` | No | Legacy license secret key |
 | `discovery_sample_dates` | No | Date count used for table discovery; `0` scans all |
 
-Direct bearer-token and base64-license values must be supplied through
-secret-backed Unity Catalog connection options. They must never appear in a
-pipeline specification or logs.
+On managed ingestion, pipeline table configuration can supply connection keys
+that the connection leaves unset, and the connector cannot tell where a key
+came from. The bootstrap options above can therefore only select files inside
+the Volume of `license_volume_path`, which is always set on the connection.
+These options of earlier builds are rejected: `kdbx_install_mode`,
+`kdbx_install_bearer_token`, `kdbx_license_b64`, `kdbx_secret_scope`,
+`kdbx_install_bearer_secret_key`, `kdbx_license_b64_secret_key`, and
+`pykx_install_spec`. The `tableConfigs` payload passed to the metadata reader
+is not parsed into connection options.
 
-Connection parameters are read only from connection-level options. The
-`tableConfigs` payload passed to the metadata reader never overrides them, and
-per-table options are limited to `external_options_allowlist`.
+## Runtime setup
 
-## Bootstrap isolation
+The connector never downloads KDB-X. Either:
 
-The recommended deployment uses a customer-provided licensed PyKX/KDB-X
-runtime. The optional online mode uses only the customer's KX bearer token and
-license. It downloads `install_kdb.sh` directly from KX into a process-local
-temporary directory, executes it there, and removes that directory afterward.
+- PyKX and KDB-X are already in the pipeline environment, and `QLIC` points
+  at `license_volume_path`; or
+- a KDB-X offline bundle is staged in the license Volume. The driver records
+  the bundle's size and modification time. On each node, the first Python
+  process takes a file lock in an owner-only directory under the temporary
+  directory, copies the bundle to local disk, checks it against the recorded
+  size and modification time and the optional SHA-256, and runs
+  `install_kdb.sh --offline -y`. Later processes on the node reuse the
+  install. A directory that is not owner-only, or is a symbolic link, is not
+  reused; a private directory is used instead.
 
-The connector does not store the installer in a shared cache or Volume and
-does not upload or re-serve it to another customer or workspace. It contains
-no shared or Databricks-held KX credential or license, and there is no fallback
-to one.
+Managed-ingestion analysis workers do not receive the pipeline environment.
+With an offline bundle, a process that cannot import PyKX therefore runs
+`python -I -m pip install --target <dir> --pre pykx==4.0.0b5` into the same
+owner-only directory, under the same lock, once per node. The requirement is
+fixed in the connector; no option changes it. Pip does not inherit
+`PYTHONPATH`, `PYTHONHOME`, KDB license variables, or the license value.
+
+PyKX is imported after setup. Setup sets only `QLIC`, `QHOME` (the install's
+`.kx` directory), `PYKX_LICENSED`, and adds the install's `bin` directory to
+`PATH` once. The PyKX fallback directory is appended to `sys.path`, so the
+runtime's own packages keep precedence. Setup does not change `HOME` or the
+working directory. Processes wait at most 25 minutes for another process's
+install on the same node.
 
 Secret handling:
 
-- `curl -q --config -` receives the bearer token on standard input.
 - `install_kdb.sh` accepts the license only as an argument, so the base64
   license is visible to other processes in the container while the installer
   runs. A preinstalled runtime avoids this exposure. The installer receives
-  only locale, proxy, and certificate environment variables.
+  only locale, proxy, and certificate environment variables, and its standard
+  input is closed.
 - A materialized license file is `0600` inside a `0700` directory. The license
   is not exported as `KDB_LICENSE_B64`.
-- Child processes do not inherit KDB license variables or values equal to a
-  connector secret. Subprocess error output is redacted.
-- Offline bundles are copied to a process-local cache keyed by source path,
-  size, and modification time. Members with absolute paths, `..` components,
-  or symbolic links are rejected.
-- The default installer URL tracks KX's latest release. If PyKX is missing,
-  only the pinned `pykx==4.0.0b5` is installed. Add PyKX to the pipeline
-  environment and stage an offline bundle for reproducible runtimes.
-- Pipeline table configuration can supply options the connection leaves
-  unset. `kdbx_offline_bundle_path` and `kdbx_license_file_path` must
-  therefore be in the same Unity Catalog Volume as `license_volume_path`.
+- Installer error output is redacted.
+- Offline bundle members with absolute paths, `..` components, or symbolic
+  links are rejected.
 
 ## Table options
 
@@ -188,17 +219,20 @@ Secret handling:
 | `start_date` | First available date | Inclusive lower discovery filter |
 | `end_date` | Last available date | Inclusive upper discovery filter |
 | `ingestion_mode` | `append` | Must remain `append` |
-| `partition_strategy` | `date_sym` | Must remain `date_sym` |
-| `sym_column` | `sym` | Physical enumerated column used for symbol filtering |
+| `max_dates_per_batch` | `250` | Most dates admitted to one micro-batch |
+| `max_tasks_per_batch` | `2000` | Most tasks in one micro-batch, except a single larger date |
+| `max_rows_per_task` | `2000000` | Most rows in one task |
+| `min_partition_age_minutes` | `0` | Minimum time since a date's last file change before it is admitted |
+
+`partition_strategy` and `sym_column` from earlier builds are rejected.
 
 ## Runtime requirements
 
 - A Lakeflow runtime with Unity Catalog Volume FUSE access.
-- PyKX available in the pipeline environment or installable from the
-  configured package spec.
+- `pykx==4.0.0b5` in the pipeline environment, or package-index access for
+  the once-per-node fallback when an offline bundle is used.
 - A customer-provided commercial KX license that permits third-party-cloud use.
-- `READ VOLUME` on the HDB, license, wheel, and optional offline-bundle
-  locations.
+- `READ VOLUME` on the HDB, license, and optional offline-bundle locations.
 
 PyKX uses a dual-license model, including commercial terms for its `q.so`
 components. PyKX, `q.so`, KDB-X, the KX installer, offline bundles, and license

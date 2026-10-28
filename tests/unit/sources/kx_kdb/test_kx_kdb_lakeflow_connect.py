@@ -2,7 +2,7 @@
 
 The setup follows the HL7 v2 Volume precedent. A temporary directory exercises
 the production filesystem and offset logic while deterministic fakes replace
-only the licensed PyKX schema, symbol-enumeration, and column-read boundaries.
+only the licensed PyKX schema, partition-shape, and row-range read boundaries.
 """
 
 from __future__ import annotations
@@ -16,6 +16,7 @@ from databricks.labs.community_connector.sources.kx_kdb import KxKdbDataSource
 from databricks.labs.community_connector.sources.kx_kdb.kx_kdb import (
     KxKdbLakeflowConnect,
 )
+from databricks.labs.community_connector.sources.kx_kdb.sym_reader import PartitionShape
 from tests.unit.sources.test_partition_suite import (
     SupportsPartitionedStreamTests,
 )
@@ -115,17 +116,15 @@ class TestKxKdbConnector(LakeflowConnectTests, SupportsPartitionedStreamTests):
         cls._patches = [
             patch(
                 "databricks.labs.community_connector.sources.kx_kdb.kx_kdb."
-                "load_sym_enumeration",
-                return_value=["AAPL", "MSFT"],
-            ),
-            patch(
-                "databricks.labs.community_connector.sources.kx_kdb.kx_kdb."
                 "infer_schema_from_partition",
                 side_effect=cls._infer_schema,
             ),
             patch(
-                "databricks.labs.community_connector.sources.kx_kdb.kx_kdb."
-                "read_kdb_date_sym_records",
+                "databricks.labs.community_connector.sources.kx_kdb.kx_kdb.read_partition_shape",
+                side_effect=cls._partition_shape,
+            ),
+            patch(
+                "databricks.labs.community_connector.sources.kx_kdb.kx_kdb.read_kdb_row_range",
                 side_effect=cls._read_records,
             ),
         ]
@@ -150,21 +149,36 @@ class TestKxKdbConnector(LakeflowConnectTests, SupportsPartitionedStreamTests):
         return list(_SCHEMAS[kwargs["kdb_table_name"].upper()])
 
     @classmethod
-    def _read_records(cls, **kwargs):
-        table = kwargs["kdb_table_name"].upper()
-        date = kwargs["date_partition"]
-        if kwargs["sym_index"] is None:
-            return iter([])
-        symbol = ["AAPL", "MSFT"][kwargs["sym_index"]]
-        return iter(
-            [
+    def _partition_rows(cls, table: str, date: str) -> list[dict]:
+        return sorted(
+            (
                 {key: value for key, value in row.items() if key != "table"}
                 for row in cls._corpus
-                if row["table"] == table
-                and row["date"] == date
-                and row["sym"] == symbol
-            ]
+                if row["table"] == table.upper() and row["date"] == date
+            ),
+            key=lambda row: row["sym"],
         )
+
+    @classmethod
+    def _partition_shape(cls, **kwargs):
+        rows = cls._partition_rows(kwargs["kdb_table_name"], kwargs["date_partition"])
+        return PartitionShape(present=True, complete=True, row_count=len(rows))
+
+    @classmethod
+    def _read_records(cls, **kwargs):
+        rows = cls._partition_rows(kwargs["kdb_table_name"], kwargs["date_partition"])
+        assert kwargs["total_rows"] == len(rows)
+        start = kwargs["row_offset"]
+        return iter(rows[start : start + kwargs["row_count"]])
+
+    def test_each_date_is_split_into_row_range_tasks(self):
+        partitions = self.connector.get_partitions("trades", {"max_rows_per_task": "1"})
+
+        assert partitions == [
+            {"date_partition": date, "row_offset": offset, "row_count": 1, "total_rows": 2}
+            for date in ("2024.01.01", "2024.01.02")
+            for offset in (0, 1)
+        ]
 
     def test_offline_fixture_covers_two_tables_dates_and_symbols(self):
         assert len(self._corpus) == 8

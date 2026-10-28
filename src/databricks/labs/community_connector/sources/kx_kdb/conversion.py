@@ -95,14 +95,34 @@ def _to_bool(value):
     return str(value).strip().lower() in {"1", "1.0", "true", "t", "yes", "y"}
 
 
+def to_python(value, *, raw: bool = False):
+    """Unwrap PyKX, numpy, and pandas objects into plain Python values.
+
+    PyKX objects convert with ``.py()`` (``.pd()`` if that fails), then any
+    ``.tolist()`` or ``.item()`` result is taken. With ``raw=True`` only
+    ``.py(raw=True)`` is tried. A value that cannot be converted is returned
+    unchanged.
+    """
+    steps = (("py",),) if raw else (("py", "pd"), ("tolist",), ("item",))
+    for converters in steps:
+        for name in converters:
+            converter = getattr(value, name, None)
+            if converter is None:
+                continue
+            try:
+                converted = converter(raw=True) if raw else converter()
+            # PyKX is pinned to a beta whose conversions raise its own exception types.
+            except Exception:
+                continue
+            if converted is not value:
+                value = converted
+            break
+    return value
+
+
 def _to_python(value):
     if _is_null(value):
         return None
     if hasattr(value, "to_pydatetime"):
         return value.to_pydatetime()
-    if hasattr(value, "item"):
-        try:
-            return value.item()
-        except Exception:
-            pass
-    return value
+    return to_python(value)

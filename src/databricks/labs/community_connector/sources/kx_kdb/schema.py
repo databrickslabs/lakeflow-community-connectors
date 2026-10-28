@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 from typing import List
 
+from databricks.labs.community_connector.sources.kx_kdb.conversion import to_python
 from databricks.labs.community_connector.sources.kx_kdb.filesystem import (
     hdb_child_path,
     scan_partition_table,
@@ -94,9 +95,7 @@ def infer_schema_from_partition(
     """Infer column definitions from one splayed KDB date partition."""
     table_path = hdb_child_path(hdb_root_path, date_partition, kdb_table_name)
     if scan_partition_table(hdb_root_path, date_partition, kdb_table_name) is None:
-        raise RuntimeError(
-            f"Could not infer schema for {kdb_table_name}: {table_path} is missing"
-        )
+        raise RuntimeError(f"Could not infer schema for {kdb_table_name}: {table_path} is missing")
     kx = prepare_pykx(runtime_config)
     try:
         _ensure_sym_domain(kx, hdb_root_path)
@@ -111,14 +110,14 @@ def infer_schema_from_partition(
 
 
 def _meta_columns(meta) -> List[dict]:
-    value = _to_py(meta)
+    value = to_python(meta)
     try:
         raw_names, raw_types = value
     except (TypeError, ValueError):
         raise RuntimeError("KDB meta returned an unexpected shape.") from None
 
-    names = [_text(item) for item in _to_py(raw_names)]
-    types = _type_chars(_to_py(raw_types))
+    names = [_text(item) for item in to_python(raw_names)]
+    types = _type_chars(to_python(raw_types))
     if len(names) != len(types):
         raise RuntimeError(
             f"KDB meta returned {len(names)} column names and {len(types)} type codes."
@@ -131,15 +130,6 @@ def _meta_columns(meta) -> List[dict]:
         }
         for name, type_char in zip(names, types)
     ]
-
-
-def _to_py(value):
-    if hasattr(value, "py"):
-        try:
-            return value.py()
-        except Exception:
-            return value
-    return value
 
 
 def _text(value) -> str:
@@ -173,7 +163,6 @@ def columns_to_spark_schema(columns: List[dict]):
         FloatType,
         IntegerType,
         LongType,
-        ShortType,
         StringType,
         StructField,
         StructType,
@@ -182,7 +171,6 @@ def columns_to_spark_schema(columns: List[dict]):
 
     type_map = {
         "BooleanType": BooleanType(),
-        "ShortType": ShortType(),
         "IntegerType": IntegerType(),
         "LongType": LongType(),
         "FloatType": FloatType(),

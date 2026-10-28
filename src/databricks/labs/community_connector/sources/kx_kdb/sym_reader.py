@@ -1,4 +1,4 @@
-"""Read one KDB date+symbol slice from a FUSE-mounted HDB root."""
+"""Read KDB partition shapes and row ranges from a FUSE-mounted HDB root."""
 
 from __future__ import annotations
 
@@ -6,51 +6,67 @@ import gc
 import logging
 import os
 import stat
+import time
+from dataclasses import dataclass
 from typing import Iterable, Iterator, List
 
 from databricks.labs.community_connector.sources.kx_kdb.conversion import (
     iter_records,
     normalize_partition_frame,
+    to_python,
 )
 from databricks.labs.community_connector.sources.kx_kdb.filesystem import (
     hdb_child_path,
+    partition_last_modified,
     scan_partition_table,
     validate_hdb_name,
 )
+from databricks.labs.community_connector.sources.kx_kdb.process_local import (
+    ProcessLocalDict,
+    ProcessLocalLock,
+)
 from databricks.labs.community_connector.sources.kx_kdb.runtime import (
     PyKxRuntimeConfig,
-    _PicklableLock,
-    _ProcessLocalDict,
     prepare_pykx,
 )
 
 logger = logging.getLogger(__name__)
 
-# Keep each date×sym slice chunk small enough for serverless Python memory limits.
+# Keep each row-range chunk small enough for serverless Python memory limits.
 _ROW_CHUNK_SIZE = 10_000
 
 _LOAD_SYM_DOMAIN_Q = "{[p] `sym set get hsym p}"
-_SYM_DOMAIN_Q = "sym"
-# Enumerations do not compare with longs once the sym domain is loaded.
-_SYMBOL_ROWS_Q = "{[sympath; symi] `chunk_idx set where symi=`long$get hsym sympath}"
-# Rows whose enumeration index is null or beyond the root sym file.
-_UNMATCHED_ROWS_Q = (
-    "{[sympath; n] `chunk_idx set where not (`long$get hsym sympath) within (0; n-1)}"
-)
-_SYMBOL_ROW_COUNT_Q = "count chunk_idx"
-_CHUNK_INDICES_Q = "{[row_off; m] chunk_idx[row_off+til m]}"
+_READ_DOT_D_Q = "{[p] get hsym p}"
+_COLUMN_COUNTS_Q = "{[paths] {count get hsym x} each paths}"
 # q lambdas do not capture outer locals, so ``idx`` is projected explicitly.
 # Timespans (16h) become nanosecond longs because Python timedelta drops
 # sub-microsecond precision. Month, date, minute, second, and time columns
 # (13h, 14h, 17h-19h) become q-formatted strings with nulls as generic null.
-_READ_COLUMNS_Q = (
-    "{[column_paths; idx] {[idx; p] v: (get hsym p) idx; "
+_READ_ROWS_Q = (
+    "{[column_paths; off; m] idx: off + til m; {[idx; p] v: (get hsym p) idx; "
     "$[16h=type v; `long$v; (type v) in 13 14 17 18 19h; "
     "{$[null x; (::); string x]} each v; v]}[idx] each column_paths}"
 )
 
-_SYM_DOMAIN_LOCK = _PicklableLock()
-_LOADED_SYM_DOMAIN: dict[str, tuple[int, int]] = _ProcessLocalDict()
+_SYM_DOMAIN_LOCK = ProcessLocalLock()
+_LOADED_SYM_DOMAIN: dict[str, tuple[int, int]] = ProcessLocalDict()
+
+
+@dataclass(frozen=True)
+class PartitionShape:
+    """What one splayed table partition looks like on disk.
+
+    ``present`` is False when the date has no directory for the table, which is
+    how a sparse table looks. ``complete`` is False while the partition cannot
+    be read safely; ``reason`` then says why, and ``recent`` is True when the
+    only problem is that a file changed within the configured minimum age.
+    """
+
+    present: bool
+    complete: bool
+    row_count: int = 0
+    reason: str = ""
+    recent: bool = False
 
 
 def _sym_file_path(hdb_root_path: str) -> str:
@@ -64,8 +80,7 @@ def _sym_file_signature(sym_file: str) -> tuple[int, int]:
         raise FileNotFoundError(f"HDB sym file does not exist: {sym_file}") from None
     if stat.S_ISLNK(info.st_mode):
         raise ValueError(
-            f"HDB sym file {sym_file} is a symbolic link; symlinked HDB content is not "
-            "supported."
+            f"HDB sym file {sym_file} is a symbolic link; symlinked HDB content is not supported."
         )
     if not stat.S_ISREG(info.st_mode):
         raise ValueError(f"HDB sym file {sym_file} is not a regular file.")
@@ -84,29 +99,8 @@ def _ensure_sym_domain(kx, hdb_root_path: str) -> str:
     return sym_file
 
 
-def load_sym_enumeration(hdb_root_path: str, runtime_config: PyKxRuntimeConfig) -> list[str]:
-    """Return the HDB sym enumeration; list positions are KDB enum indices."""
-    kx = prepare_pykx(runtime_config)
-    _ensure_sym_domain(kx, hdb_root_path)
-    return _symbols_to_strings(kx.q(_SYM_DOMAIN_Q))
-
-
-def sym_file_signature(hdb_root_path: str) -> tuple[int, int]:
-    """Return ``(size, mtime_ns)`` of the root sym file."""
-    return _sym_file_signature(_sym_file_path(hdb_root_path))
-
-
-def _symbols_to_strings(value) -> list[str]:
-    if hasattr(value, "py"):
-        try:
-            value = value.py()
-        except Exception:
-            pass
-    if hasattr(value, "tolist"):
-        try:
-            value = value.tolist()
-        except Exception:
-            pass
+def _text_list(value) -> list[str]:
+    value = to_python(value)
     if isinstance(value, (str, bytes)):
         values: Iterable = [value]
     else:
@@ -125,74 +119,160 @@ def _symbol_text(value) -> str:
     return str(value)
 
 
+def _int_list(value) -> list[int]:
+    value = to_python(value)
+    try:
+        return [int(to_python(item)) for item in value]
+    except TypeError:
+        return [int(value)]
+
+
+def _is_regular_file(entries: dict[str, os.DirEntry], name: str) -> bool:
+    entry = entries.get(name)
+    return entry is not None and entry.is_file(follow_symlinks=False)
+
+
+def read_partition_shape(
+    *,
+    hdb_root_path: str,
+    kdb_table_name: str,
+    date_partition: str,
+    runtime_config: PyKxRuntimeConfig,
+    check_all_columns: bool,
+    min_age_seconds: float = 0.0,
+) -> PartitionShape:
+    """Check that one table partition is fully written and return its row count.
+
+    A partition is complete when ``.d`` exists, every column it lists has a
+    file, and the counted columns have the same length. ``check_all_columns``
+    counts every column; otherwise only the first column of ``.d`` is counted.
+    ``min_age_seconds`` also requires the newest file to be at least that old.
+    """
+    entries = scan_partition_table(hdb_root_path, date_partition, kdb_table_name)
+    if entries is None:
+        return PartitionShape(present=False, complete=True)
+    partition_path = hdb_child_path(hdb_root_path, date_partition, kdb_table_name)
+
+    def incomplete(reason: str) -> PartitionShape:
+        return PartitionShape(present=True, complete=False, reason=f"{partition_path} {reason}")
+
+    if not _is_regular_file(entries, ".d"):
+        return incomplete("has no .d file")
+    if min_age_seconds > 0:
+        age = time.time() - partition_last_modified(entries)
+        if age < min_age_seconds:
+            return PartitionShape(
+                present=True,
+                complete=False,
+                recent=True,
+                reason=(
+                    f"{partition_path} was modified {age:.0f}s ago, less than the "
+                    f"configured minimum age of {min_age_seconds:.0f}s"
+                ),
+            )
+
+    kx = prepare_pykx(runtime_config)
+    _ensure_sym_domain(kx, hdb_root_path)
+    try:
+        columns = _text_list(kx.q(_READ_DOT_D_Q, hdb_child_path(partition_path, ".d")))
+    except Exception as exc:
+        return incomplete(f"has a .d file that q cannot read ({type(exc).__name__})")
+    for column in columns:
+        validate_hdb_name(column, "column name")
+
+    missing = [column for column in columns if not _is_regular_file(entries, column)]
+    if missing:
+        return incomplete(f"is missing column files {missing}")
+    if not columns:
+        return PartitionShape(present=True, complete=True, row_count=0)
+
+    counted = columns if check_all_columns else columns[:1]
+    try:
+        counts = _int_list(
+            kx.q(
+                _COLUMN_COUNTS_Q,
+                [hdb_child_path(partition_path, column) for column in counted],
+            )
+        )
+    except Exception as exc:
+        return incomplete(f"has column files that q cannot read ({type(exc).__name__})")
+    if len(counts) != len(counted):
+        return incomplete(f"returned {len(counts)} counts for {len(counted)} columns")
+    if len(set(counts)) > 1:
+        lengths = dict(zip(counted, counts))
+        return incomplete(f"has columns of different lengths {lengths}")
+    return PartitionShape(present=True, complete=True, row_count=counts[0])
+
+
 def _chunk_slices(row_count: int, chunk_size: int) -> Iterator[tuple[int, int]]:
     """Yield ``(offset, size)`` pairs that cover exactly ``row_count`` rows."""
     for offset in range(0, max(int(row_count), 0), chunk_size):
         yield offset, min(chunk_size, row_count - offset)
 
 
-def read_kdb_date_sym_records(
+def read_kdb_row_range(
     *,
     hdb_root_path: str,
     kdb_table_name: str,
     date_partition: str,
-    sym_index: int | None,
+    row_offset: int,
+    row_count: int,
+    total_rows: int,
     runtime_config: PyKxRuntimeConfig,
     column_defs: List[dict],
-    sym_column: str = "sym",
-    sym_count: int | None = None,
 ) -> Iterator[dict]:
-    """Read one HDB date partition filtered to one symbol enumeration index.
+    """Read rows ``[row_offset, row_offset + row_count)`` of one table partition.
 
-    ``sym_index=None`` selects the rows whose index is null or not below
-    ``sym_count``, the number of symbols in the root sym file.
+    ``total_rows`` is the partition row count seen at planning time. The read
+    fails if any schema column no longer has that many rows (q would return
+    nulls for indexes past the end of a short column) or is missing.
     """
-    sym_column = validate_hdb_name(sym_column, "sym_column")
-    if sym_index is None and sym_count is None:
-        raise ValueError("sym_count is required to read unmatched symbol rows")
-    if sym_index is not None and sym_index < 0:
-        return
-
-    entries = scan_partition_table(hdb_root_path, date_partition, kdb_table_name)
+    if row_offset < 0 or row_count < 0 or row_offset + row_count > total_rows:
+        raise ValueError(
+            f"Invalid row range offset={row_offset} count={row_count} for a "
+            f"{total_rows}-row partition."
+        )
     partition_path = hdb_child_path(hdb_root_path, date_partition, kdb_table_name)
+    entries = scan_partition_table(hdb_root_path, date_partition, kdb_table_name)
     if entries is None:
-        logger.debug("Table partition %s is absent.", partition_path)
-        return
+        raise RuntimeError(
+            f"Table partition {partition_path} is missing; it was planned with {total_rows} rows."
+        )
 
     column_names = [column["name"] for column in column_defs]
-    existing_columns = [
-        name
-        for name in column_names
-        if name != "date" and name in entries and entries[name].is_file(follow_symlinks=False)
-    ]
-    physical_sym_column = next(
-        (column for column in existing_columns if column.lower() == sym_column.lower()),
-        None,
-    )
-    if physical_sym_column is None:
-        logger.warning(
-            "Skipping %s because required sym column %r is missing.",
-            partition_path,
-            sym_column,
+    physical_columns = [name for name in column_names if name != "date"]
+    missing = [name for name in physical_columns if not _is_regular_file(entries, name)]
+    if missing:
+        raise RuntimeError(
+            f"Table partition {partition_path} is missing column files {missing}. The "
+            "partition is incomplete or its columns differ from the inferred schema."
         )
+    if row_count == 0 or not physical_columns:
         return
 
     kx = prepare_pykx(runtime_config)
     _ensure_sym_domain(kx, hdb_root_path)
-    column_paths = [hdb_child_path(partition_path, column) for column in existing_columns]
-    sym_path = hdb_child_path(partition_path, physical_sym_column)
-    if sym_index is None:
-        kx.q(_UNMATCHED_ROWS_Q, sym_path, int(sym_count))
-    else:
-        _prepare_symbol_row_indices(kx, sym_path, sym_index)
-    row_count = _symbol_row_count(kx)
+    column_paths = [hdb_child_path(partition_path, column) for column in physical_columns]
+    counts = dict(zip(physical_columns, _int_list(kx.q(_COLUMN_COUNTS_Q, column_paths))))
+    if len(counts) != len(physical_columns) or any(
+        count != total_rows for count in counts.values()
+    ):
+        raise RuntimeError(
+            f"Table partition {partition_path} has column lengths {counts} but was "
+            f"planned with {total_rows} rows; it changed after the batch was planned."
+        )
+    symbol_columns = [
+        column["name"]
+        for column in column_defs
+        if column.get("q_type") == "s" and column["name"] in physical_columns
+    ]
 
     try:
         for offset, size in _chunk_slices(row_count, _ROW_CHUNK_SIZE):
-            frame = _read_symbol_chunk(kx, column_paths, existing_columns, offset, size)
-            if frame is None or len(frame.index) == 0:
-                continue
-            frame[physical_sym_column] = frame[physical_sym_column].map(_symbol_text)
+            vectors = kx.q(_READ_ROWS_Q, column_paths, int(row_offset + offset), int(size))
+            frame = _column_vectors_to_frame(physical_columns, vectors, expected_rows=size)
+            for column in symbol_columns:
+                frame[column] = frame[column].map(_symbol_text)
             normalized = normalize_partition_frame(
                 frame=frame,
                 date_partition=date_partition,
@@ -207,80 +287,44 @@ def read_kdb_date_sym_records(
         gc.collect()
 
 
-def _prepare_symbol_row_indices(kx, sym_path: str, sym_index: int) -> None:
-    """Materialize row indices for one sym value in the q session."""
-    kx.q(_SYMBOL_ROWS_Q, sym_path, int(sym_index))
-
-
-def _symbol_row_count(kx) -> int:
-    return _scalar_int(kx.q(_SYMBOL_ROW_COUNT_Q))
-
-
-def _scalar_int(value) -> int:
-    if hasattr(value, "py"):
-        try:
-            value = value.py()
-        except Exception:
-            pass
-    if hasattr(value, "item"):
-        try:
-            value = value.item()
-        except Exception:
-            pass
-    return int(value)
-
-
-def _read_symbol_chunk(
-    kx, column_paths: list[str], columns: list[str], row_off: int, size: int
-):
-    """Read exactly ``size`` rows of the current symbol starting at ``row_off``."""
-    row_indices = kx.q(_CHUNK_INDICES_Q, int(row_off), int(size))
-    if _is_empty_collection(row_indices):
-        return None
-    vectors = kx.q(_READ_COLUMNS_Q, column_paths, row_indices)
-    return _column_vectors_to_frame(columns, vectors)
-
-
-def _is_empty_collection(value) -> bool:
-    if value is None:
-        return True
-    try:
-        return len(value) == 0
-    except TypeError:
-        return False
-
-
-def _column_vectors_to_frame(columns: list[str], vectors):
+def _column_vectors_to_frame(columns: list[str], vectors, expected_rows: int | None = None):
     import pandas as pd
 
     if vectors is None:
-        return pd.DataFrame()
-
-    # Iterate the q list itself so each column vector keeps its q type for
-    # raw integer conversion; converting the whole list first loses it.
-    try:
-        items = list(vectors)
-    except TypeError:
-        raw_vectors = vectors.py() if hasattr(vectors, "py") else vectors
+        items = []
+    else:
+        # Iterate the q list itself so each column vector keeps its q type for
+        # raw integer conversion; converting the whole list first loses it.
         try:
-            items = list(raw_vectors)
+            items = list(vectors)
         except TypeError:
-            items = [raw_vectors]
+            raw_vectors = to_python(vectors)
+            try:
+                items = list(raw_vectors)
+            except TypeError:
+                items = [raw_vectors]
 
-    if not items:
-        return pd.DataFrame()
     if len(items) != len(columns):
         raise RuntimeError(
             f"KDB returned {len(items)} column vectors for {len(columns)} requested columns."
         )
+    if not items:
+        return pd.DataFrame()
 
+    values_by_name = {
+        column_name: _vector_to_values(vector) for column_name, vector in zip(columns, items)
+    }
+    if expected_rows is not None:
+        lengths = {name: len(values) for name, values in values_by_name.items()}
+        if any(length != expected_rows for length in lengths.values()):
+            raise RuntimeError(
+                f"KDB returned column lengths {lengths} for a {expected_rows}-row range."
+            )
     # Object dtype stops pandas from turning ints with nulls into float64,
     # which would round longs above 2**53; conversion applies schema types.
-    series_by_name = {
-        column_name: pd.Series(_vector_to_values(vector), dtype=object)
-        for column_name, vector in zip(columns, items)
-    }
-    return pd.DataFrame(series_by_name)
+    return pd.DataFrame(
+        {name: pd.Series(values, dtype=object) for name, values in values_by_name.items()}
+    )
 
 
 _Q_INTEGER_NULLS = {5: -(2**15), 6: -(2**31), 7: -(2**63)}
@@ -295,9 +339,8 @@ def _raw_integer_values(vector):
     q_type = getattr(vector, "t", None)
     if q_type not in (4, 5, 6, 7):
         return None
-    try:
-        values = vector.py(raw=True)
-    except TypeError:
+    values = to_python(vector, raw=True)
+    if values is vector:
         return None
     if isinstance(values, (bytes, bytearray)):
         return list(values)
@@ -306,31 +349,10 @@ def _raw_integer_values(vector):
 
 
 def _vector_to_values(vector):
-    import pandas as pd
-
     raw_integers = _raw_integer_values(vector)
     if raw_integers is not None:
         return raw_integers
-    if hasattr(vector, "py"):
-        try:
-            vector = vector.py()
-        except Exception:
-            pass
-    if hasattr(vector, "pd"):
-        try:
-            vector = vector.pd()
-        except Exception:
-            pass
-    if hasattr(vector, "tolist"):
-        try:
-            vector = vector.tolist()
-        except Exception:
-            pass
-
-    if isinstance(vector, pd.Series):
-        return [_plain_python_value(value) for value in vector.tolist()]
-    if isinstance(vector, pd.Index):
-        return [_plain_python_value(value) for value in vector.tolist()]
+    vector = to_python(vector)
     if isinstance(vector, (bytes, bytearray)):
         # A q char vector (type c) converts to one bytes object; each byte is a row.
         return list(bytes(vector).decode("latin-1"))
@@ -343,32 +365,13 @@ def _vector_to_values(vector):
 
 
 def _plain_python_value(value):
-    from datetime import date, datetime, time
+    from datetime import date, datetime
+    from datetime import time as time_of_day
     from decimal import Decimal
 
     import pandas as pd
 
-    if hasattr(value, "py"):
-        try:
-            converted = value.py()
-            if converted is not value:
-                value = converted
-        except Exception:
-            pass
-    if hasattr(value, "tolist"):
-        try:
-            converted = value.tolist()
-            if converted is not value:
-                value = converted
-        except Exception:
-            pass
-    if hasattr(value, "item"):
-        try:
-            converted = value.item()
-            if converted is not value:
-                value = converted
-        except Exception:
-            pass
+    value = to_python(value)
     if isinstance(value, list):
         return [_plain_python_value(item) for item in value]
     if isinstance(value, tuple):
@@ -378,7 +381,7 @@ def _plain_python_value(value):
     if isinstance(value, (bytes, bytearray)):
         # q strings (nested char columns) arrive as bytes; the schema maps them to strings.
         return bytes(value).decode("utf-8", "replace")
-    if isinstance(value, (str, bool, int, float, Decimal, date, datetime, time)):
+    if isinstance(value, (str, bool, int, float, Decimal, date, datetime, time_of_day)):
         return value
     if (type(value).__module__ or "").startswith("pykx"):
         raise TypeError(

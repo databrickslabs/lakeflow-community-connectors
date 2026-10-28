@@ -3,30 +3,42 @@
 from __future__ import annotations
 
 import base64
-import importlib
-import inspect
 import json
 import os
+import pickle
 import stat
 import subprocess
 import zipfile
+from datetime import datetime
 from pathlib import Path
 
 import pytest
 import yaml
-from pyspark.sql.types import DoubleType, StringType, StructField, StructType
+from pyspark import cloudpickle
+from pyspark.sql.types import (
+    BooleanType,
+    DoubleType,
+    IntegerType,
+    LongType,
+    StringType,
+    StructField,
+    StructType,
+    TimestampType,
+)
 
 from databricks.labs.community_connector.libs.utils import parse_value
 from databricks.labs.community_connector.sources.kx_kdb import conversion, filesystem, sym_reader
 from databricks.labs.community_connector.sources.kx_kdb import runtime as runtime_mod
 from databricks.labs.community_connector.sources.kx_kdb.kx_kdb import KxKdbLakeflowConnect
 from databricks.labs.community_connector.sources.kx_kdb.runtime import (
+    REMOVED_BOOTSTRAP_OPTIONS,
     PyKxRuntimeConfig,
     build_runtime_config,
 )
 from databricks.labs.community_connector.sources.kx_kdb.schema import (
     infer_schema_from_partition,
 )
+from databricks.labs.community_connector.sources.kx_kdb.sym_reader import PartitionShape
 
 _SPEC_PATH = (
     Path(__file__).parents[4]
@@ -38,24 +50,22 @@ _SPEC_PATH = (
     / "kx_kdb"
     / "connector_spec.yaml"
 )
-_TOKEN = "tok-SENTINEL-4f1c"
 _LICENSE_B64 = base64.b64encode(b"license-SENTINEL-9a2e").decode("ascii")
+_MODULE = "databricks.labs.community_connector.sources.kx_kdb.kx_kdb"
 
 
 @pytest.fixture(autouse=True)
-def _reset_caches(monkeypatch):
+def _reset_caches(monkeypatch, tmp_path):
     runtime_mod._PREPARED_RUNTIME_KEYS.clear()
-    runtime_mod._RUNTIME_HOME_CACHE.clear()
-    runtime_mod._LOCAL_BUNDLE_DIR_CACHE.clear()
+    runtime_mod._RUNTIME_HOMES.clear()
     sym_reader._LOADED_SYM_DOMAIN.clear()
     filesystem.clear_discovery_cache()
-    monkeypatch.delenv(runtime_mod._RUNTIME_HOME_OVERRIDE_ENV, raising=False)
-    for name in ("HOME", "QLIC", "PYKX_LICENSED", "PATH"):
+    monkeypatch.setenv(runtime_mod._RUNTIME_ROOT_ENV, str(tmp_path / "runtime-root"))
+    for name in ("HOME", "QLIC", "QHOME", "PYKX_LICENSED", "PATH"):
         monkeypatch.setenv(name, os.environ.get(name, ""))
     yield
     runtime_mod._PREPARED_RUNTIME_KEYS.clear()
-    runtime_mod._RUNTIME_HOME_CACHE.clear()
-    runtime_mod._LOCAL_BUNDLE_DIR_CACHE.clear()
+    runtime_mod._RUNTIME_HOMES.clear()
     sym_reader._LOADED_SYM_DOMAIN.clear()
     filesystem.clear_discovery_cache()
 
@@ -68,30 +78,24 @@ def _make_partition(root: Path, date: str, table: str, columns=("sym", "price"))
     return partition
 
 
-class _ChunkKx:
-    """Fake q session holding one symbol's row indices for a partition."""
+class _RangeKx:
+    """Fake q session holding ``row_count`` rows of a sym/price partition."""
 
     def __init__(self, row_count: int):
         self.row_count = row_count
         self.queries: list[str] = []
-        self.chunk_requests: list[tuple[int, int]] = []
+        self.range_requests: list[tuple[int, int]] = []
 
     def q(self, query, *args):
         self.queries.append(query)
-        if query == "{[p] `sym set get hsym p}":
+        if query == sym_reader._LOAD_SYM_DOMAIN_Q:
             return None
-        if query == "{[sympath; symi] `chunk_idx set where symi=`long$get hsym sympath}":
-            return None
-        if query == "count chunk_idx":
-            return self.row_count
-        if "chunk_idx[row_off+til m]" in query:
-            row_off, size = int(args[0]), int(args[1])
-            self.chunk_requests.append((row_off, size))
-            available = max(0, min(size, self.row_count - row_off))
-            return list(range(row_off, row_off + available))
-        if "each column_paths" in query:
-            indices = list(args[1])
-            return [["AAPL"] * len(indices), [float(index) for index in indices]]
+        if query == sym_reader._COLUMN_COUNTS_Q:
+            return [self.row_count] * len(args[0])
+        if query == sym_reader._READ_ROWS_Q:
+            _paths, offset, size = args
+            self.range_requests.append((offset, size))
+            return [["AAPL"] * size, [float(index) for index in range(offset, offset + size)]]
         raise AssertionError(f"unexpected q query: {query!r}")
 
 
@@ -103,16 +107,18 @@ def _read_records(tmp_path, monkeypatch, fake_kx, **overrides):
         "hdb_root_path": str(tmp_path),
         "kdb_table_name": "TRADES",
         "date_partition": "2024.01.01",
-        "sym_index": 1,
+        "row_offset": 0,
+        "row_count": fake_kx.row_count,
+        "total_rows": fake_kx.row_count,
         "runtime_config": PyKxRuntimeConfig(license_directory="/tmp/lic"),
         "column_defs": [
             {"name": "date", "spark_type": "StringType"},
-            {"name": "sym", "spark_type": "StringType"},
-            {"name": "price", "spark_type": "DoubleType"},
+            {"name": "sym", "spark_type": "StringType", "q_type": "s"},
+            {"name": "price", "spark_type": "DoubleType", "q_type": "f"},
         ],
     }
     kwargs.update(overrides)
-    return list(sym_reader.read_kdb_date_sym_records(**kwargs))
+    return list(sym_reader.read_kdb_row_range(**kwargs))
 
 
 # ---------------------------------------------------------------------------
@@ -133,30 +139,22 @@ def test_chunk_slices_request_exactly_the_remaining_rows():
 def test_reader_emits_no_phantom_rows_for_partial_last_chunk(monkeypatch, tmp_path):
     _make_partition(tmp_path, "2024.01.01", "TRADES")
     monkeypatch.setattr(sym_reader, "_ROW_CHUNK_SIZE", 3)
-    fake_kx = _ChunkKx(row_count=8)
+    fake_kx = _RangeKx(row_count=8)
 
     records = _read_records(tmp_path, monkeypatch, fake_kx)
 
-    assert fake_kx.chunk_requests == [(0, 3), (3, 3), (6, 2)]
-    assert len(records) == 8
-    assert all(record["price"] is not None for record in records)
-    assert not any("count chunk_idx - row_off" in query for query in fake_kx.queries)
+    assert fake_kx.range_requests == [(0, 3), (3, 3), (6, 2)]
+    assert [record["price"] for record in records] == [float(index) for index in range(8)]
 
 
-def test_column_read_projects_row_indices_into_the_per_column_lambda(monkeypatch, tmp_path):
-    _make_partition(tmp_path, "2024.01.01", "TRADES")
-    fake_kx = _ChunkKx(row_count=1)
-
-    _read_records(tmp_path, monkeypatch, fake_kx)
-
-    column_reads = [query for query in fake_kx.queries if "each column_paths" in query]
+def test_row_read_projects_row_indices_into_the_per_column_lambda():
     # q lambdas do not close over outer locals; an unprojected inner lambda
     # returns projections instead of column values.
-    assert column_reads == [sym_reader._READ_COLUMNS_Q]
-    assert "{[idx; p]" in sym_reader._READ_COLUMNS_Q
-    assert "[idx] each column_paths" in sym_reader._READ_COLUMNS_Q
-    assert "16h=type v; `long$v" in sym_reader._READ_COLUMNS_Q
-    assert "(type v) in 13 14 17 18 19h" in sym_reader._READ_COLUMNS_Q
+    assert "idx: off + til m" in sym_reader._READ_ROWS_Q
+    assert "{[idx; p]" in sym_reader._READ_ROWS_Q
+    assert "[idx] each column_paths" in sym_reader._READ_ROWS_Q
+    assert "16h=type v; `long$v" in sym_reader._READ_ROWS_Q
+    assert "(type v) in 13 14 17 18 19h" in sym_reader._READ_ROWS_Q
 
 
 def test_q_string_and_char_columns_decode_to_text():
@@ -174,49 +172,56 @@ def test_q_string_and_char_columns_decode_to_text():
 
 def test_executor_loads_sym_domain_before_reading_enumerated_columns(monkeypatch, tmp_path):
     _make_partition(tmp_path, "2024.01.01", "TRADES")
-    fake_kx = _ChunkKx(row_count=1)
+    fake_kx = _RangeKx(row_count=1)
 
     _read_records(tmp_path, monkeypatch, fake_kx)
 
-    assert fake_kx.queries[0] == "{[p] `sym set get hsym p}"
+    assert fake_kx.queries[0] == sym_reader._LOAD_SYM_DOMAIN_Q
 
 
-def test_process_local_caches_serialize_empty_for_executors(tmp_path):
-    import pickle
-
-    from pyspark import cloudpickle
-
+def test_process_local_state_serializes_empty_for_executors(tmp_path):
     sym_reader._LOADED_SYM_DOMAIN[f"{tmp_path}/sym"] = (10, 20)
     runtime_mod._PREPARED_RUNTIME_KEYS.add("driver-runtime-key")
-    runtime_mod._RUNTIME_HOME_CACHE["path"] = tmp_path / "driver-home"
-    runtime_mod._LOCAL_BUNDLE_DIR_CACHE["path"] = tmp_path / "driver-bundles"
+    runtime_mod._RUNTIME_HOMES["driver-runtime-key"] = tmp_path / "driver-home"
 
     for cache in (
         sym_reader._LOADED_SYM_DOMAIN,
         runtime_mod._PREPARED_RUNTIME_KEYS,
-        runtime_mod._RUNTIME_HOME_CACHE,
-        runtime_mod._LOCAL_BUNDLE_DIR_CACHE,
+        runtime_mod._RUNTIME_HOMES,
     ):
         assert cache
         for dumps in (pickle.dumps, cloudpickle.dumps):
             restored = pickle.loads(dumps(cache))
             assert type(restored) is type(cache)
             assert len(restored) == 0
+    for lock in (runtime_mod._RUNTIME_LOCK, sym_reader._SYM_DOMAIN_LOCK):
+        with pickle.loads(cloudpickle.dumps(lock)):
+            pass
 
 
 def test_executor_reloads_sym_domain_after_cache_is_shipped(monkeypatch, tmp_path):
-    import pickle
-
     _make_partition(tmp_path, "2024.01.01", "TRADES")
     (tmp_path / "sym").write_bytes(b"stub")
-    sym_reader._ensure_sym_domain(_ChunkKx(row_count=0), str(tmp_path))
+    sym_reader._ensure_sym_domain(_RangeKx(row_count=0), str(tmp_path))
     shipped = pickle.loads(pickle.dumps(sym_reader._LOADED_SYM_DOMAIN))
     monkeypatch.setattr(sym_reader, "_LOADED_SYM_DOMAIN", shipped)
-    executor_kx = _ChunkKx(row_count=1)
+    executor_kx = _RangeKx(row_count=1)
 
     _read_records(tmp_path, monkeypatch, executor_kx)
 
-    assert executor_kx.queries[0] == "{[p] `sym set get hsym p}"
+    assert executor_kx.queries[0] == sym_reader._LOAD_SYM_DOMAIN_Q
+
+
+def test_sym_domain_reloads_when_the_sym_file_changes(tmp_path):
+    (tmp_path / "sym").write_bytes(b"stub")
+    fake_kx = _RangeKx(row_count=0)
+
+    sym_reader._ensure_sym_domain(fake_kx, str(tmp_path))
+    sym_reader._ensure_sym_domain(fake_kx, str(tmp_path))
+    (tmp_path / "sym").write_bytes(b"stub-appended")
+    sym_reader._ensure_sym_domain(fake_kx, str(tmp_path))
+
+    assert fake_kx.queries.count(sym_reader._LOAD_SYM_DOMAIN_Q) == 2
 
 
 def test_unconverted_pykx_values_fail_instead_of_becoming_text():
@@ -224,55 +229,6 @@ def test_unconverted_pykx_values_fail_instead_of_becoming_text():
 
     with pytest.raises(TypeError, match="unconverted PyKX"):
         sym_reader._plain_python_value(projection)
-
-
-def test_sym_enumeration_keeps_empty_and_slash_symbols_positional(monkeypatch, tmp_path):
-    (tmp_path / "sym").write_bytes(b"stub")
-
-    class _SymKx:
-        def q(self, query, *args):
-            if query == "{[p] `sym set get hsym p}":
-                return None
-            if query == "sym":
-                return ["", "DBRX", "AMZ", "BRK/B", "BRK/A"]
-            raise AssertionError(f"unexpected q query: {query!r}")
-
-    monkeypatch.setattr(sym_reader, "prepare_pykx", lambda _: _SymKx())
-
-    symbols = sym_reader.load_sym_enumeration(
-        str(tmp_path), PyKxRuntimeConfig(license_directory="/tmp/lic")
-    )
-
-    assert symbols == ["", "DBRX", "AMZ", "BRK/B", "BRK/A"]
-
-
-def test_partition_descriptors_use_kdb_enumeration_positions(monkeypatch, tmp_path):
-    (tmp_path / "sym").write_bytes(b"stub")
-    for date in ("2024.01.01", "2024.01.02"):
-        (tmp_path / date / "TRADES").mkdir(parents=True)
-    monkeypatch.setattr(
-        "databricks.labs.community_connector.sources.kx_kdb.kx_kdb.load_sym_enumeration",
-        lambda *_: ["", "DBRX", "AMZ", "BRK/B"],
-    )
-    monkeypatch.setattr(
-        "databricks.labs.community_connector.sources.kx_kdb.kx_kdb.infer_schema_from_partition",
-        lambda **_: [{"name": "sym", "spark_type": "StringType", "q_type": "s"}],
-    )
-    connector = KxKdbLakeflowConnect(
-        {"hdb_root_path": str(tmp_path), "license_volume_path": "/tmp/lic"}
-    )
-
-    descriptors = connector.get_partitions(
-        "trades", {}, {"date_partition": "2024.01.01"}, {"date_partition": "2024.01.02"}
-    )
-
-    assert descriptors == [
-        {"date_partition": "2024.01.02", "sym": "", "sym_index": 0},
-        {"date_partition": "2024.01.02", "sym": "DBRX", "sym_index": 1},
-        {"date_partition": "2024.01.02", "sym": "AMZ", "sym_index": 2},
-        {"date_partition": "2024.01.02", "sym": "BRK/B", "sym_index": 3},
-        {"date_partition": "2024.01.02", "sym": None, "sym_index": None, "sym_count": 4},
-    ]
 
 
 def test_reader_yields_framework_parseable_dicts_only(monkeypatch, tmp_path):
@@ -285,28 +241,90 @@ def test_reader_yields_framework_parseable_dicts_only(monkeypatch, tmp_path):
         ]
     )
 
-    records = _read_records(tmp_path, monkeypatch, _ChunkKx(row_count=2))
+    records = _read_records(tmp_path, monkeypatch, _RangeKx(row_count=2))
 
     assert records and all(isinstance(record, dict) for record in records)
     parsed = [parse_value(record, schema) for record in records]
     assert parsed[0].asDict() == {"date": "2024.01.01", "sym": "AAPL", "price": 0.0}
-    assert "conversion_mode" not in inspect.signature(
-        sym_reader.read_kdb_date_sym_records
-    ).parameters
 
 
-def test_shadow_conversion_modes_are_removed():
-    with pytest.raises(ModuleNotFoundError):
-        importlib.import_module(
-            "databricks.labs.community_connector.sources.kx_kdb.conversion_metrics"
+class _TypedVector:
+    """Fake q vector with a q type number and raw/non-raw conversions."""
+
+    def __init__(self, q_type, raw, converted=None):
+        self.t = q_type
+        self._raw = raw
+        self._converted = raw if converted is None else converted
+
+    def py(self, raw=False):
+        return self._raw if raw else self._converted
+
+
+def test_every_q_type_reaches_spark_with_its_schema_type():
+    """One row per q type goes through the single read path to typed Spark values."""
+    columns = [
+        ("flag", "BooleanType", _TypedVector(1, [True, False])),
+        ("tiny", "IntegerType", _TypedVector(4, b"\x01\xff")),
+        ("qty", "IntegerType", _TypedVector(5, [3, -(2**15)])),
+        ("lots", "IntegerType", _TypedVector(6, [7, -(2**31)])),
+        ("size", "LongType", _TypedVector(7, [2**53 + 1, -(2**63)])),
+        ("price", "DoubleType", [1.5, float("nan")]),
+        ("ts", "TimestampType", [datetime(2024, 1, 1, 9, 30, 0, 123456), None]),
+        ("side", "StringType", b"BS"),
+        ("note", "StringType", [b"caf\xc3\xa9", b""]),
+        ("day", "StringType", ["2024.01.31", None]),
+    ]
+    names = [name for name, _, _ in columns]
+    column_defs = [{"name": name, "spark_type": spark} for name, spark, _ in columns]
+    spark_types = {
+        "BooleanType": BooleanType(),
+        "IntegerType": IntegerType(),
+        "LongType": LongType(),
+        "DoubleType": DoubleType(),
+        "TimestampType": TimestampType(),
+        "StringType": StringType(),
+    }
+    schema = StructType([StructField(name, spark_types[spark]) for name, spark, _ in columns])
+
+    frame = sym_reader._column_vectors_to_frame(
+        names, [vector for _, _, vector in columns], expected_rows=2
+    )
+    records = list(
+        conversion.iter_records(
+            conversion.normalize_partition_frame(
+                frame=frame,
+                date_partition="2024.01.01",
+                column_names=names,
+                column_defs=column_defs,
+            )
         )
-    for removed in (
-        "result_to_frame",
-        "result_len",
-        "normalize_conversion_mode",
-        "PARTITION_CONVERSION_MODES",
-    ):
-        assert not hasattr(conversion, removed)
+    )
+    rows = [parse_value(record, schema).asDict() for record in records]
+
+    assert rows[0] == {
+        "flag": True,
+        "tiny": 1,
+        "qty": 3,
+        "lots": 7,
+        "size": 2**53 + 1,
+        "price": 1.5,
+        "ts": datetime(2024, 1, 1, 9, 30, 0, 123456),
+        "side": "B",
+        "note": "caf\u00e9",
+        "day": "2024.01.31",
+    }
+    assert rows[1] == {
+        "flag": False,
+        "tiny": 255,
+        "qty": None,
+        "lots": None,
+        "size": None,
+        "price": None,
+        "ts": None,
+        "side": "S",
+        "note": "",
+        "day": None,
+    }
 
 
 def test_spec_allowlist_contains_only_table_options():
@@ -316,9 +334,18 @@ def test_spec_allowlist_contains_only_table_options():
         "start_date",
         "end_date",
         "ingestion_mode",
-        "partition_strategy",
-        "sym_column",
+        "max_dates_per_batch",
+        "max_tasks_per_batch",
+        "max_rows_per_task",
+        "min_partition_age_minutes",
     }
+
+
+def test_spec_declares_no_removed_bootstrap_option():
+    spec = yaml.safe_load(_SPEC_PATH.read_text(encoding="utf-8"))
+    names = {parameter["name"] for parameter in spec["connection"]["parameters"]}
+
+    assert names.isdisjoint(REMOVED_BOOTSTRAP_OPTIONS)
 
 
 # ---------------------------------------------------------------------------
@@ -326,16 +353,77 @@ def test_spec_allowlist_contains_only_table_options():
 # ---------------------------------------------------------------------------
 
 
-def test_table_configs_cannot_replace_connection_or_bootstrap_options(tmp_path):
+def _merged_options(tmp_path, **table_options):
+    """Connection options plus flat table options, as managed ingestion merges them."""
+    (tmp_path / "hdb" / "2024.01.01" / "TRADES").mkdir(parents=True, exist_ok=True)
+    keys = tmp_path / "vol" / "keys"
+    keys.mkdir(parents=True, exist_ok=True)
+    (keys / "kc.lic").write_bytes(b"connection-license")
+    with zipfile.ZipFile(keys / "l64-bundle.zip", "w") as archive:
+        archive.writestr("install_kdb.sh", "#!/bin/bash\n")
+    return {
+        "hdb_root_path": str(tmp_path / "hdb"),
+        "license_volume_path": str(keys),
+        **table_options,
+    }
+
+
+@pytest.mark.parametrize("option", REMOVED_BOOTSTRAP_OPTIONS)
+def test_flat_pipeline_options_cannot_reach_removed_bootstrap_paths(tmp_path, option):
+    with pytest.raises(ValueError, match="no longer supported"):
+        KxKdbLakeflowConnect(_merged_options(tmp_path, **{option: "online"}))
+
+
+def test_flat_pipeline_options_keep_the_connection_license_and_bundle(monkeypatch, tmp_path):
+    monkeypatch.setattr(runtime_mod.platform, "machine", lambda: "x86_64")
+    connector = KxKdbLakeflowConnect(
+        _merged_options(tmp_path, start_date="2024.01.01", max_rows_per_task="10")
+    )
+    keys = tmp_path / "vol" / "keys"
+
+    config = connector.runtime_config
+    assert config.license_directory == str(keys)
+    assert config.license_b64 == base64.b64encode(b"connection-license").decode("ascii")
+    assert config.offline_bundle_path == str(keys / "l64-bundle.zip")
+    assert config.uses_offline_bundle is True
+
+
+@pytest.mark.parametrize("option", ["kdbx_offline_bundle_path", "kdbx_license_file_path"])
+def test_pipeline_supplied_bootstrap_files_outside_license_volume_are_rejected(tmp_path, option):
+    outside = tmp_path / "attacker" / "file.zip"
+
+    with pytest.raises(ValueError, match=option):
+        KxKdbLakeflowConnect(_merged_options(tmp_path, **{option: str(outside)}))
+
+
+@pytest.mark.parametrize(
+    ("path", "allowed"),
+    [
+        ("/Volumes/main/kx/files/kdbx/l64arm-bundle.zip", True),
+        ("dbfs:/Volumes/main/kx/files/kdbx/l64arm-bundle.zip", True),
+        ("/Volumes/main/kx/files/keys/kc.lic", True),
+        ("/Volumes/main/kx/other/l64arm-bundle.zip", False),
+        ("/Volumes/main/kx/files/../other/bundle.zip", False),
+        ("relative/bundle.zip", False),
+    ],
+)
+def test_bootstrap_files_must_share_the_license_volume(path, allowed):
+    license_directory = "/Volumes/main/kx/files/keys"
+    if allowed:
+        assert runtime_mod._within_license_volume(path, license_directory, "opt") == path
+    else:
+        with pytest.raises(ValueError, match="opt"):
+            runtime_mod._within_license_volume(path, license_directory, "opt")
+
+
+def test_table_configs_json_is_not_parsed_into_connection_options(tmp_path):
     (tmp_path / "2024.01.01" / "TRADES").mkdir(parents=True)
     hostile = {
         "hdb_root_path": "/evil/hdb",
         "license_volume_path": "/evil/lic",
-        "pykx_install_spec": "/evil/pykx.whl",
         "kdbx_offline_bundle_path": "/evil/bundle.zip",
         "kdbx_install_mode": "online",
         "kdbx_license_b64": "ZXZpbA==",
-        "kdbx_install_bearer_token": "evil-token",
     }
 
     connector = KxKdbLakeflowConnect(
@@ -350,10 +438,8 @@ def test_table_configs_cannot_replace_connection_or_bootstrap_options(tmp_path):
 
     assert connector.hdb_root_path == str(tmp_path)
     assert connector.runtime_config.license_directory == "/tmp/lic"
-    assert not hasattr(connector.runtime_config, "pykx_install_spec")
     assert connector.runtime_config.offline_bundle_path is None
     assert connector.runtime_config.license_b64 is None
-    assert connector.runtime_config.installer_bearer_token is None
 
 
 def test_read_partition_ignores_connection_keys_in_table_options(monkeypatch, tmp_path):
@@ -363,47 +449,26 @@ def test_read_partition_ignores_connection_keys_in_table_options(monkeypatch, tm
     )
     captured = {}
     monkeypatch.setattr(
-        "databricks.labs.community_connector.sources.kx_kdb.kx_kdb.infer_schema_from_partition",
+        f"{_MODULE}.infer_schema_from_partition",
         lambda **_: [
             {"name": "date", "spark_type": "StringType"},
             {"name": "sym", "spark_type": "StringType", "q_type": "s"},
         ],
     )
-
-    def _fake_reader(**kwargs):
-        captured.update(kwargs)
-        return iter(())
-
     monkeypatch.setattr(
-        "databricks.labs.community_connector.sources.kx_kdb.kx_kdb.read_kdb_date_sym_records",
-        _fake_reader,
+        f"{_MODULE}.read_kdb_row_range", lambda **kwargs: captured.update(kwargs) or iter(())
     )
 
     list(
         connector.read_partition(
             "trades",
-            {"date_partition": "2024.01.01", "sym": "a", "sym_index": 0},
-            {"hdb_root_path": "/evil/hdb", "pykx_install_spec": "/evil/pykx.whl"},
+            {"date_partition": "2024.01.01", "row_offset": 0, "row_count": 1, "total_rows": 1},
+            {"hdb_root_path": "/evil/hdb", "license_volume_path": "/evil/lic"},
         )
     )
 
     assert captured["hdb_root_path"] == str(tmp_path)
-    assert captured["runtime_config"].offline_bundle_path is None
-
-
-@pytest.mark.parametrize("sym_column", ["../other", "a/b", "..", "x\x00y", "a\nb"])
-def test_unsafe_sym_column_is_rejected(tmp_path, sym_column):
-    (tmp_path / "2024.01.01" / "TRADES").mkdir(parents=True)
-    connector = KxKdbLakeflowConnect(
-        {"hdb_root_path": str(tmp_path), "license_volume_path": "/tmp/lic"}
-    )
-
-    with pytest.raises(ValueError, match="sym_column"):
-        connector.read_partition(
-            "trades",
-            {"date_partition": "2024.01.01", "sym": "a", "sym_index": 0},
-            {"sym_column": sym_column},
-        )
+    assert captured["runtime_config"].license_directory == "/tmp/lic"
 
 
 class _SchemaKx:
@@ -474,9 +539,7 @@ def test_schema_type_chars_stay_aligned_with_names(monkeypatch, tmp_path):
 
 
 @pytest.mark.parametrize("column_name", ["../../outside", "a/b", "..", ""])
-def test_schema_rejects_column_names_that_escape_the_partition(
-    monkeypatch, tmp_path, column_name
-):
+def test_schema_rejects_column_names_that_escape_the_partition(monkeypatch, tmp_path, column_name):
     _make_partition(tmp_path, "2024.01.01", "TRADES")
     (tmp_path / "sym").write_bytes(b"stub")
     monkeypatch.setattr(
@@ -501,7 +564,7 @@ def test_symlinked_date_partition_is_rejected(tmp_path):
     (root / "2024.01.02").symlink_to(outside, target_is_directory=True)
 
     with pytest.raises(ValueError, match="symbolic link"):
-        filesystem.list_date_partitions(str(root))
+        filesystem.discover_table_partitions(str(root), "trades")
 
 
 def test_reader_rejects_symlinked_table_directory(monkeypatch, tmp_path):
@@ -512,7 +575,7 @@ def test_reader_rejects_symlinked_table_directory(monkeypatch, tmp_path):
     (tmp_path / "2024.01.01" / "TRADES").symlink_to(outside, target_is_directory=True)
 
     with pytest.raises(ValueError, match="symbolic link"):
-        _read_records(tmp_path, monkeypatch, _ChunkKx(row_count=1))
+        _read_records(tmp_path, monkeypatch, _RangeKx(row_count=1))
 
 
 def test_reader_rejects_symlinked_column_file(monkeypatch, tmp_path):
@@ -522,7 +585,51 @@ def test_reader_rejects_symlinked_column_file(monkeypatch, tmp_path):
     (partition / "price").symlink_to(secret)
 
     with pytest.raises(ValueError, match="symbolic link"):
-        _read_records(tmp_path, monkeypatch, _ChunkKx(row_count=1))
+        _read_records(tmp_path, monkeypatch, _RangeKx(row_count=1))
+
+
+def test_symlinked_nested_column_companion_file_is_rejected(monkeypatch, tmp_path):
+    partition = _make_partition(tmp_path, "2024.01.01", "TRADES", columns=("sym", "price"))
+    secret = tmp_path / "secret.bin"
+    secret.write_bytes(b"secret")
+    (partition / "price#").symlink_to(secret)
+
+    with pytest.raises(ValueError, match="symbolic link"):
+        _read_records(tmp_path, monkeypatch, _RangeKx(row_count=1))
+
+
+def test_shape_check_rejects_symlinked_dot_d(monkeypatch, tmp_path):
+    partition = _make_partition(tmp_path, "2024.01.01", "TRADES")
+    (tmp_path / "sym").write_bytes(b"stub")
+    (partition / ".d").symlink_to(tmp_path / "sym")
+    monkeypatch.setattr(sym_reader, "prepare_pykx", lambda _: pytest.fail("no q for symlinks"))
+
+    with pytest.raises(ValueError, match="symbolic link"):
+        sym_reader.read_partition_shape(
+            hdb_root_path=str(tmp_path),
+            kdb_table_name="TRADES",
+            date_partition="2024.01.01",
+            runtime_config=PyKxRuntimeConfig(license_directory="/tmp/lic"),
+            check_all_columns=True,
+        )
+
+
+def test_schema_inference_rejects_symlinked_table_content(monkeypatch, tmp_path):
+    partition = _make_partition(tmp_path, "2024.01.01", "TRADES")
+    (tmp_path / "sym").write_bytes(b"stub")
+    (partition / ".d").symlink_to(tmp_path / "sym")
+    monkeypatch.setattr(
+        "databricks.labs.community_connector.sources.kx_kdb.schema.prepare_pykx",
+        lambda _: pytest.fail("q must not open symlinked table content"),
+    )
+
+    with pytest.raises(ValueError, match="symbolic link"):
+        infer_schema_from_partition(
+            hdb_root_path=str(tmp_path),
+            kdb_table_name="TRADES",
+            date_partition="2024.01.01",
+            runtime_config=PyKxRuntimeConfig(license_directory="/tmp/lic"),
+        )
 
 
 @pytest.mark.parametrize(
@@ -543,354 +650,48 @@ def test_discovery_cache_ttl_bounds_staleness():
     assert filesystem._DISCOVERY_CACHE_TTL_SECONDS <= 300
 
 
-# ---------------------------------------------------------------------------
-# Secrets, subprocesses, and runtime materialization
-# ---------------------------------------------------------------------------
-
-
-class _Recorder:
-    def __init__(self, results):
-        self._results = list(results)
-        self.calls: list[dict] = []
-
-    def __call__(self, args, **kwargs):
-        rc, stdout, stderr = self._results.pop(0)
-        self.calls.append({"args": list(args), **kwargs})
-        return subprocess.CompletedProcess(args, rc, stdout=stdout, stderr=stderr)
-
-
-def _online_config(tmp_path, **overrides):
-    values = {
-        "license_directory": str(tmp_path / "lic"),
-        "installer_bearer_token": _TOKEN,
-        "license_b64": _LICENSE_B64,
-    }
-    values.update(overrides)
-    return PyKxRuntimeConfig(**values)
-
-
-def test_curl_receives_bearer_token_on_stdin_not_argv(monkeypatch, tmp_path):
-    monkeypatch.setattr(runtime_mod, "_runtime_home_directory", lambda: tmp_path / "home")
-    recorder = _Recorder([(0, "", ""), (0, "", "")])
-    monkeypatch.setattr(runtime_mod.subprocess, "run", recorder)
-
-    runtime_mod._install_kdbx(_online_config(tmp_path))
-
-    curl_call = recorder.calls[0]
-    assert curl_call["args"][:2] == ["curl", "-q"]
-    assert "--config" in curl_call["args"]
-    assert all(_TOKEN not in arg for arg in curl_call["args"])
-    assert _TOKEN in curl_call["input"]
-    assert _TOKEN not in json.dumps(curl_call.get("env") or {})
-
-
-@pytest.mark.parametrize("token", ['bad"token', "bad\ntoken", "bad token", "bad\\token"])
-def test_unsafe_bearer_token_characters_are_rejected(monkeypatch, tmp_path, token):
-    monkeypatch.setattr(runtime_mod, "_runtime_home_directory", lambda: tmp_path / "home")
-    monkeypatch.setattr(runtime_mod.subprocess, "run", _Recorder([]))
-
-    with pytest.raises(ValueError, match="bearer token") as excinfo:
-        runtime_mod._install_kdbx(_online_config(tmp_path, installer_bearer_token=token))
-    assert token not in str(excinfo.value)
-
-
-def test_child_processes_do_not_inherit_license_environment(monkeypatch, tmp_path):
-    monkeypatch.setattr(runtime_mod, "_runtime_home_directory", lambda: tmp_path / "home")
-    monkeypatch.setenv("KDB_LICENSE_B64", _LICENSE_B64)
-    monkeypatch.setenv("KDB_K4LICENSE_B64", _LICENSE_B64)
-    monkeypatch.setenv("UNRELATED_COPY", _TOKEN)
-    recorder = _Recorder([(0, "", ""), (0, "", ""), (0, "", "")])
-    monkeypatch.setattr(runtime_mod.subprocess, "run", recorder)
-    config = _online_config(tmp_path)
-
-    runtime_mod._install_kdbx(config)
-    runtime_mod._ensure_pykx_package(config)
-
-    for call in recorder.calls:
-        env = call["env"]
-        assert "KDB_LICENSE_B64" not in env
-        assert "KDB_K4LICENSE_B64" not in env
-        assert _TOKEN not in env.values()
-        assert _LICENSE_B64 not in env.values()
-
-
-def test_subprocess_failures_redact_secrets(monkeypatch, tmp_path):
-    monkeypatch.setattr(runtime_mod, "_runtime_home_directory", lambda: tmp_path / "home")
-    leak = f"Using --b64lic option:\n{_LICENSE_B64}\nauth {_TOKEN} failed"
-    monkeypatch.setattr(runtime_mod.subprocess, "run", _Recorder([(0, "", ""), (1, leak, leak)]))
-
-    with pytest.raises(RuntimeError) as excinfo:
-        runtime_mod._install_kdbx(_online_config(tmp_path))
-
-    message = str(excinfo.value)
-    assert _LICENSE_B64 not in message
-    assert _TOKEN not in message
-    assert "[REDACTED]" in message
-
-    monkeypatch.setattr(runtime_mod.subprocess, "run", _Recorder([(22, "", f"401 {_TOKEN}")]))
-    with pytest.raises(RuntimeError) as excinfo:
-        runtime_mod._install_kdbx(_online_config(tmp_path))
-    assert _TOKEN not in str(excinfo.value)
-
-
-def test_installer_and_pip_never_read_the_parent_stdin(monkeypatch, tmp_path):
-    monkeypatch.setattr(runtime_mod, "_runtime_home_directory", lambda: tmp_path / "home")
-    recorder = _Recorder([(0, "", ""), (0, "", ""), (0, "", "")])
-    monkeypatch.setattr(runtime_mod.subprocess, "run", recorder)
-    config = _online_config(tmp_path)
-
-    runtime_mod._install_kdbx(config)
-    runtime_mod._ensure_pykx_package(config)
-
-    curl_call, install_call, pip_call = recorder.calls
-    assert "stdin" not in curl_call and curl_call["input"]
-    assert install_call["stdin"] is subprocess.DEVNULL
-    assert pip_call["stdin"] is subprocess.DEVNULL
-
-
-def test_installer_timeout_does_not_leak_license_from_argv(monkeypatch, tmp_path):
-    monkeypatch.setattr(runtime_mod, "_runtime_home_directory", lambda: tmp_path / "home")
-    calls = []
-
-    def _run(args, **kwargs):
-        calls.append(args)
-        if args[0] == "bash":
-            raise subprocess.TimeoutExpired(args, 1200, output=f"{_LICENSE_B64}".encode())
-        return subprocess.CompletedProcess(args, 0, stdout="", stderr="")
-
-    monkeypatch.setattr(runtime_mod.subprocess, "run", _run)
-
-    with pytest.raises(RuntimeError, match="timed out") as excinfo:
-        runtime_mod._install_kdbx(_online_config(tmp_path))
-
-    assert _LICENSE_B64 not in str(excinfo.value)
-    assert excinfo.value.__cause__ is None
-    assert excinfo.value.__context__ is None
-
-
-def test_runtime_config_repr_hides_secrets(tmp_path):
-    text = repr(_online_config(tmp_path))
-
-    assert _TOKEN not in text
-    assert _LICENSE_B64 not in text
-
-
-def test_license_is_materialized_owner_only_and_not_exported(monkeypatch, tmp_path):
-    runtime_home = tmp_path / "home"
-    monkeypatch.setattr(runtime_mod, "_runtime_home_directory", lambda: runtime_home)
-    monkeypatch.delenv("KDB_LICENSE_B64", raising=False)
-    original_cwd = os.getcwd()
-    try:
-        runtime_mod._apply_pykx_environment(
-            PyKxRuntimeConfig(license_directory="", license_b64=_LICENSE_B64)
-        )
-    finally:
-        os.chdir(original_cwd)
-
-    license_file = runtime_home / "qlic" / "kc.lic"
-    assert license_file.read_bytes() == base64.b64decode(_LICENSE_B64)
-    assert stat.S_IMODE(license_file.stat().st_mode) == 0o600
-    assert stat.S_IMODE(license_file.parent.stat().st_mode) == 0o700
-    assert "KDB_LICENSE_B64" not in os.environ
-    assert _LICENSE_B64 not in os.environ.values()
-
-
-def test_runtime_key_distinguishes_same_length_secrets_without_storing_them(tmp_path):
-    first = runtime_mod._runtime_key(_online_config(tmp_path, license_b64="QUFBQQ=="))
-    second = runtime_mod._runtime_key(_online_config(tmp_path, license_b64="QkJCQg=="))
-
-    assert first != second
-    assert "QUFBQQ==" not in first
-    assert _TOKEN not in first
-
-
-def test_offline_bundle_cache_is_keyed_by_source(monkeypatch, tmp_path):
-    monkeypatch.setattr(runtime_mod, "_local_bundle_directory", lambda: tmp_path / "cache")
-    (tmp_path / "cache").mkdir()
-    first = tmp_path / "a" / "l64-bundle.zip"
-    second = tmp_path / "b" / "l64-bundle.zip"
-    for path, payload in ((first, b"first"), (second, b"second")):
-        path.parent.mkdir()
-        path.write_bytes(payload)
-
-    assert runtime_mod._localize_offline_bundle(str(first)).read_bytes() == b"first"
-    assert runtime_mod._localize_offline_bundle(str(second)).read_bytes() == b"second"
-
-
-@pytest.mark.parametrize("member", ["../escape.sh", "/abs/escape.sh", "nested/../../escape.sh"])
-def test_offline_bundle_rejects_members_outside_extract_dir(monkeypatch, tmp_path, member):
-    bundle = tmp_path / "bundle.zip"
-    with zipfile.ZipFile(bundle, "w") as archive:
-        archive.writestr("install_kdb.sh", "#!/bin/bash\n")
-        archive.writestr(member, "owned")
-    monkeypatch.setattr(runtime_mod, "_runtime_home_directory", lambda: tmp_path / "home")
-    recorder = _Recorder([(0, "", "")])
-    monkeypatch.setattr(runtime_mod.subprocess, "run", recorder)
-    config = PyKxRuntimeConfig(
-        license_directory=str(tmp_path / "lic"),
-        license_b64=_LICENSE_B64,
-        offline_bundle_path=str(bundle),
-    )
-
-    with pytest.raises(RuntimeError, match="unsafe"):
-        runtime_mod._install_kdbx(config)
-    assert recorder.calls == []
-    assert not (tmp_path / "escape.sh").exists()
-
-
-def test_offline_bundle_rejects_symlink_members(monkeypatch, tmp_path):
-    bundle = tmp_path / "bundle.zip"
-    with zipfile.ZipFile(bundle, "w") as archive:
-        archive.writestr("install_kdb.sh", "#!/bin/bash\n")
-        link = zipfile.ZipInfo("l64arm.zip")
-        link.external_attr = (stat.S_IFLNK | 0o777) << 16
-        archive.writestr(link, "/etc/passwd")
-    monkeypatch.setattr(runtime_mod, "_runtime_home_directory", lambda: tmp_path / "home")
-    monkeypatch.setattr(runtime_mod.subprocess, "run", _Recorder([]))
-    config = PyKxRuntimeConfig(
-        license_directory=str(tmp_path / "lic"),
-        license_b64=_LICENSE_B64,
-        offline_bundle_path=str(bundle),
-    )
-
-    with pytest.raises(RuntimeError, match="unsafe"):
-        runtime_mod._install_kdbx(config)
-
-
-def test_commercial_k4_license_file_uses_k4_installer_flag(monkeypatch, tmp_path):
-    license_dir = tmp_path / "lic"
-    license_dir.mkdir()
-    (license_dir / "k4.lic").write_bytes(b"commercial-license")
-    bundle = tmp_path / "bundle.zip"
-    with zipfile.ZipFile(bundle, "w") as archive:
-        archive.writestr("install_kdb.sh", "#!/bin/bash\n")
-
-    config = build_runtime_config(
-        {
-            "license_volume_path": str(license_dir),
-            "kdbx_license_file_path": str(license_dir / "k4.lic"),
-            "kdbx_offline_bundle_path": str(bundle),
-        }
-    )
-    assert config.license_file_name == "k4.lic"
-
-    monkeypatch.setattr(runtime_mod, "_runtime_home_directory", lambda: tmp_path / "home")
-    recorder = _Recorder([(0, "", "")])
-    monkeypatch.setattr(runtime_mod.subprocess, "run", recorder)
-    runtime_mod._install_kdbx(config)
-
-    args = recorder.calls[0]["args"]
-    assert "--k4b64lic" in args
-    assert "--b64lic" not in args
-
-
-def test_explicit_k4_license_kind_materializes_k4_file(monkeypatch, tmp_path):
-    config = build_runtime_config(
-        {
-            "license_volume_path": "",
-            "kdbx_install_bearer_token": _TOKEN,
-            "kdbx_license_b64": _LICENSE_B64,
-            "kdbx_license_kind": "k4",
-            "kdbx_install_mode": "online",
-        }
-    )
-    assert config.license_file_name == "k4.lic"
-
-    runtime_home = tmp_path / "home"
-    monkeypatch.setattr(runtime_mod, "_runtime_home_directory", lambda: runtime_home)
-    original_cwd = os.getcwd()
-    try:
-        runtime_mod._apply_pykx_environment(config)
-    finally:
-        os.chdir(original_cwd)
-    assert (runtime_home / "qlic" / "k4.lic").is_file()
-    assert not (runtime_home / "qlic" / "kc.lic").exists()
-
-
-def test_unknown_license_kind_is_rejected():
-    with pytest.raises(ValueError, match="kdbx_license_kind"):
-        build_runtime_config(
-            {
-                "license_volume_path": "/tmp/lic",
-                "kdbx_install_bearer_token": _TOKEN,
-                "kdbx_license_b64": _LICENSE_B64,
-                "kdbx_license_kind": "personal",
-            }
-        )
-
-
-# ---------------------------------------------------------------------------
-# Review follow-ups
-# ---------------------------------------------------------------------------
-
-
-def _connector_with_schema(monkeypatch, tmp_path, columns, symbols=("AAPL", "MSFT")):
+def test_latest_offset_sees_new_dates_after_discovery_ttl(monkeypatch, tmp_path):
     (tmp_path / "sym").write_bytes(b"stub")
     for date in ("2024.01.01", "2024.01.02"):
-        (tmp_path / date / "TRADES").mkdir(parents=True, exist_ok=True)
+        (tmp_path / date / "TRADES").mkdir(parents=True)
     monkeypatch.setattr(
-        "databricks.labs.community_connector.sources.kx_kdb.kx_kdb.load_sym_enumeration",
-        lambda *_: list(symbols),
+        f"{_MODULE}.read_partition_shape",
+        lambda **_: PartitionShape(present=True, complete=True, row_count=1),
     )
+    connector = KxKdbLakeflowConnect(
+        {"hdb_root_path": str(tmp_path), "license_volume_path": "/tmp/lic"}
+    )
+    assert connector.latest_offset("trades", {}) == {"date_partition": "2024.01.02"}
+
+    (tmp_path / "2024.01.03" / "TRADES").mkdir(parents=True)
+    monkeypatch.setattr(filesystem, "_DISCOVERY_CACHE_TTL_SECONDS", 0)
+
+    assert connector.latest_offset("trades", {}) == {"date_partition": "2024.01.03"}
+
+
+def test_schema_uses_first_selected_date_that_contains_the_table(monkeypatch, tmp_path):
+    (tmp_path / "sym").write_bytes(b"stub")
+    (tmp_path / "2024.01.01" / "TRADES").mkdir(parents=True)
+    (tmp_path / "2024.01.02").mkdir()
+    (tmp_path / "2024.01.03" / "TRADES").mkdir(parents=True)
+    seen = []
     monkeypatch.setattr(
-        "databricks.labs.community_connector.sources.kx_kdb.kx_kdb.infer_schema_from_partition",
-        lambda **_: columns,
+        f"{_MODULE}.infer_schema_from_partition",
+        lambda **kwargs: (
+            seen.append(kwargs["date_partition"])
+            or [{"name": "sym", "spark_type": "StringType", "q_type": "s"}]
+        ),
     )
-    return KxKdbLakeflowConnect({"hdb_root_path": str(tmp_path), "license_volume_path": "/tmp/lic"})
-
-
-def test_unmatched_symbol_rows_are_read_by_index_range(monkeypatch, tmp_path):
-    _make_partition(tmp_path, "2024.01.01", "TRADES")
-
-    class _UnmatchedKx(_ChunkKx):
-        def q(self, query, *args):
-            if query == sym_reader._UNMATCHED_ROWS_Q:
-                self.queries.append(query)
-                self.unmatched_args = args
-                return None
-            return super().q(query, *args)
-
-    fake_kx = _UnmatchedKx(row_count=2)
-    records = _read_records(tmp_path, monkeypatch, fake_kx, sym_index=None, sym_count=11)
-
-    assert fake_kx.unmatched_args == (f"{tmp_path}/2024.01.01/TRADES/sym", 11)
-    assert len(records) == 2
-    assert not any("chunk_idx set where symi=" in query for query in fake_kx.queries)
-
-
-def test_unmatched_symbol_read_requires_symbol_count(tmp_path):
-    with pytest.raises(ValueError, match="sym_count"):
-        list(
-            sym_reader.read_kdb_date_sym_records(
-                hdb_root_path=str(tmp_path),
-                kdb_table_name="TRADES",
-                date_partition="2024.01.01",
-                sym_index=None,
-                runtime_config=PyKxRuntimeConfig(license_directory="/tmp/lic"),
-                column_defs=[],
-            )
-        )
-
-
-def test_sym_column_must_be_an_enumerated_symbol_column(monkeypatch, tmp_path):
-    connector = _connector_with_schema(
-        monkeypatch,
-        tmp_path,
-        [
-            {"name": "sym", "spark_type": "StringType", "q_type": "s"},
-            {"name": "price", "spark_type": "DoubleType", "q_type": "f"},
-        ],
+    connector = KxKdbLakeflowConnect(
+        {"hdb_root_path": str(tmp_path), "license_volume_path": "/tmp/lic"}
     )
 
-    with pytest.raises(ValueError, match="not a column"):
-        connector.get_partitions("trades", {"sym_column": "ticker"})
-    with pytest.raises(ValueError, match="enumerated symbol column"):
-        connector.get_partitions("trades", {"sym_column": "price"})
+    connector.get_table_schema("trades", {"start_date": "2024.01.02"})
+
+    assert seen == ["2024.01.03"]
 
 
 def test_byte_and_short_columns_widen_to_integers_the_parser_accepts():
-    from pyspark.sql.types import IntegerType
-
     from databricks.labs.community_connector.sources.kx_kdb.schema import _map_meta_type_char
 
     assert _map_meta_type_char("x") == "IntegerType"
@@ -946,174 +747,196 @@ def test_pandas_na_becomes_none_not_text():
     assert sym_reader._plain_python_value(pd.NA) is None
 
 
-def test_symlinked_nested_column_companion_file_is_rejected(monkeypatch, tmp_path):
-    partition = _make_partition(tmp_path, "2024.01.01", "TRADES", columns=("sym", "note"))
-    secret = tmp_path / "secret.bin"
-    secret.write_bytes(b"secret")
-    (partition / "note#").symlink_to(secret)
-
-    with pytest.raises(ValueError, match="symbolic link"):
-        _read_records(tmp_path, monkeypatch, _ChunkKx(row_count=1))
+# ---------------------------------------------------------------------------
+# Secrets, subprocesses, and runtime materialization
+# ---------------------------------------------------------------------------
 
 
-def test_schema_inference_rejects_symlinked_table_content(monkeypatch, tmp_path):
-    partition = _make_partition(tmp_path, "2024.01.01", "TRADES")
-    (tmp_path / "sym").write_bytes(b"stub")
-    (partition / ".d").symlink_to(tmp_path / "sym")
-    monkeypatch.setattr(
-        "databricks.labs.community_connector.sources.kx_kdb.schema.prepare_pykx",
-        lambda _: pytest.fail("q must not open symlinked table content"),
-    )
+class _Recorder:
+    def __init__(self, results):
+        self._results = list(results)
+        self.calls: list[dict] = []
 
-    with pytest.raises(ValueError, match="symbolic link"):
-        infer_schema_from_partition(
-            hdb_root_path=str(tmp_path),
-            kdb_table_name="TRADES",
-            date_partition="2024.01.01",
-            runtime_config=PyKxRuntimeConfig(license_directory="/tmp/lic"),
-        )
+    def __call__(self, args, **kwargs):
+        rc, stdout, stderr = self._results.pop(0)
+        self.calls.append({"args": list(args), **kwargs})
+        return subprocess.CompletedProcess(args, rc, stdout=stdout, stderr=stderr)
 
 
-def test_latest_offset_sees_new_dates_after_discovery_ttl(monkeypatch, tmp_path):
-    connector = _connector_with_schema(
-        monkeypatch, tmp_path, [{"name": "sym", "spark_type": "StringType", "q_type": "s"}]
-    )
-    assert connector.latest_offset("trades", {}) == {"date_partition": "2024.01.02"}
-
-    (tmp_path / "2024.01.03" / "TRADES").mkdir(parents=True)
-    monkeypatch.setattr(filesystem, "_DISCOVERY_CACHE_TTL_SECONDS", 0)
-
-    assert connector.latest_offset("trades", {}) == {"date_partition": "2024.01.03"}
-
-
-def test_symbols_reload_when_the_sym_file_changes(monkeypatch, tmp_path):
-    connector = _connector_with_schema(
-        monkeypatch, tmp_path, [{"name": "sym", "spark_type": "StringType", "q_type": "s"}]
-    )
-    loads = []
-    monkeypatch.setattr(
-        "databricks.labs.community_connector.sources.kx_kdb.kx_kdb.load_sym_enumeration",
-        lambda *_: loads.append(1) or ["A"] * len(loads),
-    )
-
-    assert connector._symbols() == ["A"]
-    assert connector._symbols() == ["A"]
-    (tmp_path / "sym").write_bytes(b"stub-appended")
-    assert connector._symbols() == ["A", "A"]
-    assert len(loads) == 2
+def _bundle(path: Path, members=()) -> Path:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with zipfile.ZipFile(path, "w") as archive:
+        archive.writestr("install_kdb.sh", "#!/bin/bash\n")
+        for member in members:
+            if isinstance(member, zipfile.ZipInfo):
+                archive.writestr(member, "/etc/passwd")
+            else:
+                archive.writestr(member, "owned")
+    return path
 
 
-def test_schema_uses_first_selected_date_that_contains_the_table(monkeypatch, tmp_path):
-    (tmp_path / "sym").write_bytes(b"stub")
-    (tmp_path / "2024.01.01" / "TRADES").mkdir(parents=True)
-    (tmp_path / "2024.01.02").mkdir()
-    (tmp_path / "2024.01.03" / "TRADES").mkdir(parents=True)
-    seen = []
-    monkeypatch.setattr(
-        "databricks.labs.community_connector.sources.kx_kdb.kx_kdb.infer_schema_from_partition",
-        lambda **kwargs: seen.append(kwargs["date_partition"])
-        or [{"name": "sym", "spark_type": "StringType", "q_type": "s"}],
-    )
-    connector = KxKdbLakeflowConnect(
-        {"hdb_root_path": str(tmp_path), "license_volume_path": "/tmp/lic"}
-    )
-
-    connector.get_table_schema("trades", {"start_date": "2024.01.02"})
-
-    assert seen == ["2024.01.03"]
+def _offline_config(tmp_path, **overrides):
+    values = {
+        "license_directory": str(tmp_path / "lic"),
+        "license_b64": _LICENSE_B64,
+        "offline_bundle_path": str(_bundle(tmp_path / "bundle.zip")),
+    }
+    values.update(overrides)
+    return PyKxRuntimeConfig(**values)
 
 
-def test_absent_table_partition_yields_nothing_without_warning(monkeypatch, tmp_path, caplog):
-    (tmp_path / "sym").write_bytes(b"stub")
-    (tmp_path / "2024.01.01").mkdir()
-    monkeypatch.setattr(sym_reader, "prepare_pykx", lambda _: pytest.fail("no q for absent table"))
-
-    with caplog.at_level("WARNING"):
-        records = _read_records(tmp_path, monkeypatch, _ChunkKx(row_count=1))
-
-    assert records == []
-    assert not caplog.records
-
-
-def test_bearer_token_with_trailing_newline_is_rejected(monkeypatch, tmp_path):
-    monkeypatch.setattr(runtime_mod, "_runtime_home_directory", lambda: tmp_path / "home")
-    monkeypatch.setattr(runtime_mod.subprocess, "run", _Recorder([]))
-
-    with pytest.raises(ValueError, match="bearer token"):
-        runtime_mod._install_kdbx(_online_config(tmp_path, installer_bearer_token="abc\n"))
+def _install(config):
+    runtime_mod._install_kdbx_offline(config, runtime_mod._runtime_home(config))
 
 
 def test_installer_environment_is_allowlisted(monkeypatch, tmp_path):
-    monkeypatch.setattr(runtime_mod, "_runtime_home_directory", lambda: tmp_path / "home")
     monkeypatch.setenv("DATABRICKS_TOKEN", "workspace-token")
+    monkeypatch.setenv("KDB_LICENSE_B64", _LICENSE_B64)
+    monkeypatch.setenv("UNRELATED_COPY", _LICENSE_B64)
     monkeypatch.setenv("HTTPS_PROXY", "http://proxy:3128")
-    recorder = _Recorder([(0, "", ""), (0, "", "")])
+    recorder = _Recorder([(0, "", "")])
     monkeypatch.setattr(runtime_mod.subprocess, "run", recorder)
+    config = _offline_config(tmp_path)
 
-    runtime_mod._install_kdbx(_online_config(tmp_path))
+    _install(config)
 
-    install_env = recorder.calls[1]["env"]
-    assert "DATABRICKS_TOKEN" not in install_env
-    assert install_env["HTTPS_PROXY"] == "http://proxy:3128"
-    assert install_env["HOME"] == str(tmp_path / "home")
-    assert install_env["TERM"] == "dumb"
-
-
-# ---------------------------------------------------------------------------
-# Options merged from pipeline table configuration (managed ingestion path)
-# ---------------------------------------------------------------------------
+    env = recorder.calls[0]["env"]
+    assert "DATABRICKS_TOKEN" not in env
+    assert "KDB_LICENSE_B64" not in env
+    assert _LICENSE_B64 not in env.values()
+    assert env["HTTPS_PROXY"] == "http://proxy:3128"
+    assert env["HOME"] == str(runtime_mod._runtime_home(config))
+    assert env["TERM"] == "dumb"
 
 
-def _merged_options(tmp_path, **table_options):
-    (tmp_path / "hdb" / "2024.01.01" / "TRADES").mkdir(parents=True, exist_ok=True)
-    keys = tmp_path / "vol" / "keys"
-    keys.mkdir(parents=True, exist_ok=True)
-    (keys / "kc.lic").write_bytes(b"license")
-    return {
-        "hdb_root_path": str(tmp_path / "hdb"),
-        "license_volume_path": str(keys),
-        "kdbx_license_file_path": str(keys / "kc.lic"),
-        **table_options,
-    }
-
-
-def test_pipeline_supplied_package_spec_is_ignored(monkeypatch, tmp_path):
-    connector = KxKdbLakeflowConnect(
-        _merged_options(tmp_path, pykx_install_spec=str(tmp_path / "evil.whl"))
-    )
-    monkeypatch.setattr(runtime_mod, "_runtime_home_directory", lambda: tmp_path / "home")
+def test_installer_never_reads_the_parent_stdin(monkeypatch, tmp_path):
     recorder = _Recorder([(0, "", "")])
     monkeypatch.setattr(runtime_mod.subprocess, "run", recorder)
 
-    runtime_mod._ensure_pykx_package(connector.runtime_config)
+    _install(_offline_config(tmp_path))
 
-    assert all("evil.whl" not in arg for arg in recorder.calls[0]["args"])
-    assert recorder.calls[0]["args"][-1] == runtime_mod.PYKX_PIP_SPEC
-
-
-@pytest.mark.parametrize("option", ["kdbx_offline_bundle_path", "kdbx_license_file_path"])
-def test_pipeline_supplied_bootstrap_files_outside_license_volume_are_rejected(tmp_path, option):
-    outside = tmp_path / "attacker" / "file.zip"
-
-    with pytest.raises(ValueError, match=option):
-        KxKdbLakeflowConnect(_merged_options(tmp_path, **{option: str(outside)}))
+    assert recorder.calls[0]["stdin"] is subprocess.DEVNULL
 
 
-@pytest.mark.parametrize(
-    ("path", "allowed"),
-    [
-        ("/Volumes/main/kx/files/kdbx/l64arm-bundle.zip", True),
-        ("dbfs:/Volumes/main/kx/files/kdbx/l64arm-bundle.zip", True),
-        ("/Volumes/main/kx/files/keys/kc.lic", True),
-        ("/Volumes/main/kx/other/l64arm-bundle.zip", False),
-        ("/Volumes/main/kx/files/../other/bundle.zip", False),
-        ("relative/bundle.zip", False),
-    ],
-)
-def test_bootstrap_files_must_share_the_license_volume(path, allowed):
-    license_directory = "/Volumes/main/kx/files/keys"
-    if allowed:
-        assert runtime_mod._within_license_volume(path, license_directory, "opt") == path
-    else:
-        with pytest.raises(ValueError, match="opt"):
-            runtime_mod._within_license_volume(path, license_directory, "opt")
+def test_installer_failures_redact_the_license(monkeypatch, tmp_path):
+    leak = f"Using --b64lic option:\n{_LICENSE_B64}\nfailed"
+    monkeypatch.setattr(runtime_mod.subprocess, "run", _Recorder([(1, leak, leak)]))
+
+    with pytest.raises(RuntimeError) as excinfo:
+        _install(_offline_config(tmp_path))
+
+    assert _LICENSE_B64 not in str(excinfo.value)
+    assert "[REDACTED]" in str(excinfo.value)
+
+
+def test_installer_timeout_does_not_leak_license_from_argv(monkeypatch, tmp_path):
+    def _run(args, **_kwargs):
+        raise subprocess.TimeoutExpired(args, 1200, output=_LICENSE_B64.encode())
+
+    monkeypatch.setattr(runtime_mod.subprocess, "run", _run)
+
+    with pytest.raises(RuntimeError, match="timed out") as excinfo:
+        _install(_offline_config(tmp_path))
+
+    assert _LICENSE_B64 not in str(excinfo.value)
+    assert excinfo.value.__cause__ is None
+    assert excinfo.value.__context__ is None
+
+
+def test_runtime_config_repr_hides_the_license(tmp_path):
+    assert _LICENSE_B64 not in repr(_offline_config(tmp_path))
+
+
+def test_license_is_materialized_owner_only_and_not_exported(monkeypatch, tmp_path):
+    monkeypatch.delenv("KDB_LICENSE_B64", raising=False)
+    config = PyKxRuntimeConfig(
+        license_directory="/Volumes/main/kx/files/keys", license_b64=_LICENSE_B64
+    )
+    home = runtime_mod._runtime_home(config)
+
+    runtime_mod._apply_pykx_environment(config, home)
+
+    license_file = home / "qlic" / "kc.lic"
+    assert license_file.read_bytes() == base64.b64decode(_LICENSE_B64)
+    assert stat.S_IMODE(license_file.stat().st_mode) == 0o600
+    assert stat.S_IMODE(license_file.parent.stat().st_mode) == 0o700
+    assert os.environ["QLIC"] == str(license_file.parent)
+    assert "KDB_LICENSE_B64" not in os.environ
+    assert _LICENSE_B64 not in os.environ.values()
+
+
+def test_runtime_key_distinguishes_same_length_licenses_without_storing_them(tmp_path):
+    first = runtime_mod._runtime_key(_offline_config(tmp_path, license_b64="QUFBQQ=="))
+    second = runtime_mod._runtime_key(_offline_config(tmp_path, license_b64="QkJCQg=="))
+
+    assert first != second
+    assert "QUFBQQ==" not in first
+
+
+@pytest.mark.parametrize("member", ["../escape.sh", "/abs/escape.sh", "nested/../../escape.sh"])
+def test_offline_bundle_rejects_members_outside_extract_dir(monkeypatch, tmp_path, member):
+    recorder = _Recorder([(0, "", "")])
+    monkeypatch.setattr(runtime_mod.subprocess, "run", recorder)
+    config = _offline_config(
+        tmp_path, offline_bundle_path=str(_bundle(tmp_path / "evil.zip", [member]))
+    )
+
+    with pytest.raises(RuntimeError, match="unsafe"):
+        _install(config)
+    assert recorder.calls == []
+    assert not (tmp_path / "escape.sh").exists()
+
+
+def test_offline_bundle_rejects_symlink_members(monkeypatch, tmp_path):
+    link = zipfile.ZipInfo("l64arm.zip")
+    link.external_attr = (stat.S_IFLNK | 0o777) << 16
+    monkeypatch.setattr(runtime_mod.subprocess, "run", _Recorder([]))
+    config = _offline_config(
+        tmp_path, offline_bundle_path=str(_bundle(tmp_path / "evil.zip", [link]))
+    )
+
+    with pytest.raises(RuntimeError, match="unsafe"):
+        _install(config)
+
+
+def test_commercial_k4_license_file_uses_k4_installer_flag(monkeypatch, tmp_path):
+    license_dir = tmp_path / "lic"
+    license_dir.mkdir()
+    (license_dir / "k4.lic").write_bytes(b"commercial-license")
+    bundle = _bundle(tmp_path / "bundle.zip")
+    config = build_runtime_config(
+        {
+            "license_volume_path": str(license_dir),
+            "kdbx_license_file_path": str(license_dir / "k4.lic"),
+            "kdbx_offline_bundle_path": str(bundle),
+        }
+    )
+    assert config.license_file_name == "k4.lic"
+    recorder = _Recorder([(0, "", "")])
+    monkeypatch.setattr(runtime_mod.subprocess, "run", recorder)
+
+    _install(config)
+
+    args = recorder.calls[0]["args"]
+    assert "--k4b64lic" in args
+    assert "--b64lic" not in args
+
+
+def test_explicit_k4_license_kind_materializes_k4_file(tmp_path):
+    license_dir = tmp_path / "lic"
+    license_dir.mkdir()
+    (license_dir / "license.txt").write_bytes(b"commercial-license")
+    config = build_runtime_config(
+        {
+            "license_volume_path": str(license_dir),
+            "kdbx_license_file_path": str(license_dir / "license.txt"),
+            "kdbx_license_kind": "k4",
+        }
+    )
+    assert config.license_file_name == "k4.lic"
+    home = runtime_mod._runtime_home(config)
+
+    runtime_mod._apply_pykx_environment(config, home)
+
+    assert (home / "qlic" / "k4.lic").is_file()
+    assert not (home / "qlic" / "kc.lic").exists()

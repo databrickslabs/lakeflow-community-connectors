@@ -10,6 +10,8 @@ import time
 from dataclasses import dataclass
 from datetime import date
 
+from databricks.labs.community_connector.sources.kx_kdb.process_local import ProcessLocal
+
 DATE_PARTITION_RE = re.compile(r"^\d{4}\.\d{2}\.\d{2}$")
 _DATE_INPUT_PATTERNS = (
     re.compile(r"^(\d{4})\.(\d{2})\.(\d{2})$"),
@@ -45,20 +47,14 @@ class _TablesDiscovery:
     tables: tuple[str, ...]
 
 
-class _DiscoveryCache:
-    """Process-shared FUSE metadata cache that serializes as empty."""
+class _DiscoveryCache(ProcessLocal):
+    """Process-shared FUSE metadata cache."""
 
     def __init__(self) -> None:
         self._lock = threading.RLock()
         self._roots: dict[str, _RootDiscovery] = {}
         self._tables: dict[tuple[str, str], _TableDiscovery] = {}
         self._table_lists: dict[tuple[str, int], _TablesDiscovery] = {}
-
-    def __getstate__(self) -> dict:
-        return {}
-
-    def __setstate__(self, _state: dict) -> None:
-        self.__init__()
 
     def clear(self) -> None:
         with self._lock:
@@ -70,11 +66,11 @@ class _DiscoveryCache:
     def _is_fresh(created_at: float) -> bool:
         return time.monotonic() - created_at < _DISCOVERY_CACHE_TTL_SECONDS
 
-    def root(self, root_path: str) -> _RootDiscovery:
+    def root(self, root_path: str, *, refresh: bool = False) -> _RootDiscovery:
         normalized_root = str(root_path).rstrip("/")
         with self._lock:
             cached = self._roots.get(normalized_root)
-            if cached is not None and self._is_fresh(cached.created_at):
+            if cached is not None and not refresh and self._is_fresh(cached.created_at):
                 logger.info(
                     "KX_DISCOVERY event=root_dates_cache_hit dates=%s",
                     len(cached.date_partitions),
@@ -113,7 +109,9 @@ class _DiscoveryCache:
                 return cached
 
             started = time.perf_counter()
-            root = self.root(normalized_root)
+            # Rebuilding an expired table entry from a root listing that is
+            # itself almost expired would double how stale new dates can be.
+            root = self.root(normalized_root, refresh=cached is not None)
             actual_name, first_partition, latest_partition = _find_table_boundaries(
                 root.root_path,
                 root.date_partitions,
@@ -213,8 +211,7 @@ def normalize_partition_date(raw_value: str | None) -> str | None:
     parsed = _parse_date(value)
     if parsed is None:
         raise ValueError(
-            f"Invalid KDB partition date {value!r}; expected YYYY.MM.DD, YYYY-MM-DD, "
-            "or YYYY/MM/DD."
+            f"Invalid KDB partition date {value!r}; expected YYYY.MM.DD, YYYY-MM-DD, or YYYY/MM/DD."
         )
     return parsed
 
@@ -240,16 +237,13 @@ def _is_partition_name(name: str) -> bool:
 def _reject_symlink(entry: os.DirEntry, label: str) -> None:
     if entry.is_symlink():
         raise ValueError(
-            f"HDB {label} {entry.path} is a symbolic link; symlinked HDB content is not "
-            "supported."
+            f"HDB {label} {entry.path} is a symbolic link; symlinked HDB content is not supported."
         )
 
 
 def _scan_date_partitions(root_path: str) -> list[str]:
     if "://" in str(root_path):
-        raise ValueError(
-            f"HDB root path must be a FUSE/local directory, not a URI: {root_path}"
-        )
+        raise ValueError(f"HDB root path must be a FUSE/local directory, not a URI: {root_path}")
 
     # Name and d_type checks only: FUSE listings return entry types, while a
     # per-entry stat on UC Volumes costs tens of milliseconds.
@@ -359,11 +353,6 @@ def clear_discovery_cache() -> None:
     _DISCOVERY_CACHE.clear()
 
 
-def list_date_partitions(root_path: str) -> list[str]:
-    """List all date partitions found under an HDB root path."""
-    return list(_DISCOVERY_CACHE.date_partitions(root_path))
-
-
 def discover_tables(root_path: str, sample_dates: int = 0) -> list[str]:
     """Discover logical table names by scanning date-partition directories."""
     return list(_DISCOVERY_CACHE.list_tables(root_path, sample_dates))
@@ -382,13 +371,30 @@ def table_partition_exists(root_path: str, date_partition: str, table_name: str)
     return _table_directory_exists(root_path, date_partition, table_name)
 
 
+def latest_table_partition(root_path: str, table_name: str) -> str:
+    """Return the newest date partition that contains the table directory."""
+    return _DISCOVERY_CACHE.table(root_path, table_name).latest_partition
+
+
+def partition_last_modified(entries: dict[str, os.DirEntry]) -> float:
+    """Return the newest modification time, in epoch seconds, of a partition's files."""
+    return max(
+        (entry.stat(follow_symlinks=False).st_mtime for entry in entries.values()),
+        default=0.0,
+    )
+
+
 def discover_table_partitions(
     root_path: str,
     table_name: str,
     start_date: str | None = None,
     end_date: str | None = None,
 ) -> list[str]:
-    """Return all partitions that contain the requested table directory."""
+    """Return every date from the table's first to its newest directory.
+
+    Interior dates are included even when they have no table directory, which
+    is how a sparse table looks on disk; callers treat those dates as empty.
+    """
     normalized_start = normalize_partition_date(start_date)
     normalized_end = normalize_partition_date(end_date)
     discovery = _DISCOVERY_CACHE.table(root_path, table_name)

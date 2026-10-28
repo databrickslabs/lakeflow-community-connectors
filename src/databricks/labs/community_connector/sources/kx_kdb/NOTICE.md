@@ -11,12 +11,18 @@ The connector source and wheel do not bundle or redistribute PyKX, `q.so`,
 KDB-X, the KX installer, an offline KX bundle, or a KX license. Customers
 provide and license those components separately.
 
-The optional online bootstrap downloads the installer directly from KX using
-the customer's KX bearer token and license. The installer is held only in a
-process-local temporary directory for that bootstrap attempt. It is not
-persisted, uploaded, cached for another run, or re-served to another customer
-or workspace. The connector contains no shared or Databricks-held KX
+The connector never downloads KDB-X or the KX installer. When the customer stages a KDB-X
+offline bundle in their own Unity Catalog Volume, the connector copies it to
+an owner-only directory on each node, runs its `install_kdb.sh --offline`
+there with the customer's license, and keeps the install on that node for the
+lifetime of the node. It does not upload or re-serve the bundle to another
+customer or workspace. The connector contains no shared or Databricks-held KX
 credential or license.
+
+When a process on such a node cannot import PyKX (managed-ingestion analysis
+workers do not receive the pipeline environment), the connector installs
+exactly `pykx==4.0.0b5` from the package index configured for the workspace,
+once per node, into the same owner-only directory.
 
 ## Declared dependencies
 
