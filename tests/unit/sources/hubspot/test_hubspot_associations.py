@@ -250,3 +250,24 @@ def test_malformed_error_envelope_fails_before_returning_empty(extra, generated)
     helper, _, _ = reader(batch(result("a"), **extra), generated=generated)
     with pytest.raises(RuntimeError, match="error"):
         helper.read("deals", "tickets", ["a"])
+
+
+@pytest.mark.parametrize("generated", [False, True])
+def test_exhaustion_reports_only_finite_error_labels(generated):
+    payload = batch(errors=[{
+        "category": "VALIDATION_ERROR",
+        "message": "PRIVATE_MESSAGE",
+        "errors": [{"code": "OBJECT_NOT_FOUND", "context": {"id": "PRIVATE_ID"}}],
+    }, {
+        "category": "PRIVATE_CATEGORY",
+        "errors": [{"code": "PRIVATE_CODE"}, {"code": ["PRIVATE_NESTED"]}],
+    }, {"category": {"value": "PRIVATE_CATEGORY"}}, "PRIVATE_ERROR"], numErrors=4)
+    helper, post, _ = reader(*([payload] * 6), generated=generated)
+    with pytest.raises(RuntimeError) as raised:
+        helper.read("deals", "contacts", ["PRIVATE_ID"])
+    message = str(raised.value)
+    assert "error_categories=UNKNOWN|VALIDATION_ERROR" in message
+    assert "error_codes=OBJECT_NOT_FOUND|UNKNOWN" in message
+    assert "PRIVATE" not in message
+    assert post.call_count == 6
+    assert len(message) < 500

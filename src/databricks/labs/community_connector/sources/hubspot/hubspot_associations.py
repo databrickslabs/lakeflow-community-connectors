@@ -11,6 +11,36 @@ ASSOCIATION_BATCH_READ_SIZE = 1000
 ASSOCIATION_MIN_INTERVAL_S = 0.11
 ASSOCIATION_MAX_RETRIES = 5
 ASSOCIATION_MAX_BACKOFF_S = 30.0
+ASSOCIATION_SAFE_ERROR_LABELS = frozenset({
+    "VALIDATION_ERROR", "OBJECT_NOT_FOUND", "MISSING_SCOPES",
+    "INVALID_AUTHENTICATION", "RATE_LIMITS", "INTERNAL_ERROR",
+    "FORBIDDEN", "CONFLICT",
+})
+
+
+def _association_error_labels(errors: list) -> tuple[str, str]:
+    """Emit only fixed diagnostic labels, never arbitrary API error text."""
+    categories, codes = set(), set()
+
+    def label(value):
+        return value if isinstance(value, str) and value in ASSOCIATION_SAFE_ERROR_LABELS else "UNKNOWN"
+
+    for error in errors:
+        if not isinstance(error, dict):
+            categories.add("UNKNOWN")
+            continue
+        if "category" in error:
+            categories.add(label(error["category"]))
+        details = error.get("errors", [])
+        if not isinstance(details, list):
+            codes.add("UNKNOWN")
+            continue
+        for detail in details:
+            if isinstance(detail, dict) and "code" in detail:
+                codes.add(label(detail["code"]))
+            elif not isinstance(detail, dict):
+                codes.add("UNKNOWN")
+    return "|".join(sorted(categories)) or "NONE", "|".join(sorted(codes)) or "NONE"
 
 
 def _association_identifier(value, kind: str) -> str:
@@ -95,12 +125,14 @@ class HubspotAssociations:
                                 status = "MISSING" if status is None else "UNKNOWN"
                             errors = data.get("errors", [])
                             error_count = len(errors) if isinstance(errors, list) else "malformed"
+                            categories, codes = _association_error_labels(errors)
                             raise RuntimeError(
                                 "Incomplete HubSpot associations: exhausted retries "
                                 f"(from_type={from_type}, to_type={to_type}, "
                                 f"status={status}, requested={len(pending)}, "
                                 f"returned={len(results)}, errors={error_count}, "
-                                f"numErrors={data.get('numErrors', 0)})"
+                                f"numErrors={data.get('numErrors', 0)}, "
+                                f"error_categories={categories}, error_codes={codes})"
                             )
                         retries[parent] += 1
                         unresolved.append(retries[parent])
