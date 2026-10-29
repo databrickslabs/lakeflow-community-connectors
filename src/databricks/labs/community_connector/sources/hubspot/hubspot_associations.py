@@ -118,8 +118,16 @@ class HubspotAssociations:
                 # Error context has no universal parent-ID key. Do not commit
                 # results from an errored batch without reliable attribution.
                 has_errors = bool(errors) or error_count > 0
+                empty = self._empty_association_parents(data)
                 unresolved = []
                 for parent in list(pending):
+                    if parent in empty and parent not in results:
+                        # HubSpot answers a parent with no links explicitly, so
+                        # this is a result rather than a failure: record the
+                        # empty set and move on instead of retrying and then
+                        # asking for each parent again individually.
+                        del pending[parent]
+                        continue
                     if has_errors or data.get("status") != "COMPLETE" or parent not in results:
                         if retries[parent] >= ASSOCIATION_MAX_RETRIES:
                             if self._get is not None and self._can_reconcile_not_found(data):
@@ -164,6 +172,43 @@ class HubspotAssociations:
                 if unresolved:
                     self._sleep(min(2.0 ** (max(unresolved) - 1), ASSOCIATION_MAX_BACKOFF_S))
         return {parent: sorted(ids) for parent, ids in targets.items()}
+
+    @staticmethod
+    def _empty_association_parents(data: dict) -> set:
+        """Parents HubSpot explicitly reported as having no associations.
+
+        A parent with no links is not a missing parent: the batch read returns
+        ``status: COMPLETE`` with an ``OBJECT_NOT_FOUND`` error whose
+        ``subCategory`` is ``crm.associations.NO_ASSOCIATIONS_FOUND`` and whose
+        ``context.fromObjectId`` names that parent. Trusting that answer avoids
+        five retries plus two per-parent requests for every association-less
+        record, which otherwise dominates a large snapshot.
+
+        Only the explicit sub-category is trusted. Any other OBJECT_NOT_FOUND
+        (for example a parent that genuinely does not exist) still retries and
+        may still fall back to a per-parent read.
+        """
+        empty = set()
+        errors = data.get("errors")
+        if not isinstance(errors, list):
+            return empty
+        for error in errors:
+            if not isinstance(error, dict):
+                continue
+            if error.get("category") != "OBJECT_NOT_FOUND":
+                continue
+            if "NO_ASSOCIATIONS_FOUND" not in str(error.get("subCategory") or ""):
+                continue
+            context = error.get("context")
+            if not isinstance(context, dict):
+                continue
+            parents = context.get("fromObjectId")
+            if not isinstance(parents, list):
+                continue
+            for parent in parents:
+                if isinstance(parent, str) and parent:
+                    empty.add(parent)
+        return empty
 
     @staticmethod
     def _can_reconcile_not_found(data: dict) -> bool:

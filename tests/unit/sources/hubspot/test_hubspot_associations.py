@@ -452,3 +452,61 @@ def test_empty_get_rejects_error_bearing_parent_confirmation(generated, extra):
                                           Mock(), get=get)
     with pytest.raises(RuntimeError, match="parent identity"):
         helper.read("deals", "contacts", ["a"])
+
+
+def no_links(parent):
+    """The shape HubSpot uses to say a parent has no associations at all."""
+    return {
+        "status": "error",
+        "category": "OBJECT_NOT_FOUND",
+        "subCategory": "crm.associations.NO_ASSOCIATIONS_FOUND",
+        "message": f"No company is associated with contact {parent}.",
+        "context": {"fromObjectId": [parent]},
+    }
+
+
+@pytest.mark.parametrize("generated", [False, True])
+def test_no_associations_found_resolves_parents_without_retries_or_reads(generated):
+    """A parent with no links is an answer, not a failure.
+
+    HubSpot reports it as OBJECT_NOT_FOUND/NO_ASSOCIATIONS_FOUND naming that
+    parent. Retrying and then reading each parent individually costs two HTTP
+    requests per association-less record, which dominates a large snapshot.
+    """
+    helper, post, sleep = reader(
+        batch(errors=[no_links("a"), no_links("b")], numErrors=2),
+        generated=generated,
+    )
+    assert helper.read("contacts", "companies", ["a", "b"]) == {"a": [], "b": []}
+    assert post.call_count == 1
+    sleep.assert_not_called()
+
+
+@pytest.mark.parametrize("generated", [False, True])
+def test_mixed_response_resolves_populated_and_empty_parents_together(generated):
+    """Empty parents resolve immediately; populated ones survive the retry.
+
+    An error in a batch still makes the *other* parents retry, which is
+    deliberate conservatism, so the populated parent costs one extra round trip
+    rather than the O(parents) per-parent read it used to cost.
+    """
+    helper, post, sleep = reader(
+        batch(result("a", ["2", "3"]), errors=[no_links("b")], numErrors=1),
+        batch(result("a", ["2", "3"])),
+        generated=generated,
+    )
+    assert helper.read("contacts", "companies", ["a", "b"]) == {"a": ["2", "3"], "b": []}
+    assert post.call_count == 2
+    assert inputs(post)[1] == [{"id": "a"}]
+
+
+@pytest.mark.parametrize("generated", [False, True])
+def test_only_the_explicit_no_associations_subcategory_is_trusted(generated):
+    """A bare OBJECT_NOT_FOUND is still ambiguous: it must keep retrying."""
+    helper, post, _ = reader(
+        *([batch(errors=[{"category": "OBJECT_NOT_FOUND"}], numErrors=1)] * 6),
+        generated=generated,
+    )
+    with pytest.raises(RuntimeError, match="exhausted retries"):
+        helper.read("contacts", "companies", ["a"])
+    assert post.call_count == 6
