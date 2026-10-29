@@ -1,0 +1,13 @@
+[
+  {
+    "conversionId": "conversion-1",
+    "submittedAt": 1709251200000,
+    "pageUrl": "https://example.invalid/form",
+    "values": [
+      {
+        "name": "email",
+        "value": "synthetic@example.invalid"
+      }
+    ]
+  }
+]

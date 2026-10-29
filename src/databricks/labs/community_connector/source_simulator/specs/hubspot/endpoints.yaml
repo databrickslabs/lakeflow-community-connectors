@@ -14,6 +14,31 @@
 # with paging empty so the connector terminates after one page.
 
 endpoints:
+  - path: /crm/owners/2026-09
+    method: GET
+    corpus: owners
+    response: {pagination_style: none, wrapper: {records_key: results}}
+  - path: /crm/pipelines/2026-09/{object_type}
+    method: GET
+    corpus: pipelines
+    response: {pagination_style: none, wrapper: {records_key: results}}
+  - path: /marketing/v3/forms
+    method: GET
+    corpus: forms
+    response: {pagination_style: none, wrapper: {records_key: results}}
+  - path: /crm/lists/2026-09/all
+    method: POST
+    corpus: contact_lists
+    response: {pagination_style: none, wrapper: {records_key: results}}
+  - path: /crm/lists/2026-09/{list_id}/memberships
+    method: GET
+    corpus: contact_list_memberships
+    response: {pagination_style: none, wrapper: {records_key: results}}
+  - path: /form-integrations/v1/submissions/forms/{form_id}
+    method: GET
+    corpus: form_submissions
+    response: {pagination_style: none, wrapper: {records_key: results}}
+
   # Discovery — empty schemas → no custom objects.
   - path: /crm-object-schemas/2026-09/schemas
     method: GET

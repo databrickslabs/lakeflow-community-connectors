@@ -22,6 +22,10 @@ from databricks.labs.community_connector.sources.hubspot.hubspot_associations im
 from databricks.labs.community_connector.sources.hubspot.hubspot_http import (
     HubspotHttpClient,
 )
+from databricks.labs.community_connector.sources.hubspot.hubspot_non_crm import (
+    NON_CRM_TABLES,
+    HubspotNonCrm,
+)
 
 
 class HubspotLakeflowConnect(LakeflowConnect):
@@ -146,6 +150,16 @@ class HubspotLakeflowConnect(LakeflowConnect):
             self._post_association_read,
             get=self._get_association_page,
         )
+        self._non_crm = HubspotNonCrm(
+            self.base_url,
+            self.auth_header,
+            self._custom_api_types,
+            self._post_association_read,
+        )
+
+    def _custom_api_types(self) -> List[str]:
+        self._discover_custom_objects(require_access=True)
+        return list(self._custom_object_types.values())
 
     def _post_association_read(
         self, kind: str, url: str, body: dict, min_interval: float
@@ -213,9 +227,11 @@ class HubspotLakeflowConnect(LakeflowConnect):
         # Add dynamic discovery of custom objects
         standard_tables.extend(self._discover_custom_objects())
 
-        return standard_tables
+        return standard_tables + self._non_crm.list_tables()
 
-    def _discover_custom_objects(self) -> List[str]:  # pylint: disable=too-many-statements
+    def _discover_custom_objects(  # pylint: disable=too-many-statements
+        self, require_access: bool = False
+    ) -> List[str]:
         """
         Discover custom objects from HubSpot CRM schemas API
         """
@@ -223,7 +239,7 @@ class HubspotLakeflowConnect(LakeflowConnect):
             return list(self._custom_objects)
         url = f"{self.base_url}/crm-object-schemas/2026-09/schemas"
         resp = self._http.get(url, operation="schema discovery GET")
-        if resp.status_code == 403:
+        if resp.status_code == 403 and not require_access:
             return []
         if resp.status_code != 200:
             raise RuntimeError(
@@ -255,6 +271,7 @@ class HubspotLakeflowConnect(LakeflowConnect):
             alias = name.lower()
             if (
                 alias in self._object_config
+                or alias in NON_CRM_TABLES
                 or alias in custom_types
                 or object_type in names_by_type
             ):
@@ -398,6 +415,8 @@ class HubspotLakeflowConnect(LakeflowConnect):
         Returns:
             A StructType object representing the schema of the table.
         """
+        if table_name in NON_CRM_TABLES:
+            return self._non_crm.get_table_schema(table_name)
         supported_tables = self.list_tables()
         if table_name not in supported_tables:
             raise ValueError(
@@ -450,6 +469,8 @@ class HubspotLakeflowConnect(LakeflowConnect):
                     - "cdc": capture incremental changes
                     - "append": incremental append
         """
+        if table_name in NON_CRM_TABLES:
+            return self._non_crm.read_table_metadata(table_name)
         supported_tables = self.list_tables()
         if table_name not in supported_tables:
             raise ValueError(
@@ -664,6 +685,8 @@ class HubspotLakeflowConnect(LakeflowConnect):
         Returns:
             Tuple of (records, new_offset)
         """
+        if table_name in NON_CRM_TABLES:
+            return iter(self._non_crm.read_table(table_name, table_options)), {}
         supported_tables = self.list_tables()
         if table_name not in supported_tables:
             raise ValueError(
@@ -701,6 +724,8 @@ class HubspotLakeflowConnect(LakeflowConnect):
     def read_table_deletes(self, table_name, start_offset, table_options):
         """Drain the frozen archive window before advancing its checkpoint."""
         start = start_offset or {}
+        if table_name in NON_CRM_TABLES:
+            return iter([]), start
         if table_name not in self.list_tables():
             raise ValueError(f"Unsupported table: {table_name}")
         if not self._get_object_config(table_name).get("supports_deletes", False):

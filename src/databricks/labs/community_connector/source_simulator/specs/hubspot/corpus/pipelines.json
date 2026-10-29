@@ -1,0 +1,22 @@
+[
+  {
+    "id": "pipeline-1",
+    "label": "Synthetic pipeline",
+    "displayOrder": 0,
+    "createdAt": "2024-03-01T00:00:00.000Z",
+    "updatedAt": "2024-03-01T00:00:00.000Z",
+    "archived": false,
+    "stages": [
+      {
+        "id": "stage-1",
+        "label": "Synthetic stage",
+        "displayOrder": 0,
+        "createdAt": "2024-03-01T00:00:00.000Z",
+        "updatedAt": "2024-03-01T00:00:00.000Z",
+        "metadata": {
+          "probability": "0.5"
+        }
+      }
+    ]
+  }
+]
