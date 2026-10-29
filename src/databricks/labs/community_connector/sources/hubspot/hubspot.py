@@ -135,7 +135,11 @@ class HubspotLakeflowConnect(LakeflowConnect):
             "associations": [],
             "supports_deletes": False,  # Custom objects don't support archived queries by default
         }
-        self._associations = HubspotAssociations(self.base_url, self._post_association_read)
+        self._associations = HubspotAssociations(
+            self.base_url,
+            self._post_association_read,
+            get=self._get_association_page,
+        )
 
     def _post_association_read(
         self, kind: str, url: str, body: dict, min_interval: float
@@ -152,6 +156,32 @@ class HubspotLakeflowConnect(LakeflowConnect):
         data = response.json()
         if not isinstance(data, dict):
             raise RuntimeError("Malformed HubSpot association response")
+        return data
+
+    def _get_association_page(
+        self, kind: str, url: str, params: dict, min_interval: float
+    ) -> dict:
+        """GET one association page without exposing response bodies in errors."""
+        del kind, min_interval
+        try:
+            response = requests.get(
+                url,
+                headers=self.auth_header,
+                params=params,
+                timeout=60,
+            )
+        except requests.RequestException:
+            raise RuntimeError("HubSpot association GET request failed") from None
+        if response.status_code != 200:
+            raise RuntimeError(
+                f"HubSpot association GET failed (status={response.status_code})"
+            )
+        try:
+            data = response.json()
+        except ValueError:
+            raise RuntimeError("Malformed HubSpot association GET JSON") from None
+        if not isinstance(data, dict):
+            raise RuntimeError("Malformed HubSpot association GET response")
         return data
 
     def list_tables(self) -> list[str]:
