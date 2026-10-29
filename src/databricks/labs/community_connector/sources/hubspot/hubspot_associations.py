@@ -76,11 +76,32 @@ class HubspotAssociations:
                 ]
                 data = self._post("associations", url, {"inputs": inputs}, ASSOCIATION_MIN_INTERVAL_S)
                 results = self._validate_results(data, pending)
+                errors = data.get("errors", [])
+                error_count = data.get("numErrors", 0)
+                if (not isinstance(errors, list) or isinstance(error_count, bool)
+                        or not isinstance(error_count, int) or error_count < 0):
+                    raise RuntimeError("Malformed HubSpot association error envelope")
+                # Error context has no universal parent-ID key. Do not commit
+                # results from an errored batch without reliable attribution.
+                has_errors = bool(errors) or error_count > 0
                 unresolved = []
                 for parent in list(pending):
-                    if data.get("status") != "COMPLETE" or parent not in results:
+                    if has_errors or data.get("status") != "COMPLETE" or parent not in results:
                         if retries[parent] >= ASSOCIATION_MAX_RETRIES:
-                            raise RuntimeError("Incomplete HubSpot associations: exhausted retries")
+                            status = data.get("status")
+                            if not isinstance(status, str) or status not in {
+                                "COMPLETE", "PENDING", "PROCESSING", "CANCELED"
+                            }:
+                                status = "MISSING" if status is None else "UNKNOWN"
+                            errors = data.get("errors", [])
+                            error_count = len(errors) if isinstance(errors, list) else "malformed"
+                            raise RuntimeError(
+                                "Incomplete HubSpot associations: exhausted retries "
+                                f"(from_type={from_type}, to_type={to_type}, "
+                                f"status={status}, requested={len(pending)}, "
+                                f"returned={len(results)}, errors={error_count}, "
+                                f"numErrors={data.get('numErrors', 0)})"
+                            )
                         retries[parent] += 1
                         unresolved.append(retries[parent])
                         continue

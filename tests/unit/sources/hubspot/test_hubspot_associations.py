@@ -21,10 +21,10 @@ def batch(*results, status="COMPLETE", **extra):
     return {"status": status, "results": list(results), **extra}
 
 
-def reader(*responses):
+def reader(*responses, generated=False):
     post = Mock(side_effect=responses)
     sleep = Mock()
-    return HubspotAssociations("https://example.invalid/", post, sleep), post, sleep
+    return association_class(generated)("https://example.invalid/", post, sleep), post, sleep
 
 
 def inputs(post):
@@ -198,3 +198,55 @@ def test_history_transport_handles_http_status_separately(http_status):
         assert helper.read("contacts", "companies", ["a"]) == {"a": ["2"]}
     assert post.call_count == 2
     assert post.call_args.kwargs["json"] == {"inputs": [{"id": "a"}]}
+
+
+def association_class(generated):
+    import runpy
+    from pathlib import Path
+    import databricks.labs.community_connector.sources.hubspot.hubspot as source
+
+    helper_class = HubspotAssociations
+    if generated:
+        path = Path(source.__file__).with_name("_generated_hubspot_python_source.py")
+        from types import SimpleNamespace
+        registry = Mock()
+        runpy.run_path(str(path))["register_lakeflow_source"](SimpleNamespace(dataSource=registry))
+        connector = registry.register.call_args.args[0]({"access_token": "offline"}).lakeflow_connect
+        helper_class = type(connector._associations)
+    return helper_class
+
+
+@pytest.mark.parametrize("generated", [False, True])
+def test_exhaustion_diagnostics_are_bounded_and_do_not_expose_payload(generated):
+    helper_class = association_class(generated)
+    payload = batch(errors=[{"message": "SECRET_PAYLOAD", "context": {"id": "PRIVATE_ID"}}])
+    post = Mock(return_value=payload)
+    helper = helper_class("https://example.invalid", post, Mock())
+    with pytest.raises(RuntimeError) as raised:
+        helper.read("deals", "tickets", ["PRIVATE_ID"])
+    message = str(raised.value)
+    assert "status=COMPLETE" in message
+    assert "requested=1" in message and "returned=0" in message
+    assert "errors=1" in message
+    assert "SECRET_PAYLOAD" not in message and "PRIVATE_ID" not in message
+
+
+@pytest.mark.parametrize("extra", [
+    {"errors": [{"message": "attributable context not guaranteed"}]},
+    {"numErrors": 1},
+])
+@pytest.mark.parametrize("generated", [False, True])
+def test_complete_with_errors_never_commits_explicit_empty(extra, generated):
+    helper, post, _ = reader(*([batch(result("a"), **extra)] * 6), generated=generated)
+    with pytest.raises(RuntimeError, match="exhausted retries"):
+        helper.read("deals", "tickets", ["a"])
+    assert post.call_count == 6
+
+
+@pytest.mark.parametrize("extra", [{"errors": "bad"}, {"numErrors": -1},
+                                   {"numErrors": True}, {"numErrors": "1"}])
+@pytest.mark.parametrize("generated", [False, True])
+def test_malformed_error_envelope_fails_before_returning_empty(extra, generated):
+    helper, _, _ = reader(batch(result("a"), **extra), generated=generated)
+    with pytest.raises(RuntimeError, match="error"):
+        helper.read("deals", "tickets", ["a"])
