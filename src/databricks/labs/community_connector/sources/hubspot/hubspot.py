@@ -268,6 +268,25 @@ class HubspotLakeflowConnect(LakeflowConnect):
                 source = names_by_type.get(definition.get("fromObjectTypeId"))
                 target = names_by_type.get(definition.get("toObjectTypeId"))
                 if source is None or target is None:
+                    # HubSpot auto-creates association definitions between a new
+                    # custom object and internal object types the connector does
+                    # not model (for example 0-18 communication, 0-116 postal
+                    # mail, 0-51 conversation session, 0-4 engagement). There is
+                    # no table to attach an association column to, so skip the
+                    # edge instead of failing discovery for every table.
+                    unresolved = [
+                        value for value, resolved in (
+                            (definition.get("fromObjectTypeId"), source),
+                            (definition.get("toObjectTypeId"), target),
+                        ) if resolved is None
+                    ]
+                    if all(
+                        isinstance(value, str) and value.startswith("0-")
+                        for value in unresolved
+                    ):
+                        continue
+                    # An unresolved custom type means a schema was dropped or the
+                    # account is mid-provisioning; do not silently lose the edge.
                     raise RuntimeError("Unsupported HubSpot association object type")
                 if target.lower() in reserved:
                     raise RuntimeError(
