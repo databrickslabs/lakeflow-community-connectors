@@ -252,7 +252,11 @@ class HubspotLakeflowConnect(LakeflowConnect):
         }
         configs.update(
             {
-                name: {**self._default_object_config, "associations": []}
+                name: {
+                    **self._default_object_config,
+                    "associations": [],
+                    "supports_deletes": True,
+                }
                 for name in custom_types
             }
         )
