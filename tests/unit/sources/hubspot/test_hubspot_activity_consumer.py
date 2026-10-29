@@ -108,7 +108,7 @@ def test_nonempty_activity_fields_survive_reader(table, incremental, generated):
     assert properties["custom_future_field"] == "preserve me"
     for field, value in FIELDS[table].items():
         assert properties[field] == (Decimal(value) if field == "hs_call_duration" else value)
-    if incremental:
+    if incremental and table != "meetings":
         body = next(kwargs["json"] for method, url, kwargs in api.requests if url.endswith("/search"))
         assert set(api.properties) <= set(body["properties"])
         assert all(item["propertyName"] == "hs_lastmodifieddate"

@@ -44,7 +44,7 @@ class ArchiveAPI(ActivityAPI):
 
 
 @pytest.mark.parametrize("generated", [False, True])
-@pytest.mark.parametrize("table", list(FIELDS))
+@pytest.mark.parametrize("table", [table for table in FIELDS if table != "meetings"])
 def test_activity_archives_drain_pages_and_respect_frozen_window(table, generated):
     api = ArchiveAPI(table)
     with patch("requests.get", side_effect=api.get), patch("time.sleep", return_value=None):

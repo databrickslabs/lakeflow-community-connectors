@@ -355,6 +355,15 @@ class HubspotLakeflowConnect(LakeflowConnect):
             raise ValueError("numeric_value_mode must be bigint or decimal")
         return mode
 
+    @classmethod
+    def _uses_snapshot(
+        cls, table_name: str, table_options: Dict[str, str] | None
+    ) -> bool:
+        return (
+            table_name == "meetings"
+            or cls._association_sync_mode(table_options) == "full_refresh"
+        )
+
     def _association_cache_key(
         self, table_name: str, table_options: Dict[str, str] | None
     ) -> tuple:
@@ -485,7 +494,7 @@ class HubspotLakeflowConnect(LakeflowConnect):
         # Use cdc_with_deletes only for tables that support archived queries
         supports_deletes = config.get("supports_deletes", False)
         ingestion_type = "cdc_with_deletes" if supports_deletes else "cdc"
-        if self._association_sync_mode(table_options) == "full_refresh":
+        if self._uses_snapshot(table_name, table_options):
             ingestion_type = "snapshot"
 
         return {
@@ -652,7 +661,7 @@ class HubspotLakeflowConnect(LakeflowConnect):
         is_incremental = (
             start_offset is not None and start_offset.get("updatedAt") is not None
         )
-        if self._association_sync_mode(table_options) == "full_refresh":
+        if self._uses_snapshot(table_name, table_options):
             is_incremental = False
             start_offset = {}
 
@@ -776,6 +785,7 @@ class HubspotLakeflowConnect(LakeflowConnect):
         max_records = self._parse_max_records(table_options) if incremental else None
 
         all_records = []
+        snapshot_ids, snapshot_cursors = set(), set()
         after = None
         checkpoint = start_offset.get("updatedAt") if start_offset else None
         latest_updated = checkpoint
@@ -801,6 +811,34 @@ class HubspotLakeflowConnect(LakeflowConnect):
                 records, after = self._fetch_full_refresh_batch(
                     table_name, property_names, associations, after, archived=False
                 )
+
+            if not incremental:
+                if not records and after is not None:
+                    raise RuntimeError("Empty HubSpot snapshot page has pagination")
+                if after is not None:
+                    cursor = str(after)
+                    if cursor in snapshot_cursors:
+                        raise RuntimeError(
+                            "HubSpot snapshot pagination cursor repeated"
+                        )
+                    snapshot_cursors.add(cursor)
+                for record in records:
+                    if not isinstance(record, dict):
+                        raise RuntimeError("Malformed HubSpot snapshot record")
+                    identity = record.get("id")
+                    if (
+                        isinstance(identity, bool)
+                        or not isinstance(identity, (str, int))
+                        or not str(identity).strip()
+                        or record.get("archived", False) is not False
+                    ):
+                        raise RuntimeError(
+                            "Malformed HubSpot active snapshot identity"
+                        )
+                    identity = str(identity)
+                    if identity in snapshot_ids:
+                        raise RuntimeError("Duplicate HubSpot snapshot identity")
+                    snapshot_ids.add(identity)
 
             if not records:
                 if incremental and after:
@@ -837,7 +875,7 @@ class HubspotLakeflowConnect(LakeflowConnect):
                 if updated_at and (not latest_updated or updated_at > latest_updated):
                     latest_updated = updated_at
 
-            if not after:
+            if after is None:
                 break
 
             # Rate limiting
@@ -893,7 +931,7 @@ class HubspotLakeflowConnect(LakeflowConnect):
         api_type = self._get_api_object_type(table_name)
         url = f"{self.base_url}/crm/objects/2026-09/{api_type}?limit=100&archived={archived_param}"
 
-        if after:
+        if after is not None:
             url += f"&after={after}"
         if property_names:
             url += f"&properties={','.join(property_names)}"
@@ -906,8 +944,28 @@ class HubspotLakeflowConnect(LakeflowConnect):
             )
 
         data = resp.json()
-        records = data.get("results", [])
-        next_after = data.get("paging", {}).get("next", {}).get("after")
+        if not isinstance(data, dict) or not isinstance(data.get("results"), list):
+            raise RuntimeError("Malformed HubSpot object results")
+        if any(key in data for key in ("errors", "numErrors", "category")) or (
+            "status" in data and data["status"] not in ("success", "SUCCESS")
+        ):
+            raise RuntimeError("HubSpot object response contains an error envelope")
+        records = data["results"]
+        paging = data.get("paging", {})
+        if not isinstance(paging, dict):
+            raise RuntimeError("Malformed HubSpot object pagination")
+        next_after = None
+        if "next" in paging:
+            next_page = paging["next"]
+            if not isinstance(next_page, dict) or "after" not in next_page:
+                raise RuntimeError("Malformed HubSpot object pagination cursor")
+            next_after = next_page["after"]
+            if (
+                isinstance(next_after, bool)
+                or not isinstance(next_after, (str, int))
+                or not str(next_after)
+            ):
+                raise RuntimeError("Malformed HubSpot object pagination cursor")
 
         return records, next_after
 
@@ -950,7 +1008,7 @@ class HubspotLakeflowConnect(LakeflowConnect):
             "properties": property_names or [],
         }
 
-        if after:
+        if after is not None:
             search_body["after"] = after
 
         api_type = self._get_api_object_type(table_name)
