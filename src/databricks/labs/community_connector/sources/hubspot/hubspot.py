@@ -1,6 +1,7 @@
 import json
 import time
 from datetime import datetime, timezone
+from decimal import Decimal, InvalidOperation
 from typing import Dict, Iterator, List, Tuple
 
 import requests
@@ -8,6 +9,7 @@ from pyspark.sql.types import (
     ArrayType,
     BooleanType,
     DataType,
+    DecimalType,
     LongType,
     StringType,
     StructField,
@@ -42,6 +44,7 @@ class HubspotLakeflowConnect(LakeflowConnect):
         }
         # Cache for discovered schemas to avoid repeated API calls
         self._schema_cache = {}
+        self._property_types = {}
         # Cache for table metadata
         self._metadata_cache = {}
         self._custom_objects = None
@@ -95,7 +98,7 @@ class HubspotLakeflowConnect(LakeflowConnect):
                 "cursor_field": "updatedAt",
                 "cursor_property_field": "hs_lastmodifieddate",
                 "associations": ["contacts", "companies", "deals", "tickets"],
-                "supports_deletes": False,  # HubSpot doesn't support archived queries for calls
+                "supports_deletes": True,
             },
             "emails": {
                 "primary_keys": ["id"],
@@ -345,6 +348,13 @@ class HubspotLakeflowConnect(LakeflowConnect):
             raise ValueError("association_value_mode must be ids or typed")
         return mode
 
+    @staticmethod
+    def _numeric_value_mode(table_options: Dict[str, str] | None) -> str:
+        mode = (table_options or {}).get("numeric_value_mode", "bigint")
+        if mode not in ("bigint", "decimal"):
+            raise ValueError("numeric_value_mode must be bigint or decimal")
+        return mode
+
     def _association_cache_key(
         self, table_name: str, table_options: Dict[str, str] | None
     ) -> tuple:
@@ -355,6 +365,7 @@ class HubspotLakeflowConnect(LakeflowConnect):
             selected,
             self._association_sync_mode(options),
             self._association_value_mode(options),
+            self._numeric_value_mode(options),
         )
 
     def get_table_schema(
@@ -469,6 +480,7 @@ class HubspotLakeflowConnect(LakeflowConnect):
         property_names = [prop["name"] for prop in properties]
         associations = self._get_associations_for_object(table_name, table_options)
         association_value_mode = self._association_value_mode(table_options)
+        numeric_value_mode = self._numeric_value_mode(table_options)
 
         # Use cdc_with_deletes only for tables that support archived queries
         supports_deletes = config.get("supports_deletes", False)
@@ -483,6 +495,7 @@ class HubspotLakeflowConnect(LakeflowConnect):
             "property_names": property_names,
             "associations": associations,
             "association_value_mode": association_value_mode,
+            "numeric_value_mode": numeric_value_mode,
             "ingestion_type": ingestion_type,
         }
 
@@ -517,13 +530,19 @@ class HubspotLakeflowConnect(LakeflowConnect):
         # Build nested properties schema based on API response
         properties_fields = []
 
+        self._property_types[table_name] = {
+            prop.get("name"): prop.get("type")
+            for prop in properties
+            if isinstance(prop, dict) and prop.get("name")
+        }
+        numeric_mode = self._numeric_value_mode(table_options)
         if isinstance(properties, list):
             for prop in properties:
                 prop_name = prop.get("name", "")
                 prop_type = prop.get("type", "string")
 
                 # Map HubSpot property types to Spark types
-                spark_type = self._map_hubspot_type_to_spark(prop_type)
+                spark_type = self._map_hubspot_type_to_spark(prop_type, numeric_mode)
                 properties_fields.append(StructField(prop_name, spark_type, True))
 
         # Create nested properties StructType
@@ -582,7 +601,9 @@ class HubspotLakeflowConnect(LakeflowConnect):
                 f"Failed to get object properties for {object_type}: {e}"
             ) from e
 
-    def _map_hubspot_type_to_spark(self, hubspot_type: str) -> DataType:
+    def _map_hubspot_type_to_spark(
+        self, hubspot_type: str, numeric_value_mode: str = "bigint"
+    ) -> DataType:
         """
         Map HubSpot property types to Spark DataTypes
         Following the requirement: strings -> StringType, integers -> LongType
@@ -591,7 +612,11 @@ class HubspotLakeflowConnect(LakeflowConnect):
             "string": StringType(),
             "enumeration": StringType(),
             "bool": BooleanType(),  # Keep boolean as boolean for better data handling
-            "number": LongType(),
+            "number": (
+                DecimalType(38, 18)
+                if numeric_value_mode == "decimal"
+                else LongType()
+            ),
             "date": StringType(),  # Store as string to preserve ISO format
             "date-time": StringType(),  # Store as string to preserve ISO format
             "datetime": StringType(),
@@ -638,99 +663,90 @@ class HubspotLakeflowConnect(LakeflowConnect):
             table_options=table_options,
         )
 
-    def read_table_deletes(
-        self, table_name: str, start_offset: dict, table_options: Dict[str, str]
-    ) -> (Iterator[dict], dict):
-        """
-        Read deleted (archived) records from HubSpot API.
+    @staticmethod
+    def _archive_time(value):
+        if not isinstance(value, str):
+            raise RuntimeError("Malformed HubSpot archive timestamp")
+        try:
+            parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        except ValueError as exc:
+            raise RuntimeError("Malformed HubSpot archive timestamp") from exc
+        if parsed.tzinfo is None:
+            raise RuntimeError("Malformed HubSpot archive timestamp timezone")
+        return parsed.astimezone(timezone.utc)
 
-        HubSpot uses "archived" status to represent deleted records. This method
-        fetches all archived records and filters them client-side for incremental reads.
+    def read_table_deletes(self, table_name, start_offset, table_options):
+        """Drain the frozen archive window before advancing its checkpoint."""
+        start = start_offset or {}
+        if table_name not in self.list_tables():
+            raise ValueError(f"Unsupported table: {table_name}")
+        if not self._get_object_config(table_name).get("supports_deletes", False):
+            return iter([]), start
 
-        Internally uses archivedAt for filtering, but copies it to updatedAt in the
-        output records and offset for consistency with the normal read flow cursor.
+        upper = self._archive_time(self._init_ts)
+        checkpoint = (
+            self._archive_time(start["updatedAt"])
+            if "updatedAt" in start
+            else None
+        )
+        if checkpoint is not None and checkpoint >= upper:
+            return iter([]), start
 
-        Args:
-            table_name: Name of the table to read deleted records from
-            start_offset: Dictionary containing cursor information for incremental reads
-                         (uses 'updatedAt' key, which stores archivedAt values)
-            table_options: Additional options for reading
-
-        Returns:
-            Tuple of (deleted_records, new_offset) where updatedAt contains archivedAt value
-        """
-        supported_tables = self.list_tables()
-        if table_name not in supported_tables:
-            raise ValueError(
-                f"Unsupported table: {table_name}. "
-                f"Supported tables are: {supported_tables}"
-            )
-
-        # Short-circuit once the cursor has caught up to the init-time cap,
-        # so Trigger.AvailableNow can terminate.
-        if (
-            start_offset
-            and start_offset.get("updatedAt", "") >= self._init_ts
-        ):
-            return [], start_offset
-
-        # Get discovered properties (no associations needed for deletes)
         metadata = self.read_table_metadata(table_name, table_options)
-        property_names = metadata.get("property_names", [])
-
-        max_records = self._parse_max_records(table_options)
-
-        all_records = []
+        properties = metadata.get("property_names", [])
+        numeric_mode = metadata.get("numeric_value_mode", "bigint")
+        rows, seen_ids, seen_cursors = [], {}, set()
         after = None
-        # Use updatedAt from offset (which stores archivedAt values for delete flow)
-        checkpoint = start_offset.get("updatedAt") if start_offset else None
-        latest_archived = checkpoint
-
         while True:
-            # Fetch archived records using the Objects API with archived=true
-            records, after = self._fetch_full_refresh_batch(
-                table_name, property_names, associations=[], after=after, archived=True
+            records, next_after = self._fetch_full_refresh_batch(
+                table_name, properties, associations=[], after=after, archived=True
             )
-
-            if not records:
+            if not records and next_after is not None:
+                raise RuntimeError("Empty HubSpot archive page has pagination")
+            for record in records:
+                if not isinstance(record, dict) or record.get("archived") is not True:
+                    raise RuntimeError("Malformed HubSpot archive record")
+                raw_id = record.get("id")
+                if (
+                    isinstance(raw_id, bool)
+                    or not isinstance(raw_id, (str, int))
+                    or not str(raw_id).strip()
+                ):
+                    raise RuntimeError("Malformed HubSpot archive identity")
+                identity = str(raw_id)
+                archived = self._archive_time(record.get("archivedAt"))
+                if identity in seen_ids:
+                    if seen_ids[identity] != record:
+                        raise RuntimeError(
+                            "Conflicting duplicate HubSpot archive identity"
+                        )
+                    continue
+                seen_ids[identity] = record
+                if archived > upper or (
+                    checkpoint is not None and archived <= checkpoint
+                ):
+                    continue
+                row = self._transform_single_record(
+                    {**record, "id": identity},
+                    table_name,
+                    [],
+                    "ids",
+                    properties,
+                    numeric_mode,
+                )
+                row["updatedAt"] = archived.isoformat(
+                    timespec="milliseconds"
+                ).replace("+00:00", "Z")
+                rows.append(row)
+            if next_after is None:
                 break
-
-            # Filter client-side for incremental deletes based on archivedAt (from raw records)
-            if checkpoint:
-                records = [r for r in records if r.get("archivedAt", "") > checkpoint]
-
-            # Transform records
-            transformed_records = self._transform_records(records, table_name)
-
-            # Copy archivedAt to updatedAt for consistency with normal flow cursor
-            for i, transformed in enumerate(transformed_records):
-                archived_at = records[i].get("archivedAt")
-                if archived_at:
-                    transformed["updatedAt"] = archived_at
-                    if not latest_archived or archived_at > latest_archived:
-                        latest_archived = archived_at
-
-            all_records.extend(transformed_records)
-
-            if not after:
-                break
-
-            # Stop if we've hit the per-microbatch record cap. The next
-            # microbatch resumes from latest_archived via the cursor filter.
-            if max_records is not None and len(all_records) >= max_records:
-                break
-
-            # Rate limiting
+            cursor = str(next_after)
+            if cursor in seen_cursors:
+                raise RuntimeError("HubSpot archive pagination cursor repeated")
+            seen_cursors.add(cursor)
+            after = next_after
             time.sleep(0.1)
-
-        # Cap the returned cursor at the init-time bound so the next call
-        # eventually short-circuits.
-        if latest_archived and latest_archived > self._init_ts:
-            latest_archived = self._init_ts
-
-        # Return offset with updatedAt key for consistency with normal flow
-        offset = {"updatedAt": latest_archived} if latest_archived else {}
-        return all_records, offset
+        return iter(rows), {"updatedAt": self._init_ts}
 
     def _read_data(
         self, table_name: str, start_offset: dict = None, incremental: bool = False,
@@ -753,6 +769,7 @@ class HubspotLakeflowConnect(LakeflowConnect):
         cursor_property_field = metadata.get("cursor_property_field")
         associations = metadata.get("associations", [])
         association_value_mode = metadata.get("association_value_mode", "ids")
+        numeric_value_mode = metadata.get("numeric_value_mode", "bigint")
 
         # Only cap on the incremental path — full-refresh snapshots need
         # to drain everything in a single call to keep the snapshot atomic.
@@ -766,17 +783,19 @@ class HubspotLakeflowConnect(LakeflowConnect):
         while True:
             if incremental:
                 # Use search API for incremental reads
-                records, after, updated_time = self._fetch_incremental_batch(
+                records, after, _ = self._fetch_incremental_batch(
                     table_name,
                     property_names,
                     cursor_property_field,
                     start_offset,
                     after,
                 )
-                if updated_time and (
-                    not latest_updated or updated_time > latest_updated
-                ):
-                    latest_updated = updated_time
+                if checkpoint:
+                    records = [
+                        record
+                        for record in records
+                        if (record.get("updatedAt") or "") > checkpoint
+                    ]
             else:
                 # Use objects API for full refresh
                 records, after = self._fetch_full_refresh_batch(
@@ -784,6 +803,18 @@ class HubspotLakeflowConnect(LakeflowConnect):
                 )
 
             if not records:
+                if incremental and after:
+                    time.sleep(0.1)
+                    continue
+                break
+
+            if (
+                incremental
+                and max_records is not None
+                and len(all_records) >= max_records
+                and latest_updated
+                and (records[0].get("updatedAt") or "") > latest_updated
+            ):
                 break
 
             self._hydrate_associations(
@@ -791,7 +822,12 @@ class HubspotLakeflowConnect(LakeflowConnect):
             )
             # Transform records
             transformed_records = self._transform_records(
-                records, table_name, associations, association_value_mode
+                records,
+                table_name,
+                associations,
+                association_value_mode,
+                property_names,
+                numeric_value_mode,
             )
             all_records.extend(transformed_records)
 
@@ -802,11 +838,6 @@ class HubspotLakeflowConnect(LakeflowConnect):
                     latest_updated = updated_at
 
             if not after:
-                break
-
-            # Stop if we've hit the per-microbatch record cap. The next
-            # microbatch resumes from latest_updated via the cursor filter.
-            if max_records is not None and len(all_records) >= max_records:
                 break
 
             # Rate limiting
@@ -950,11 +981,18 @@ class HubspotLakeflowConnect(LakeflowConnect):
         table_name: str,
         associations: List[str] | None = None,
         association_value_mode: str = "ids",
+        property_names: List[str] | None = None,
+        numeric_value_mode: str = "bigint",
     ) -> List[Dict]:
         """Transform HubSpot records by flattening properties and associations"""
         return [
             self._transform_single_record(
-                record, table_name, associations, association_value_mode
+                record,
+                table_name,
+                associations,
+                association_value_mode,
+                property_names,
+                numeric_value_mode,
             )
             for record in records
         ]
@@ -965,6 +1003,8 @@ class HubspotLakeflowConnect(LakeflowConnect):
         table_name: str,
         associations: List[str] | None = None,
         association_value_mode: str = "ids",
+        property_names: List[str] | None = None,
+        numeric_value_mode: str = "bigint",
     ) -> Dict:
         """Transform a single HubSpot record"""
         transformed_record = {}
@@ -977,7 +1017,12 @@ class HubspotLakeflowConnect(LakeflowConnect):
         # Copy properties with empty string to None conversion
         # HubSpot API returns "" for null values in many fields
         if "properties" in record:
-            transformed_record["properties"] = self._sanitize_properties(record["properties"])
+            transformed_record["properties"] = self._sanitize_properties(
+                record["properties"],
+                table_name,
+                property_names,
+                numeric_value_mode,
+            )
 
         # Handle associations
         transformed_record.update(
@@ -992,15 +1037,50 @@ class HubspotLakeflowConnect(LakeflowConnect):
 
         return transformed_record
 
-    def _sanitize_properties(self, properties: Dict) -> Dict:
-        """Convert empty strings to None in properties dict.
+    @staticmethod
+    def _decimal_property(value):
+        """Reject values that Spark decimal(38,18) would round or overflow."""
+        try:
+            number = Decimal(str(value))
+        except InvalidOperation as exc:
+            raise ValueError("Invalid HubSpot numeric property") from exc
+        if not number.is_finite():
+            raise ValueError("Nonfinite HubSpot numeric property")
+        if number == 0:
+            return Decimal(0)
+        sign, digits, exponent = number.as_tuple()
+        digits = list(digits)
+        while digits[-1] == 0:
+            digits.pop()
+            exponent += 1
+        if max(-exponent, 0) > 18 or max(len(digits) + exponent, 0) > 20:
+            raise ValueError("HubSpot numeric property exceeds decimal(38,18)")
+        return Decimal((sign, tuple(digits), exponent))
 
-        HubSpot API returns empty strings "" instead of null for many fields,
-        which causes issues when parsing to typed schemas (e.g., LongType).
-        """
+    def _sanitize_properties(
+        self,
+        properties: Dict,
+        table_name: str | None = None,
+        property_names: List[str] | None = None,
+        numeric_value_mode: str = "bigint",
+    ) -> Dict:
+        """Normalize nulls and optionally preserve representable decimals."""
         if not properties:
             return properties
-        return {k: (None if v == "" else v) for k, v in properties.items()}
+        types = self._property_types.get(table_name, {})
+        output = {}
+        for name, value in properties.items():
+            if value == "" or value is None:
+                output[name] = None
+            elif (
+                numeric_value_mode == "decimal"
+                and types.get(name) == "number"
+                and (property_names is None or name in property_names)
+            ):
+                output[name] = self._decimal_property(value)
+            else:
+                output[name] = value
+        return output
 
     @staticmethod
     def _typed_association_type() -> ArrayType:

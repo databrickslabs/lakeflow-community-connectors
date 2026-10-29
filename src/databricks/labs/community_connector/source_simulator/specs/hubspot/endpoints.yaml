@@ -38,40 +38,31 @@ endpoints:
   # Per-table listing endpoints (GET).
   - path: /crm/objects/2026-09/contacts
     method: GET
-    corpus: contacts
-    response: {pagination_style: none, wrapper: {records_key: results, extras: {paging: {}}}}
+    handler: databricks.labs.community_connector.source_simulator.specs.hubspot.handlers.search:serve_objects
   - path: /crm/objects/2026-09/companies
     method: GET
-    corpus: companies
-    response: {pagination_style: none, wrapper: {records_key: results, extras: {paging: {}}}}
+    handler: databricks.labs.community_connector.source_simulator.specs.hubspot.handlers.search:serve_objects
   - path: /crm/objects/2026-09/deals
     method: GET
-    corpus: deals
-    response: {pagination_style: none, wrapper: {records_key: results, extras: {paging: {}}}}
+    handler: databricks.labs.community_connector.source_simulator.specs.hubspot.handlers.search:serve_objects
   - path: /crm/objects/2026-09/tickets
     method: GET
-    corpus: tickets
-    response: {pagination_style: none, wrapper: {records_key: results, extras: {paging: {}}}}
+    handler: databricks.labs.community_connector.source_simulator.specs.hubspot.handlers.search:serve_objects
   - path: /crm/objects/2026-09/calls
     method: GET
-    corpus: calls
-    response: {pagination_style: none, wrapper: {records_key: results, extras: {paging: {}}}}
+    handler: databricks.labs.community_connector.source_simulator.specs.hubspot.handlers.search:serve_objects
   - path: /crm/objects/2026-09/emails
     method: GET
-    corpus: emails
-    response: {pagination_style: none, wrapper: {records_key: results, extras: {paging: {}}}}
+    handler: databricks.labs.community_connector.source_simulator.specs.hubspot.handlers.search:serve_objects
   - path: /crm/objects/2026-09/meetings
     method: GET
-    corpus: meetings
-    response: {pagination_style: none, wrapper: {records_key: results, extras: {paging: {}}}}
+    handler: databricks.labs.community_connector.source_simulator.specs.hubspot.handlers.search:serve_objects
   - path: /crm/objects/2026-09/tasks
     method: GET
-    corpus: tasks
-    response: {pagination_style: none, wrapper: {records_key: results, extras: {paging: {}}}}
+    handler: databricks.labs.community_connector.source_simulator.specs.hubspot.handlers.search:serve_objects
   - path: /crm/objects/2026-09/notes
     method: GET
-    corpus: notes
-    response: {pagination_style: none, wrapper: {records_key: results, extras: {paging: {}}}}
+    handler: databricks.labs.community_connector.source_simulator.specs.hubspot.handlers.search:serve_objects
 
   # Search endpoint (POST) — used for incremental reads. Same wrapper.
   - path: /crm/objects/2026-09/contacts/search

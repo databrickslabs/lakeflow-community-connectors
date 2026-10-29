@@ -69,10 +69,14 @@ the response-level `updatedAt`:
 HubSpot supports `archived=true` queries on the following tables. The
 connector emits these via `read_table_deletes`:
 
-- `contacts`, `companies`, `deals`, `tickets`, `emails`, `tasks`, `notes`
+- `contacts`, `companies`, `deals`, `tickets`, `calls`, `emails`, `meetings`, `tasks`, `notes`
 
-`calls` and `meetings` do not support archived queries and are append-only
-incremental.
+The connector drains every archived page before committing the frozen archive-time
+window. Archive listing is not ordered by archive time, so this scan ignores
+`max_records_per_batch`. Invalid records, conflicting duplicate IDs, malformed
+paging, and later-page failures fail the read before publishing a checkpoint.
+Archive reads cover records retained and returned by HubSpot; they do not detect
+hard deletes or records outside the source retention window.
 
 ## Schema discovery
 
