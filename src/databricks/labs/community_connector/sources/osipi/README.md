@@ -250,7 +250,7 @@ This notebook provides:
 - Set `tags_per_request=25` to batch tag queries
 - Set `window_seconds=300` to limit time windows per batch
 - Use `prefer_streamset=true` for multi-tag efficiency
-- Value reads use `/piwebapi/batch` where possible (the connector sends `X-Requested-With` so this works under PI Web API CSRF defense) and fall back to slower per-tag GETs if batch is refused. If value reads are slow, confirm your PI Web API allows the batch endpoint (CSRF, CORS, and account permissions).
+- Value reads use `/piwebapi/batch` where possible (the connector sends `X-Requested-With` so this works under PI Web API CSRF defense). If the server refuses batch with 403 or 405, the connector logs one `PI Web API refused POST /piwebapi/batch` warning and uses slower per-tag GETs for the rest of the run. Other batch errors (429, 5xx) fail the read rather than multiplying load on the server. If value reads are slow, check the driver logs for that warning and confirm your PI Web API allows the batch endpoint (CSRF, CORS, and account permissions).
 
 **For large-scale deployments:**
 - Group tables by category and ingestion type
@@ -273,7 +273,7 @@ This notebook provides:
 - Verify `tag_webids` are valid and accessible
 - Check time ranges (`startTime`, `endTime`) are correct
 - Confirm PI Web API permissions for data access
-- For Asset Framework / Event Frame tables, also check the pipeline driver logs for `Skipping asset server ...` (401/403) or `Skipping asset database ...` (5xx) warnings. Those sources are skipped with a warning rather than a failure, so their data is silently omitted; grant the connection account access, or resolve the server error, and re-run for complete data.
+- For Asset Framework / Event Frame tables, also check the pipeline driver logs for `Skipping asset server ...` warnings. An asset server that returns 401/403 is skipped rather than failing the read, so its data is omitted. For `pi_event_frames` (append) the offset still advances, and a summary warning reports how many servers were skipped for each window, so a later run does not pick up the skipped window. After granting the connection account access, run a full refresh of the affected tables. A 5xx from an asset database fails the read so the same window is retried on the next run.
 
 **Schema Changes:**
 - Re-run discovery to update table metadata

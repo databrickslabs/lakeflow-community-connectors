@@ -4,6 +4,7 @@ This module contains the PI Web API HTTP client that handles authentication,
 request execution, and response processing.
 """
 
+import logging
 from datetime import datetime, timedelta
 from typing import Any, Dict, Iterator, List, Optional, Tuple
 
@@ -19,7 +20,13 @@ from databricks.labs.community_connector.sources.osipi.osipi_utils import (
     utcnow,
 )
 
+logger = logging.getLogger(__name__)
+
 _SENSITIVE_HEADERS = {"authorization", "proxy-authorization", "cookie", "set-cookie", "x-api-key"}
+
+# Statuses that mean the server will not accept POST /piwebapi/batch at all
+# (CSRF defense / permissions / method disabled), as opposed to a transient error.
+_BATCH_REFUSED_STATUSES = (403, 405)
 
 
 def _redact_headers(headers: Any) -> Dict[str, str]:
@@ -94,6 +101,9 @@ class PiWebApiClient:
         )
         self.verify_ssl = as_bool(options.get("verify_ssl"), default=True)
         self._auth_resolved = False
+        # Set once POST /piwebapi/batch is refused so later groups and
+        # microbatches go straight to per-tag GETs instead of re-sending it.
+        self.batch_refused = False
 
         # OIDC token cache
         self._oidc_access_token: Optional[str] = None
@@ -307,6 +317,36 @@ class PiWebApiClient:
         payload = batch_request_dict(requests_list)
         resp_json = self.post_json("/piwebapi/batch", payload)
         return batch_response_items(resp_json)
+
+    def batch_execute_or_none(self, requests_list: List[dict]) -> Optional[List[Tuple[str, dict]]]:
+        """Execute a batch request, or return None when the server refuses batch.
+
+        Only 403/405 count as a refusal (CSRF defense, per-endpoint permissions,
+        or batch disabled). The refusal is remembered on the client and logged
+        once. Anything else (429, 5xx, auth failures) raises, so an overloaded
+        server is not answered with one GET per tag.
+
+        Args:
+            requests_list: List of request dictionaries.
+
+        Returns:
+            List of (request_id, response_dict) tuples, or None if batch is refused.
+        """
+        if self.batch_refused:
+            return None
+        try:
+            return self.batch_execute(requests_list)
+        except requests.exceptions.HTTPError as e:
+            status = getattr(e.response, "status_code", None)
+            if status not in _BATCH_REFUSED_STATUSES:
+                raise
+            self.batch_refused = True
+            logger.warning(
+                "PI Web API refused POST /piwebapi/batch (HTTP %s); "
+                "falling back to per-tag GET requests for the rest of this run.",
+                status,
+            )
+            return None
 
 
 # =============================================================================
