@@ -1,0 +1,89 @@
+# e-conomic Community Connector Spec
+# This file defines the specification for the connector including
+# connection parameters and allowlist options.
+
+# ============================================================================
+# Connection Parameters
+# These are provided when creating the Unity Catalog connection.
+# Visma e-conomic authenticates every request with two static headers:
+#   X-AppSecretToken       (app_secret_token)
+#   X-AgreementGrantToken  (agreement_grant_token)
+# Both are issued by e-conomic to the integrating app and to the customer
+# agreement respectively. There is no OAuth flow.
+# ============================================================================
+display_name: e-conomic
+connection:
+  parameters:
+    - name: app_secret_token
+      type: string
+      required: true
+      secret: true
+      description: >
+        e-conomic app secret token (sent as the X-AppSecretToken header),
+        identifying the integrating application. Obtain it from the e-conomic
+        developer portal when registering the app. Store as a Databricks
+        secret rather than inline. Use 'demo' together with
+        agreement_grant_token = 'demo' to read the public demo agreement
+        (GET only).
+
+    - name: agreement_grant_token
+      type: string
+      required: true
+      secret: true
+      description: >
+        e-conomic agreement grant token (sent as the X-AgreementGrantToken
+        header), granted by the customer agreement (company) to the app. The
+        grant's role must allow read access to the Projects and Customers
+        resources, otherwise the API returns 403. Store as a Databricks secret
+        rather than inline. Use 'demo' together with app_secret_token = 'demo'
+        to read the public demo agreement.
+
+    - name: base_url
+      type: string
+      required: false
+      description: >
+        Base URL for the e-conomic resource APIs. Defaults to
+        'https://apis.e-conomic.com'. Override only if e-conomic provides a
+        different host for your environment.
+
+    - name: projects_api_version
+      type: string
+      required: false
+      description: >
+        Version of the e-conomic Projects resource API (used for employees,
+        projects and project_time_entries), for example '1.1.0' or 'v1.1.0'.
+        Defaults to '1.1.0'.
+
+    - name: customers_api_version
+      type: string
+      required: false
+      description: >
+        Version of the e-conomic Customers resource API (used for customers),
+        for example '3.1.0' or 'v3.1.0'. Defaults to '3.1.0'.
+
+# ============================================================================
+# External Options Allowlist
+# These table-specific options must be included in the externalOptionsAllowList
+# parameter of the UC connection to allow them to be passed through.
+# Use a comma-separated string of option names.
+#
+# Options actually read by the connector implementation (economic.py):
+#   - max_records_per_batch   Maximum number of records emitted per micro-batch
+#                             for the incremental (cdc) tables projects and
+#                             project_time_entries. Must be a positive integer.
+#                             Default 5000. When a scan is cut short, the offset
+#                             records the last primary key and the next batch
+#                             resumes the same scan.
+#   - lookback_seconds        Seconds subtracted from the stored lastUpdated
+#                             high-water mark at the start of each new scan, to
+#                             re-read recently modified rows (dedup is by
+#                             primary key). Must be >= 0. Default 600.
+#   - start_timestamp         ISO-8601 lower bound for the first incremental
+#                             scan of projects and project_time_entries, for
+#                             example '2024-01-01T00:00:00'. Only used when no
+#                             offset has been committed yet. If omitted, the
+#                             first scan is unfiltered (full history).
+#
+# employees and customers are snapshot tables and read no table options.
+# ============================================================================
+external_options_allowlist: "max_records_per_batch,lookback_seconds,start_timestamp"
