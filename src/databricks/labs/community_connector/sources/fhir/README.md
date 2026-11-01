@@ -1,6 +1,6 @@
 # Lakeflow FHIR R4 Community Connector
 
-Ingests clinical data from any FHIR R4-compliant server into Databricks Delta tables using CDC (Change Data Capture). Supports any server implementing SMART on FHIR Backend Services, OAuth2 client credentials, or open access.
+Ingests clinical data from any FHIR R4-compliant server into Databricks Delta tables using CDC (Change Data Capture). Each resource type lands in its own table, with the whole FHIR resource stored in a `VARIANT` column. Supports any server implementing SMART on FHIR Backend Services, OAuth2 client credentials, or open access.
 
 ---
 
@@ -22,15 +22,16 @@ Ingests clinical data from any FHIR R4-compliant server into Databricks Delta ta
 - [Connection Parameters Reference](#connection-parameters-reference)
 - [Table Configuration Reference](#table-configuration-reference)
 - [Bulk Data Export](#bulk-data-export)
+- [Deletes](#deletes)
 - [Supported Resource Types](#supported-resource-types)
 - [Schema Design](#schema-design)
-  - [Common Columns](#common-columns)
-  - [Typed Columns — UK Core Profile (default)](#typed-columns--uk-core-profile-default)
-  - [Profile System](#profile-system)
-  - [FHIR Type Mappings](#fhir-type-mappings)
-  - [Per-Resource Column Reference](#per-resource-column-reference)
+  - [Table Columns](#table-columns)
+  - [Querying the VARIANT Column](#querying-the-variant-column)
+  - [Recommended Silver View](#recommended-silver-view)
+  - [Data Skipping and Clustering](#data-skipping-and-clustering)
+  - [Decimal Precision](#decimal-precision)
+- [Migrating from the Typed Schema](#migrating-from-the-typed-schema)
 - [Architecture](#architecture)
-  - [Profile Registry](#profile-registry)
   - [Extending the Connector](#extending-the-connector)
 - [Troubleshooting](#troubleshooting)
 
@@ -44,6 +45,7 @@ Ingests clinical data from any FHIR R4-compliant server into Databricks Delta ta
 
 - **First run**: full load — all records for each configured resource type are fetched.
 - **Subsequent runs**: incremental sync — only records with `meta.lastUpdated` newer than the previous cursor are fetched, using the FHIR `_lastUpdated` search parameter.
+- **Deletes** (opt-in with `track_deletes=true`): resources deleted on the server are removed from the table. See [Deletes](#deletes).
 
 **Tested against:**
 
@@ -68,18 +70,27 @@ Ingests clinical data from any FHIR R4-compliant server into Databricks Delta ta
   - `_lastUpdated` search parameter (required for incremental sync)
   - `_count` pagination parameter
   - Bundle searchset responses with `next` pagination links
+  - Type-level `_history` with `_since` only if you enable `track_deletes`
 
 ---
 
 ## Runtime Requirements
 
-The connector schema declares `raw_json` and `extension` as native [VARIANT](https://docs.databricks.com/aws/en/sql/language-manual/data-types/variant-type) so downstream queries can use the `:` path syntax (e.g. `raw_json:name[0].family::STRING`). Native `VariantType` in the Spark Python Data Source API was added in Spark 4.0 / PySpark 4.0 ([SPARK-54337](https://issues.apache.org/jira/browse/SPARK-54337)).
+The connector stores each resource in a `resource` column of type [VARIANT](https://docs.databricks.com/aws/en/sql/language-manual/data-types/variant-type). Native `VariantType` in the Spark Python Data Source API was added in Spark 4.0 / PySpark 4.0 ([SPARK-54337](https://issues.apache.org/jira/browse/SPARK-54337)).
+
+**Supported runtimes:**
+
+| Runtime | Status |
+|---|---|
+| Serverless SDP, channel `CURRENT` or `PREVIEW` | Supported. This is what `create_pipeline` deploys. |
+| Classic compute, DBR 18.2 or later | Supported. Measured as a Lakeflow Job; classic SDP pipelines were not measured. |
+| Classic DBR 17.3 LTS | Not supported. |
 
 ### Compatibility matrix (empirical, 2026-10-21)
 
 Measured with a minimal pure-PySpark probe: one `Trigger.AvailableNow` streaming write of a `VARIANT` column into a Unity Catalog Delta table, then read back with `v:name[0].family::string`. Run as a Lakeflow Job (`spark_python_task`) on a classic single-user cluster or serverless jobs compute, then repeated inside serverless SDP pipelines (second table). Not yet verified through the connector framework's own reader classes.
 
-| Runtime | Simple stream reader (what the connector uses today) | Partitioned stream reader (`SupportsPartitionedStream`) |
+| Runtime | Simple stream reader (what the connector uses) | Partitioned stream reader (`SupportsPartitionedStream`) |
 |---|---|---|
 | Classic DBR 17.3 LTS (Spark 4.0.0) | ❌ `Not implemented. VariantType` | ✅ |
 | Classic DBR 18.2 (Spark 4.1.0) | ✅ | ✅ |
@@ -94,90 +105,11 @@ Measured with a minimal pure-PySpark probe: one `Trigger.AvailableNow` streaming
 | Serverless, channel `PREVIEW`, default environment | 4.1.0 / 4.2.0 | ✅ | ❌ `ModuleNotFoundError: No module named 'pyspark.databricks.wsfs'` |
 | Serverless, channel `CURRENT`, `environment_version: "4"` | 4.0.0 / 4.1.0 | ✅ | ❌ same `ModuleNotFoundError` |
 
-The partitioned-reader failure is not VARIANT-related: the STRING control fails identically. It happens inside Databricks' Python planning worker (`pyspark/sql/worker/plan_data_source_read.py` → `worker_util.py` imports `pyspark.databricks.wsfs`) before any connector code runs, and only where the PySpark client and Spark server versions differ. **The simple reader with VARIANT works in all three SDP configurations**, so the connector as shipped works on serverless SDP today. Note that the framework's default pipeline config deploys to channel `PREVIEW` (`tools/community_connector/.../default_config.yaml`).
+The partitioned-reader failure is not VARIANT-related: the STRING control fails identically. It happens inside Databricks' Python planning worker (`pyspark/sql/worker/plan_data_source_read.py` → `worker_util.py` imports `pyspark.databricks.wsfs`) before any connector code runs, and only where the PySpark client and Spark server versions differ. **The connector uses the simple reader, which works with VARIANT in all three SDP configurations above**, so the connector works on serverless SDP. Note that the framework's default pipeline config deploys to channel `PREVIEW` (`tools/community_connector/.../default_config.yaml`).
 
-On every runtime, values must be `VariantVal` objects (`VariantVal.parseJson(text)`); the `{"value": ..., "metadata": ...}` dict form fails. Decimal precision survives exactly: `5.10000000000000000001` reads back unchanged. The partitioned reader is the only path that works on all four runtimes, including the 17.3 LTS.
+On every runtime, values must be `VariantVal` objects (`VariantVal.parseJson(text)`); the `{"value": ..., "metadata": ...}` dict form fails. Decimal precision survives exactly: `5.10000000000000000001` reads back unchanged. The partitioned reader works on all four jobs runtimes, including 17.3 LTS; the connector uses the simple reader, which works on every supported runtime above.
 
-The matrix below is the earlier 2026-05-04 measurement, kept for history.
-
-> ⚠️ **As of 2026-05-04, VariantType in a streaming Python DataSource was not functional on any verified Databricks runtime.** Spark and PySpark 4.0 / 4.1 expose the type and the `VariantVal.parseJson()` API, but the streaming-write JVM path raises `Not implemented. VariantType SQLSTATE: XXKST` before the first row lands. This blocks the connector's primary deployment target (Serverless SDP / DLT). **The supported deployment at that time was the [StringType fallback](#stringtype-fallback-dbr-173-lts-only).** This section documents the empirical state so you can re-evaluate as Databricks ships fixes.
-
-### Compatibility matrix (empirical, e2-demo-field-eng, 2026-05-04, superseded)
-
-| Runtime | Status | Failure mode (verbatim) |
-|---|---|---|
-| Serverless SDP / DLT, default env (v3, PySpark 3.5) | ❌ Broken | `[STREAM_FAILED] ... Not implemented. VariantType SQLSTATE: XXKST` on the first microbatch |
-| Serverless SDP, `environment.environment_version: "4"` | ❌ Broken | (a) `ModuleNotFoundError: No module named 'databricks.labs'` because env v4 doesn't auto-add SDP `root_path` to `sys.path`; (b) workarounds lead back to the same JVM `Not implemented. VariantType` |
-| Classic DLT pipeline, `channel: PREVIEW` | ❌ Blocked (framework, not VariantType) | `ModuleNotFoundError: No module named 'databricks.labs'` — the community-connector framework auto-installs on Serverless DLT only |
-| Classic interactive cluster, DBR 17.3.10 LTS (Spark 4.0.0) | ❌ Broken | `[STREAM_FAILED] ... Not implemented. VariantType SQLSTATE: XXKST` on `Trigger.AvailableNow` even with tuple rows + `VariantVal.parseJson()` |
-| Classic interactive cluster, DBR 18.1.2 (Spark 4.1.0) | ❌ Broken | Same `Not implemented. VariantType` as 17.3 + dict-row form rejected with `DATA_SOURCE_INVALID_RETURN_TYPE` |
-| Serverless Job, `tasks[0].environment.client: "2"` | ❌ Broken | `AttributeError: type object 'VariantVal' has no attribute 'parseJson'` (PySpark 3.5.0) |
-| Serverless Job, `tasks[0].environment.client: "3"` (batch read of an existing VARIANT table only) | ⚠️ Partial | Batch reads of VARIANT columns work via Spark Connect (PySpark 3.5.2 client + Spark 4.1.0 server). Streaming write into a VARIANT-typed table has not been verified end-to-end and likely hits the same JVM gap. |
-| Classic DBR ≤ 17.1 | ❌ Broken | `java.lang.RuntimeException: Not implemented. VariantType` (pre-Spark-4.0 JVM has no Variant) |
-| DLT image `dlt:16.4.x` | ❌ Broken | `MALFORMED_VARIANT` in `convert_variant` — use current `PREVIEW` channel |
-
-Diagnostic recipe (copy into a notebook on the cluster you want to evaluate):
-
-```python
-import pyspark, json
-from pyspark.sql.types import StructType, StructField, StringType, VariantType, VariantVal
-from pyspark.sql.datasource import DataSource, SimpleDataSourceStreamReader
-print("pyspark:", pyspark.__version__)
-print("dbr:", spark.conf.get("spark.databricks.clusterUsageTags.sparkVersion", "n/a"))
-print("parseJson:", hasattr(VariantVal, "parseJson"))
-
-class S(DataSource):
-    @classmethod
-    def name(cls): return "v_probe"
-    def schema(self): return StructType([StructField("id", StringType(), False), StructField("v", VariantType(), True)])
-    def simpleStreamReader(self, schema): return R()
-
-class R(SimpleDataSourceStreamReader):
-    def initialOffset(self): return {"o": 0}
-    def read(self, start):
-        if start.get("o", 0) > 0: return ([], start)
-        return ([("a", VariantVal.parseJson(json.dumps({"hello": "world"})))], {"o": 1})
-    def commit(self, end): pass
-
-spark.sql("DROP TABLE IF EXISTS main.default.v_probe")
-spark.dataSource.register(S)
-q = (spark.readStream.format("v_probe").load()
-     .writeStream.format("delta")
-     .option("checkpointLocation", "/tmp/v_probe_ckpt")
-     .trigger(availableNow=True)
-     .toTable("main.default.v_probe"))
-q.awaitTermination()
-print("VARIANT streaming write:", "OK" if q.exception() is None else f"BROKEN: {q.exception()}")
-```
-
-If this probe still raises `Not implemented. VariantType` on the runtime you've chosen, your best option is the StringType fallback below.
-
-### StringType fallback (DBR 17.3 LTS only)
-
-On a runtime where the probe above still fails (classic DBR 17.3 LTS as of 2026-10-21), deploy the connector with `raw_json` and `extension` as `StringType`. The connector already returns `json.dumps(...)` strings from its extractors — the only change needed is the schema. Edit `src/databricks/labs/community_connector/sources/fhir/fhir_profile_registry.py`:
-
-```python
-# Before — VariantType (default; works on DBR 18.2+ and serverless SDP)
-StructField("raw_json", VariantType(), nullable=True),
-StructField("extension", VariantType(), nullable=True),
-
-# After — StringType (works on every supported runtime)
-StructField("raw_json", StringType(), nullable=True),
-StructField("extension", StringType(), nullable=True),
-```
-
-Re-run the merge script (`python tools/scripts/merge_python_source.py fhir`) and redeploy. Downstream queries cast at read time:
-
-```sql
-SELECT
-    parse_json(raw_json):name[0].family::STRING AS family_name,
-    variant_get(parse_json(extension), '$[0].url', 'STRING') AS ext_url
-FROM main.<schema>.patient
-```
-
-This forfeits native VARIANT shredding (no on-disk Variant binary, no Variant-specific stats) but unblocks every runtime listed above and matches what the connector shipped with prior to the VariantType experiment (commit `b0f2d41`).
-
-### Caveat — CLI rendering of `pipeline_spec.json`
+### Caveat — CLI rendering of the pipeline spec
 
 `pipeline_spec.json` accepts **only** `connection_name` and `objects` — the framework's `PipelineSpec` model is declared `extra="forbid"`, so any other key fails at pipeline init with `Extra inputs are not permitted`. Pipeline-level settings (`channel`, `serverless`, `continuous`, `development`, `environment`, …) belong in the CLI's `--config` file, not the spec. Boolean keys are doubly unsafe in the spec: the CLI renders it into `ingest.py` via `json.dumps()`, so `true`/`false` also become invalid Python identifiers (`NameError: name 'true' is not defined`).
 
@@ -427,10 +359,6 @@ Create a `pipeline_spec.json` file:
 }
 ```
 
-> ⚠️ **Before deploying, decide which schema mode you need** — see [Runtime Requirements](#runtime-requirements). VariantType for `raw_json` / `extension` works on serverless SDP and DBR 18.2+ but not on classic DBR 17.3 LTS; if you hit `Not implemented. VariantType SQLSTATE: XXKST` at pipeline run time, switch to the [StringType fallback](#stringtype-fallback-dbr-173-lts-only).
->
-> Do **not** add boolean keys like `"serverless": true` to this JSON — the CLI embeds the spec verbatim into a Python file and JSON booleans render as Python `NameError`. Set those via the CLI `--config` file or rely on bundled defaults. See [Runtime Requirements → CLI rendering caveat](#caveat--cli-rendering-of-pipeline_spec).
-
 Then pass it to the command:
 
 ```bash
@@ -439,20 +367,12 @@ community-connector create_pipeline fhir my_fhir_pipeline \
   --repo-url https://github.com/databrickslabs/lakeflow-community-connectors.git
 ```
 
-**Use a specific schema profile** (see [Profile System](#profile-system)):
+> **Note:** Do **not** add boolean keys like `"serverless": true` to this JSON — the CLI embeds the spec verbatim into a Python file and JSON booleans render as Python `NameError`. Set those via the CLI `--config` file or rely on bundled defaults. See [Runtime Requirements → CLI rendering caveat](#caveat--cli-rendering-of-the-pipeline-spec).
+
+To turn on delete tracking for one table, add a `table_configuration` (see [Deletes](#deletes)):
 
 ```json
-{
-  "connection_name": "my_fhir_conn",
-  "objects": [
-    {
-      "table": {
-        "source_table": "Patient",
-        "table_configuration": {"profile": "base_r4"}
-      }
-    }
-  ]
-}
+{"table": {"source_table": "Patient", "table_configuration": {"track_deletes": "true"}}}
 ```
 
 ---
@@ -470,7 +390,7 @@ Or go to **Databricks UI → Jobs & pipelines → Pipelines**, find `my_fhir_pip
 | Run | Behaviour |
 |---|---|
 | First run | Full load — all records for each resource type are fetched |
-| Subsequent runs | Incremental — only records with `lastUpdated` newer than the previous run's cursor are fetched |
+| Subsequent runs | Incremental — only records with `lastUpdated` newer than the previous run's cursor are fetched (plus deletions, if `track_deletes` is on) |
 | No new records | Pipeline completes immediately; cursor is unchanged |
 
 ---
@@ -499,11 +419,13 @@ These are set per-table inside `table_configuration` in the pipeline spec.
 
 | Option | Default | Description |
 |---|---|---|
+| `resource_types` | the 14 defaults | Comma-separated FHIR resource types served by this table configuration. Any R4 type name works. Example: `Patient,Observation,Condition` |
 | `page_size` | `100` | Number of resources requested per page (`_count` parameter). Reduce if the server rate-limits you. |
 | `max_records_per_batch` | `1000` | Maximum records fetched per pipeline trigger. Controls run duration and API load. |
 | `page_delay` | `0.0` | Seconds to sleep between paginated requests. Set to `1.0` for public shared servers. |
-| `resource_types` | all 14 | Comma-separated list to limit which resource types are available. Example: `Patient,Observation,Condition` |
-| `profile` | `uk_core` | Schema profile to use for this table. One of: `uk_core` (default), `base_r4`. See [Profile System](#profile-system). |
+| `track_deletes` | `false` | `true` removes resources deleted on the server from the table. Requires type-level `_history` on the server. See [Deletes](#deletes). |
+
+Bulk export options (`bulk_export_*`, `bulk_incremental_mode`, `bulk_overlap_seconds`) are listed under [Bulk Data Export](#bulk-data-export).
 
 > **`max_records_per_batch` and timestamp ties:** The batch is never cut inside a run of records sharing the same `lastUpdated`, because the next read asks for `lastUpdated > cursor` and would skip the rest of the tie. A batch can therefore exceed `max_records_per_batch` by the size of that tie. If the server ignores `_sort=_lastUpdated` and a batch has to be truncated, the read fails rather than skip records; raise `max_records_per_batch` or use bulk export.
 
@@ -536,16 +458,11 @@ Every option above must also appear in the connection's `externalOptionsAllowLis
 |---|---|---|
 | `since` | `_type` + `_since` | Default. Works on most servers. |
 | `typefilter` | `_type` + `_typeFilter=<Type>?_lastUpdated=gt<cursor>` | The server does not support `_since` — notably **Epic**. |
-| `full` | `_type` only | You want a complete re-export every trigger. |
+| `full` | `_type` only | You want a complete re-export every trigger. The table is ingested as a snapshot, so resources deleted on the server are removed. |
 
 `_type` is always sent. Per the Bulk Data IG a server *"SHALL return all supported resources"* when `_type` is omitted, and `_typeFilter` only constrains *"resource types referenced in the `_typeFilter` expression"* — so sending `_typeFilter` alone makes the server export every other resource type unfiltered. A server that rejects the two parameters together will fail at kick-off with a clear error rather than silently over-exporting.
 
-> ⚠️ **`full` mode re-exports everything on every trigger.** Each trigger runs a complete server-side export and re-writes all rows (deduplicated downstream by the upsert on `id`). Bulk exports are expensive and some servers rate-limit them hard — Epic enforces a **24-hour cooldown** between exports of the same group. Schedule `full` pipelines accordingly; prefer `since` or `typefilter` for routine incremental sync.
-
-### Deletes
-
-- **`full` mode** tables are ingested as `snapshot` (`apply_changes_from_snapshot`). Each export replaces the previous one, so a resource deleted on the server is removed from the target table.
-- **`since` / `typefilter` modes** (and REST mode) are upsert-only. Bulk Data v2 servers may list deleted resources in the manifest's `deleted` array; the connector logs a warning with the file count but does not apply them, so deleted rows remain. If you need deletes propagated, use `full` mode on a schedule the server tolerates.
+> ⚠️ **`full` mode re-exports everything on every trigger.** Each trigger runs a complete server-side export and rewrites the table from it. Bulk exports are expensive and some servers rate-limit them hard — Epic enforces a **24-hour cooldown** between exports of the same group. Schedule `full` pipelines accordingly; prefer `since` or `typefilter` for routine incremental sync.
 
 Switching an existing table between `full` and an incremental mode changes its ingestion type, which requires a full refresh of that table.
 
@@ -563,7 +480,7 @@ The framework runs each table as its own streaming query, so a pipeline covering
 
 The cursor advances to the manifest's `transactionTime`. The spec permits servers to report this as either the export's *start* or *completion* instant, and the connector cannot tell which. On a completion-time server, resources written while the export ran can be missed.
 
-If you suspect that, set `bulk_overlap_seconds` to comfortably exceed a typical export duration. The cursor is then rewound by that amount, re-reading a safe window; duplicates are absorbed by the upsert on `id`. The cursor is never moved earlier than the previous cursor, so this cannot cause a re-read loop.
+If you suspect that, set `bulk_overlap_seconds` to comfortably exceed a typical export duration. The cursor is then rewound by that amount, re-reading a safe window; duplicates are absorbed by the upsert on `resource_id`. The cursor is never moved earlier than the previous cursor, so this cannot cause a re-read loop.
 
 If a manifest omits `transactionTime` entirely, the connector falls back to a clock reading captured **before** kick-off, which risks duplicates rather than data loss.
 
@@ -579,258 +496,150 @@ If a manifest omits `transactionTime` entirely, the connector falls back to a cl
 
 ---
 
+## Deletes
+
+Deletes are opt-in. Set `track_deletes=true` on a table to have the connector remove resources that were deleted on the server. The table is then ingested as `cdc_with_deletes`.
+
+| Mode | Deleted resources |
+|---|---|
+| REST, or bulk `since` / `typefilter`, `track_deletes=false` (default) | Not removed. The table is upsert-only. |
+| REST, or bulk `since` / `typefilter`, `track_deletes=true` | Removed. Read from each type's history (see below). |
+| Bulk `full`, any `track_deletes` setting | Removed. The table is ingested as a snapshot, so each export replaces the previous one. `track_deletes` has no effect here. |
+
+**How `track_deletes` works:**
+
+- Once per trigger, the connector reads `GET [type]/_history?_since=<cursor>` and deletes each resource whose newest history entry is a DELETE. This applies in REST mode and in bulk `since` / `typefilter` modes.
+- The server must support type-level `_history` with `_since`. HAPI does; Epic does not. If it does not, the read fails with an error naming the missing capability, rather than silently leaving deletes unapplied.
+- The first trigger reads no deletes, because the initial load already reflects current state.
+- Each read starts 5 minutes before the previous trigger began, to cover clock skew between the server and the pipeline. Re-reads are idempotent.
+- HAPI's DELETE history entries carry no timestamp, so a delete is sequenced by the closest newer history entry. That is always later than the resource's last version, so the delete wins. A resource re-created after its deletion is not removed.
+
+The bulk manifest's `deleted` array (Bulk Data v2) is not applied in incremental modes. The connector logs a warning with the file count. Use `track_deletes` or `full` mode instead.
+
+---
+
 ## Supported Resource Types
 
-All 14 resource types use CDC ingestion with `id` as the primary key and `lastUpdated` as the cursor.
+Each name in `resource_types` becomes its own table. Any FHIR R4 resource type name works, with no code change. The default set is:
 
-| Resource Type | Profile | Total Columns |
-|---|---|---|
-| `Patient` | UK Core 2.6.1 | 22 |
-| `Observation` | UK Core 2.5.0 | 28 |
-| `Condition` | UK Core 2.6.0 | 22 |
-| `Encounter` | UK Core 2.5.0 | 22 |
-| `Procedure` | UK Core 2.5.0 | 25 |
-| `MedicationRequest` | UK Core 2.5.0 | 22 |
-| `DiagnosticReport` | UK Core 2.5.0 | 20 |
-| `AllergyIntolerance` | UK Core 2.5.0 | 21 |
-| `Immunization` | UK Core 2.4.0 | 27 |
-| `Coverage` | Base FHIR R4 | 19 |
-| `CarePlan` | UK Core 2.2.0 | 20 |
-| `Goal` | Base FHIR R4 | 19 |
-| `Device` | UK Core 1.2.0 | 20 |
-| `DocumentReference` | UK Core 2.2.0 | 19 |
+Patient, Observation, Condition, Encounter, Procedure, MedicationRequest, DiagnosticReport, AllergyIntolerance, Immunization, Coverage, CarePlan, Goal, Device, DocumentReference
 
-Coverage and Goal have no UK Core profile — the base FHIR R4 spec is used directly.
+Every table uses `resource_id` as its primary key and `last_updated` as its cursor. The ingestion type is `cdc`, `cdc_with_deletes` when `track_deletes` is on, or `snapshot` in bulk `full` mode.
 
 ---
 
 ## Schema Design
 
-### Common Columns
+### Table Columns
 
-Every table includes these four columns regardless of resource type or profile:
+Every resource-type table has the same six columns, so one schema serves all types:
 
 | Column | Type | Description |
 |---|---|---|
-| `id` | `StringType` | FHIR resource ID (primary key) |
-| `resourceType` | `StringType` | FHIR resource type name |
-| `lastUpdated` | `TimestampType` | `meta.lastUpdated` — CDC cursor |
-| `raw_json` | `StringType` | Full FHIR resource as a JSON string — complete, lossless storage |
+| `resource_type` | `STRING NOT NULL` | FHIR `resourceType`. Constant within a table, so `UNION ALL` across tables stays self-describing. |
+| `resource_id` | `STRING NOT NULL` | FHIR `id`. Primary key. |
+| `last_updated` | `TIMESTAMP` | `meta.lastUpdated`. The CDC cursor and the sequence key. |
+| `resource` | `VARIANT` | The whole FHIR resource. |
+| `fhir_version` | `STRING` | `fhirVersion` from the server's CapabilityStatement (`GET /metadata`). Null if the server does not return it. |
+| `ingested_at` | `TIMESTAMP` | When the connector read the row. |
 
-### Typed Columns — UK Core Profile (default)
+### Querying the VARIANT Column
 
-Beyond the four common columns, each resource has typed columns extracted from the FHIR JSON. Repeated FHIR elements (cardinality `0..*` or `1..*`) are represented as `ArrayType(StructType(...))`, which you can query in Databricks SQL using standard array syntax:
+Use the `:` path syntax for FHIR element names, `::` to cast, and `variant_get` or `variant_explode` for typed extraction. Replace `<catalog>.<schema>` with your pipeline's destination.
 
 ```sql
--- Explode Patient names into rows
-SELECT id, explode(name) AS n FROM clinical.patient;
+-- Path with a cast: first family name
+SELECT resource_id, resource:name[0].family::string AS family_name
+FROM <catalog>.<schema>.patient;
 
--- Access first name directly
-SELECT id, name[0].family AS surname FROM clinical.patient;
+-- Date cast
+SELECT resource_id, resource:birthDate::date AS birth_date
+FROM <catalog>.<schema>.patient;
 
--- Filter by NHS number (UK Core Patient only)
-SELECT * FROM clinical.patient WHERE nhs_number = '9000000009';
+-- Typed extraction from a nested path
+SELECT resource_id,
+       variant_get(resource, '$.code.coding[0].code', 'string') AS code
+FROM <catalog>.<schema>.observation;
 
--- Explode Observation components (e.g. blood pressure panels)
-SELECT id, component[0].value_quantity.value AS systolic,
-           component[1].value_quantity.value AS diastolic
-FROM clinical.observation
-WHERE code.coding[0].code = '55284-4';
+-- One row per identifier
+SELECT p.resource_id, i.pos, i.value:system::string AS id_system, i.value:value::string AS id_value
+FROM <catalog>.<schema>.patient AS p,
+     LATERAL variant_explode(p.resource:identifier) AS i;
 ```
 
-**Key structural types used across all schemas:**
+A few rules to keep in mind:
 
-| FHIR Type | Spark Representation |
-|---|---|
-| `Coding` | `StructType(system, code, display)` |
-| `CodeableConcept` | `StructType(coding: ArrayType(Coding), text)` |
-| `Reference` | `StructType(reference, display)` |
-| `Period` | `StructType(start: Timestamp, end: Timestamp)` |
-| `Identifier` | `StructType(system, value, use)` |
-| `HumanName` | `StructType(family, given: ArrayType(String), text, use)` |
-| `Address` | `StructType(use, line: ArrayType(String), city, district, postalCode, country)` |
-| `ContactPoint` | `StructType(system, value, use)` |
-| `Quantity` | `StructType(value: Double, unit, system, code)` |
-| `Dosage` | `StructType(text, timing_code, dose_value: Double, dose_unit, route, site)` |
+- A VARIANT column cannot be used in `GROUP BY`, `ORDER BY`, `DISTINCT` or set operators. Extract a scalar with a path or `variant_get` first.
+- FHIR element names are case-sensitive (`birthDate`, not `birthdate`).
 
-### Profile System
+### Recommended Silver View
 
-The connector ships with two schema profiles:
+For silver-layer tables, flatten each resource type into typed columns with a view (SQL-on-FHIR style). This keeps the bronze table complete and lets consumers query plain columns:
 
-| Profile | Description | When to use |
-|---|---|---|
-| `uk_core` | UK Core R4 implementation guide (default) | UK-based EHRs, NHS data, servers publishing UK Core extensions |
-| `base_r4` | Base FHIR R4 specification | Non-UK servers, international deployments, or when UK Core extensions are not present |
+```sql
+CREATE OR REPLACE VIEW <catalog>.<schema>.patient_typed AS
+SELECT
+  resource_id                        AS id,
+  resource:name[0].family::string    AS family_name,
+  resource:name[0].given[0]::string  AS given_name,
+  resource:birthDate::date           AS birth_date,
+  resource:birthDate::string         AS birth_date_raw,
+  resource:gender::string            AS gender,
+  last_updated
+FROM <catalog>.<schema>.patient;
+```
 
-**Default:** `uk_core`. For most resources, both profiles produce identical schemas — UK Core only adds meaningful extra columns to `Patient` (see below). For all other resources, `uk_core` falls back to `base_r4` automatically.
+> **Partial dates:** FHIR `date` values may be just a year or a year and month (`"1956"`, `"1956-08"`). Casting them with `::date` silently yields the first of the period (`1956-01-01`). Keep the raw string alongside, as above, wherever precision matters. Measured on public HAPI on 2026-11-01: 20 of 15,637 birth dates were partial.
 
-**UK Core Patient extra columns** (beyond base_r4):
+The `patient` queries in this section were run against a table loaded from public HAPI R4 by this connector on serverless SDP (2026-11-01).
 
-| Column | Type | Source |
-|---|---|---|
-| `nhs_number` | `StringType` | Extracted from `identifier` where `system = https://fhir.nhs.uk/Id/nhs-number` |
-| `ethnic_category` | `CodeableConcept` | UK Core extension `Extension-UKCore-EthnicCategory` |
-| `birth_sex` | `CodeableConcept` | UK Core extension `Extension-UKCore-BirthSex` |
-| `death_notification_status` | `CodeableConcept` | UK Core extension `Extension-UKCore-DeathNotificationStatus` |
-| `interpreter_required` | `BooleanType` | HL7 base extension `patient-interpreterRequired` |
-| `residential_status` | `CodeableConcept` | UK Core extension `Extension-UKCore-ResidentialStatus` |
+### Data Skipping and Clustering
 
-To use a specific profile per table, set it in `table_configuration`:
+VARIANT has no min/max statistics, so Delta cannot skip files based on a path inside `resource`. Filter on `last_updated` or `resource_id` instead. They are plain columns with statistics, and filters on them let Delta prune files.
+
+A VARIANT column cannot be a clustering key. To cluster a table, set `cluster_by` in `table_configuration` on a plain column:
 
 ```json
-{
-  "table": {
-    "source_table": "Patient",
-    "table_configuration": {"profile": "base_r4"}
-  }
-}
+{"table": {"source_table": "Observation", "table_configuration": {"cluster_by": "last_updated"}}}
 ```
 
-### FHIR Type Mappings
+### Decimal Precision
 
-FHIR primitive types map to Spark types as follows:
+- **Bulk:** the NDJSON line is stored verbatim, so FHIR decimals keep the precision the server sent. `5.10000000000000000001` keeps all of its digits.
+- **REST:** the parsed JSON is re-serialised, so decimals are rounded to float64. Realistic clinical values such as `5.1` or `98.6` survive. Values with more significant digits than float64 holds do not.
+- **Trailing zeros** (`1.500` becomes `1.5`) are lost on both paths. This is a property of VARIANT storage.
 
-| FHIR Type | Spark Type | Notes |
-|---|---|---|
-| `string`, `code`, `uri`, `id` | `StringType` | Status codes, identifiers, reference URLs |
-| `instant`, `dateTime` | `TimestampType` | ISO 8601 with timezone |
-| `date` | `StringType` | Partial dates (e.g. `2024-01`) cannot be represented as Timestamp |
-| `boolean` | `BooleanType` | |
-| `decimal` | `DoubleType` | Lab values, quantities |
-| `integer`, `positiveInt` | `LongType` | Counts, ranks |
-| `Reference.reference` | `StringType` (inside Reference struct) | e.g. `Patient/123` |
+---
 
-> All typed columns are nullable. FHIR R4 has very few required fields, and even required fields may be absent from records exported by some servers. The `raw_json` column preserves all data losslessly.
+## Migrating from the Typed Schema
 
-### Per-Resource Column Reference
+The typed per-resource schema has been replaced by the shared schema above. This is a breaking change:
 
-#### Patient
-
-| Column | Type | FHIR Source |
-|---|---|---|
-| `identifier` | `ArrayType(Identifier)` | `Patient.identifier` |
-| `active` | `BooleanType` | `Patient.active` |
-| `name` | `ArrayType(HumanName)` | `Patient.name` |
-| `telecom` | `ArrayType(ContactPoint)` | `Patient.telecom` |
-| `gender` | `StringType` | `Patient.gender` |
-| `birthDate` | `StringType` | `Patient.birthDate` |
-| `deceased_boolean` | `BooleanType` | `Patient.deceasedBoolean` |
-| `deceased_datetime` | `TimestampType` | `Patient.deceasedDateTime` |
-| `address` | `ArrayType(Address)` | `Patient.address` |
-| `maritalStatus` | `CodeableConcept` | `Patient.maritalStatus` |
-| `generalPractitioner` | `ArrayType(Reference)` | `Patient.generalPractitioner` |
-| `managingOrganization` | `Reference` | `Patient.managingOrganization` |
-| *UK Core only:* `nhs_number` | `StringType` | NHS number identifier slice |
-| *UK Core only:* `ethnic_category` | `CodeableConcept` | UK Core extension |
-| *UK Core only:* `birth_sex` | `CodeableConcept` | UK Core extension |
-| *UK Core only:* `death_notification_status` | `CodeableConcept` | UK Core extension |
-| *UK Core only:* `interpreter_required` | `BooleanType` | HL7 base extension |
-| *UK Core only:* `residential_status` | `CodeableConcept` | UK Core extension |
-
-#### Observation
-
-| Column | Type | FHIR Source |
-|---|---|---|
-| `status` | `StringType` | `Observation.status` |
-| `category` | `ArrayType(CodeableConcept)` | `Observation.category` |
-| `code` | `CodeableConcept` | `Observation.code` |
-| `subject` | `Reference` | `Observation.subject` |
-| `encounter` | `Reference` | `Observation.encounter` |
-| `effective_datetime` | `TimestampType` | `Observation.effectiveDateTime` |
-| `effective_period` | `Period` | `Observation.effectivePeriod` |
-| `issued` | `TimestampType` | `Observation.issued` |
-| `performer` | `ArrayType(Reference)` | `Observation.performer` |
-| `value_quantity` | `Quantity` | `Observation.valueQuantity` |
-| `value_codeable_concept` | `CodeableConcept` | `Observation.valueCodeableConcept` |
-| `value_string` | `StringType` | `Observation.valueString` |
-| `value_boolean` | `BooleanType` | `Observation.valueBoolean` |
-| `value_integer` | `LongType` | `Observation.valueInteger` |
-| `data_absent_reason` | `CodeableConcept` | `Observation.dataAbsentReason` |
-| `interpretation` | `ArrayType(CodeableConcept)` | `Observation.interpretation` |
-| `body_site` | `CodeableConcept` | `Observation.bodySite` |
-| `method` | `CodeableConcept` | `Observation.method` |
-| `specimen` | `Reference` | `Observation.specimen` |
-| `device` | `Reference` | `Observation.device` |
-| `reference_range` | `ArrayType(struct)` | `Observation.referenceRange` |
-| `has_member` | `ArrayType(Reference)` | `Observation.hasMember` |
-| `derived_from` | `ArrayType(Reference)` | `Observation.derivedFrom` |
-| `component` | `ArrayType(struct)` | `Observation.component` — includes `code`, `value_quantity`, `value_string`, `value_codeable_concept`, `value_boolean`, `value_integer`, `data_absent_reason` |
-
-For all other resource types, use `DESCRIBE TABLE <catalog>.<schema>.<table>` in Databricks SQL to see the full column list, or refer to `profiles/base_r4.py` in the source.
+- **Columns renamed:** `id` → `resource_id`, `lastUpdated` → `last_updated`.
+- **Columns removed:** the typed per-resource columns, `raw_json` and `extension`. The full resource is now in `resource`, so read those fields with paths such as `resource:birthDate` or `variant_explode(resource:identifier)`.
+- **Columns added:** `resource_type`, `resource` (VARIANT), `fhir_version`, `ingested_at`.
+- **Option removed:** `profile`. The `uk_core` and `base_r4` profiles no longer exist. Remove `profile` from any `table_configuration`. UK-specific values such as the NHS number are read from `resource`.
+- **Action required:** existing tables do not match the new schema. Run a **full refresh** of every table after upgrading.
 
 ---
 
 ## Architecture
 
-### Profile Registry
-
-The connector uses a **profile registry** to decouple schema definitions from ingestion logic. This makes it straightforward to support different national or organisational FHIR implementation guides without touching the core ingestion pipeline.
-
-**How it works:**
-
-```
-Lookup: get_schema("Patient", "uk_core")
-
-PROFILE_CHAIN = ["uk_core", "base_r4"]
-
-Step 1: Check registry for ("Patient", "uk_core") → found → return UK Core Patient schema (22 col + NHS fields)
-Step 2: (not reached)
-
-Lookup: get_schema("Observation", "uk_core")
-
-Step 1: Check registry for ("Observation", "uk_core") → not found
-Step 2: Check registry for ("Observation", "base_r4") → found → return base R4 Observation schema
-```
-
-Each resource schema and extractor function is registered as a pair keyed by `(resource_type, profile)`. If a resource has no profile-specific override, the lookup automatically falls back to the next profile in the chain.
-
-**Source files:**
+The connector is one `LakeflowConnect` implementation. Each resource type is a table, and every table shares `RESOURCE_SCHEMA`.
 
 | File | Purpose |
 |---|---|
-| `fhir_types.py` | Shared Spark type building blocks (`CODING`, `CODEABLE_CONCEPT`, `REFERENCE`, etc.) and extractor helpers |
-| `fhir_profile_registry.py` | Registry implementation — `register` decorator, `get_schema`, `extract`, `PROFILE_CHAIN` |
-| `profiles/base_r4.py` | Base FHIR R4 schemas and extractors for all 14 resources, validated against [hl7.org/fhir/R4](https://hl7.org/fhir/R4/) |
-| `profiles/uk_core.py` | UK Core overrides — currently adds NHS number and UK extensions to Patient |
-| `fhir_schemas.py` | Public API — imports and re-exports `get_schema` and `FALLBACK_SCHEMA` |
-| `fhir_utils.py` | HTTP client, auth, bundle pagination, and profile-aware `extract_record` |
-| `fhir.py` | `LakeflowConnect` implementation — orchestrates ingestion |
+| `fhir.py` | `LakeflowConnect` implementation: table listing, REST and bulk reads, cursors, deletes |
+| `fhir_bulk.py` | Bulk Data `$export` client: kick-off, polling, NDJSON download, error handling |
+| `fhir_utils.py` | `RESOURCE_SCHEMA`, HTTP client with retries, SMART auth, bundle pagination, `extract_record` |
+| `fhir_constants.py` | Default resource types, retry and timeout settings, history overlap, bulk limits |
+| `connector_spec.yaml` | Connection parameters and the `externalOptionsAllowList` |
+
+`_generated_fhir_python_source.py` is produced from these modules by `tools/scripts/merge_python_source.py fhir`. Edit the source modules, not the generated file.
 
 ### Extending the Connector
 
-#### Adding a new FHIR resource type
-
-1. Open `profiles/base_r4.py`
-2. Add a schema constant and extractor function decorated with `@register("NewResource", "base_r4", schema)`
-3. The resource is automatically available in all pipelines via the `resource_types` table option
-
-No changes needed to `fhir.py`, `fhir_schemas.py`, or any other file.
-
-#### Adding a new national profile (e.g. AU Core, US Core)
-
-1. Create `profiles/au_core.py` with overrides only for resources that differ from base R4:
-
-```python
-from databricks.labs.community_connector.sources.fhir.fhir_profile_registry import register
-from databricks.labs.community_connector.sources.fhir.profiles.base_r4 import _patient as _base_patient, _PATIENT_SCHEMA
-
-# Only override resources where AU Core differs from base R4
-@register("Patient", "au_core", _AU_PATIENT_SCHEMA)
-def _patient_au(r: dict) -> dict:
-    result = _base_patient(r)
-    # add AU-specific fields...
-    return result
-```
-
-2. Add `"au_core"` to `PROFILE_CHAIN` in `fhir_profile_registry.py`:
-
-```python
-PROFILE_CHAIN: list = ["au_core", "uk_core", "base_r4"]
-```
-
-3. Import `au_core` in `fhir_schemas.py` to trigger registration.
-
-Resources not overridden in `au_core.py` will automatically fall back to `uk_core`, then `base_r4`. You only need to define what actually differs.
+To ingest another FHIR R4 resource type, add its name to `resource_types`. No code change is needed, because every type uses the same schema. The server must support that type's search (and, for `track_deletes`, its `_history`).
 
 ---
 
@@ -843,7 +652,7 @@ If your pipeline run fails with one of:
 - `AttributeError: type object 'VariantVal' has no attribute 'parseJson'`
 - `java.lang.RuntimeException: Not implemented. VariantType`
 - `MALFORMED_VARIANT` in `convert_variant`
-- `DATA_SOURCE_INVALID_RETURN_TYPE` referencing the `raw_json` or `extension` column
+- `DATA_SOURCE_INVALID_RETURN_TYPE` referencing the `resource` column
 - A schema-time error mentioning "no such data type exists" / variant
 
 …you are running on a runtime that predates PySpark 4.0 / VARIANT-in-DataSource support. Confirm with a one-cell notebook on the same compute:
@@ -856,9 +665,13 @@ print("dbr:", spark.conf.get("spark.databricks.clusterUsageTags.sparkVersion", "
 print("parseJson:", hasattr(VariantVal, "parseJson"))  # must be True
 ```
 
-As of 2026-10-21, `Not implemented. VariantType` reproduces only on **classic DBR 17.3 LTS** (and on the older runtimes in the superseded 2026-05-04 matrix). The connector writes `VariantType` successfully on DBR 18.2, DBR 19, serverless jobs, and all three serverless SDP configurations tested. See [Runtime Requirements → Compatibility matrix](#compatibility-matrix-empirical-2026-10-21) for the per-runtime evidence.
+As of 2026-10-21, `Not implemented. VariantType` reproduces only on **classic DBR 17.3 LTS**. The connector writes `VariantType` successfully on DBR 18.2, DBR 19, serverless jobs, and all three serverless SDP configurations tested. See [Runtime Requirements → Compatibility matrix](#compatibility-matrix-empirical-2026-10-21) for the per-runtime evidence.
 
-Recommended action: move to serverless SDP or DBR 18.2+. If you must stay on DBR 17.3 LTS, switch the schema to `StringType` per [StringType fallback](#stringtype-fallback-dbr-173-lts-only).
+Recommended action: move to serverless SDP or DBR 18.2+. DBR 17.3 LTS is not supported.
+
+### `track_deletes=true needs the server to support GET ... /_history`
+
+The connector raises this when `track_deletes=true` and the server rejects or does not implement type-level `GET [type]/_history` with `_since`. Epic is a known example. Leave `track_deletes` off for that server; upserts still work. Otherwise, check that the server supports history for the resource type.
 
 ### `invalid_grant` from token endpoint
 
@@ -904,5 +717,4 @@ FHIR resource type names are case-sensitive. Use exact casing: `Patient`, not `p
 
 - [FHIR R4 Specification](https://hl7.org/fhir/R4/)
 - [SMART on FHIR Backend Services](https://hl7.org/fhir/smart-app-launch/backend-services.html)
-- [UK Core FHIR R4 Implementation Guide](https://simplifier.net/guide/uk-core-implementation-guide-stu3-sequence)
 - [HAPI FHIR public test server](https://hapi.fhir.org/baseR4)
