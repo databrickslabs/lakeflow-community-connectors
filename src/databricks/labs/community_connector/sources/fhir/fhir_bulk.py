@@ -32,7 +32,6 @@ from databricks.labs.community_connector.sources.fhir.fhir_constants import (
     MAX_RETRIES,
     MAX_RETRY_AFTER,
     RETRIABLE_STATUS_CODES,
-    UNTYPED_BUCKET,
 )
 from databricks.labs.community_connector.sources.fhir.fhir_utils import (
     SmartAuthClient,
@@ -89,7 +88,7 @@ class BulkExportClient:
     ) -> tuple:
         """Run a full bulk export cycle: kick-off -> poll -> download -> cleanup.
 
-        Returns (transaction_time, {resource_type: [resource_dicts]}).
+        Returns (transaction_time, [(raw_ndjson_line, resource_dict), ...]).
         transaction_time is an ISO-8601 string suitable for use as a CDC cursor.
         For incremental_mode="full", transaction_time is None (caller should not
         advance the cursor).
@@ -249,28 +248,26 @@ class BulkExportClient:
             f"Bulk export timed out after {self._timeout}s. Status URL: {status_url}"
         )
 
-    def _download_and_parse(self, manifest: dict) -> dict:
-        """Download NDJSON files from the manifest and group records by type."""
+    def _download_and_parse(self, manifest: dict) -> list:
+        """Download the manifest's NDJSON files as (raw line, parsed resource) pairs.
+
+        The raw line is kept so the caller can store it verbatim: re-serialising
+        the parsed dict would round FHIR decimals to float64.
+        """
         # `is not False` rather than a get() default: an explicit JSON null must
         # keep auth on, not silently drop the bearer token from every download.
         requires_token = manifest.get("requiresAccessToken") is not False
-        resources: dict = {}
+        resources: list = []
 
         # `or []` rather than a get() default: a server may send an explicit
         # JSON null for these keys, and get(k, []) returns the stored None.
         for entry in manifest.get("output") or []:
-            rtype = entry.get("type") or UNTYPED_BUCKET
             url = entry.get("url")
             if not url:
                 continue
-            records = list(self._download_ndjson(url, requires_token))
-            resources.setdefault(rtype, []).extend(records)
-            logger.info(
-                "Downloaded %d %s resources from %s",
-                len(records),
-                rtype,
-                url,
-            )
+            lines = list(self._download_ndjson(url, requires_token))
+            resources.extend((line, json.loads(line)) for line in lines)
+            logger.info("Downloaded %d %s resources from %s", len(lines), entry.get("type"), url)
 
         # The spec puts error, warning and information OperationOutcomes in the
         # same "error" array. Only error/fatal issues mean resources are missing
@@ -284,7 +281,7 @@ class BulkExportClient:
             if not url:
                 continue
             try:
-                outcomes = list(self._download_ndjson(url, requires_token))
+                outcomes = [json.loads(line) for line in self._download_ndjson(url, requires_token)]
             except Exception as exc:
                 problems.append(f"error file {url} could not be downloaded: {exc}")
                 continue
@@ -324,7 +321,7 @@ class BulkExportClient:
         return resources
 
     def _download_ndjson(self, url: str, requires_access_token: bool = True):
-        """Download and parse an NDJSON file, yielding one dict per line.
+        """Download an NDJSON file, yielding each non-empty line as text.
 
         Handles three download patterns:
         1. Direct HTTP + bearer token (Epic, HAPI, InterSystems, etc.)
@@ -345,9 +342,7 @@ class BulkExportClient:
         send_auth = requires_access_token
 
         for _ in range(BULK_MAX_REDIRECTS + 1):
-            headers = (
-                auth_headers(self._auth_client, NDJSON) if send_auth else {"Accept": NDJSON}
-            )
+            headers = auth_headers(self._auth_client, NDJSON) if send_auth else {"Accept": NDJSON}
             resp = self._session.get(
                 current,
                 headers=headers,
@@ -375,9 +370,12 @@ class BulkExportClient:
                 raise RuntimeError(
                     f"NDJSON download failed (HTTP {resp.status_code}): {resp.text[:500]}"
                 )
-            for line in resp.iter_lines(decode_unicode=True):
+            # Split on bytes, then decode: NDJSON is UTF-8 by spec, and
+            # str-mode splitting would also break lines on U+2028/U+2029,
+            # which are legal inside JSON strings.
+            for line in resp.iter_lines():
                 if line:
-                    yield json.loads(line)
+                    yield line.decode("utf-8") if isinstance(line, bytes) else line
         finally:
             resp.close()
 

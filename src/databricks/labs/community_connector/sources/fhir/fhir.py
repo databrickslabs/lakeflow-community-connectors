@@ -1,7 +1,8 @@
 """FHIR R4 Lakeflow Community Connector.
 
 Implements LakeflowConnect to ingest FHIR R4 resources from any
-SMART-on-FHIR-compliant server into Databricks Delta tables.
+SMART-on-FHIR-compliant server. Each configured resource type is its own
+table, and every table shares one schema with the resource as a VARIANT.
 
 See fhir_api_doc.md for API details and design decisions.
 """
@@ -15,6 +16,7 @@ from typing import Iterator, Optional
 from pyspark.sql.types import StructType
 
 from databricks.labs.community_connector.interface import LakeflowConnect
+from databricks.labs.community_connector.sources.fhir.fhir_bulk import BulkExportClient
 from databricks.labs.community_connector.sources.fhir.fhir_constants import (
     BULK_EXPORT_TIMEOUT,
     BULK_POLL_INTERVAL,
@@ -24,11 +26,10 @@ from databricks.labs.community_connector.sources.fhir.fhir_constants import (
     DEFAULT_PAGE_SIZE,
     DEFAULT_RESOURCES,
     PAGE_DELAY,
-    UNTYPED_BUCKET,
+    PRIMARY_KEYS,
 )
-from databricks.labs.community_connector.sources.fhir.fhir_schemas import get_schema
-from databricks.labs.community_connector.sources.fhir.fhir_bulk import BulkExportClient
 from databricks.labs.community_connector.sources.fhir.fhir_utils import (
+    RESOURCE_SCHEMA,
     FhirHttpClient,
     build_auth_client,
     extract_record,
@@ -36,6 +37,8 @@ from databricks.labs.community_connector.sources.fhir.fhir_utils import (
 )
 
 logger = logging.getLogger(__name__)
+
+_UNSET = object()
 
 
 _TS_RE = re.compile(
@@ -123,7 +126,11 @@ def _float_option(options: dict, key: str, default: float, minimum: float = 0.0)
 
 
 class FhirLakeflowConnect(LakeflowConnect):
-    """LakeflowConnect implementation for FHIR R4 servers."""
+    """LakeflowConnect implementation for FHIR R4 servers.
+
+    One table per resource type named in `resource_types`. All tables share
+    RESOURCE_SCHEMA, so supporting another FHIR type needs no schema code.
+    """
 
     def __init__(self, options: dict[str, str]) -> None:
         super().__init__(options)
@@ -133,6 +140,7 @@ class FhirLakeflowConnect(LakeflowConnect):
 
         # Cap cursor at init time -- never chase data written after this trigger started.
         self._init_ts = datetime.now(timezone.utc).isoformat()
+        self._fhir_version = _UNSET
 
         resource_types_opt = options.get("resource_types", "").strip()
         self._resources = (
@@ -149,7 +157,7 @@ class FhirLakeflowConnect(LakeflowConnect):
         self._bulk_incremental_mode = options.get("bulk_incremental_mode", "since")
         # Servers differ on whether manifest transactionTime marks the start
         # or the completion of an export. A non-zero overlap re-reads a safe
-        # window; duplicates are absorbed by the upsert on `id`.
+        # window; duplicates are absorbed by the upsert on the primary key.
         self._bulk_overlap_seconds = _int_option(options, "bulk_overlap_seconds", 0, minimum=0)
         if self._bulk_enabled:
             if self._bulk_incremental_mode not in BULK_VALID_INCREMENTAL_MODES:
@@ -172,8 +180,7 @@ class FhirLakeflowConnect(LakeflowConnect):
 
     def get_table_schema(self, table_name: str, table_options: dict[str, str]) -> StructType:
         self._validate_table(table_name)
-        profile = table_options.get("profile", "uk_core")
-        return get_schema(table_name, profile=profile)
+        return RESOURCE_SCHEMA
 
     def read_table_metadata(self, table_name: str, table_options: dict[str, str]) -> dict:
         self._validate_table(table_name)
@@ -181,9 +188,9 @@ class FhirLakeflowConnect(LakeflowConnect):
             # A full export is a complete copy of the server's data, so ingest it
             # as a snapshot: resources deleted on the server leave the target.
             # As "cdc" they would be upserted forever and never removed.
-            return {"primary_keys": ["id"], "ingestion_type": "snapshot"}
+            return {"primary_keys": PRIMARY_KEYS, "ingestion_type": "snapshot"}
         return {
-            "primary_keys": ["id"],
+            "primary_keys": PRIMARY_KEYS,
             "cursor_field": CURSOR_FIELD,
             "ingestion_type": "cdc",
         }
@@ -191,42 +198,53 @@ class FhirLakeflowConnect(LakeflowConnect):
     def read_table(
         self, table_name: str, start_offset: dict, table_options: dict[str, str]
     ) -> tuple[Iterator[dict], dict]:
-        """Fetch FHIR resources with bundle pagination and _lastUpdated incremental sync.
+        """Fetch one resource type with bundle pagination and _lastUpdated incremental sync.
 
-        Uses max_records_per_batch admission control (always required for CDC tables).
-        Short-circuits when cursor >= _init_ts to prevent chasing live writes.
+        Uses max_records_per_batch admission control. Short-circuits when the
+        cursor reaches _init_ts so a trigger never chases live writes.
         When bulk_export_enabled=true, delegates to _read_table_bulk() instead.
         """
         self._validate_table(table_name)
-
         if self._bulk_enabled:
-            return self._read_table_bulk(table_name, start_offset, table_options)
+            return self._read_table_bulk(table_name, start_offset)
 
         since = start_offset.get("cursor") if start_offset else None
+        budget = _int_option(table_options, "max_records_per_batch", DEFAULT_MAX_RECORDS)
+        resources, cursor = self._read_type(table_name, since, budget, table_options)
+        if not resources or not cursor or cursor == since:
+            # Nothing new, or nothing a cursor can advance past (every resource
+            # lacks meta.lastUpdated): an unchanged offset ends the trigger.
+            return iter([]), start_offset or {}
+        return iter(self._records([(r, None) for r in resources])), {"cursor": cursor}
+
+    def _read_type(
+        self, resource_type: str, since: Optional[str], budget: int, table_options: dict
+    ) -> tuple[list[dict], Optional[str]]:
+        """Read one resource type from `since`; return (resources, cursor).
+
+        Truncates at `budget`, but never inside a run of equal lastUpdated
+        values: the next read asks for lastUpdated > cursor, so a tie left
+        behind the cut would never be fetched. The batch may therefore exceed
+        the budget by the size of the boundary tie.
+        """
         if since and _parse_ts(since) >= _parse_ts(self._init_ts):
-            return iter([]), start_offset
+            return [], since
 
         page_size = _int_option(table_options, "page_size", DEFAULT_PAGE_SIZE)
-        max_records = _int_option(table_options, "max_records_per_batch", DEFAULT_MAX_RECORDS)
         page_delay = _float_option(table_options, "page_delay", PAGE_DELAY)
-        profile = table_options.get("profile", "uk_core")
-
         params: dict[str, str] = {"_count": str(page_size), "_sort": "_lastUpdated"}
         if since:
             params["_lastUpdated"] = f"gt{since}"
 
-        # Truncate at max_records, but never inside a run of equal lastUpdated
-        # values: the next read asks for lastUpdated > cursor, so a tie left
-        # behind the cut would never be fetched. The batch may therefore exceed
-        # max_records by the size of the boundary tie.
-        records = []
-        boundary = None  # lastUpdated of the record that filled the batch
+        resources: list[dict] = []
+        boundary = None  # lastUpdated of the resource that filled the budget
         truncated = False
         out_of_order = False
         prev_dt = None
-        for resource in iter_bundle_pages(self._client, table_name, params, page_delay=page_delay):
-            record = extract_record(resource, table_name, profile=profile)
-            ts = record.get(CURSOR_FIELD)
+        for resource in iter_bundle_pages(
+            self._client, resource_type, params, page_delay=page_delay
+        ):
+            ts = _last_updated(resource)
             dt = _parse_ts(ts) if ts else None
             if boundary is not None and dt != boundary:
                 truncated = True
@@ -235,92 +253,60 @@ class FhirLakeflowConnect(LakeflowConnect):
                 if prev_dt is not None and dt < prev_dt:
                     out_of_order = True
                 prev_dt = dt
-            records.append(record)
-            if boundary is None and len(records) >= max_records:
+            resources.append(resource)
+            if boundary is None and len(resources) >= budget:
                 boundary = dt
                 if boundary is None:
-                    # No timestamp to extend a tie on; cut here as before.
+                    # No timestamp to extend a tie on; cut here.
                     truncated = True
                     break
 
         # A truncated batch is only safe if results arrive sorted: otherwise the
-        # cursor (max lastUpdated) jumps past records not yet fetched.
+        # cursor (max lastUpdated) jumps past resources not yet fetched.
         if truncated and out_of_order:
             raise RuntimeError(
-                f"FHIR server returned '{table_name}' results out of _lastUpdated order — "
+                f"FHIR server returned '{resource_type}' results out of _lastUpdated order — "
                 f"it appears to have ignored '_sort=_lastUpdated'. Truncating the batch at "
-                f"max_records_per_batch={max_records} would skip records permanently. "
+                f"max_records_per_batch would skip resources permanently. "
                 f"Raise max_records_per_batch above the resource count, or use bulk export."
             )
 
-        if not records:
-            return iter([]), start_offset or {}
+        stamps = [ts for ts in map(_last_updated, resources) if ts]
+        # Resources with a lastUpdated, none newer than `since`, mean the server
+        # ignored the filter. Resources with no lastUpdated (0..1 in the spec)
+        # are not evidence either way.
+        if since and stamps and all(_parse_ts(ts) <= _parse_ts(since) for ts in stamps):
+            raise RuntimeError(
+                f"FHIR server appears to have ignored the '_lastUpdated=gt{since}' filter — "
+                f"all {len(stamps)} '{resource_type}' resources with a lastUpdated are "
+                f"<= '{since}'. This server may not support the _lastUpdated search "
+                f"parameter. See README.md for server requirements."
+            )
 
-        # Detect if server ignored the _lastUpdated filter.
-        # Only raise if there are records with a datable lastUpdated AND none of them are
-        # newer than since — that combination is evidence the filter was ignored.
-        # Records with null lastUpdated are excluded from this check (cardinality 0..1 in spec).
-        if since:
-            has_datable = [r for r in records if r.get(CURSOR_FIELD)]
-            since_dt = _parse_ts(since)
-            newer = [r for r in has_datable if _parse_ts(r[CURSOR_FIELD]) > since_dt]
-            if has_datable and not newer:
-                raise RuntimeError(
-                    f"FHIR server appears to have ignored the '_lastUpdated=gt{since}' filter — "
-                    f"all {len(has_datable)} records with a lastUpdated for '{table_name}' have "
-                    f"lastUpdated <= '{since}'. "
-                    f"This server may not support the _lastUpdated search parameter. "
-                    f"See README.md for server requirements."
-                )
+        cursor = max(stamps, key=_parse_ts) if stamps else since
+        return resources, cursor
 
-        # Advance cursor to max lastUpdated across batch.
-        cursors = [r[CURSOR_FIELD] for r in records if r.get(CURSOR_FIELD)]
-        if not cursors:
-            return iter(records), start_offset or {}
+    def _read_table_bulk(self, table_name: str, start_offset: dict) -> tuple[Iterator[dict], dict]:
+        """Bulk export path: one $export, scoped to this table's type, per trigger.
 
-        last_cursor = max(cursors, key=_parse_ts)
-        end_offset = {"cursor": last_cursor}
-
-        if start_offset and start_offset == end_offset:
-            return iter([]), start_offset
-
-        return iter(records), end_offset
-
-    def _read_table_bulk(
-        self,
-        table_name: str,
-        start_offset: dict,
-        table_options: dict[str, str],
-    ) -> tuple[Iterator[dict], dict]:
-        """Bulk export path. Uses server transactionTime as the CDC cursor.
-
-        In "full" mode there is no server cursor, so the offset carries this
-        trigger's frozen `_init_ts` instead. That advances once per trigger —
-        enough for the rows to be written — and short-circuits on the second
-        call so Trigger.AvailableNow terminates. The next trigger is a new
-        process with a new `_init_ts`, so the export runs again. It advances
-        even when the export came back empty: leaving the offset alone there
-        makes the framework call again and run a second $export for the same
-        trigger (measured against HAPI).
-
-        No instance "already exported" flag is used: on a cache miss the
+        The offset carries `run_ts`, this process's frozen `_init_ts`, so a
+        later call in the same trigger short-circuits: a bulk $export is a whole
+        server-side job (hours on real EHRs; Epic enforces a 24h cooldown per
+        group), so a trigger must never run a second one just to find nothing
+        new. A new trigger is a new process with a new `_init_ts`, so it exports
+        again. No instance "already exported" flag is used: on a cache miss the
         framework replays a batch via readBetweenOffsets -> read_table, and a
         sticky flag would make that replay return nothing.
 
-        Note there is deliberately no per-batch record cap here. The bulk cursor
-        is the server's export snapshot instant, which already covers every
-        resource in the manifest, so truncating the batch while advancing the
-        cursor would drop the remainder permanently. A cap would have to
-        paginate within the manifest; until then the whole export is emitted.
-        """
-        profile = table_options.get("profile", "uk_core")
-        full_mode = self._bulk_incremental_mode == "full"
+        `run_ts` is stamped even when the export is empty or the cursor cannot
+        move. Leaving the offset unchanged makes the framework call again and
+        run a second $export for the same trigger (measured against HAPI).
 
-        # One export per trigger, in every mode. A bulk $export is a whole
-        # server-side job (hours on real EHRs, and Epic enforces a 24h cooldown
-        # per group), so the trigger must never run a second one just to discover
-        # there is nothing new. `run_ts` is this process's frozen `_init_ts`, so
-        # it matches only on a later call within the same trigger.
+        There is no per-batch record cap: the cursor is the export's snapshot
+        instant, which covers every resource in the manifest, so truncating
+        while advancing it would drop the remainder permanently.
+        """
+        full_mode = self._bulk_incremental_mode == "full"
         if start_offset and start_offset.get("run_ts") == self._init_ts:
             return iter([]), start_offset
 
@@ -334,52 +320,13 @@ class FhirLakeflowConnect(LakeflowConnect):
             # transactionTime so it always moves forward.
             since = self._widen_since(cursor)
 
-        transaction_time, resource_map = self._bulk_client.export(
+        transaction_time, exported = self._bulk_client.export(
             resource_types=[table_name],
             since=since,
             incremental_mode=self._bulk_incremental_mode,
         )
-
-        raw_resources = list(resource_map.get(table_name) or [])
-        # `_download_and_parse` buckets manifest entries with no "type" key under
-        # UNTYPED_BUCKET. The export was scoped to this one type via `_type`, so
-        # those rows are this table's data; merge them in rather than dropping a
-        # completed export. Only that bucket is adopted — a differently-typed
-        # bucket (e.g. OperationOutcome) must not be relabelled as this table.
-        untyped = resource_map.get(UNTYPED_BUCKET)
-        if untyped:
-            logger.warning(
-                "Bulk manifest for '%s' has %d entries with no resource type; "
-                "treating them as '%s'.",
-                table_name,
-                len(untyped),
-                table_name,
-            )
-            # De-duplicate on id: a server that reports the same file both with
-            # and without a "type" would otherwise emit each resource twice.
-            seen = {r.get("id") for r in raw_resources if r.get("id")}
-            raw_resources.extend(r for r in untyped if not r.get("id") or r["id"] not in seen)
-
-        for bucket, rows in resource_map.items():
-            if bucket not in (table_name, UNTYPED_BUCKET) and rows:
-                logger.warning(
-                    "Bulk manifest for '%s' also returned %d %r resources; ignoring them.",
-                    table_name,
-                    len(rows),
-                    bucket,
-                )
-
-        records = [extract_record(r, table_name, profile=profile) for r in raw_resources]
-
+        records = self._bulk_records(table_name, exported)
         if full_mode:
-            # `run_ts` is stamped even for an empty export. Returning
-            # `start_offset or {}` here would leave the offset unchanged, so the
-            # framework calls read_table again and the `run_ts` guard above --
-            # which is what limits a trigger to one export -- has nothing to
-            # match on, kicking off a second $export for the same trigger.
-            # Measured against HAPI: 2 jobs per trigger for a resource type with
-            # no instances. Advancing on empty costs nothing (no rows to write)
-            # and makes the second call short-circuit like the non-empty case.
             return iter(records), {"run_ts": self._init_ts}
 
         # Advance the cursor to the newest instant we can justify, never
@@ -389,24 +336,65 @@ class FhirLakeflowConnect(LakeflowConnect):
         cursor_value = _canonical_ts(transaction_time) if transaction_time else cursor
         if cursor_value and cursor and _parse_ts(cursor_value) < _parse_ts(cursor):
             logger.warning(
-                "Bulk export for '%s' reported transactionTime %s, which precedes "
-                "the stored cursor %s; keeping the stored cursor.",
-                table_name,
+                "Bulk export reported transactionTime %s, which precedes the stored "
+                "cursor %s; keeping the stored cursor.",
                 transaction_time,
                 cursor,
             )
             cursor_value = cursor
 
-        # `run_ts` carries this trigger's frozen `_init_ts`, so the offset always
-        # differs from the one we were handed and the batch is never discarded —
-        # even when the cursor itself could not move. It is also what terminates
-        # the trigger: the second call short-circuits above. Termination must not
-        # depend on the cursor changing, because an export whose transactionTime
-        # is stable (or textually re-spelled) would otherwise loop.
         end_offset = {"run_ts": self._init_ts}
         if cursor_value:
             end_offset["cursor"] = cursor_value
         return iter(records), end_offset
+
+    def _bulk_records(self, table_name: str, exported: list[tuple[str, dict]]) -> list[dict]:
+        """Turn (raw NDJSON line, parsed resource) pairs into table records.
+
+        The raw line becomes the VARIANT value, so FHIR decimals keep the
+        precision the server sent; a json.loads/json.dumps round-trip would
+        round them to float64. Each resource is typed by its own resourceType,
+        so manifest entries that omit "type" are still ingested; resources of
+        another type are dropped, and a resource listed twice (one file under
+        two entries) is kept once.
+        """
+        by_id: dict[str, tuple[str, dict]] = {}
+        ignored: dict[str, int] = {}
+        for raw, resource in exported:
+            resource_type = resource.get("resourceType")
+            if resource_type != table_name:
+                ignored[resource_type] = ignored.get(resource_type, 0) + 1
+                continue
+            by_id[resource.get("id")] = (raw, resource)
+        if ignored:
+            logger.warning(
+                "Bulk export for '%s' also returned other resource types; ignoring %s",
+                table_name,
+                ignored,
+            )
+        return self._records([(resource, raw) for raw, resource in by_id.values()])
+
+    def _records(self, pairs: list[tuple[dict, Optional[str]]]) -> list[dict]:
+        """Build table records from (resource, raw JSON text or None) pairs."""
+        fhir_version = self._server_fhir_version()
+        ingested_at = datetime.now(timezone.utc).isoformat()
+        return [
+            extract_record(resource, raw=raw, fhir_version=fhir_version, ingested_at=ingested_at)
+            for resource, raw in pairs
+        ]
+
+    def _server_fhir_version(self) -> Optional[str]:
+        """FHIR version from the server's CapabilityStatement, fetched once per instance."""
+        if self._fhir_version is _UNSET:
+            self._fhir_version = None
+            try:
+                resp = self._client.get("metadata")
+                if resp.status_code == 200:
+                    self._fhir_version = resp.json().get("fhirVersion")
+            except Exception as exc:  # pylint: disable=broad-except
+                # Informational column only; never fail a read over it.
+                logger.warning("Could not read fhirVersion from /metadata: %s", exc)
+        return self._fhir_version
 
     def _widen_since(self, cursor: Optional[str]) -> Optional[str]:
         """Rewind the `_since` sent to the server by bulk_overlap_seconds.
@@ -414,7 +402,7 @@ class FhirLakeflowConnect(LakeflowConnect):
         Servers differ on whether transactionTime marks the start or the end of
         an export, so a cursor taken from it can sit after resources that were
         written while the export ran. Widening only the query re-reads that
-        window; duplicates are absorbed by the upsert on `id`.
+        window; duplicates are absorbed by the upsert on the primary key.
         """
         if not cursor:
             return None
@@ -430,3 +418,7 @@ class FhirLakeflowConnect(LakeflowConnect):
             raise ValueError(
                 f"Resource type '{table_name}' is not configured. Configured: {self._resources}"
             )
+
+
+def _last_updated(resource: dict) -> Optional[str]:
+    return (resource.get("meta") or {}).get("lastUpdated")

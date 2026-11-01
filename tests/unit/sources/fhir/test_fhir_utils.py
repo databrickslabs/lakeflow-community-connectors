@@ -9,16 +9,16 @@ from databricks.labs.community_connector.source_simulator import (
     Simulator,
 )
 from databricks.labs.community_connector.sources.fhir.fhir_utils import (
-    SmartAuthClient,
+    RESOURCE_SCHEMA,
     FhirHttpClient,
-    iter_bundle_pages,
+    SmartAuthClient,
     extract_record,
+    iter_bundle_pages,
 )
 
 CONFIG_PATH = Path(__file__).parent / "configs" / "dev_config.json"
 _SIMULATOR_BASE_URL = "https://simulator-fhir.example.com/fhir"
 _FHIR_SPEC_DIR = Path(_sim_pkg.__file__).parent / "specs" / "fhir"
-
 
 
 def load_config():
@@ -66,97 +66,47 @@ def test_auth_none_returns_empty_token():
     assert auth.get_token() == ""
 
 
-def test_extract_record_common_fields():
+def test_extract_record_maps_resource_to_shared_schema():
     resource = {
         "resourceType": "Patient",
         "id": "p1",
         "meta": {"lastUpdated": "2024-01-15T10:30:00+00:00"},
+        "name": [{"family": "Ødegård"}],
     }
-    record = extract_record(resource, "Patient")
-    assert record["id"] == "p1"
-    assert record["resourceType"] == "Patient"
-    assert record["lastUpdated"] == "2024-01-15T10:30:00+00:00"
-    assert json.loads(record["raw_json"]) == resource
-
-
-def test_extract_record_missing_meta_returns_none_for_last_updated():
-    record = extract_record({"resourceType": "Patient", "id": "p2"}, "Patient")
-    assert record["lastUpdated"] is None
-
-
-def test_extract_record_patient_typed_fields():
-    resource = {
-        "resourceType": "Patient",
-        "id": "p3",
-        "meta": {"lastUpdated": "2024-01-01T00:00:00+00:00"},
-        "gender": "female",
-        "birthDate": "1985-03-12",
-        "active": True,
-        "name": [{"text": "Jane Doe", "family": "Doe", "given": ["Jane"]}],
+    record = extract_record(resource, fhir_version="4.0.1", ingested_at="2024-01-16T00:00:00Z")
+    assert record == {
+        "resource_type": "Patient",
+        "resource_id": "p1",
+        "last_updated": "2024-01-15T10:30:00+00:00",
+        "resource": json.dumps(resource),
+        "fhir_version": "4.0.1",
+        "ingested_at": "2024-01-16T00:00:00Z",
     }
-    record = extract_record(resource, "Patient")
-    assert record["gender"] == "female"
-    assert record["birthDate"] == "1985-03-12"
-    assert record["active"] is True
-    # name is now an array of HumanName structs
-    assert record["name"][0]["family"] == "Doe"
-    assert record["name"][0]["text"] == "Jane Doe"
-    assert record["name"][0]["given"] == ["Jane"]
+    assert set(record) == set(RESOURCE_SCHEMA.fieldNames())
 
 
-def test_extract_record_observation_typed_fields():
-    resource = {
-        "resourceType": "Observation",
-        "id": "obs1",
-        "meta": {"lastUpdated": "2024-01-01T00:00:00+00:00"},
-        "status": "final",
-        "code": {
-            "coding": [{"system": "http://loinc.org", "code": "29463-7"}],
-            "text": "Body weight",
-        },
-        "subject": {"reference": "Patient/p1"},
-        "valueQuantity": {"value": 70.5, "unit": "kg"},
-    }
-    record = extract_record(resource, "Observation")
-    assert record["status"] == "final"
-    # code is now a CodeableConcept struct
-    assert record["code"]["text"] == "Body weight"
-    assert record["code"]["coding"][0]["code"] == "29463-7"
-    # subject is now a Reference struct
-    assert record["subject"]["reference"] == "Patient/p1"
-    # value_quantity is now a Quantity struct
-    assert record["value_quantity"]["value"] == 70.5
-    assert record["value_quantity"]["unit"] == "kg"
+def test_extract_record_missing_meta_gives_null_last_updated():
+    assert extract_record({"resourceType": "Patient", "id": "p1"})["last_updated"] is None
 
 
-def test_extract_record_unknown_resource_returns_common_only():
-    resource = {
-        "resourceType": "UnknownXYZ",
-        "id": "u1",
-        "meta": {"lastUpdated": "2024-01-01T00:00:00Z"},
-    }
-    record = extract_record(resource, "UnknownXYZ")
-    assert set(record.keys()) == {"id", "resourceType", "lastUpdated", "raw_json", "extension"}
+def test_extract_record_keeps_raw_text_verbatim():
+    """Raw NDJSON text is stored as-is: re-serialising would round decimals."""
+    raw = (
+        '{"resourceType":"Observation","id":"o1","valueQuantity":{"value":5.10000000000000000001}}'
+    )
+    record = extract_record(json.loads(raw), raw=raw)
+    assert record["resource"] == raw
+    assert json.loads(raw)["valueQuantity"]["value"] == 5.1  # what a round-trip would store
 
 
-def test_extract_record_absent_extension_is_none_not_json_null():
-    """Absent extension must be SQL NULL, not the JSON string "null".
+def test_resource_column_parses_as_variant():
+    """The framework's parse_value turns the JSON text into a VariantVal."""
+    from pyspark.sql.types import VariantVal
 
-    json.dumps(None) yields the string "null", which parse_json() turns into a
-    VARIANT null *value* rather than a NULL column — silently unqueryable.
-    """
-    record = extract_record({"resourceType": "Patient", "id": "p1"}, "Patient")
-    assert record["extension"] is None
+    from databricks.labs.community_connector.libs.utils import parse_value
 
-
-def test_extract_record_present_extension_is_json_string():
-    resource = {
-        "resourceType": "Patient",
-        "id": "p1",
-        "extension": [{"url": "http://example.org/ext", "valueString": "x"}],
-    }
-    record = extract_record(resource, "Patient")
-    assert json.loads(record["extension"])[0]["url"] == "http://example.org/ext"
+    row = parse_value(extract_record({"resourceType": "Patient", "id": "p1"}), RESOURCE_SCHEMA)
+    assert isinstance(row[RESOURCE_SCHEMA.fieldNames().index("resource")], VariantVal)
 
 
 # --- Integration tests (driven via the simulator) ---
@@ -165,6 +115,7 @@ def test_extract_record_present_extension_is_json_string():
 # the request actually serializes through ``requests``, the simulator
 # intercepts it, serves the Bundle from the corpus, and the client + helper
 # parse it. No live FHIR server needed.
+
 
 def test_fhir_client_get_patient_bundle(simulated_fhir_client):
     resp = simulated_fhir_client.get("Patient", params={"_count": "3"})
@@ -175,9 +126,7 @@ def test_fhir_client_get_patient_bundle(simulated_fhir_client):
 
 
 def test_iter_bundle_pages_yields_patient_resources(simulated_fhir_client):
-    resources = list(
-        iter_bundle_pages(simulated_fhir_client, "Patient", {"_count": "5"})
-    )
+    resources = list(iter_bundle_pages(simulated_fhir_client, "Patient", {"_count": "5"}))
     assert len(resources) > 0
     for r in resources:
         assert r["resourceType"] == "Patient"
@@ -420,11 +369,3 @@ def test_fhir_connector_auto_discovers_token_url_when_omitted():
 
     mock_discover.assert_called_once_with("https://fhir.example.com/R4")
     assert connector._client._auth_client._token_url == "https://auth.example.com/token"
-
-
-def test_extract_record_explicit_null_extension_is_none():
-    """An explicit JSON null must become SQL NULL, not the string "null"."""
-    record = extract_record(
-        {"resourceType": "Patient", "id": "p1", "extension": None}, "Patient"
-    )
-    assert record["extension"] is None

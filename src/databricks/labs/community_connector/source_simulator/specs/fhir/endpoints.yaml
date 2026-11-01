@@ -5,6 +5,11 @@
 # Empty entry array → connector terminates.
 
 endpoints:
+  # CapabilityStatement: the connector reads fhirVersion from it once per run.
+  - path: /fhir/metadata
+    method: GET
+    corpus: metadata
+    response: {pagination_style: none, single_entity: true}
   - path: /fhir/Patient
     method: GET
     handler: databricks.labs.community_connector.source_simulator.specs.fhir.handlers.patient_bundle:serve_patient_bundle

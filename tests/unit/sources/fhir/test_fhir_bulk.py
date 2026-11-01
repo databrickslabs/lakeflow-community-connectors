@@ -251,10 +251,25 @@ def test_download_ndjson_parses_lines():
     c._session = MagicMock()
     c._session.get.return_value = resp
 
-    records = list(c._download_ndjson("https://fhir.example.com/file.ndjson", True))
-    assert len(records) == 2
-    assert records[0]["id"] == "p1"
-    assert records[1]["id"] == "p2"
+    lines = list(c._download_ndjson("https://fhir.example.com/file.ndjson", True))
+    assert [json.loads(line)["id"] for line in lines] == ["p1", "p2"]
+
+
+def test_download_ndjson_keeps_u2028_inside_a_line():
+    """Byte-level splitting: U+2028 is legal inside a JSON string, not a line break."""
+    c = _make_client()
+    line = json.dumps(
+        {"resourceType": "Patient", "id": "p1", "text": "a\u2028b"}, ensure_ascii=False
+    )
+    resp = MagicMock()
+    resp.status_code = 200
+    resp.iter_lines.return_value = iter([line.encode("utf-8")])
+    c._session = MagicMock()
+    c._session.get.return_value = resp
+
+    (out,) = list(c._download_ndjson("https://fhir.example.com/file.ndjson", True))
+    assert out == line
+    assert json.loads(out)["text"] == "a\u2028b"
 
 
 def test_download_ndjson_no_auth_when_not_required():
@@ -302,7 +317,7 @@ def test_download_ndjson_handles_307_redirect():
 # ── download_and_parse tests ──────────────────────────────────────────────────
 
 
-def test_download_and_parse_groups_by_type():
+def test_download_and_parse_returns_raw_and_parsed_pairs():
     c = _make_client()
     manifest = {
         "requiresAccessToken": True,
@@ -315,18 +330,22 @@ def test_download_and_parse_groups_by_type():
 
     def fake_download(url, requires_token):
         if "patient" in url:
-            return iter([{"resourceType": "Patient", "id": "p1"}])
+            return iter(['{"resourceType": "Patient", "id": "p1"}'])
         return iter(
             [
-                {"resourceType": "Observation", "id": "o1"},
-                {"resourceType": "Observation", "id": "o2"},
+                '{"resourceType": "Observation", "id": "o1"}',
+                '{"resourceType": "Observation", "id": "o2"}',
             ]
         )
 
     c._download_ndjson = fake_download
     result = c._download_and_parse(manifest)
-    assert len(result["Patient"]) == 1
-    assert len(result["Observation"]) == 2
+    assert [(res["resourceType"], res["id"]) for _, res in result] == [
+        ("Patient", "p1"),
+        ("Observation", "o1"),
+        ("Observation", "o2"),
+    ]
+    assert result[0][0] == '{"resourceType": "Patient", "id": "p1"}'  # raw text kept
 
 
 def test_download_and_parse_empty_output():
@@ -334,7 +353,7 @@ def test_download_and_parse_empty_output():
     manifest = {"requiresAccessToken": True, "output": [], "error": []}
     c._download_ndjson = MagicMock()
     result = c._download_and_parse(manifest)
-    assert result == {}
+    assert result == []
 
 
 # ── export() end-to-end (mocked) ─────────────────────────────────────────────
@@ -350,12 +369,12 @@ def test_export_returns_transaction_time_and_records():
     }
     c._kick_off = MagicMock(return_value="https://fhir.example.com/status/1")
     c._poll_until_complete = MagicMock(return_value=manifest)
-    c._download_ndjson = lambda url, tok: iter([{"resourceType": "Patient", "id": "p1"}])
+    c._download_ndjson = lambda url, tok: iter(['{"resourceType": "Patient", "id": "p1"}'])
     c._cleanup = MagicMock()
 
     tx_time, resources = c.export(["Patient"], since=None, incremental_mode="since")
     assert tx_time == "2024-06-01T12:00:00Z"
-    assert len(resources["Patient"]) == 1
+    assert [res["id"] for _, res in resources] == ["p1"]
     c._cleanup.assert_called_once()
 
 
@@ -470,16 +489,10 @@ def test_download_and_parse_handles_explicit_json_nulls():
     """`{"output": null}` must not raise — get(k, []) returns the stored None."""
     c = _make_client()
     c._session = MagicMock()
-    assert c._download_and_parse({"output": None, "error": None}) == {}
+    assert c._download_and_parse({"output": None, "error": None}) == []
 
 
 # ── Regression tests: Retry-After clamping (F10) ──────────────────────────────
-
-
-
-
-
-
 
 
 # ── Regression tests: auth refresh across kick-off retries (F11) ──────────────

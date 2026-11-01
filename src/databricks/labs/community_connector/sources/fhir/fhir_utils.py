@@ -4,8 +4,9 @@ Key design decisions (from fhir_api_doc.md):
 - SmartAuthClient handles jwt_assertion, client_secret, and none auth types.
 - Token is cached and refreshed 30s before expiry (tokens are short-lived: ~300s).
 - iter_bundle_pages follows Bundle.link[relation=next] per FHIR R4 spec.
-- extract_record returns raw field values (no type conversion) -- framework handles coercion.
-- Absent struct fields return None, not {}.
+- extract_record maps a resource to one row of RESOURCE_SCHEMA, which every
+  resource-type table shares; the resource itself is a VARIANT, so no
+  per-type schema code exists.
 - Every HTTP call has a timeout (see fhir_constants) to prevent hangs on slow FHIR servers.
 """
 
@@ -20,6 +21,7 @@ from urllib.parse import urljoin
 
 import jwt  # pylint: disable=import-error
 import requests
+from pyspark.sql.types import StringType, StructField, StructType, TimestampType, VariantType
 
 from databricks.labs.community_connector.sources.fhir.fhir_constants import (
     HTTP_TIMEOUT,
@@ -30,9 +32,23 @@ from databricks.labs.community_connector.sources.fhir.fhir_constants import (
     RETRIABLE_STATUS_CODES,
     TOKEN_TIMEOUT,
 )
-from databricks.labs.community_connector.sources.fhir.fhir_profile_registry import extract
 
 logger = logging.getLogger(__name__)
+
+# Shared by every resource-type table. `resource` holds the whole FHIR
+# resource; the scalar columns exist because VARIANT has no min/max statistics,
+# so filters on them are what let Delta skip files. resource_type is constant
+# within a table but makes UNION ALL across tables self-describing.
+RESOURCE_SCHEMA = StructType(
+    [
+        StructField("resource_type", StringType(), nullable=False),
+        StructField("resource_id", StringType(), nullable=False),
+        StructField("last_updated", TimestampType(), nullable=True),
+        StructField("resource", VariantType(), nullable=True),
+        StructField("fhir_version", StringType(), nullable=True),
+        StructField("ingested_at", TimestampType(), nullable=True),
+    ]
+)
 
 _SUPPORTED_ALGORITHMS = {"RS384", "ES384"}
 _TOKEN_AUTH_TYPES = {"jwt_assertion", "client_secret"}
@@ -332,27 +348,26 @@ def iter_bundle_pages(
             )
 
 
-def extract_record(resource: dict, resource_type: str, profile: str = "uk_core") -> dict:
-    """Map a raw FHIR resource to hybrid schema format (typed fields + raw_json).
+def extract_record(
+    resource: dict,
+    raw: Optional[str] = None,
+    fhir_version: Optional[str] = None,
+    ingested_at: Optional[str] = None,
+) -> dict:
+    """Map a FHIR resource to a row of RESOURCE_SCHEMA.
 
-    Delegates to the profile registry for resource-specific extraction.
-    Returns raw field values — do NOT pre-convert types; framework handles coercion.
-    profile defaults to 'uk_core' (falls back to base_r4 for resources without UK Core override).
+    `raw` is the resource's JSON text as the server sent it (bulk NDJSON). When
+    given it becomes the VARIANT value unchanged, which keeps FHIR decimal
+    precision exactly; otherwise the parsed resource is re-serialised, which
+    rounds decimals to float64. Values are returned raw: the framework's
+    parse_value() converts JSON text via VariantVal.parseJson() and ISO strings
+    to timestamps.
     """
-    meta = resource.get("meta") or {}
-    record = {
-        "id": resource.get("id"),
-        "resourceType": resource.get("resourceType", resource_type),
-        "lastUpdated": meta.get("lastUpdated"),
-        # raw_json and extension are VariantType — return JSON strings here;
-        # the framework's parse_value() converts them via VariantVal.parseJson().
-        "raw_json": json.dumps(resource),
-        # `is not None` rather than a key check: json.dumps(None) yields the
-        # string "null", which parse_json turns into a VARIANT null *value* in a
-        # non-NULL column instead of a SQL NULL.
-        "extension": (
-            json.dumps(resource["extension"]) if resource.get("extension") is not None else None
-        ),
+    return {
+        "resource_type": resource.get("resourceType"),
+        "resource_id": resource.get("id"),
+        "last_updated": (resource.get("meta") or {}).get("lastUpdated"),
+        "resource": raw if raw is not None else json.dumps(resource),
+        "fhir_version": fhir_version,
+        "ingested_at": ingested_at,
     }
-    record.update(extract(resource, resource_type, profile))
-    return record

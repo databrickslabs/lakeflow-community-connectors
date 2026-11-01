@@ -2,7 +2,14 @@
 
 from unittest.mock import MagicMock, patch
 
+import json
+
 from databricks.labs.community_connector.sources.fhir.fhir import FhirLakeflowConnect
+
+
+def _pairs(by_type):
+    """Shape {type: [resources]} as BulkExportClient.export returns it."""
+    return [(json.dumps(r), r) for rs in by_type.values() for r in rs]
 
 
 def _make_options(**overrides):
@@ -31,15 +38,17 @@ def test_bulk_path_used_when_enabled(MockBulkClient):
     mock_instance = MagicMock()
     mock_instance.export.return_value = (
         "2024-06-01T00:00:00Z",
-        {
-            "Patient": [
-                {
-                    "resourceType": "Patient",
-                    "id": "p1",
-                    "meta": {"lastUpdated": "2024-06-01T00:00:00Z"},
-                },
-            ]
-        },
+        _pairs(
+            {
+                "Patient": [
+                    {
+                        "resourceType": "Patient",
+                        "id": "p1",
+                        "meta": {"lastUpdated": "2024-06-01T00:00:00Z"},
+                    },
+                ]
+            }
+        ),
     )
     MockBulkClient.return_value = mock_instance
 
@@ -49,7 +58,7 @@ def test_bulk_path_used_when_enabled(MockBulkClient):
     records, offset = c.read_table("Patient", None, {"profile": "uk_core"})
     record_list = list(records)
     assert len(record_list) == 1
-    assert record_list[0]["id"] == "p1"
+    assert record_list[0]["resource_id"] == "p1"
     mock_instance.export.assert_called_once()
 
 
@@ -61,15 +70,17 @@ def test_bulk_uses_transaction_time_as_cursor(MockBulkClient):
     mock_instance = MagicMock()
     mock_instance.export.return_value = (
         "2024-06-15T12:00:00Z",
-        {
-            "Patient": [
-                {
-                    "resourceType": "Patient",
-                    "id": "p1",
-                    "meta": {"lastUpdated": "2024-06-01T00:00:00Z"},
-                },
-            ]
-        },
+        _pairs(
+            {
+                "Patient": [
+                    {
+                        "resourceType": "Patient",
+                        "id": "p1",
+                        "meta": {"lastUpdated": "2024-06-01T00:00:00Z"},
+                    },
+                ]
+            }
+        ),
     )
     MockBulkClient.return_value = mock_instance
 
@@ -95,7 +106,7 @@ def test_bulk_short_circuits_when_cursor_ge_init_ts(MockBulkClient):
 @patch("databricks.labs.community_connector.sources.fhir.fhir.BulkExportClient")
 def test_bulk_returns_empty_when_no_records(MockBulkClient):
     mock_instance = MagicMock()
-    mock_instance.export.return_value = ("2024-06-01T00:00:00Z", {})
+    mock_instance.export.return_value = ("2024-06-01T00:00:00Z", [])
     MockBulkClient.return_value = mock_instance
 
     c = _make_connector(bulk_export_enabled="true")
@@ -114,15 +125,17 @@ def test_bulk_passes_incremental_mode(MockBulkClient):
     mock_instance = MagicMock()
     mock_instance.export.return_value = (
         "2024-06-01T00:00:00Z",
-        {
-            "Patient": [
-                {
-                    "resourceType": "Patient",
-                    "id": "p1",
-                    "meta": {"lastUpdated": "2024-06-01T00:00:00Z"},
-                },
-            ]
-        },
+        _pairs(
+            {
+                "Patient": [
+                    {
+                        "resourceType": "Patient",
+                        "id": "p1",
+                        "meta": {"lastUpdated": "2024-06-01T00:00:00Z"},
+                    },
+                ]
+            }
+        ),
     )
     MockBulkClient.return_value = mock_instance
 
@@ -169,7 +182,7 @@ def _patient(pid):
 
 def _mock_bulk(MockBulkClient, tx_time, resources):
     inst = MagicMock()
-    inst.export.return_value = (tx_time, resources)
+    inst.export.return_value = (tx_time, _pairs(resources))
     MockBulkClient.return_value = inst
     return inst
 
@@ -239,7 +252,7 @@ def test_bulk_emits_whole_export_no_truncation(MockBulkClient):
     records, offset = c.read_table("Patient", None, {"max_records_per_batch": "10"})
     emitted = list(records)
     assert len(emitted) == 50
-    assert {r["id"] for r in emitted} == {f"p{i}" for i in range(50)}
+    assert {r["resource_id"] for r in emitted} == {f"p{i}" for i in range(50)}
     assert offset["cursor"] == "2024-06-01T00:00:00Z"
 
 
@@ -248,9 +261,7 @@ def test_bulk_emits_whole_export_no_truncation(MockBulkClient):
 
 @patch("databricks.labs.community_connector.sources.fhir.fhir.BulkExportClient")
 def test_overlap_widens_since_sent_to_server(MockBulkClient):
-    inst = _mock_bulk(
-        MockBulkClient, "2024-06-01T12:30:00+00:00", {"Patient": [_patient("p1")]}
-    )
+    inst = _mock_bulk(MockBulkClient, "2024-06-01T12:30:00+00:00", {"Patient": [_patient("p1")]})
     c = _make_connector(bulk_export_enabled="true", bulk_overlap_seconds="600")
 
     c.read_table("Patient", {"cursor": "2024-06-01T12:00:00+00:00"}, {})
@@ -286,9 +297,7 @@ def test_overlap_terminates_when_transaction_time_repeats(MockBulkClient):
 
 @patch("databricks.labs.community_connector.sources.fhir.fhir.BulkExportClient")
 def test_zero_overlap_leaves_since_untouched(MockBulkClient):
-    inst = _mock_bulk(
-        MockBulkClient, "2024-06-01T12:30:00+00:00", {"Patient": [_patient("p1")]}
-    )
+    inst = _mock_bulk(MockBulkClient, "2024-06-01T12:30:00+00:00", {"Patient": [_patient("p1")]})
     c = _make_connector(bulk_export_enabled="true")
 
     c.read_table("Patient", {"cursor": "2024-06-01T12:00:00+00:00"}, {})
@@ -307,15 +316,15 @@ def test_naive_transaction_time_does_not_crash(MockBulkClient):
 
 
 @patch("databricks.labs.community_connector.sources.fhir.fhir.BulkExportClient")
-def test_untyped_manifest_bucket_is_not_dropped(MockBulkClient):
-    """A single-type export whose manifest omits "type" must still be ingested."""
+def test_untyped_manifest_entry_is_not_dropped(MockBulkClient):
+    """A manifest entry that omits "type" is typed by each resource's resourceType."""
     _mock_bulk(MockBulkClient, "2024-06-01T12:00:00+00:00", {"Unknown": [_patient("p1")]})
     c = _make_connector(bulk_export_enabled="true")
 
     records, offset = c.read_table("Patient", None, {})
     emitted = list(records)
     assert len(emitted) == 1
-    assert emitted[0]["id"] == "p1"
+    assert emitted[0]["resource_id"] == "p1"
     assert offset["cursor"] == "2024-06-01T12:00:00Z"
 
 
@@ -373,8 +382,8 @@ def test_empty_export_still_advances_cursor(MockBulkClient):
 
 
 @patch("databricks.labs.community_connector.sources.fhir.fhir.BulkExportClient")
-def test_wrongly_typed_bucket_is_not_relabelled(MockBulkClient):
-    """Only the untyped bucket may be adopted; a real other type must not be."""
+def test_unrequested_resource_type_is_dropped(MockBulkClient):
+    """Resources of a type not in resource_types must not reach the table."""
     _mock_bulk(
         MockBulkClient,
         "2024-06-01T12:00:00Z",
@@ -387,7 +396,7 @@ def test_wrongly_typed_bucket_is_not_relabelled(MockBulkClient):
 
 
 @patch("databricks.labs.community_connector.sources.fhir.fhir.BulkExportClient")
-def test_mixed_typed_and_untyped_buckets_are_merged(MockBulkClient):
+def test_mixed_typed_and_untyped_entries_are_merged(MockBulkClient):
     """Untyped entries alongside typed ones must not be silently dropped."""
     _mock_bulk(
         MockBulkClient,
@@ -397,7 +406,7 @@ def test_mixed_typed_and_untyped_buckets_are_merged(MockBulkClient):
     c = _make_connector(bulk_export_enabled="true")
 
     records, _ = c.read_table("Patient", None, {})
-    assert {r["id"] for r in records} == {"p1", "p2", "p3"}
+    assert {r["resource_id"] for r in records} == {"p1", "p2", "p3"}
 
 
 def test_non_finite_page_delay_rejected():
@@ -454,7 +463,7 @@ def test_cursor_never_regresses_on_earlier_transaction_time(MockBulkClient):
 
 
 @patch("databricks.labs.community_connector.sources.fhir.fhir.BulkExportClient")
-def test_untyped_bucket_merge_does_not_duplicate(MockBulkClient):
+def test_resource_listed_twice_is_emitted_once(MockBulkClient):
     """A server listing the same file both typed and untyped must not double-emit."""
     _mock_bulk(
         MockBulkClient,
@@ -463,16 +472,14 @@ def test_untyped_bucket_merge_does_not_duplicate(MockBulkClient):
     )
     c = _make_connector(bulk_export_enabled="true")
 
-    ids = [r["id"] for r in c.read_table("Patient", None, {})[0]]
+    ids = [r["resource_id"] for r in c.read_table("Patient", None, {})[0]]
     assert sorted(ids) == ["p1", "p2"]
 
 
 @patch("databricks.labs.community_connector.sources.fhir.fhir.BulkExportClient")
 def test_widen_since_normalises_non_utc_cursor_to_z(MockBulkClient):
     """A cursor with a non-UTC offset must still yield a "Z" instant."""
-    inst = _mock_bulk(
-        MockBulkClient, "2024-06-01T13:00:00Z", {"Patient": [_patient("p1")]}
-    )
+    inst = _mock_bulk(MockBulkClient, "2024-06-01T13:00:00Z", {"Patient": [_patient("p1")]})
     c = _make_connector(bulk_export_enabled="true", bulk_overlap_seconds="600")
 
     c.read_table("Patient", {"cursor": "2024-06-01T12:00:00+01:00"}, {})
@@ -549,3 +556,34 @@ def test_respelled_transaction_time_does_not_reexport(MockBulkClient):
     records2, _ = c.read_table("Patient", offset, {})
     assert list(records2) == []
     assert inst.export.call_count == 1
+
+
+# ── Per-type tables: export scoped to the table, raw text kept ───────────────
+
+
+@patch("databricks.labs.community_connector.sources.fhir.fhir.BulkExportClient")
+def test_export_is_scoped_to_the_tables_type(MockBulkClient):
+    obs = {"resourceType": "Observation", "id": "o1"}
+    inst = _mock_bulk(
+        MockBulkClient, "2024-06-01T00:00:00Z", {"Patient": [_patient("p1")], "Observation": [obs]}
+    )
+    c = _make_connector(bulk_export_enabled="true", resource_types="Patient,Observation")
+
+    records = list(c.read_table("Patient", None, {})[0])
+    assert inst.export.call_args.kwargs["resource_types"] == ["Patient"]
+    assert [(r["resource_type"], r["resource_id"]) for r in records] == [("Patient", "p1")]
+
+
+@patch("databricks.labs.community_connector.sources.fhir.fhir.BulkExportClient")
+def test_bulk_resource_column_is_raw_ndjson_text(MockBulkClient):
+    """The raw line is stored verbatim, so decimals keep full precision."""
+    raw = (
+        '{"resourceType":"Observation","id":"o1","valueQuantity":{"value":5.10000000000000000001}}'
+    )
+    inst = MagicMock()
+    inst.export.return_value = ("2024-06-01T00:00:00Z", [(raw, json.loads(raw))])
+    MockBulkClient.return_value = inst
+    c = _make_connector(bulk_export_enabled="true", resource_types="Observation")
+
+    (record,) = list(c.read_table("Observation", None, {})[0])
+    assert record["resource"] == raw

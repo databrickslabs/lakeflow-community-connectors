@@ -17,7 +17,8 @@ DEFAULT_RESOURCES = [
     "DocumentReference",
 ]
 
-CURSOR_FIELD = "lastUpdated"
+PRIMARY_KEYS = ["resource_id"]
+CURSOR_FIELD = "last_updated"
 
 RETRIABLE_STATUS_CODES = {429, 500, 502, 503}  # 502: Azure/AWS
 MAX_RETRIES = 5
@@ -37,5 +38,4 @@ BULK_NDJSON_TIMEOUT = 300  # seconds; NDJSON file download timeout (files can be
 BULK_VALID_SCOPES = {"system", "patient", "group"}
 BULK_VALID_INCREMENTAL_MODES = {"since", "typefilter", "full"}
 BULK_MAX_REDIRECTS = 5  # max hops when following NDJSON download redirects
-UNTYPED_BUCKET = "Unknown"  # key for manifest output entries that omit "type"
 BULK_MIN_POLL_SLEEP = 0.5  # seconds; below this the remaining budget is spent, so stop polling

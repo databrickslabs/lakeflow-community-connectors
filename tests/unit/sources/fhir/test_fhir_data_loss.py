@@ -5,6 +5,7 @@
 3. Full bulk mode was declared "cdc", so server-side deletes never left the target.
 """
 
+import json
 import logging
 from unittest.mock import patch
 
@@ -32,7 +33,7 @@ def _read(conn, resources, start_offset=None, max_records=2):
         records, offset = conn.read_table(
             "Patient", start_offset, {"max_records_per_batch": str(max_records)}
         )
-        return [r["id"] for r in records], offset
+        return [r["resource_id"] for r in records], offset
 
 
 # ── 1. REST timestamp ties ────────────────────────────────────────────────────
@@ -104,11 +105,13 @@ def _manifest_with_error_file():
     }
 
 
-def _fake_download(error_lines):
+def _fake_download(error_outcomes):
+    """Fake BulkExportClient._download_ndjson, which yields NDJSON text lines."""
+
     def fake(url, requires_token):
         if "err" in url:
-            return iter(error_lines)
-        return iter([{"resourceType": "Patient", "id": "p1"}])
+            return iter(json.dumps(o) for o in error_outcomes)
+        return iter([json.dumps({"resourceType": "Patient", "id": "p1"})])
 
     return fake
 
@@ -127,7 +130,7 @@ def test_warning_outcome_is_only_logged(severity, caplog):
     c._download_ndjson = _fake_download([_outcome(severity)])
     with caplog.at_level(logging.WARNING):
         result = c._download_and_parse(_manifest_with_error_file())
-    assert [r["id"] for r in result["Patient"]] == ["p1"]
+    assert [res["id"] for _, res in result] == ["p1"]
     assert "OperationOutcome" in caplog.text
 
 
@@ -137,7 +140,7 @@ def test_unreadable_error_file_fails_the_export():
     def fake(url, requires_token):
         if "err" in url:
             raise RuntimeError("HTTP 500")
-        return iter([{"resourceType": "Patient", "id": "p1"}])
+        return iter([json.dumps({"resourceType": "Patient", "id": "p1"})])
 
     c._download_ndjson = fake
     with pytest.raises(RuntimeError, match="could not be downloaded"):
@@ -149,7 +152,7 @@ def test_ignore_errors_accepts_partial_export(caplog):
     c._download_ndjson = _fake_download([_outcome("error")])
     with caplog.at_level(logging.WARNING):
         result = c._download_and_parse(_manifest_with_error_file())
-    assert [r["id"] for r in result["Patient"]] == ["p1"]
+    assert [res["id"] for _, res in result] == ["p1"]
     assert "bulk_export_ignore_errors" in caplog.text
 
 
@@ -187,7 +190,7 @@ def test_deleted_manifest_entries_are_reported(caplog):
 def test_full_bulk_mode_is_snapshot():
     c = _connector(bulk_export_enabled="true", bulk_incremental_mode="full")
     assert c.read_table_metadata("Patient", {}) == {
-        "primary_keys": ["id"],
+        "primary_keys": ["resource_id"],
         "ingestion_type": "snapshot",
     }
 
@@ -217,8 +220,8 @@ def test_snapshot_batch_read_returns_full_export(MockBulkClient):
     # The snapshot path calls read_table(table, None, ...) once per batch read.
     MockBulkClient.return_value.export.return_value = (
         None,
-        {"Patient": [_patient("p1", T1), _patient("p2", T2)]},
+        [(json.dumps(r), r) for r in (_patient("p1", T1), _patient("p2", T2))],
     )
     c = _connector(bulk_export_enabled="true", bulk_incremental_mode="full")
     records, _ = c.read_table("Patient", None, {})
-    assert [r["id"] for r in records] == ["p1", "p2"]
+    assert [r["resource_id"] for r in records] == ["p1", "p2"]

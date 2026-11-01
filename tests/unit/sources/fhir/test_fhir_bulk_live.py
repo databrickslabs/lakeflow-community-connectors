@@ -181,7 +181,7 @@ def test_export_returns_transaction_time_and_real_patients(base_url):
     # parse would crash mid-microbatch on the next trigger.
     assert _parse_ts(transaction_time).tzinfo is not None
 
-    patients = resources.get("Patient") or []
+    patients = [res for _, res in resources if res.get("resourceType") == "Patient"]
     assert patients, "export produced no Patient resources"
     assert all(p.get("resourceType") == "Patient" for p in patients)
     assert all(p.get("id") for p in patients)
@@ -221,7 +221,7 @@ def test_download_succeeds_without_token_despite_requires_access_token(live_expo
         "server no longer advertises requiresAccessToken: true; "
         "this test's premise needs rechecking"
     )
-    assert resources.get("Patient"), "download returned nothing despite HTTP 200"
+    assert resources, "download returned nothing despite HTTP 200"
 
     client = _bulk_client(load_config()["base_url"])
     headers = auth_headers(client._auth_client, "application/fhir+ndjson")
@@ -246,7 +246,7 @@ def test_downloaded_ndjson_preserves_non_ascii(base_url, live_export):
     property of the data, not of the decoder.
     """
     _, resources = live_export
-    patients = resources.get("Patient") or []
+    patients = [res for _, res in resources if res.get("resourceType") == "Patient"]
     non_ascii = [
         p
         for p in patients
