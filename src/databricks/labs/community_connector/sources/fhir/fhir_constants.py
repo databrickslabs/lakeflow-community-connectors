@@ -30,6 +30,10 @@ MAX_RETRY_AFTER = 300  # seconds; ceiling on a server-supplied Retry-After value
 
 DEFAULT_PAGE_SIZE = 100  # _count parameter sent to FHIR server
 DEFAULT_MAX_RECORDS = 1000  # max records per read_table() call
+# Each deletes read starts this far before the previous trigger began, so a
+# server clock trailing the driver cannot hide a deletion; re-reads are
+# idempotent deletes.
+HISTORY_OVERLAP_SECONDS = 300
 
 # Bulk export constants (HL7 Bulk Data Access IG)
 BULK_POLL_INTERVAL = 30  # seconds between status poll requests

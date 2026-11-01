@@ -318,22 +318,32 @@ def iter_bundle_pages(
     page_delay: float = PAGE_DELAY,
 ) -> Iterator[dict]:
     """Yield FHIR resources from a paginated search, following Bundle next links."""
-    resp = client.get(resource_type, params=params)
+    for entry in iter_bundle_entries(client, resource_type, params, page_delay):
+        resource = entry.get("resource")
+        if resource:
+            yield resource
+
+
+def iter_bundle_entries(
+    client: FhirHttpClient,
+    path: str,
+    params: Optional[dict] = None,
+    page_delay: float = PAGE_DELAY,
+) -> Iterator[dict]:
+    """Yield Bundle entries from a paginated search or history, following next links.
+
+    History entries matter beyond their resource: a DELETE entry has no
+    resource at all, only `request.method` and `request.url`.
+    """
+    resp = client.get(path, params=params)
     if resp.status_code != 200:
-        raise RuntimeError(
-            f"FHIR search failed for {resource_type} (HTTP {resp.status_code}): {resp.text}"
-        )
+        raise RuntimeError(f"FHIR search failed for {path} (HTTP {resp.status_code}): {resp.text}")
 
     while True:
         bundle = resp.json()
         if bundle.get("resourceType") != "Bundle":
-            raise RuntimeError(
-                f"Expected Bundle for {resource_type}, got: {bundle.get('resourceType')}"
-            )
-        for entry in bundle.get("entry", []):
-            resource = entry.get("resource")
-            if resource:
-                yield resource
+            raise RuntimeError(f"Expected Bundle for {path}, got: {bundle.get('resourceType')}")
+        yield from bundle.get("entry", [])
 
         next_url = _next_link(bundle)
         if not next_url:
@@ -344,7 +354,7 @@ def iter_bundle_pages(
         resp = client.get_url(next_url)
         if resp.status_code != 200:
             raise RuntimeError(
-                f"FHIR pagination failed for {resource_type} (HTTP {resp.status_code}): {resp.text}"
+                f"FHIR pagination failed for {path} (HTTP {resp.status_code}): {resp.text}"
             )
 
 

@@ -154,6 +154,17 @@ connection:
         Procedure, MedicationRequest, DiagnosticReport, AllergyIntolerance,
         Immunization, Coverage, CarePlan, Goal, Device, DocumentReference.
 
+    - name: track_deletes
+      type: string
+      required: false
+      description: >
+        "true" to remove resources deleted on the server from the target tables
+        (ingestion_type cdc_with_deletes). Deletions are read from each type's
+        REST history (GET [type]/_history?_since=...), once per trigger, in both
+        REST and bulk modes; the server must support type-level history (HAPI
+        does; Epic does not). Not needed with bulk_incremental_mode "full", which
+        is ingested as a snapshot. Default: "false".
+
     # ── Bulk Data Export options (opt-in) ──────────────────────────────────────
     - name: bulk_export_enabled
       type: string
@@ -232,4 +243,4 @@ connection:
 # These table-specific options must be included in the externalOptionsAllowList
 # parameter of the UC connection to allow them to be passed through.
 # ============================================================================
-external_options_allowlist: "resource_types,page_size,max_records_per_batch,page_delay,bulk_export_enabled,bulk_export_scope,bulk_export_group_id,bulk_export_poll_interval,bulk_export_timeout,bulk_incremental_mode,bulk_overlap_seconds,bulk_export_ignore_errors"
+external_options_allowlist: "resource_types,page_size,max_records_per_batch,page_delay,bulk_export_enabled,bulk_export_scope,bulk_export_group_id,bulk_export_poll_interval,bulk_export_timeout,bulk_incremental_mode,bulk_overlap_seconds,bulk_export_ignore_errors,track_deletes"

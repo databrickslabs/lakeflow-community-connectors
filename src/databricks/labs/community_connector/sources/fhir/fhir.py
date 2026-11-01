@@ -25,6 +25,7 @@ from databricks.labs.community_connector.sources.fhir.fhir_constants import (
     DEFAULT_MAX_RECORDS,
     DEFAULT_PAGE_SIZE,
     DEFAULT_RESOURCES,
+    HISTORY_OVERLAP_SECONDS,
     PAGE_DELAY,
     PRIMARY_KEYS,
 )
@@ -33,6 +34,7 @@ from databricks.labs.community_connector.sources.fhir.fhir_utils import (
     FhirHttpClient,
     build_auth_client,
     extract_record,
+    iter_bundle_entries,
     iter_bundle_pages,
 )
 
@@ -153,6 +155,10 @@ class FhirLakeflowConnect(LakeflowConnect):
         # are assigned unconditionally so the cursor helpers work on any instance;
         # `_bulk_client` exists only when bulk mode is on, and `_read_table_bulk`
         # is reachable only through the `_bulk_enabled` guard in read_table.
+        # Deletes come from each type's REST _history (opt-in: not every
+        # server supports type-level history), in both REST and bulk modes.
+        self._track_deletes = options.get("track_deletes", "false").lower() == "true"
+
         self._bulk_enabled = options.get("bulk_export_enabled", "false").lower() == "true"
         self._bulk_incremental_mode = options.get("bulk_incremental_mode", "since")
         # Servers differ on whether manifest transactionTime marks the start
@@ -192,7 +198,7 @@ class FhirLakeflowConnect(LakeflowConnect):
         return {
             "primary_keys": PRIMARY_KEYS,
             "cursor_field": CURSOR_FIELD,
-            "ingestion_type": "cdc",
+            "ingestion_type": "cdc_with_deletes" if self._track_deletes else "cdc",
         }
 
     def read_table(
@@ -216,6 +222,82 @@ class FhirLakeflowConnect(LakeflowConnect):
             # lacks meta.lastUpdated): an unchanged offset ends the trigger.
             return iter([]), start_offset or {}
         return iter(self._records([(r, None) for r in resources])), {"cursor": cursor}
+
+    def read_table_deletes(
+        self, table_name: str, start_offset: dict, table_options: dict[str, str]
+    ) -> tuple[Iterator[dict], dict]:
+        """Read deletions of one resource type from GET [type]/_history (track_deletes=true).
+
+        Runs once per trigger (the `run_ts` guard, as in bulk mode): history is
+        newest-first, so it cannot be truncated safely and is read in full
+        from the cursor. The cursor is this trigger's start minus
+        HISTORY_OVERLAP_SECONDS, so the next trigger re-reads a small window
+        rather than trust the server's clock to match the driver's.
+
+        The first trigger reads nothing: its upsert stream loads current
+        state, in which deleted resources are already absent.
+        """
+        self._validate_table(table_name)
+        if start_offset and start_offset.get("run_ts") == self._init_ts:
+            return iter([]), start_offset
+
+        next_since = _parse_ts(self._init_ts) - timedelta(seconds=HISTORY_OVERLAP_SECONDS)
+        end_offset = {"cursor": _canonical_ts(next_since.isoformat()), "run_ts": self._init_ts}
+        since = start_offset.get("cursor") if start_offset else None
+        if not since:
+            return iter([]), end_offset
+        return iter(self._read_deletes(table_name, since, table_options)), end_offset
+
+    def _read_deletes(self, table_name: str, since: str, table_options: dict) -> list[dict]:
+        """Delete records for every resource whose newest history entry is a DELETE.
+
+        Some servers (HAPI, measured) give DELETE entries no timestamp. Because
+        history is newest-first, the closest newer entry's timestamp bounds the
+        deletion from above, so it is used as the delete's sequence value: it
+        is later than the resource's last version, so the delete wins the
+        merge. Deletions newer than every timestamped entry get the read time.
+        A resource re-created after its deletion is left alone.
+        """
+        params = {
+            "_since": since,
+            "_count": str(_int_option(table_options, "page_size", DEFAULT_PAGE_SIZE)),
+        }
+        page_delay = _float_option(table_options, "page_delay", PAGE_DELAY)
+        read_at = datetime.now(timezone.utc).isoformat()
+        newer = read_at
+        seen: set[str] = set()
+        deleted: list[tuple[str, str]] = []
+        try:
+            for entry in iter_bundle_entries(
+                self._client, f"{table_name}/_history", params, page_delay=page_delay
+            ):
+                resource = entry.get("resource") or {}
+                stamp = (entry.get("response") or {}).get("lastModified") or _last_updated(resource)
+                resource_id = resource.get("id") or _history_id(entry, table_name)
+                if resource_id and resource_id not in seen:
+                    seen.add(resource_id)
+                    if (entry.get("request") or {}).get("method") == "DELETE":
+                        deleted.append((resource_id, stamp or newer))
+                if stamp:
+                    newer = stamp
+        except RuntimeError as exc:
+            raise RuntimeError(
+                f"track_deletes=true needs the server to support GET {table_name}/_history "
+                f"with _since: {exc}"
+            ) from exc
+
+        fhir_version = self._server_fhir_version()
+        return [
+            {
+                "resource_type": table_name,
+                "resource_id": resource_id,
+                "last_updated": deleted_at,
+                "resource": None,
+                "fhir_version": fhir_version,
+                "ingested_at": read_at,
+            }
+            for resource_id, deleted_at in deleted
+        ]
 
     def _read_type(
         self, resource_type: str, since: Optional[str], budget: int, table_options: dict
@@ -422,3 +504,14 @@ class FhirLakeflowConnect(LakeflowConnect):
 
 def _last_updated(resource: dict) -> Optional[str]:
     return (resource.get("meta") or {}).get("lastUpdated")
+
+
+def _history_id(entry: dict, resource_type: str) -> Optional[str]:
+    """Resource id from a history entry's request.url ("Patient/1/_history/2") or fullUrl."""
+    for url in ((entry.get("request") or {}).get("url"), entry.get("fullUrl")):
+        parts = (url or "").split("/")
+        if resource_type in parts:
+            i = len(parts) - 1 - parts[::-1].index(resource_type)
+            if i + 1 < len(parts) and parts[i + 1]:
+                return parts[i + 1]
+    return None
