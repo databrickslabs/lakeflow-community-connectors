@@ -31,7 +31,10 @@ from databricks.labs.community_connector.sources.fhir.fhir import (
     _parse_ts,
 )
 from databricks.labs.community_connector.sources.fhir.fhir_bulk import BulkExportClient
-from databricks.labs.community_connector.sources.fhir.fhir_utils import SmartAuthClient
+from databricks.labs.community_connector.sources.fhir.fhir_utils import (
+    SmartAuthClient,
+    auth_headers,
+)
 
 CONFIG_PATH = Path(__file__).parent / "configs" / "dev_config.json"
 
@@ -220,7 +223,8 @@ def test_download_succeeds_without_token_despite_requires_access_token(live_expo
     )
     assert resources.get("Patient"), "download returned nothing despite HTTP 200"
 
-    headers = _bulk_client(load_config()["base_url"])._ndjson_auth_headers()
+    client = _bulk_client(load_config()["base_url"])
+    headers = auth_headers(client._auth_client, "application/fhir+ndjson")
     assert headers["Accept"] == "application/fhir+ndjson"
     assert "Authorization" not in headers, "sent a bearer header with no token"
 

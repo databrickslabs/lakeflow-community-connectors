@@ -2009,6 +2009,7 @@ def register_lakeflow_source(spark):
     logger = logging.getLogger(__name__)
 
     _SUPPORTED_ALGORITHMS = {"RS384", "ES384"}
+    _TOKEN_AUTH_TYPES = {"jwt_assertion", "client_secret"}
 
 
     def retry_after(resp: requests.Response, default: float, ceiling: Optional[float] = None) -> float:
@@ -2077,6 +2078,12 @@ def register_lakeflow_source(spark):
             self._access_token: Optional[str] = None
             self._expires_at: Optional[datetime] = None
 
+            # Fail at construction, not on the first HTTP call mid-pipeline.
+            if auth_type not in _TOKEN_AUTH_TYPES | {"none"}:
+                raise ValueError(
+                    f"Unsupported auth_type: {auth_type!r}. "
+                    f"Use 'jwt_assertion', 'client_secret', or 'none'."
+                )
             if auth_type == "jwt_assertion":
                 if private_key_algorithm not in _SUPPORTED_ALGORITHMS:
                     raise ValueError(
@@ -2099,14 +2106,9 @@ def register_lakeflow_source(spark):
             if self._auth_type == "jwt_assertion":
                 data = self._jwt_assertion_data()
                 post_kwargs: dict = {}
-            elif self._auth_type == "client_secret":
+            else:  # client_secret; "none" returns before reaching here
                 data = self._client_secret_data()
                 post_kwargs = {"auth": (self._client_id, self._client_secret)}
-            else:
-                raise ValueError(
-                    f"Unsupported auth_type: {self._auth_type!r}. "
-                    f"Use 'jwt_assertion', 'client_secret', or 'none'."
-                )
             resp = requests.post(
                 self._token_url,
                 data=data,
@@ -2194,24 +2196,48 @@ def register_lakeflow_source(spark):
         return token_endpoint
 
 
+    def build_auth_client(options: dict) -> SmartAuthClient:
+        """Build the SMART auth client from connection options.
+
+        Discovers the token endpoint from .well-known/smart-configuration when a
+        token-based auth_type is configured without an explicit token_url.
+        """
+        auth_type = options.get("auth_type", "none")
+        token_url = options.get("token_url", "").strip()
+        if not token_url and auth_type in _TOKEN_AUTH_TYPES:
+            token_url = discover_token_url(options["base_url"])
+        return SmartAuthClient(
+            token_url=token_url,
+            client_id=options.get("client_id", ""),
+            auth_type=auth_type,
+            private_key_pem=options.get("private_key_pem", ""),
+            client_secret=options.get("client_secret", ""),
+            scope=options.get("scope", ""),
+            kid=options.get("kid", ""),
+            private_key_algorithm=options.get("private_key_algorithm", "RS384"),
+        )
+
+
+    def auth_headers(auth_client: SmartAuthClient, accept: str = "application/fhir+json") -> dict:
+        """Request headers with a Bearer token when the auth client has one."""
+        headers = {"Accept": accept}
+        token = auth_client.get_token()
+        if token:
+            headers["Authorization"] = f"Bearer {token}"
+        return headers
+
+
     class FhirHttpClient:
         """HTTP client for FHIR R4 REST API with auth injection and retry logic.
 
         Retries on 429/500/503 with exponential backoff. Honors Retry-After on 429.
-        All requests have timeout=60 to prevent hangs.
+        Every request has a timeout (HTTP_TIMEOUT) to prevent hangs.
         """
 
         def __init__(self, base_url: str, auth_client: SmartAuthClient) -> None:
             self._base_url = base_url.rstrip("/") + "/"
             self._auth_client = auth_client
             self._session = requests.Session()
-
-        def _headers(self) -> dict:
-            token = self._auth_client.get_token()
-            h = {"Accept": "application/fhir+json"}
-            if token:
-                h["Authorization"] = f"Bearer {token}"
-            return h
 
         def get(self, resource_type: str, params: Optional[dict] = None) -> requests.Response:
             """Fetch a FHIR resource type with optional query parameters."""
@@ -2225,7 +2251,7 @@ def register_lakeflow_source(spark):
                 resp = self._session.get(
                     url,
                     params=params,
-                    headers=self._headers(),
+                    headers=auth_headers(self._auth_client),
                     timeout=HTTP_TIMEOUT,
                 )
                 if resp.status_code not in RETRIABLE_STATUS_CODES:
@@ -2247,11 +2273,9 @@ def register_lakeflow_source(spark):
         client: FhirHttpClient,
         resource_type: str,
         params: Optional[dict] = None,
-        max_records: Optional[int] = None,
         page_delay: float = PAGE_DELAY,
     ) -> Iterator[dict]:
         """Yield FHIR resources from a paginated search, following Bundle next links."""
-        count = 0
         resp = client.get(resource_type, params=params)
         if resp.status_code != 200:
             raise RuntimeError(
@@ -2268,9 +2292,6 @@ def register_lakeflow_source(spark):
                 resource = entry.get("resource")
                 if resource:
                     yield resource
-                    count += 1
-                    if max_records is not None and count >= max_records:
-                        return
 
             next_url = _next_link(bundle)
             if not next_url:
@@ -2283,17 +2304,6 @@ def register_lakeflow_source(spark):
                 raise RuntimeError(
                     f"FHIR pagination failed for {resource_type} (HTTP {resp.status_code}): {resp.text}"
                 )
-
-
-    def _safe(d, *keys, default=None):
-        """Safely navigate nested dicts. Returns default if any key is missing."""
-        for k in keys:
-            if not isinstance(d, dict):
-                return default
-            d = d.get(k)
-            if d is None:
-                return default
-        return d
 
 
     def extract_record(resource: dict, resource_type: str, profile: str = "uk_core") -> dict:
@@ -2327,6 +2337,8 @@ def register_lakeflow_source(spark):
     ########################################################
 
     logger = logging.getLogger(__name__)
+
+    NDJSON = "application/fhir+ndjson"
 
 
     class BulkExportClient:
@@ -2365,20 +2377,6 @@ def register_lakeflow_source(spark):
                 return f"{self._base_url}/Group/{safe_id}/$export"
             return f"{self._base_url}/$export"
 
-        def _auth_headers(self) -> dict:
-            token = self._auth_client.get_token()
-            h = {"Accept": "application/fhir+json"}
-            if token:
-                h["Authorization"] = f"Bearer {token}"
-            return h
-
-        def _ndjson_auth_headers(self) -> dict:
-            token = self._auth_client.get_token()
-            h = {"Accept": "application/fhir+ndjson"}
-            if token:
-                h["Authorization"] = f"Bearer {token}"
-            return h
-
         def export(
             self,
             resource_types: list,
@@ -2392,12 +2390,6 @@ def register_lakeflow_source(spark):
             For incremental_mode="full", transaction_time is None (caller should not
             advance the cursor).
             """
-            if incremental_mode not in BULK_VALID_INCREMENTAL_MODES:
-                raise ValueError(
-                    f"Invalid bulk_incremental_mode {incremental_mode!r}. "
-                    f"Use one of: {sorted(BULK_VALID_INCREMENTAL_MODES)}."
-                )
-
             # Captured before kick-off so it is never later than the export's own
             # snapshot point. Using the post-download clock would skip everything
             # written while the export ran.
@@ -2452,7 +2444,7 @@ def register_lakeflow_source(spark):
             for attempt in range(MAX_RETRIES):
                 # Re-fetch the token each attempt: the retry ladder spans up to
                 # ~155s, which can outlive a cached token's remaining lifetime.
-                headers = self._auth_headers()
+                headers = auth_headers(self._auth_client)
                 headers["Prefer"] = "respond-async"
                 resp = self._session.get(
                     url,
@@ -2515,7 +2507,7 @@ def register_lakeflow_source(spark):
             while time.time() < deadline:
                 resp = self._session.get(
                     status_url,
-                    headers=self._auth_headers(),
+                    headers=auth_headers(self._auth_client),
                     timeout=HTTP_TIMEOUT,
                 )
                 if resp.status_code == 200:
@@ -2650,7 +2642,7 @@ def register_lakeflow_source(spark):
 
             for _ in range(BULK_MAX_REDIRECTS + 1):
                 headers = (
-                    self._ndjson_auth_headers() if send_auth else {"Accept": "application/fhir+ndjson"}
+                    auth_headers(self._auth_client, NDJSON) if send_auth else {"Accept": NDJSON}
                 )
                 resp = self._session.get(
                     current,
@@ -2690,7 +2682,7 @@ def register_lakeflow_source(spark):
             try:
                 self._session.delete(
                     status_url,
-                    headers=self._auth_headers(),
+                    headers=auth_headers(self._auth_client),
                     timeout=HTTP_TIMEOUT,
                 )
             except Exception as exc:
@@ -2835,18 +2827,12 @@ def register_lakeflow_source(spark):
             print(f"  token_url  : {token_url}")
 
         # Step 2: Obtain an access token
+        try:
+            auth_client = build_auth_client({**config, "token_url": token_url})
+        except ValueError as exc:
+            _fail(str(exc))
         if auth_type != "none":
             print(f"\n[2/3] Requesting access token ({auth_type}) ...")
-            auth_client = SmartAuthClient(
-                token_url=token_url,
-                client_id=config.get("client_id", ""),
-                auth_type=auth_type,
-                private_key_pem=config.get("private_key_pem", ""),
-                client_secret=config.get("client_secret", ""),
-                scope=config.get("scope", ""),
-                kid=config.get("kid", ""),
-                private_key_algorithm=config.get("private_key_algorithm", "RS384"),
-            )
             try:
                 token = auth_client.get_token()
             except (RuntimeError, ValueError) as exc:
@@ -2854,9 +2840,6 @@ def register_lakeflow_source(spark):
             print(f"  access token obtained  ({len(token)} chars)")
         else:
             print("\n[2/3] auth_type=none — skipping token request.")
-            auth_client = SmartAuthClient(
-                token_url="", client_id="", auth_type="none",
-            )
 
         # Step 3: Hit the FHIR server metadata endpoint to confirm connectivity
         print("\n[3/3] Confirming FHIR server connectivity (GET /metadata) ...")
@@ -3004,22 +2987,7 @@ def register_lakeflow_source(spark):
         def __init__(self, options: dict[str, str]) -> None:
             super().__init__(options)
 
-            auth_type = options.get("auth_type", "none")
-            token_url = options.get("token_url", "").strip()
-
-            if not token_url and auth_type != "none":
-                token_url = discover_token_url(options["base_url"])
-
-            auth_client = SmartAuthClient(
-                token_url=token_url,
-                client_id=options.get("client_id", ""),
-                auth_type=auth_type,
-                private_key_pem=options.get("private_key_pem", ""),
-                client_secret=options.get("client_secret", ""),
-                scope=options.get("scope", ""),
-                kid=options.get("kid", ""),
-                private_key_algorithm=options.get("private_key_algorithm", "RS384"),
-            )
+            auth_client = build_auth_client(options)
             self._client = FhirHttpClient(base_url=options["base_url"], auth_client=auth_client)
 
             # Cap cursor at init time -- never chase data written after this trigger started.
@@ -3314,11 +3282,7 @@ def register_lakeflow_source(spark):
                 # otherwise reach _typeFilter verbatim and be corrupted there.
                 return _canonical_ts(cursor)
             shifted = _parse_ts(cursor) - timedelta(seconds=self._bulk_overlap_seconds)
-            # Always emit a UTC "Z" instant. Converting first matters: a cursor with
-            # a non-UTC offset would otherwise keep it, and in typefilter mode this
-            # value is embedded in a nested _typeFilter query where a URL-encoded
-            # "+" decodes back to a space and corrupts the date bound.
-            return shifted.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+            return _canonical_ts(shifted.isoformat())
 
         def _validate_table(self, table_name: str) -> None:
             if table_name not in self._resources:

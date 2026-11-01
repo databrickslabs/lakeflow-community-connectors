@@ -26,7 +26,6 @@ from databricks.labs.community_connector.sources.fhir.fhir_constants import (
     BULK_MIN_POLL_SLEEP,
     BULK_NDJSON_TIMEOUT,
     BULK_POLL_INTERVAL,
-    BULK_VALID_INCREMENTAL_MODES,
     BULK_VALID_SCOPES,
     HTTP_TIMEOUT,
     INITIAL_BACKOFF,
@@ -37,10 +36,13 @@ from databricks.labs.community_connector.sources.fhir.fhir_constants import (
 )
 from databricks.labs.community_connector.sources.fhir.fhir_utils import (
     SmartAuthClient,
+    auth_headers,
     retry_after as _retry_after,
 )
 
 logger = logging.getLogger(__name__)
+
+NDJSON = "application/fhir+ndjson"
 
 
 class BulkExportClient:
@@ -79,20 +81,6 @@ class BulkExportClient:
             return f"{self._base_url}/Group/{safe_id}/$export"
         return f"{self._base_url}/$export"
 
-    def _auth_headers(self) -> dict:
-        token = self._auth_client.get_token()
-        h = {"Accept": "application/fhir+json"}
-        if token:
-            h["Authorization"] = f"Bearer {token}"
-        return h
-
-    def _ndjson_auth_headers(self) -> dict:
-        token = self._auth_client.get_token()
-        h = {"Accept": "application/fhir+ndjson"}
-        if token:
-            h["Authorization"] = f"Bearer {token}"
-        return h
-
     def export(
         self,
         resource_types: list,
@@ -106,12 +94,6 @@ class BulkExportClient:
         For incremental_mode="full", transaction_time is None (caller should not
         advance the cursor).
         """
-        if incremental_mode not in BULK_VALID_INCREMENTAL_MODES:
-            raise ValueError(
-                f"Invalid bulk_incremental_mode {incremental_mode!r}. "
-                f"Use one of: {sorted(BULK_VALID_INCREMENTAL_MODES)}."
-            )
-
         # Captured before kick-off so it is never later than the export's own
         # snapshot point. Using the post-download clock would skip everything
         # written while the export ran.
@@ -166,7 +148,7 @@ class BulkExportClient:
         for attempt in range(MAX_RETRIES):
             # Re-fetch the token each attempt: the retry ladder spans up to
             # ~155s, which can outlive a cached token's remaining lifetime.
-            headers = self._auth_headers()
+            headers = auth_headers(self._auth_client)
             headers["Prefer"] = "respond-async"
             resp = self._session.get(
                 url,
@@ -229,7 +211,7 @@ class BulkExportClient:
         while time.time() < deadline:
             resp = self._session.get(
                 status_url,
-                headers=self._auth_headers(),
+                headers=auth_headers(self._auth_client),
                 timeout=HTTP_TIMEOUT,
             )
             if resp.status_code == 200:
@@ -364,7 +346,7 @@ class BulkExportClient:
 
         for _ in range(BULK_MAX_REDIRECTS + 1):
             headers = (
-                self._ndjson_auth_headers() if send_auth else {"Accept": "application/fhir+ndjson"}
+                auth_headers(self._auth_client, NDJSON) if send_auth else {"Accept": NDJSON}
             )
             resp = self._session.get(
                 current,
@@ -404,7 +386,7 @@ class BulkExportClient:
         try:
             self._session.delete(
                 status_url,
-                headers=self._auth_headers(),
+                headers=auth_headers(self._auth_client),
                 timeout=HTTP_TIMEOUT,
             )
         except Exception as exc:

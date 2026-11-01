@@ -322,13 +322,6 @@ def test_untyped_manifest_bucket_is_not_dropped(MockBulkClient):
 # ── Regression tests: attribute init and mode validation ──────────────────────
 
 
-def test_bulk_attrs_present_on_rest_instance():
-    """Bulk helpers must not AttributeError on a REST-mode connector."""
-    c = _make_connector()
-    assert c._bulk_incremental_mode == "since"
-    assert c._bulk_overlap_seconds == 0
-
-
 def test_invalid_incremental_mode_rejected_at_construction():
     import pytest
 

@@ -6,7 +6,7 @@ Key design decisions (from fhir_api_doc.md):
 - iter_bundle_pages follows Bundle.link[relation=next] per FHIR R4 spec.
 - extract_record returns raw field values (no type conversion) -- framework handles coercion.
 - Absent struct fields return None, not {}.
-- All HTTP calls have timeout=60 to prevent hangs on slow FHIR servers.
+- Every HTTP call has a timeout (see fhir_constants) to prevent hangs on slow FHIR servers.
 """
 
 import json
@@ -35,6 +35,7 @@ from databricks.labs.community_connector.sources.fhir.fhir_profile_registry impo
 logger = logging.getLogger(__name__)
 
 _SUPPORTED_ALGORITHMS = {"RS384", "ES384"}
+_TOKEN_AUTH_TYPES = {"jwt_assertion", "client_secret"}
 
 
 def retry_after(resp: requests.Response, default: float, ceiling: Optional[float] = None) -> float:
@@ -103,6 +104,12 @@ class SmartAuthClient:  # pylint: disable=too-few-public-methods,too-many-instan
         self._access_token: Optional[str] = None
         self._expires_at: Optional[datetime] = None
 
+        # Fail at construction, not on the first HTTP call mid-pipeline.
+        if auth_type not in _TOKEN_AUTH_TYPES | {"none"}:
+            raise ValueError(
+                f"Unsupported auth_type: {auth_type!r}. "
+                f"Use 'jwt_assertion', 'client_secret', or 'none'."
+            )
         if auth_type == "jwt_assertion":
             if private_key_algorithm not in _SUPPORTED_ALGORITHMS:
                 raise ValueError(
@@ -125,14 +132,9 @@ class SmartAuthClient:  # pylint: disable=too-few-public-methods,too-many-instan
         if self._auth_type == "jwt_assertion":
             data = self._jwt_assertion_data()
             post_kwargs: dict = {}
-        elif self._auth_type == "client_secret":
+        else:  # client_secret; "none" returns before reaching here
             data = self._client_secret_data()
             post_kwargs = {"auth": (self._client_id, self._client_secret)}
-        else:
-            raise ValueError(
-                f"Unsupported auth_type: {self._auth_type!r}. "
-                f"Use 'jwt_assertion', 'client_secret', or 'none'."
-            )
         resp = requests.post(
             self._token_url,
             data=data,
@@ -220,24 +222,48 @@ def discover_token_url(base_url: str) -> str:
     return token_endpoint
 
 
+def build_auth_client(options: dict) -> SmartAuthClient:
+    """Build the SMART auth client from connection options.
+
+    Discovers the token endpoint from .well-known/smart-configuration when a
+    token-based auth_type is configured without an explicit token_url.
+    """
+    auth_type = options.get("auth_type", "none")
+    token_url = options.get("token_url", "").strip()
+    if not token_url and auth_type in _TOKEN_AUTH_TYPES:
+        token_url = discover_token_url(options["base_url"])
+    return SmartAuthClient(
+        token_url=token_url,
+        client_id=options.get("client_id", ""),
+        auth_type=auth_type,
+        private_key_pem=options.get("private_key_pem", ""),
+        client_secret=options.get("client_secret", ""),
+        scope=options.get("scope", ""),
+        kid=options.get("kid", ""),
+        private_key_algorithm=options.get("private_key_algorithm", "RS384"),
+    )
+
+
+def auth_headers(auth_client: SmartAuthClient, accept: str = "application/fhir+json") -> dict:
+    """Request headers with a Bearer token when the auth client has one."""
+    headers = {"Accept": accept}
+    token = auth_client.get_token()
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    return headers
+
+
 class FhirHttpClient:
     """HTTP client for FHIR R4 REST API with auth injection and retry logic.
 
     Retries on 429/500/503 with exponential backoff. Honors Retry-After on 429.
-    All requests have timeout=60 to prevent hangs.
+    Every request has a timeout (HTTP_TIMEOUT) to prevent hangs.
     """
 
     def __init__(self, base_url: str, auth_client: SmartAuthClient) -> None:
         self._base_url = base_url.rstrip("/") + "/"
         self._auth_client = auth_client
         self._session = requests.Session()
-
-    def _headers(self) -> dict:
-        token = self._auth_client.get_token()
-        h = {"Accept": "application/fhir+json"}
-        if token:
-            h["Authorization"] = f"Bearer {token}"
-        return h
 
     def get(self, resource_type: str, params: Optional[dict] = None) -> requests.Response:
         """Fetch a FHIR resource type with optional query parameters."""
@@ -251,7 +277,7 @@ class FhirHttpClient:
             resp = self._session.get(
                 url,
                 params=params,
-                headers=self._headers(),
+                headers=auth_headers(self._auth_client),
                 timeout=HTTP_TIMEOUT,
             )
             if resp.status_code not in RETRIABLE_STATUS_CODES:
@@ -273,11 +299,9 @@ def iter_bundle_pages(
     client: FhirHttpClient,
     resource_type: str,
     params: Optional[dict] = None,
-    max_records: Optional[int] = None,
     page_delay: float = PAGE_DELAY,
 ) -> Iterator[dict]:
     """Yield FHIR resources from a paginated search, following Bundle next links."""
-    count = 0
     resp = client.get(resource_type, params=params)
     if resp.status_code != 200:
         raise RuntimeError(
@@ -294,9 +318,6 @@ def iter_bundle_pages(
             resource = entry.get("resource")
             if resource:
                 yield resource
-                count += 1
-                if max_records is not None and count >= max_records:
-                    return
 
         next_url = _next_link(bundle)
         if not next_url:
@@ -309,17 +330,6 @@ def iter_bundle_pages(
             raise RuntimeError(
                 f"FHIR pagination failed for {resource_type} (HTTP {resp.status_code}): {resp.text}"
             )
-
-
-def _safe(d, *keys, default=None):
-    """Safely navigate nested dicts. Returns default if any key is missing."""
-    for k in keys:
-        if not isinstance(d, dict):
-            return default
-        d = d.get(k)
-        if d is None:
-            return default
-    return d
 
 
 def extract_record(resource: dict, resource_type: str, profile: str = "uk_core") -> dict:

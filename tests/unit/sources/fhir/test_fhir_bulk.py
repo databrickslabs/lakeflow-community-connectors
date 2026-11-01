@@ -359,12 +359,6 @@ def test_export_returns_transaction_time_and_records():
     c._cleanup.assert_called_once()
 
 
-def test_export_invalid_incremental_mode_raises():
-    c = _make_client()
-    with pytest.raises(ValueError, match="Invalid bulk_incremental_mode"):
-        c.export(["Patient"], incremental_mode="invalid")
-
-
 # ── Cleanup tests ─────────────────────────────────────────────────────────────
 
 
@@ -482,29 +476,10 @@ def test_download_and_parse_handles_explicit_json_nulls():
 # ── Regression tests: Retry-After clamping (F10) ──────────────────────────────
 
 
-def test_retry_after_rejects_negative():
-    from databricks.labs.community_connector.sources.fhir.fhir_bulk import _retry_after
-
-    resp = MagicMock()
-    resp.headers = {"Retry-After": "-1"}
-    assert _retry_after(resp, 5.0) == 0.0
 
 
-def test_retry_after_clamped_to_ceiling():
-    from databricks.labs.community_connector.sources.fhir.fhir_bulk import _retry_after
-
-    resp = MagicMock()
-    resp.headers = {"Retry-After": "86400"}
-    assert _retry_after(resp, 5.0, ceiling=60.0) == 60.0
 
 
-def test_retry_after_rejects_non_finite_and_garbage():
-    from databricks.labs.community_connector.sources.fhir.fhir_bulk import _retry_after
-
-    for value in ("nan", "inf", "abc"):
-        resp = MagicMock()
-        resp.headers = {"Retry-After": value}
-        assert _retry_after(resp, 7.0) == 7.0
 
 
 # ── Regression tests: auth refresh across kick-off retries (F11) ──────────────
@@ -617,24 +592,20 @@ def test_download_and_parse_keeps_auth_when_requires_token_is_null():
     assert headers.get("Authorization") == "Bearer tok123"
 
 
-def test_retry_after_honours_large_value_when_no_ceiling():
-    """The REST path must not sleep LESS than a 429 asked for.
-
-    Capping the wait is what provokes a request storm, so the shared helper
-    defaults to no ceiling; callers with their own deadline pass one explicitly.
-    """
+@pytest.mark.parametrize(
+    "header, ceiling, expected",
+    [
+        ("-1", None, 0.0),  # negative: time.sleep would raise
+        ("nan", None, 7.0),  # non-finite: fall back to the default
+        ("inf", None, 7.0),
+        ("abc", None, 7.0),  # HTTP-date or garbage
+        ("600", None, 600.0),  # no ceiling: never sleep less than a 429 asked for
+        ("86400", 60.0, 60.0),  # bulk kick-off caps the wait so a hostile value cannot stall
+    ],
+)
+def test_retry_after(header, ceiling, expected):
     from databricks.labs.community_connector.sources.fhir.fhir_utils import retry_after
 
     resp = MagicMock()
-    resp.headers = {"Retry-After": "600"}
-    assert retry_after(resp, 5.0) == 600.0
-
-
-def test_retry_after_respects_explicit_ceiling():
-    """Bulk kick-off caps the wait so a hostile value cannot stall the run."""
-    from databricks.labs.community_connector.sources.fhir.fhir_constants import MAX_RETRY_AFTER
-    from databricks.labs.community_connector.sources.fhir.fhir_utils import retry_after
-
-    resp = MagicMock()
-    resp.headers = {"Retry-After": "86400"}
-    assert retry_after(resp, 5.0, ceiling=MAX_RETRY_AFTER) == MAX_RETRY_AFTER
+    resp.headers = {"Retry-After": header}
+    assert retry_after(resp, 7.0, ceiling=ceiling) == expected

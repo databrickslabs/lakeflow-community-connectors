@@ -30,8 +30,7 @@ from databricks.labs.community_connector.sources.fhir.fhir_schemas import get_sc
 from databricks.labs.community_connector.sources.fhir.fhir_bulk import BulkExportClient
 from databricks.labs.community_connector.sources.fhir.fhir_utils import (
     FhirHttpClient,
-    SmartAuthClient,
-    discover_token_url,
+    build_auth_client,
     extract_record,
     iter_bundle_pages,
 )
@@ -129,22 +128,7 @@ class FhirLakeflowConnect(LakeflowConnect):
     def __init__(self, options: dict[str, str]) -> None:
         super().__init__(options)
 
-        auth_type = options.get("auth_type", "none")
-        token_url = options.get("token_url", "").strip()
-
-        if not token_url and auth_type != "none":
-            token_url = discover_token_url(options["base_url"])
-
-        auth_client = SmartAuthClient(
-            token_url=token_url,
-            client_id=options.get("client_id", ""),
-            auth_type=auth_type,
-            private_key_pem=options.get("private_key_pem", ""),
-            client_secret=options.get("client_secret", ""),
-            scope=options.get("scope", ""),
-            kid=options.get("kid", ""),
-            private_key_algorithm=options.get("private_key_algorithm", "RS384"),
-        )
+        auth_client = build_auth_client(options)
         self._client = FhirHttpClient(base_url=options["base_url"], auth_client=auth_client)
 
         # Cap cursor at init time -- never chase data written after this trigger started.
@@ -439,11 +423,7 @@ class FhirLakeflowConnect(LakeflowConnect):
             # otherwise reach _typeFilter verbatim and be corrupted there.
             return _canonical_ts(cursor)
         shifted = _parse_ts(cursor) - timedelta(seconds=self._bulk_overlap_seconds)
-        # Always emit a UTC "Z" instant. Converting first matters: a cursor with
-        # a non-UTC offset would otherwise keep it, and in typefilter mode this
-        # value is embedded in a nested _typeFilter query where a URL-encoded
-        # "+" decodes back to a space and corrupts the date bound.
-        return shifted.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+        return _canonical_ts(shifted.isoformat())
 
     def _validate_table(self, table_name: str) -> None:
         if table_name not in self._resources:

@@ -176,19 +176,12 @@ def test_fhir_client_get_patient_bundle(simulated_fhir_client):
 
 def test_iter_bundle_pages_yields_patient_resources(simulated_fhir_client):
     resources = list(
-        iter_bundle_pages(simulated_fhir_client, "Patient", {"_count": "5"}, max_records=5)
+        iter_bundle_pages(simulated_fhir_client, "Patient", {"_count": "5"})
     )
     assert len(resources) > 0
     for r in resources:
         assert r["resourceType"] == "Patient"
         assert "id" in r
-
-
-def test_iter_bundle_pages_respects_max_records(simulated_fhir_client):
-    resources = list(
-        iter_bundle_pages(simulated_fhir_client, "Patient", {"_count": "10"}, max_records=3)
-    )
-    assert len(resources) <= 3
 
 
 def test_jwt_assertion_includes_kid_header():
@@ -236,65 +229,40 @@ def test_jwt_assertion_includes_nbf_claim():
 
 def test_jwt_assertion_raises_if_kid_missing():
     """kid is required for jwt_assertion per SMART spec — must raise if omitted."""
-    from unittest.mock import patch
-
     auth = SmartAuthClient(
         token_url="https://auth.example.com/token",
         client_id="my-client",
         auth_type="jwt_assertion",
         # kid intentionally omitted
     )
-    try:
+    with pytest.raises(ValueError, match="(?i)kid"):
         auth._jwt_assertion_data()
-        assert False, "Should have raised ValueError"
-    except ValueError as e:
-        assert "kid" in str(e).lower()
 
 
-def test_jwt_assertion_defaults_to_rs384():
-    """Default algorithm must be RS384 per SMART spec SHOULD guidance."""
+@pytest.mark.parametrize(
+    "configured, expected",
+    [(None, "RS384"), ("ES384", "ES384")],  # SMART: SHOULD default RS384, SHALL support ES384
+)
+def test_jwt_assertion_algorithm(configured, expected):
     from unittest.mock import patch
 
+    kwargs = {"private_key_algorithm": configured} if configured else {}
     auth = SmartAuthClient(
         token_url="https://auth.example.com/token",
         client_id="my-client",
         auth_type="jwt_assertion",
         kid="k1",
+        **kwargs,
     )
     with patch("databricks.labs.community_connector.sources.fhir.fhir_utils.jwt") as mock_jwt:
         mock_jwt.encode.return_value = "h.p.s"
         auth._jwt_assertion_data()
-    call_args = mock_jwt.encode.call_args
-    algorithm_used = call_args.kwargs.get("algorithm") or (
-        call_args.args[2] if len(call_args.args) > 2 else None
-    )
-    assert algorithm_used == "RS384", f"Expected RS384, got {algorithm_used}"
-
-
-def test_jwt_assertion_uses_configured_algorithm():
-    """Algorithm must be configurable to ES384 per SMART spec SHALL support requirement."""
-    from unittest.mock import patch
-
-    auth = SmartAuthClient(
-        token_url="https://auth.example.com/token",
-        client_id="my-client",
-        auth_type="jwt_assertion",
-        kid="k1",
-        private_key_algorithm="ES384",
-    )
-    with patch("databricks.labs.community_connector.sources.fhir.fhir_utils.jwt") as mock_jwt:
-        mock_jwt.encode.return_value = "h.p.s"
-        auth._jwt_assertion_data()
-    call_args = mock_jwt.encode.call_args
-    algorithm_used = call_args.kwargs.get("algorithm") or (
-        call_args.args[2] if len(call_args.args) > 2 else None
-    )
-    assert algorithm_used == "ES384", f"Expected ES384, got {algorithm_used}"
+    assert mock_jwt.encode.call_args.kwargs["algorithm"] == expected
 
 
 def test_jwt_assertion_rejects_unsupported_algorithm():
     """Unsupported algorithm must raise ValueError at construction time."""
-    try:
+    with pytest.raises(ValueError, match="RS256.*RS384"):
         SmartAuthClient(
             token_url="https://auth.example.com/token",
             client_id="my-client",
@@ -302,10 +270,11 @@ def test_jwt_assertion_rejects_unsupported_algorithm():
             kid="k1",
             private_key_algorithm="RS256",
         )
-        assert False, "Should have raised ValueError"
-    except ValueError as e:
-        assert "RS256" in str(e)
-        assert "RS384" in str(e)
+
+
+def test_unknown_auth_type_rejected_at_construction():
+    with pytest.raises(ValueError, match="Unsupported auth_type"):
+        SmartAuthClient(token_url="", client_id="", auth_type="basic")
 
 
 def test_client_secret_uses_http_basic_auth():
@@ -411,11 +380,8 @@ def test_discover_token_url_raises_on_http_error():
         "databricks.labs.community_connector.sources.fhir.fhir_utils.requests.get",
         return_value=mock_resp,
     ):
-        try:
+        with pytest.raises(RuntimeError, match="404"):
             discover_token_url("https://fhir.example.com/R4")
-            assert False, "Should have raised RuntimeError"
-        except RuntimeError as e:
-            assert "404" in str(e)
 
 
 def test_discover_token_url_raises_if_token_endpoint_missing():
@@ -429,11 +395,8 @@ def test_discover_token_url_raises_if_token_endpoint_missing():
         "databricks.labs.community_connector.sources.fhir.fhir_utils.requests.get",
         return_value=mock_resp,
     ):
-        try:
+        with pytest.raises(RuntimeError, match="token_endpoint"):
             discover_token_url("https://fhir.example.com/R4")
-            assert False, "Should have raised RuntimeError"
-        except RuntimeError as e:
-            assert "token_endpoint" in str(e)
 
 
 def test_fhir_connector_auto_discovers_token_url_when_omitted():
@@ -442,7 +405,7 @@ def test_fhir_connector_auto_discovers_token_url_when_omitted():
     from databricks.labs.community_connector.sources.fhir.fhir import FhirLakeflowConnect
 
     with patch(
-        "databricks.labs.community_connector.sources.fhir.fhir.discover_token_url",
+        "databricks.labs.community_connector.sources.fhir.fhir_utils.discover_token_url",
         return_value="https://auth.example.com/token",
     ) as mock_discover:
         connector = FhirLakeflowConnect(
