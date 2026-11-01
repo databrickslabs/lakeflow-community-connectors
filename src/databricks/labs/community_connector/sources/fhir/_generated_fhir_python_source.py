@@ -2340,6 +2340,7 @@ def register_lakeflow_source(spark):
             group_id: Optional[str] = None,
             poll_interval: int = BULK_POLL_INTERVAL,
             timeout: int = BULK_EXPORT_TIMEOUT,
+            ignore_errors: bool = False,
         ) -> None:
             if scope not in BULK_VALID_SCOPES:
                 raise ValueError(
@@ -2353,6 +2354,7 @@ def register_lakeflow_source(spark):
             self._group_id = group_id
             self._poll_interval = poll_interval
             self._timeout = timeout
+            self._ignore_errors = ignore_errors
             self._session = requests.Session()
 
         def _export_url(self) -> str:
@@ -2574,15 +2576,54 @@ def register_lakeflow_source(spark):
                     url,
                 )
 
+            # The spec puts error, warning and information OperationOutcomes in the
+            # same "error" array. Only error/fatal issues mean resources are missing
+            # from the export; the caller would otherwise advance the cursor past
+            # them and they would never be re-read. An outcome with no severity, or
+            # an error file that cannot be read, is treated as an error: we cannot
+            # tell what was lost.
+            problems = []
             for entry in manifest.get("error") or []:
                 url = entry.get("url")
-                if url:
-                    try:
-                        errors = list(self._download_ndjson(url, requires_token))
-                        for err in errors:
-                            logger.warning("Bulk export OperationOutcome: %s", json.dumps(err)[:300])
-                    except Exception as exc:
-                        logger.warning("Failed to download error file %s: %s", url, exc)
+                if not url:
+                    continue
+                try:
+                    outcomes = list(self._download_ndjson(url, requires_token))
+                except Exception as exc:
+                    problems.append(f"error file {url} could not be downloaded: {exc}")
+                    continue
+                for outcome in outcomes:
+                    severities = {
+                        (issue.get("severity") or "").lower() for issue in outcome.get("issue") or []
+                    }
+                    text = json.dumps(outcome)[:300]
+                    if not severities or severities - {"warning", "information"}:
+                        problems.append(text)
+                    else:
+                        logger.warning("Bulk export OperationOutcome: %s", text)
+
+            if problems:
+                if not self._ignore_errors:
+                    raise RuntimeError(
+                        f"Bulk export reported {len(problems)} error(s), so the export is "
+                        f"incomplete. The cursor is not advanced; the next trigger retries. "
+                        f"Set bulk_export_ignore_errors=true to accept partial exports. "
+                        f"First error: {problems[0]}"
+                    )
+                for problem in problems:
+                    logger.warning("Bulk export error ignored (bulk_export_ignore_errors): %s", problem)
+
+            # Deletions reported by a _since export (Bulk Data v2 "deleted" array) are
+            # not applied: the tables are upsert-only outside full mode. Say so rather
+            # than drop them silently.
+            deleted = manifest.get("deleted") or []
+            if deleted:
+                logger.warning(
+                    "Bulk export manifest lists %d file(s) of deleted resources. Deletes are "
+                    "not applied in incremental bulk modes, so those rows stay in the target "
+                    "table. Use bulk_incremental_mode=full to propagate deletes.",
+                    len(deleted),
+                )
 
             return resources
 
@@ -3014,6 +3055,7 @@ def register_lakeflow_source(spark):
                     group_id=options.get("bulk_export_group_id") or None,
                     poll_interval=_int_option(options, "bulk_export_poll_interval", BULK_POLL_INTERVAL),
                     timeout=_int_option(options, "bulk_export_timeout", BULK_EXPORT_TIMEOUT),
+                    ignore_errors=options.get("bulk_export_ignore_errors", "false").lower() == "true",
                 )
 
         def list_tables(self) -> list[str]:
@@ -3026,6 +3068,11 @@ def register_lakeflow_source(spark):
 
         def read_table_metadata(self, table_name: str, table_options: dict[str, str]) -> dict:
             self._validate_table(table_name)
+            if self._bulk_enabled and self._bulk_incremental_mode == "full":
+                # A full export is a complete copy of the server's data, so ingest it
+                # as a snapshot: resources deleted on the server leave the target.
+                # As "cdc" they would be upserted forever and never removed.
+                return {"primary_keys": ["id"], "ingestion_type": "snapshot"}
             return {
                 "primary_keys": ["id"],
                 "cursor_field": CURSOR_FIELD,
@@ -3059,15 +3106,43 @@ def register_lakeflow_source(spark):
             if since:
                 params["_lastUpdated"] = f"gt{since}"
 
+            # Truncate at max_records, but never inside a run of equal lastUpdated
+            # values: the next read asks for lastUpdated > cursor, so a tie left
+            # behind the cut would never be fetched. The batch may therefore exceed
+            # max_records by the size of the boundary tie.
             records = []
-            for resource in iter_bundle_pages(
-                self._client,
-                table_name,
-                params,
-                max_records=max_records,
-                page_delay=page_delay,
-            ):
-                records.append(extract_record(resource, table_name, profile=profile))
+            boundary = None  # lastUpdated of the record that filled the batch
+            truncated = False
+            out_of_order = False
+            prev_dt = None
+            for resource in iter_bundle_pages(self._client, table_name, params, page_delay=page_delay):
+                record = extract_record(resource, table_name, profile=profile)
+                ts = record.get(CURSOR_FIELD)
+                dt = _parse_ts(ts) if ts else None
+                if boundary is not None and dt != boundary:
+                    truncated = True
+                    break
+                if dt is not None:
+                    if prev_dt is not None and dt < prev_dt:
+                        out_of_order = True
+                    prev_dt = dt
+                records.append(record)
+                if boundary is None and len(records) >= max_records:
+                    boundary = dt
+                    if boundary is None:
+                        # No timestamp to extend a tie on; cut here as before.
+                        truncated = True
+                        break
+
+            # A truncated batch is only safe if results arrive sorted: otherwise the
+            # cursor (max lastUpdated) jumps past records not yet fetched.
+            if truncated and out_of_order:
+                raise RuntimeError(
+                    f"FHIR server returned '{table_name}' results out of _lastUpdated order — "
+                    f"it appears to have ignored '_sort=_lastUpdated'. Truncating the batch at "
+                    f"max_records_per_batch={max_records} would skip records permanently. "
+                    f"Raise max_records_per_batch above the resource count, or use bulk export."
+                )
 
             if not records:
                 return iter([]), start_offset or {}

@@ -54,6 +54,7 @@ class BulkExportClient:
         group_id: Optional[str] = None,
         poll_interval: int = BULK_POLL_INTERVAL,
         timeout: int = BULK_EXPORT_TIMEOUT,
+        ignore_errors: bool = False,
     ) -> None:
         if scope not in BULK_VALID_SCOPES:
             raise ValueError(
@@ -67,6 +68,7 @@ class BulkExportClient:
         self._group_id = group_id
         self._poll_interval = poll_interval
         self._timeout = timeout
+        self._ignore_errors = ignore_errors
         self._session = requests.Session()
 
     def _export_url(self) -> str:
@@ -288,15 +290,54 @@ class BulkExportClient:
                 url,
             )
 
+        # The spec puts error, warning and information OperationOutcomes in the
+        # same "error" array. Only error/fatal issues mean resources are missing
+        # from the export; the caller would otherwise advance the cursor past
+        # them and they would never be re-read. An outcome with no severity, or
+        # an error file that cannot be read, is treated as an error: we cannot
+        # tell what was lost.
+        problems = []
         for entry in manifest.get("error") or []:
             url = entry.get("url")
-            if url:
-                try:
-                    errors = list(self._download_ndjson(url, requires_token))
-                    for err in errors:
-                        logger.warning("Bulk export OperationOutcome: %s", json.dumps(err)[:300])
-                except Exception as exc:
-                    logger.warning("Failed to download error file %s: %s", url, exc)
+            if not url:
+                continue
+            try:
+                outcomes = list(self._download_ndjson(url, requires_token))
+            except Exception as exc:
+                problems.append(f"error file {url} could not be downloaded: {exc}")
+                continue
+            for outcome in outcomes:
+                severities = {
+                    (issue.get("severity") or "").lower() for issue in outcome.get("issue") or []
+                }
+                text = json.dumps(outcome)[:300]
+                if not severities or severities - {"warning", "information"}:
+                    problems.append(text)
+                else:
+                    logger.warning("Bulk export OperationOutcome: %s", text)
+
+        if problems:
+            if not self._ignore_errors:
+                raise RuntimeError(
+                    f"Bulk export reported {len(problems)} error(s), so the export is "
+                    f"incomplete. The cursor is not advanced; the next trigger retries. "
+                    f"Set bulk_export_ignore_errors=true to accept partial exports. "
+                    f"First error: {problems[0]}"
+                )
+            for problem in problems:
+                logger.warning("Bulk export error ignored (bulk_export_ignore_errors): %s", problem)
+
+        # Deletions reported by a _since export (Bulk Data v2 "deleted" array) are
+        # not applied: the tables are upsert-only outside full mode. Say so rather
+        # than drop them silently.
+        deleted = manifest.get("deleted") or []
+        if deleted:
+            logger.warning(
+                "Bulk export manifest lists %d file(s) of deleted resources. Deletes are "
+                "not applied in incremental bulk modes, so those rows stay in the target "
+                "table. Use bulk_incremental_mode=full to propagate deletes.",
+                len(deleted),
+            )
 
         return resources
 

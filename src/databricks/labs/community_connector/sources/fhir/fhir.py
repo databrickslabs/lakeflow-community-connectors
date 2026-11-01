@@ -180,6 +180,7 @@ class FhirLakeflowConnect(LakeflowConnect):
                 group_id=options.get("bulk_export_group_id") or None,
                 poll_interval=_int_option(options, "bulk_export_poll_interval", BULK_POLL_INTERVAL),
                 timeout=_int_option(options, "bulk_export_timeout", BULK_EXPORT_TIMEOUT),
+                ignore_errors=options.get("bulk_export_ignore_errors", "false").lower() == "true",
             )
 
     def list_tables(self) -> list[str]:
@@ -192,6 +193,11 @@ class FhirLakeflowConnect(LakeflowConnect):
 
     def read_table_metadata(self, table_name: str, table_options: dict[str, str]) -> dict:
         self._validate_table(table_name)
+        if self._bulk_enabled and self._bulk_incremental_mode == "full":
+            # A full export is a complete copy of the server's data, so ingest it
+            # as a snapshot: resources deleted on the server leave the target.
+            # As "cdc" they would be upserted forever and never removed.
+            return {"primary_keys": ["id"], "ingestion_type": "snapshot"}
         return {
             "primary_keys": ["id"],
             "cursor_field": CURSOR_FIELD,
@@ -225,15 +231,43 @@ class FhirLakeflowConnect(LakeflowConnect):
         if since:
             params["_lastUpdated"] = f"gt{since}"
 
+        # Truncate at max_records, but never inside a run of equal lastUpdated
+        # values: the next read asks for lastUpdated > cursor, so a tie left
+        # behind the cut would never be fetched. The batch may therefore exceed
+        # max_records by the size of the boundary tie.
         records = []
-        for resource in iter_bundle_pages(
-            self._client,
-            table_name,
-            params,
-            max_records=max_records,
-            page_delay=page_delay,
-        ):
-            records.append(extract_record(resource, table_name, profile=profile))
+        boundary = None  # lastUpdated of the record that filled the batch
+        truncated = False
+        out_of_order = False
+        prev_dt = None
+        for resource in iter_bundle_pages(self._client, table_name, params, page_delay=page_delay):
+            record = extract_record(resource, table_name, profile=profile)
+            ts = record.get(CURSOR_FIELD)
+            dt = _parse_ts(ts) if ts else None
+            if boundary is not None and dt != boundary:
+                truncated = True
+                break
+            if dt is not None:
+                if prev_dt is not None and dt < prev_dt:
+                    out_of_order = True
+                prev_dt = dt
+            records.append(record)
+            if boundary is None and len(records) >= max_records:
+                boundary = dt
+                if boundary is None:
+                    # No timestamp to extend a tie on; cut here as before.
+                    truncated = True
+                    break
+
+        # A truncated batch is only safe if results arrive sorted: otherwise the
+        # cursor (max lastUpdated) jumps past records not yet fetched.
+        if truncated and out_of_order:
+            raise RuntimeError(
+                f"FHIR server returned '{table_name}' results out of _lastUpdated order — "
+                f"it appears to have ignored '_sort=_lastUpdated'. Truncating the batch at "
+                f"max_records_per_batch={max_records} would skip records permanently. "
+                f"Raise max_records_per_batch above the resource count, or use bulk export."
+            )
 
         if not records:
             return iter([]), start_offset or {}

@@ -75,9 +75,34 @@ Ingests clinical data from any FHIR R4-compliant server into Databricks Delta ta
 
 The connector schema declares `raw_json` and `extension` as native [VARIANT](https://docs.databricks.com/aws/en/sql/language-manual/data-types/variant-type) so downstream queries can use the `:` path syntax (e.g. `raw_json:name[0].family::STRING`). Native `VariantType` in the Spark Python Data Source API was added in Spark 4.0 / PySpark 4.0 ([SPARK-54337](https://issues.apache.org/jira/browse/SPARK-54337)).
 
-> ⚠️ **As of 2026-05-04, VariantType in a streaming Python DataSource is not functional on any verified Databricks runtime.** Spark and PySpark 4.0 / 4.1 expose the type and the `VariantVal.parseJson()` API, but the streaming-write JVM path raises `Not implemented. VariantType SQLSTATE: XXKST` before the first row lands. This blocks the connector's primary deployment target (Serverless SDP / DLT). **The supported deployment today is the [StringType fallback](#stringtype-fallback-currently-recommended).** This section documents the empirical state so you can re-evaluate as Databricks ships fixes.
+### Compatibility matrix (empirical, 2026-10-21)
 
-### Compatibility matrix (empirical, e2-demo-field-eng, 2026-05-04)
+Measured with a minimal pure-PySpark probe: one `Trigger.AvailableNow` streaming write of a `VARIANT` column into a Unity Catalog Delta table, then read back with `v:name[0].family::string`. Run as a Lakeflow Job (`spark_python_task`) on a classic single-user cluster or serverless jobs compute, then repeated inside serverless SDP pipelines (second table). Not yet verified through the connector framework's own reader classes.
+
+| Runtime | Simple stream reader (what the connector uses today) | Partitioned stream reader (`SupportsPartitionedStream`) |
+|---|---|---|
+| Classic DBR 17.3 LTS (Spark 4.0.0) | ❌ `Not implemented. VariantType` | ✅ |
+| Classic DBR 18.2 (Spark 4.1.0) | ✅ | ✅ |
+| Classic DBR 19 (Spark 4.2.0) | ✅ | ✅ |
+| Serverless jobs, `environment_version: "4"` (Spark 4.2.0 server) | ✅ | ✅ |
+
+**Inside serverless SDP pipelines** (same probe, each reader feeding its own `@dp.table` streaming table):
+
+| SDP configuration | PySpark client / Spark server | Simple reader + VARIANT | Partitioned reader (VARIANT *or* STRING) |
+|---|---|---|---|
+| Serverless, channel `CURRENT`, default environment | 4.1.0 / 4.1.0 | ✅ | ✅ |
+| Serverless, channel `PREVIEW`, default environment | 4.1.0 / 4.2.0 | ✅ | ❌ `ModuleNotFoundError: No module named 'pyspark.databricks.wsfs'` |
+| Serverless, channel `CURRENT`, `environment_version: "4"` | 4.0.0 / 4.1.0 | ✅ | ❌ same `ModuleNotFoundError` |
+
+The partitioned-reader failure is not VARIANT-related: the STRING control fails identically. It happens inside Databricks' Python planning worker (`pyspark/sql/worker/plan_data_source_read.py` → `worker_util.py` imports `pyspark.databricks.wsfs`) before any connector code runs, and only where the PySpark client and Spark server versions differ. **The simple reader with VARIANT works in all three SDP configurations**, so the connector as shipped works on serverless SDP today. Note that the framework's default pipeline config deploys to channel `PREVIEW` (`tools/community_connector/.../default_config.yaml`).
+
+On every runtime, values must be `VariantVal` objects (`VariantVal.parseJson(text)`); the `{"value": ..., "metadata": ...}` dict form fails. Decimal precision survives exactly: `5.10000000000000000001` reads back unchanged. The partitioned reader is the only path that works on all four runtimes, including the 17.3 LTS.
+
+The matrix below is the earlier 2026-05-04 measurement, kept for history.
+
+> ⚠️ **As of 2026-05-04, VariantType in a streaming Python DataSource was not functional on any verified Databricks runtime.** Spark and PySpark 4.0 / 4.1 expose the type and the `VariantVal.parseJson()` API, but the streaming-write JVM path raises `Not implemented. VariantType SQLSTATE: XXKST` before the first row lands. This blocks the connector's primary deployment target (Serverless SDP / DLT). **The supported deployment at that time was the [StringType fallback](#stringtype-fallback-dbr-173-lts-only).** This section documents the empirical state so you can re-evaluate as Databricks ships fixes.
+
+### Compatibility matrix (empirical, e2-demo-field-eng, 2026-05-04, superseded)
 
 | Runtime | Status | Failure mode (verbatim) |
 |---|---|---|
@@ -127,12 +152,12 @@ print("VARIANT streaming write:", "OK" if q.exception() is None else f"BROKEN: {
 
 If this probe still raises `Not implemented. VariantType` on the runtime you've chosen, your best option is the StringType fallback below.
 
-### StringType fallback (currently recommended)
+### StringType fallback (DBR 17.3 LTS only)
 
-Until the streaming-Variant gap is closed, deploy the connector with `raw_json` and `extension` as `StringType`. The connector already returns `json.dumps(...)` strings from its extractors — the only change needed is the schema. Edit `src/databricks/labs/community_connector/sources/fhir/fhir_profile_registry.py`:
+On a runtime where the probe above still fails (classic DBR 17.3 LTS as of 2026-10-21), deploy the connector with `raw_json` and `extension` as `StringType`. The connector already returns `json.dumps(...)` strings from its extractors — the only change needed is the schema. Edit `src/databricks/labs/community_connector/sources/fhir/fhir_profile_registry.py`:
 
 ```python
-# Before — VariantType (preferred long-term, blocked today by Databricks runtime)
+# Before — VariantType (default; works on DBR 18.2+ and serverless SDP)
 StructField("raw_json", VariantType(), nullable=True),
 StructField("extension", VariantType(), nullable=True),
 
@@ -402,7 +427,7 @@ Create a `pipeline_spec.json` file:
 }
 ```
 
-> ⚠️ **Before deploying, decide which schema mode you need** — see [Runtime Requirements](#runtime-requirements). VariantType for `raw_json` / `extension` is currently blocked by a streaming-Variant gap in the Databricks runtime; if you hit `Not implemented. VariantType SQLSTATE: XXKST` at pipeline run time, switch to the [StringType fallback](#stringtype-fallback-currently-recommended).
+> ⚠️ **Before deploying, decide which schema mode you need** — see [Runtime Requirements](#runtime-requirements). VariantType for `raw_json` / `extension` works on serverless SDP and DBR 18.2+ but not on classic DBR 17.3 LTS; if you hit `Not implemented. VariantType SQLSTATE: XXKST` at pipeline run time, switch to the [StringType fallback](#stringtype-fallback-dbr-173-lts-only).
 >
 > Do **not** add boolean keys like `"serverless": true` to this JSON — the CLI embeds the spec verbatim into a Python file and JSON booleans render as Python `NameError`. Set those via the CLI `--config` file or rely on bundled defaults. See [Runtime Requirements → CLI rendering caveat](#caveat--cli-rendering-of-pipeline_spec).
 
@@ -480,7 +505,7 @@ These are set per-table inside `table_configuration` in the pipeline spec.
 | `resource_types` | all 14 | Comma-separated list to limit which resource types are available. Example: `Patient,Observation,Condition` |
 | `profile` | `uk_core` | Schema profile to use for this table. One of: `uk_core` (default), `base_r4`. See [Profile System](#profile-system). |
 
-> **`max_records_per_batch` and data completeness:** If multiple records share the same `lastUpdated` timestamp and `max_records_per_batch` cuts mid-batch, records sharing the exact cursor value may be skipped on subsequent runs. Set `max_records_per_batch` generously (≥1000) for bulk-imported datasets.
+> **`max_records_per_batch` and timestamp ties:** The batch is never cut inside a run of records sharing the same `lastUpdated`, because the next read asks for `lastUpdated > cursor` and would skip the rest of the tie. A batch can therefore exceed `max_records_per_batch` by the size of that tie. If the server ignores `_sort=_lastUpdated` and a batch has to be truncated, the read fails rather than skip records; raise `max_records_per_batch` or use bulk export.
 
 ---
 
@@ -501,6 +526,7 @@ Bulk export is much more efficient for large initial loads, and it is the access
 | `bulk_export_poll_interval` | `30` | Seconds between status polls. The server's `Retry-After` takes precedence. |
 | `bulk_export_timeout` | `14400` | Max seconds to wait for a job (4 hours). |
 | `bulk_overlap_seconds` | `0` | Rewind the cursor by this many seconds after each export. See [transactionTime semantics](#transactiontime-semantics). |
+| `bulk_export_ignore_errors` | `false` | `true` accepts an export whose manifest reports error/fatal `OperationOutcome`s. See [Export errors](#export-errors). |
 
 Every option above must also appear in the connection's `externalOptionsAllowList`, which the shipped `connector_spec.yaml` already handles.
 
@@ -515,6 +541,19 @@ Every option above must also appear in the connection's `externalOptionsAllowLis
 `_type` is always sent. Per the Bulk Data IG a server *"SHALL return all supported resources"* when `_type` is omitted, and `_typeFilter` only constrains *"resource types referenced in the `_typeFilter` expression"* — so sending `_typeFilter` alone makes the server export every other resource type unfiltered. A server that rejects the two parameters together will fail at kick-off with a clear error rather than silently over-exporting.
 
 > ⚠️ **`full` mode re-exports everything on every trigger.** Each trigger runs a complete server-side export and re-writes all rows (deduplicated downstream by the upsert on `id`). Bulk exports are expensive and some servers rate-limit them hard — Epic enforces a **24-hour cooldown** between exports of the same group. Schedule `full` pipelines accordingly; prefer `since` or `typefilter` for routine incremental sync.
+
+### Deletes
+
+- **`full` mode** tables are ingested as `snapshot` (`apply_changes_from_snapshot`). Each export replaces the previous one, so a resource deleted on the server is removed from the target table.
+- **`since` / `typefilter` modes** (and REST mode) are upsert-only. Bulk Data v2 servers may list deleted resources in the manifest's `deleted` array; the connector logs a warning with the file count but does not apply them, so deleted rows remain. If you need deletes propagated, use `full` mode on a schedule the server tolerates.
+
+Switching an existing table between `full` and an incremental mode changes its ingestion type, which requires a full refresh of that table.
+
+### Export errors
+
+The manifest's `error` array mixes error, warning and information `OperationOutcome`s. Warnings and information are logged. An **error or fatal** outcome means some resources are missing from the export, so by default the read fails **without advancing the cursor**, and the next trigger runs the export again. An outcome with no severity, or an error file that cannot be downloaded, is treated the same way, because the connector cannot tell what was lost.
+
+If the server reports a persistent error you have decided to accept, set `bulk_export_ignore_errors=true`. Errors are then logged and the export is ingested as-is.
 
 ### One export job per resource type
 
@@ -817,9 +856,9 @@ print("dbr:", spark.conf.get("spark.databricks.clusterUsageTags.sparkVersion", "
 print("parseJson:", hasattr(VariantVal, "parseJson"))  # must be True
 ```
 
-As of 2026-05-04 there is **no Databricks runtime configuration on which `VariantType` in this connector's streaming pipeline writes successfully** — every option fails with the same JVM-side `Not implemented. VariantType SQLSTATE: XXKST` (or, on environments that lack PySpark 4.0, the earlier `AttributeError` for `parseJson`). See [Runtime Requirements → Compatibility matrix](#compatibility-matrix-empirical-e2-demo-field-eng-2026-05-04) for the per-runtime evidence.
+As of 2026-10-21, `Not implemented. VariantType` reproduces only on **classic DBR 17.3 LTS** (and on the older runtimes in the superseded 2026-05-04 matrix). The connector writes `VariantType` successfully on DBR 18.2, DBR 19, serverless jobs, and all three serverless SDP configurations tested. See [Runtime Requirements → Compatibility matrix](#compatibility-matrix-empirical-2026-10-21) for the per-runtime evidence.
 
-Recommended action today: switch the schema to `StringType` per [StringType fallback](#stringtype-fallback-currently-recommended). Re-evaluate VariantType after Databricks ships a streaming-Variant fix in the Python DataSource path.
+Recommended action: move to serverless SDP or DBR 18.2+. If you must stay on DBR 17.3 LTS, switch the schema to `StringType` per [StringType fallback](#stringtype-fallback-dbr-173-lts-only).
 
 ### `invalid_grant` from token endpoint
 
