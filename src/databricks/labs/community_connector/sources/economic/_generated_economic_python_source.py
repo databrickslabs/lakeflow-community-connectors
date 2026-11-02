@@ -760,11 +760,204 @@ def register_lakeflow_source(spark):
         ]
     )
 
+    ACTIVITIES_SCHEMA = StructType(
+        [
+            StructField("number", LongType(), False),
+            StructField("groupNumber", LongType(), True),
+            StructField("name", StringType(), True),
+            StructField("isBarred", BooleanType(), True),
+            StructField("inLieuCode", LongType(), True),
+            StructField("hideInSearch", BooleanType(), True),
+            StructField("cutoffDate", TimestampType(), True),
+            StructField("salesPriceBefore", DoubleType(), True),
+            StructField("salesPriceAfter", DoubleType(), True),
+            StructField("costPriceMarkupPercentage", DoubleType(), True),
+            StructField("objectVersion", StringType(), True),
+        ]
+    )
+
+    ACTIVITY_GROUPS_SCHEMA = StructType(
+        [
+            StructField("number", LongType(), False),
+            StructField("name", StringType(), True),
+            StructField("type", LongType(), True),
+            StructField("includeCostPriceInFinance", BooleanType(), True),
+            StructField("costAccountClosed", LongType(), True),
+            StructField("costAccountOngoing", LongType(), True),
+            StructField("costAccountOngoingType", LongType(), True),
+            StructField("costContraAccountOngoing", LongType(), True),
+            StructField("includeSalesPriceInFinance", BooleanType(), True),
+            StructField("salesAccountClosed", LongType(), True),
+            StructField("salesAccountOngoing", LongType(), True),
+            StructField("salesAccountOngoingType", LongType(), True),
+            StructField("salesContraAccountOngoing", LongType(), True),
+            StructField("objectVersion", StringType(), True),
+        ]
+    )
+
+    EMPLOYEE_GROUPS_SCHEMA = StructType(
+        [
+            StructField("number", LongType(), False),
+            StructField("name", StringType(), True),
+            StructField("objectVersion", StringType(), True),
+        ]
+    )
+
+    PROJECT_GROUPS_SCHEMA = StructType(
+        [
+            StructField("number", LongType(), False),
+            StructField("name", StringType(), True),
+            StructField("type", LongType(), True),
+            StructField("includeCostPriceInFinance", BooleanType(), True),
+            StructField("costAccountOngoingType", LongType(), True),
+            StructField("costAccountOngoing", LongType(), True),
+            StructField("costContraAccountOngoing", LongType(), True),
+            StructField("costAccountClosed", LongType(), True),
+            StructField("includeSalesPriceInFinance", BooleanType(), True),
+            StructField("salesAccountOngoingType", LongType(), True),
+            StructField("salesAccountOngoing", LongType(), True),
+            StructField("salesContraAccountOngoing", LongType(), True),
+            StructField("salesAccountClosed", LongType(), True),
+            StructField("objectVersion", StringType(), True),
+        ]
+    )
+
+    PROJECT_STATUSES_SCHEMA = StructType(
+        [
+            StructField("number", LongType(), False),
+            StructField("name", StringType(), True),
+            StructField("type", LongType(), True),
+            StructField("priority", LongType(), True),
+            StructField("objectVersion", StringType(), True),
+        ]
+    )
+
+    # ``from`` / ``to`` are the literal JSON keys (quote them in SQL).
+    MILEAGES_SCHEMA = StructType(
+        [
+            StructField("number", LongType(), False),
+            StructField("projectNumber", LongType(), True),
+            StructField("employeeNumber", LongType(), True),
+            StructField("date", TimestampType(), True),
+            StructField("distance", DoubleType(), True),
+            StructField("from", StringType(), True),
+            StructField("to", StringType(), True),
+            StructField("isApproved", BooleanType(), True),
+            StructField("objectVersion", StringType(), True),
+        ]
+    )
+
+    # ``cutOffDate`` is a plain ``date`` in the spec; live values carry a
+    # ``T00:00:00`` suffix, which the DateType parser accepts.
+    PROJECT_EMPLOYEES_SCHEMA = StructType(
+        [
+            StructField("number", LongType(), False),
+            StructField("groupNumber", LongType(), True),
+            StructField("name", StringType(), True),
+            StructField("isUser", BooleanType(), True),
+            StructField("userId", StringType(), True),
+            StructField("canApprove", BooleanType(), True),
+            StructField("employeeType", LongType(), True),
+            StructField("canInvoice", BooleanType(), True),
+            StructField("isBarred", BooleanType(), True),
+            StructField("address", StringType(), True),
+            StructField("city", StringType(), True),
+            StructField("zipCode", StringType(), True),
+            StructField("cutOffDate", DateType(), True),
+            StructField("salesPriceBefore", DoubleType(), True),
+            StructField("salesPriceAfter", DoubleType(), True),
+            StructField("costPriceBefore", DoubleType(), True),
+            StructField("costPriceAfter", DoubleType(), True),
+            StructField("objectVersion", StringType(), True),
+        ]
+    )
+
+    PROJECT_CUSTOMERS_SCHEMA = StructType(
+        [
+            StructField("number", LongType(), False),
+            StructField("name", StringType(), True),
+            StructField("objectVersion", StringType(), True),
+        ]
+    )
+
+    TIME_ENTRY_PRICES_SCHEMA = StructType(
+        [
+            StructField("number", LongType(), False),
+            StructField("costPrice", DoubleType(), True),
+            StructField("salesPrice", DoubleType(), True),
+        ]
+    )
+
+    COST_TYPES_SCHEMA = StructType(
+        [
+            StructField("number", LongType(), False),
+            StructField("name", StringType(), True),
+            StructField("costGroupNumber", LongType(), True),
+            # Fixed-width code; trailing spaces are kept exactly as returned.
+            StructField("vatCode", StringType(), True),
+            StructField("isBarred", BooleanType(), True),
+            StructField("lastUpdated", TimestampType(), True),
+            StructField("objectVersion", StringType(), True),
+        ]
+    )
+
+    CUSTOMER_CONTACTS_SCHEMA = StructType(
+        [
+            StructField("number", LongType(), False),
+            StructField("customerNumber", LongType(), True),
+            StructField("userInterfaceNumber", LongType(), True),
+            StructField("name", StringType(), True),
+            StructField("email", StringType(), True),
+            StructField("phone", StringType(), True),
+            StructField("notes", StringType(), True),
+            StructField("eInvoiceId", StringType(), True),
+            StructField("lastUpdated", TimestampType(), True),
+            StructField("receiveQuotes", BooleanType(), True),
+            StructField("receiveOrders", BooleanType(), True),
+            StructField("receiveInvoices", BooleanType(), True),
+            StructField("receiveEInvoices", BooleanType(), True),
+            StructField("receiveStatementOfAccounts", BooleanType(), True),
+            StructField("receiveReminders", BooleanType(), True),
+            StructField("objectVersion", StringType(), True),
+            StructField("isDeleted", BooleanType(), True),
+            StructField("active", BooleanType(), True),
+        ]
+    )
+
+    CUSTOMER_DELIVERY_LOCATIONS_SCHEMA = StructType(
+        [
+            StructField("number", LongType(), False),
+            StructField("customerNumber", LongType(), True),
+            StructField("userInterfaceNumber", LongType(), True),
+            StructField("address", StringType(), True),
+            StructField("city", StringType(), True),
+            StructField("country", StringType(), True),
+            StructField("postalCode", StringType(), True),
+            StructField("termsOfDelivery", StringType(), True),
+            StructField("eInvoiceId", StringType(), True),
+            StructField("isBarred", BooleanType(), True),
+            StructField("lastUpdated", TimestampType(), True),
+            StructField("objectVersion", StringType(), True),
+        ]
+    )
+
     TABLE_SCHEMAS = {
         "employees": EMPLOYEES_SCHEMA,
         "customers": CUSTOMERS_SCHEMA,
         "projects": PROJECTS_SCHEMA,
         "project_time_entries": PROJECT_TIME_ENTRIES_SCHEMA,
+        "activities": ACTIVITIES_SCHEMA,
+        "activity_groups": ACTIVITY_GROUPS_SCHEMA,
+        "employee_groups": EMPLOYEE_GROUPS_SCHEMA,
+        "project_groups": PROJECT_GROUPS_SCHEMA,
+        "project_statuses": PROJECT_STATUSES_SCHEMA,
+        "mileages": MILEAGES_SCHEMA,
+        "project_employees": PROJECT_EMPLOYEES_SCHEMA,
+        "project_customers": PROJECT_CUSTOMERS_SCHEMA,
+        "time_entry_prices": TIME_ENTRY_PRICES_SCHEMA,
+        "cost_types": COST_TYPES_SCHEMA,
+        "customer_contacts": CUSTOMER_CONTACTS_SCHEMA,
+        "customer_delivery_locations": CUSTOMER_DELIVERY_LOCATIONS_SCHEMA,
     }
 
     # ---------------------------------------------------------------------------
@@ -790,6 +983,61 @@ def register_lakeflow_source(spark):
             "cursor_field": "lastUpdated",
             "ingestion_type": "cdc",
         },
+        "activities": {
+            "primary_keys": ["number"],
+            "ingestion_type": "snapshot",
+        },
+        "activity_groups": {
+            "primary_keys": ["number"],
+            "ingestion_type": "snapshot",
+        },
+        "employee_groups": {
+            "primary_keys": ["number"],
+            "ingestion_type": "snapshot",
+        },
+        "project_groups": {
+            "primary_keys": ["number"],
+            "ingestion_type": "snapshot",
+        },
+        "project_statuses": {
+            "primary_keys": ["number"],
+            "ingestion_type": "snapshot",
+        },
+        "mileages": {
+            "primary_keys": ["number"],
+            "ingestion_type": "snapshot",
+        },
+        "project_employees": {
+            "primary_keys": ["number"],
+            "ingestion_type": "snapshot",
+        },
+        "project_customers": {
+            "primary_keys": ["number"],
+            "ingestion_type": "snapshot",
+        },
+        # Prices are calculated server-side and can change without the parent
+        # time entry's lastUpdated moving, so they are re-read in full.
+        "time_entry_prices": {
+            "primary_keys": ["number"],
+            "ingestion_type": "snapshot",
+        },
+        "cost_types": {
+            "primary_keys": ["number"],
+            "cursor_field": "lastUpdated",
+            "ingestion_type": "cdc",
+        },
+        # isDeleted is kept as an ordinary column: the list endpoint has not been
+        # observed returning soft-deleted rows, so this is not cdc_with_deletes.
+        "customer_contacts": {
+            "primary_keys": ["number"],
+            "cursor_field": "lastUpdated",
+            "ingestion_type": "cdc",
+        },
+        "customer_delivery_locations": {
+            "primary_keys": ["number"],
+            "cursor_field": "lastUpdated",
+            "ingestion_type": "cdc",
+        },
     }
 
     # ---------------------------------------------------------------------------
@@ -801,6 +1049,19 @@ def register_lakeflow_source(spark):
         "customers": (CUSTOMERS_API, "Customers", "customerNumber"),
         "projects": (PROJECTS_API, "Projects", "number"),
         "project_time_entries": (PROJECTS_API, "TimeEntries", "number"),
+        "activities": (PROJECTS_API, "Activities", "number"),
+        "activity_groups": (PROJECTS_API, "ActivityGroups", "number"),
+        "employee_groups": (PROJECTS_API, "EmployeeGroups", "number"),
+        "project_groups": (PROJECTS_API, "ProjectGroups", "number"),
+        "project_statuses": (PROJECTS_API, "ProjectStatuses", "number"),
+        "mileages": (PROJECTS_API, "Mileages", "number"),
+        # Spec casing: these two resources are lower-kebab, not PascalCase.
+        "project_employees": (PROJECTS_API, "project-employees", "number"),
+        "project_customers": (PROJECTS_API, "project-customers", "number"),
+        "time_entry_prices": (PROJECTS_API, "TimeEntryPrices", "number"),
+        "cost_types": (PROJECTS_API, "CostTypes", "number"),
+        "customer_contacts": (CUSTOMERS_API, "Contacts", "number"),
+        "customer_delivery_locations": (CUSTOMERS_API, "DeliveryLocations", "number"),
     }
 
     SUPPORTED_TABLES = list(TABLE_SCHEMAS.keys())

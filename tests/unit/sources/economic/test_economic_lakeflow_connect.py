@@ -18,10 +18,10 @@ class TestEconomicConnector(LakeflowConnectTests):
         "app_secret_token": "demo",
         "agreement_grant_token": "demo",
     }
-    # 8, not 5: the corpus is the live demo rows (5 customers, 7 projects)
-    # followed by synthetic rows; record 6/8 is the first synthetic row,
-    # the only one that populates the columns the demo agreement leaves null.
-    sample_records = 8
+    # 16, not 5: the corpus is the live demo rows (up to 11, for
+    # customer_contacts) followed by synthetic rows, which are the only ones
+    # populating the columns the demo agreement leaves null.
+    sample_records = 16
     # The public demo agreement is tiny (5-10 rows per table, one page
     # each), so keep whole live responses in the cassette; the corpus is
     # re-seeded from it via ``tools.cassette_to_corpus``.

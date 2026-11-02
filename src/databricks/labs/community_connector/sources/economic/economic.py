@@ -3,8 +3,18 @@
 Reads from the e-conomic "resource APIs" at ``https://apis.e-conomic.com/``:
 
 * ``projectsapi``  -> ``employees`` (/Employees), ``projects`` (/Projects),
-  ``project_time_entries`` (/TimeEntries)
-* ``customersapi`` -> ``customers`` (/Customers)
+  ``project_time_entries`` (/TimeEntries), ``activities`` (/Activities),
+  ``activity_groups`` (/ActivityGroups), ``employee_groups``
+  (/EmployeeGroups), ``project_groups`` (/ProjectGroups),
+  ``project_statuses`` (/ProjectStatuses), ``mileages`` (/Mileages),
+  ``project_employees`` (/project-employees), ``project_customers``
+  (/project-customers), ``time_entry_prices`` (/TimeEntryPrices),
+  ``cost_types`` (/CostTypes)
+* ``customersapi`` -> ``customers`` (/Customers), ``customer_contacts``
+  (/Contacts), ``customer_delivery_locations`` (/DeliveryLocations)
+
+Every table is a flat, top-level cursor list (no parent fan-out); the
+table -> endpoint routing lives in ``TABLE_ENDPOINTS``.
 
 Authentication is two static headers (``X-AppSecretToken`` and
 ``X-AgreementGrantToken``). All list reads use the cursor endpoints, which
@@ -14,8 +24,12 @@ cursor endpoints do not support ``sort``.
 
 Ingestion strategy
 ------------------
-* ``employees`` / ``customers`` -> snapshot (no change-tracking field).
-* ``projects`` / ``project_time_entries`` -> cdc on ``lastUpdated``.
+* cdc on ``lastUpdated``: ``projects``, ``project_time_entries``,
+  ``cost_types``, ``customer_contacts``, ``customer_delivery_locations``.
+* snapshot (no filterable change-tracking field): every other table.
+  ``time_entry_prices`` is snapshot even though it mirrors time entries 1:1,
+  because its prices are calculated and can change without the entry's
+  ``lastUpdated`` moving.
 
 Because results are ordered by primary key rather than ``lastUpdated``, the
 cdc read is a *resumable PK-ordered scan*: each trigger scans every record

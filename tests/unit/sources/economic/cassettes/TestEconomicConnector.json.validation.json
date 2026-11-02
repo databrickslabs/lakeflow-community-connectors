@@ -1,7 +1,18 @@
 {
   "version": 1,
-  "generated_at": "2026-11-02T07:45:33.897539Z",
+  "generated_at": "2026-11-02T09:50:41.625192Z",
   "endpoints": [
+    {
+      "method": "GET",
+      "spec_path": "/customersapi/{version}/Contacts",
+      "sample_url": "https://apis.e-conomic.com/customersapi/v3.1.0/Contacts",
+      "status": "validated",
+      "calls": 2,
+      "matched": 2,
+      "mismatched": 0,
+      "no_spec": 0,
+      "issues": []
+    },
     {
       "method": "GET",
       "spec_path": "/customersapi/{version}/Customers",
@@ -15,8 +26,96 @@
     },
     {
       "method": "GET",
+      "spec_path": "/customersapi/{version}/DeliveryLocations",
+      "sample_url": "https://apis.e-conomic.com/customersapi/v3.1.0/DeliveryLocations",
+      "status": "validated",
+      "calls": 2,
+      "matched": 2,
+      "mismatched": 0,
+      "no_spec": 0,
+      "issues": []
+    },
+    {
+      "method": "GET",
+      "spec_path": "/projectsapi/{version}/Activities",
+      "sample_url": "https://apis.e-conomic.com/projectsapi/v1.1.0/Activities",
+      "status": "validated",
+      "calls": 3,
+      "matched": 3,
+      "mismatched": 0,
+      "no_spec": 0,
+      "issues": []
+    },
+    {
+      "method": "GET",
+      "spec_path": "/projectsapi/{version}/ActivityGroups",
+      "sample_url": "https://apis.e-conomic.com/projectsapi/v1.1.0/ActivityGroups",
+      "status": "validated",
+      "calls": 3,
+      "matched": 3,
+      "mismatched": 0,
+      "no_spec": 0,
+      "issues": []
+    },
+    {
+      "method": "GET",
+      "spec_path": "/projectsapi/{version}/CostTypes",
+      "sample_url": "https://apis.e-conomic.com/projectsapi/v1.1.0/CostTypes",
+      "status": "validated",
+      "calls": 2,
+      "matched": 2,
+      "mismatched": 0,
+      "no_spec": 0,
+      "issues": []
+    },
+    {
+      "method": "GET",
+      "spec_path": "/projectsapi/{version}/EmployeeGroups",
+      "sample_url": "https://apis.e-conomic.com/projectsapi/v1.1.0/EmployeeGroups",
+      "status": "validated",
+      "calls": 3,
+      "matched": 3,
+      "mismatched": 0,
+      "no_spec": 0,
+      "issues": []
+    },
+    {
+      "method": "GET",
       "spec_path": "/projectsapi/{version}/Employees",
       "sample_url": "https://apis.e-conomic.com/projectsapi/v1.1.0/Employees",
+      "status": "validated",
+      "calls": 3,
+      "matched": 3,
+      "mismatched": 0,
+      "no_spec": 0,
+      "issues": []
+    },
+    {
+      "method": "GET",
+      "spec_path": "/projectsapi/{version}/Mileages",
+      "sample_url": "https://apis.e-conomic.com/projectsapi/v1.1.0/Mileages",
+      "status": "validated",
+      "calls": 3,
+      "matched": 3,
+      "mismatched": 0,
+      "no_spec": 0,
+      "issues": []
+    },
+    {
+      "method": "GET",
+      "spec_path": "/projectsapi/{version}/ProjectGroups",
+      "sample_url": "https://apis.e-conomic.com/projectsapi/v1.1.0/ProjectGroups",
+      "status": "validated",
+      "calls": 3,
+      "matched": 3,
+      "mismatched": 0,
+      "no_spec": 0,
+      "issues": []
+    },
+    {
+      "method": "GET",
+      "spec_path": "/projectsapi/{version}/ProjectStatuses",
+      "sample_url": "https://apis.e-conomic.com/projectsapi/v1.1.0/ProjectStatuses",
       "status": "validated",
       "calls": 3,
       "matched": 3,
@@ -45,11 +144,44 @@
       "mismatched": 0,
       "no_spec": 0,
       "issues": []
+    },
+    {
+      "method": "GET",
+      "spec_path": "/projectsapi/{version}/TimeEntryPrices",
+      "sample_url": "https://apis.e-conomic.com/projectsapi/v1.1.0/TimeEntryPrices",
+      "status": "validated",
+      "calls": 3,
+      "matched": 3,
+      "mismatched": 0,
+      "no_spec": 0,
+      "issues": []
+    },
+    {
+      "method": "GET",
+      "spec_path": "/projectsapi/{version}/project-customers",
+      "sample_url": "https://apis.e-conomic.com/projectsapi/v1.1.0/project-customers",
+      "status": "validated",
+      "calls": 3,
+      "matched": 3,
+      "mismatched": 0,
+      "no_spec": 0,
+      "issues": []
+    },
+    {
+      "method": "GET",
+      "spec_path": "/projectsapi/{version}/project-employees",
+      "sample_url": "https://apis.e-conomic.com/projectsapi/v1.1.0/project-employees",
+      "status": "validated",
+      "calls": 3,
+      "matched": 3,
+      "mismatched": 0,
+      "no_spec": 0,
+      "issues": []
     }
   ],
   "summary": {
-    "endpoints_total": 4,
-    "endpoints_validated": 4,
+    "endpoints_total": 16,
+    "endpoints_validated": 16,
     "endpoints_mismatched": 0,
     "endpoints_missing_spec": 0
   }

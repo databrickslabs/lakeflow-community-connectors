@@ -1,0 +1,41 @@
+[
+  {
+    "number": 1,
+    "name": "Invoiceable projects group",
+    "type": 2,
+    "includeCostPriceInFinance": true,
+    "costAccountOngoingType": 0,
+    "costAccountOngoing": 1025,
+    "costContraAccountOngoing": 2212,
+    "costAccountClosed": 3621,
+    "includeSalesPriceInFinance": true,
+    "salesAccountOngoingType": 0,
+    "salesAccountOngoing": 2811,
+    "salesContraAccountOngoing": 3110,
+    "salesAccountClosed": 3618,
+    "objectVersion": "e669de10cd7b7553"
+  },
+  {
+    "number": 2,
+    "name": "Non-invoiceable projects group",
+    "type": 3,
+    "includeCostPriceInFinance": true,
+    "costAccountOngoingType": 0,
+    "costAccountOngoing": 1021,
+    "costContraAccountOngoing": 2211,
+    "costAccountClosed": 2210,
+    "includeSalesPriceInFinance": false,
+    "salesAccountOngoingType": 0,
+    "objectVersion": "e449e4ee2dc5dc6e"
+  },
+  {
+    "number": 3,
+    "name": "Internal projects groups",
+    "type": 1,
+    "includeCostPriceInFinance": false,
+    "costAccountOngoingType": 0,
+    "includeSalesPriceInFinance": false,
+    "salesAccountOngoingType": 0,
+    "objectVersion": "e790d1a5f6f2136a"
+  }
+]

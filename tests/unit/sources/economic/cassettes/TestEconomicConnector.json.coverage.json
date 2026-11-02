@@ -3,6 +3,14 @@
   "endpoints": [
     {
       "method": "GET",
+      "url": "https://apis.e-conomic.com/customersapi/v3.1.0/Contacts",
+      "count": 2,
+      "param_shapes": [
+        []
+      ]
+    },
+    {
+      "method": "GET",
       "url": "https://apis.e-conomic.com/customersapi/v3.1.0/Customers",
       "count": 3,
       "param_shapes": [
@@ -11,7 +19,71 @@
     },
     {
       "method": "GET",
+      "url": "https://apis.e-conomic.com/customersapi/v3.1.0/DeliveryLocations",
+      "count": 2,
+      "param_shapes": [
+        []
+      ]
+    },
+    {
+      "method": "GET",
+      "url": "https://apis.e-conomic.com/projectsapi/v1.1.0/Activities",
+      "count": 3,
+      "param_shapes": [
+        []
+      ]
+    },
+    {
+      "method": "GET",
+      "url": "https://apis.e-conomic.com/projectsapi/v1.1.0/ActivityGroups",
+      "count": 3,
+      "param_shapes": [
+        []
+      ]
+    },
+    {
+      "method": "GET",
+      "url": "https://apis.e-conomic.com/projectsapi/v1.1.0/CostTypes",
+      "count": 2,
+      "param_shapes": [
+        []
+      ]
+    },
+    {
+      "method": "GET",
+      "url": "https://apis.e-conomic.com/projectsapi/v1.1.0/EmployeeGroups",
+      "count": 3,
+      "param_shapes": [
+        []
+      ]
+    },
+    {
+      "method": "GET",
       "url": "https://apis.e-conomic.com/projectsapi/v1.1.0/Employees",
+      "count": 3,
+      "param_shapes": [
+        []
+      ]
+    },
+    {
+      "method": "GET",
+      "url": "https://apis.e-conomic.com/projectsapi/v1.1.0/Mileages",
+      "count": 3,
+      "param_shapes": [
+        []
+      ]
+    },
+    {
+      "method": "GET",
+      "url": "https://apis.e-conomic.com/projectsapi/v1.1.0/ProjectGroups",
+      "count": 3,
+      "param_shapes": [
+        []
+      ]
+    },
+    {
+      "method": "GET",
+      "url": "https://apis.e-conomic.com/projectsapi/v1.1.0/ProjectStatuses",
       "count": 3,
       "param_shapes": [
         []
@@ -34,6 +106,30 @@
         [
           "filter"
         ]
+      ]
+    },
+    {
+      "method": "GET",
+      "url": "https://apis.e-conomic.com/projectsapi/v1.1.0/TimeEntryPrices",
+      "count": 3,
+      "param_shapes": [
+        []
+      ]
+    },
+    {
+      "method": "GET",
+      "url": "https://apis.e-conomic.com/projectsapi/v1.1.0/project-customers",
+      "count": 3,
+      "param_shapes": [
+        []
+      ]
+    },
+    {
+      "method": "GET",
+      "url": "https://apis.e-conomic.com/projectsapi/v1.1.0/project-employees",
+      "count": 3,
+      "param_shapes": [
+        []
       ]
     }
   ]

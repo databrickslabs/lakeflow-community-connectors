@@ -33,10 +33,14 @@ connection:
       description: >
         e-conomic agreement grant token (sent as the X-AgreementGrantToken
         header), granted by the customer agreement (company) to the app. The
-        grant's role must allow read access to the Projects and Customers
-        resources, otherwise the API returns 403. Store as a Databricks secret
-        rather than inline. Use 'demo' together with app_secret_token = 'demo'
-        to read the public demo agreement.
+        grant must carry the roles for the tables you read. SuperUser covers
+        all 16 tables. Without SuperUser, the grant needs Sales (employees,
+        employee_groups, customers, customer_contacts,
+        customer_delivery_locations) and ProjectEmployee (the other 11 tables)
+        to read all 16. A missing role returns 403 for the affected tables
+        only. Store as a Databricks secret rather than inline. Use 'demo'
+        together with app_secret_token = 'demo' to read the public demo
+        agreement.
 
     - name: base_url
       type: string
@@ -50,16 +54,21 @@ connection:
       type: string
       required: false
       description: >
-        Version of the e-conomic Projects resource API (used for employees,
-        projects and project_time_entries), for example '1.1.0' or 'v1.1.0'.
+        Version of the e-conomic Projects resource API (/projectsapi). Used by
+        the 13 tables employees, employee_groups, projects,
+        project_time_entries, activities, activity_groups, project_groups,
+        project_statuses, mileages, project_employees, project_customers,
+        time_entry_prices and cost_types. For example '1.1.0' or 'v1.1.0'.
         Defaults to '1.1.0'.
 
     - name: customers_api_version
       type: string
       required: false
       description: >
-        Version of the e-conomic Customers resource API (used for customers),
-        for example '3.1.0' or 'v3.1.0'. Defaults to '3.1.0'.
+        Version of the e-conomic Customers resource API (/customersapi). Used
+        by the 3 tables customers, customer_contacts and
+        customer_delivery_locations. For example '3.1.0' or 'v3.1.0'. Defaults
+        to '3.1.0'.
 
 # ============================================================================
 # External Options Allowlist
@@ -69,21 +78,26 @@ connection:
 #
 # Options actually read by the connector implementation (economic.py):
 #   - max_records_per_batch   Maximum number of records emitted per micro-batch
-#                             for the incremental (cdc) tables projects and
-#                             project_time_entries. Must be a positive integer.
-#                             Default 5000. When a scan is cut short, the offset
-#                             records the last primary key and the next batch
-#                             resumes the same scan.
+#                             for the incremental (cdc) tables projects,
+#                             project_time_entries, cost_types, customer_contacts
+#                             and customer_delivery_locations. Must be a positive
+#                             integer. Default 5000. When a scan is cut short, the
+#                             offset records the last primary key and the next
+#                             batch resumes the same scan.
 #   - lookback_seconds        Seconds subtracted from the stored lastUpdated
 #                             high-water mark at the start of each new scan, to
 #                             re-read recently modified rows (dedup is by
-#                             primary key). Must be >= 0. Default 600.
+#                             primary key). Must be >= 0. Default 600. Applies to
+#                             the same five cdc tables.
 #   - start_timestamp         ISO-8601 lower bound for the first incremental
-#                             scan of projects and project_time_entries, for
-#                             example '2024-01-01T00:00:00'. Only used when no
-#                             offset has been committed yet. If omitted, the
-#                             first scan is unfiltered (full history).
+#                             scan of the same five cdc tables, for example
+#                             '2024-01-01T00:00:00'. Only used when no offset has
+#                             been committed yet. If omitted, the first scan is
+#                             unfiltered (full history).
 #
-# employees and customers are snapshot tables and read no table options.
+# The other 11 tables (employees, customers, activities, activity_groups,
+# employee_groups, project_groups, project_statuses, mileages,
+# project_employees, project_customers, time_entry_prices) are snapshot tables
+# and read no table options.
 # ============================================================================
 external_options_allowlist: "max_records_per_batch,lookback_seconds,start_timestamp"
