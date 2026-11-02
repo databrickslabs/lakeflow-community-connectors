@@ -16,7 +16,6 @@ from databricks.labs.community_connector.sources.github.github_utils import (
     parse_pagination_options,
     extract_next_link,
     apply_lookback,
-    compute_next_cursor,
     get_cursor_from_offset,
     require_owner_repo,
     parse_file_filter,
@@ -142,59 +141,56 @@ class GithubLakeflowConnect(LakeflowConnect):
         if not ts:
             return None
         try:
-            return datetime.fromisoformat(ts.replace("Z", "+00:00"))
+            dt = datetime.fromisoformat(ts.replace("Z", "+00:00"))
         except (ValueError, TypeError):
             return None
+        return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
 
-    def _compute_next_offset(
-        self,
-        next_cursor: str | None,
-        current_cursor: str | None,
-        start_offset: dict | None,
-        records: list,
-    ) -> dict:
+    def _cdc_key(self, row: dict) -> tuple:
+        """Sort and compare key for CDC rows: ``(updated_at, id)``."""
+        updated = self._parse_ts(row.get("updated_at")) or datetime.min.replace(tzinfo=timezone.utc)
+        return updated, row.get("id") or 0
+
+    def _is_new_cdc_row(self, row: dict, cursor: str | None, start_offset: dict | None) -> bool:
+        """
+        True if ``row`` sorts after the stored ``(cursor, cursor_id)`` key.
+
+        The compound key keeps rows that share the boundary second. Rows from
+        ``_init_time``'s second onward wait for the next run, which replaces the
+        old cursor cap and means every emitted second is already closed.
+        """
+        row_key = self._cdc_key(row)
+        if row_key[0] >= self._parse_ts(self._init_time):
+            return False
+        cursor_dt = self._parse_ts(cursor)
+        if cursor_dt is None:
+            return True
+        return row_key > (cursor_dt, (start_offset or {}).get("cursor_id", -1))
+
+    @staticmethod
+    def _compute_next_offset(start_offset: dict | None, records: list) -> dict:
         """
         Decide the offset to return from a CDC read.
 
-        The cursor is capped at ``_init_time`` (set once in ``__init__``) so
-        that a single trigger run only drains data that existed when the
-        connector was instantiated.  Any records arriving after that point
-        are still emitted (the API has no upper-bound filter) but the
-        checkpoint will not advance past ``_init_time``, guaranteeing
-        termination.  The next trigger creates a fresh connector with a
-        new ``_init_time``.
-
-        Also guards against backward movement — when ``apply_lookback``
-        widens the ``since`` filter, the API may return only records
-        older than ``current_cursor``, producing a ``next_cursor`` that
-        regresses.  In that case the offset is held at ``current_cursor``.
-
-        Returns start_offset (signalling "no more data") when either:
-        - No records were produced, or
-        - The (capped, guarded) cursor has not advanced beyond current_cursor.
+        Records are sorted by ``(updated_at, id)``, so the last one is the new
+        cursor. Returns start_offset (signalling "no more data") when no records
+        were produced.
         """
-        if not records and start_offset:
-            return start_offset
-
-        if not next_cursor:
+        if not records:
             return start_offset if start_offset else {}
+        return {"cursor": records[-1]["updated_at"], "cursor_id": records[-1]["id"]}
 
-        next_dt = self._parse_ts(next_cursor)
-        init_dt = self._parse_ts(self._init_time)
-        current_dt = self._parse_ts(current_cursor)
+    def _get(self, url: str, params: dict | None, entity_name: str) -> requests.Response:
+        """Issue one GET and raise on a non-200 status.
 
-        if next_dt is not None and init_dt is not None and next_dt > init_dt:
-            next_cursor = self._init_time
-            next_dt = init_dt
-
-        if current_dt is not None and next_dt is not None and next_dt < current_dt:
-            next_cursor = current_cursor
-            next_dt = current_dt
-
-        if next_cursor == current_cursor:
-            return start_offset if start_offset else {"cursor": next_cursor}
-
-        return {"cursor": next_cursor}
+        Single place for GitHub error handling (and any future retry/backoff).
+        """
+        response = self._session.get(url, params=params, timeout=30)
+        if response.status_code != 200:
+            raise RuntimeError(
+                f"GitHub API error for {entity_name}: {response.status_code} {response.text}"
+            )
+        return response
 
     def _paginated_fetch(
         self,
@@ -222,12 +218,7 @@ class GithubLakeflowConnect(LakeflowConnect):
         next_params: dict | None = params
 
         while next_url:
-            response = self._session.get(next_url, params=next_params, timeout=30)
-            if response.status_code != 200:
-                raise RuntimeError(
-                    f"GitHub API error for {entity_name}: {response.status_code} {response.text}"
-                )
-
+            response = self._get(next_url, next_params, entity_name)
             data = response.json() or []
             if not isinstance(data, list):
                 raise ValueError(
@@ -264,16 +255,15 @@ class GithubLakeflowConnect(LakeflowConnect):
 
         raw_issues = self._paginated_fetch(url, params, pagination, "issues")
 
+        raw_issues.sort(key=self._cdc_key)
+
         max_records = pagination.max_records_per_batch
         records: list[dict[str, Any]] = []
-        max_updated_at: str | None = None
 
         for issue in raw_issues:
-            updated_at = issue.get("updated_at")
-
             # Skip rows at or below the stored cursor so a no-new-rows batch is
             # empty and the offset advances.
-            if cursor and isinstance(updated_at, str) and updated_at <= cursor:
+            if not self._is_new_cdc_row(issue, cursor, start_offset):
                 continue
 
             record: dict[str, Any] = dict(issue)
@@ -281,17 +271,10 @@ class GithubLakeflowConnect(LakeflowConnect):
             record["repository_name"] = repo
             records.append(record)
 
-            if isinstance(updated_at, str):
-                if max_updated_at is None or updated_at > max_updated_at:
-                    max_updated_at = updated_at
-
             if max_records is not None and len(records) >= max_records:
                 break
 
-        next_cursor = compute_next_cursor(max_updated_at, cursor)
-        next_offset = self._compute_next_offset(
-            next_cursor, cursor, start_offset, records
-        )
+        next_offset = self._compute_next_offset(start_offset, records)
 
         return iter(records), next_offset
 
@@ -384,17 +367,16 @@ class GithubLakeflowConnect(LakeflowConnect):
 
         raw_prs = self._paginated_fetch(url, params, pagination, "pull_requests")
 
+        raw_prs.sort(key=self._cdc_key)
+
         max_records = pagination.max_records_per_batch
         records: list[dict[str, Any]] = []
-        max_updated_at: str | None = None
 
         for pr in raw_prs:
-            updated_at = pr.get("updated_at")
-
             # GET /pulls ignores `since`, so filter client-side: skip rows at or
             # below the stored cursor so a no-new-rows batch is empty and the
             # offset advances.
-            if cursor and isinstance(updated_at, str) and updated_at <= cursor:
+            if not self._is_new_cdc_row(pr, cursor, start_offset):
                 continue
 
             record: dict[str, Any] = dict(pr)
@@ -402,17 +384,10 @@ class GithubLakeflowConnect(LakeflowConnect):
             record["repository_name"] = repo
             records.append(record)
 
-            if isinstance(updated_at, str):
-                if max_updated_at is None or updated_at > max_updated_at:
-                    max_updated_at = updated_at
-
             if max_records is not None and len(records) >= max_records:
                 break
 
-        next_cursor = compute_next_cursor(max_updated_at, cursor)
-        next_offset = self._compute_next_offset(
-            next_cursor, cursor, start_offset, records
-        )
+        next_offset = self._compute_next_offset(start_offset, records)
 
         return iter(records), next_offset
 
@@ -439,16 +414,15 @@ class GithubLakeflowConnect(LakeflowConnect):
 
         raw_comments = self._paginated_fetch(url, params, pagination, "comments")
 
+        raw_comments.sort(key=self._cdc_key)
+
         max_records = pagination.max_records_per_batch
         records: list[dict[str, Any]] = []
-        max_updated_at: str | None = None
 
         for comment in raw_comments:
-            updated_at = comment.get("updated_at")
-
             # Skip rows at or below the stored cursor so a no-new-rows batch is
             # empty and the offset advances.
-            if cursor and isinstance(updated_at, str) and updated_at <= cursor:
+            if not self._is_new_cdc_row(comment, cursor, start_offset):
                 continue
 
             record: dict[str, Any] = dict(comment)
@@ -456,17 +430,10 @@ class GithubLakeflowConnect(LakeflowConnect):
             record["repository_name"] = repo
             records.append(record)
 
-            if isinstance(updated_at, str):
-                if max_updated_at is None or updated_at > max_updated_at:
-                    max_updated_at = updated_at
-
             if max_records is not None and len(records) >= max_records:
                 break
 
-        next_cursor = compute_next_cursor(max_updated_at, cursor)
-        next_offset = self._compute_next_offset(
-            next_cursor, cursor, start_offset, records
-        )
+        next_offset = self._compute_next_offset(start_offset, records)
 
         return iter(records), next_offset
 
@@ -844,12 +811,6 @@ class GithubLakeflowConnect(LakeflowConnect):
         max_records = pagination.max_records_per_batch
         records: list[dict[str, Any]] = []
 
-        # Append table with no per-record cursor: emit the full set once at a
-        # sentinel offset, then return empty so the stream terminates without
-        # re-emitting.
-        if start_offset and start_offset.get("cursor"):
-            return iter([]), start_offset
-
         def _fetch_reviews_for_pull(pull_number: int) -> None:
             """Fetch reviews for a single pull request and append to records."""
             url = f"{self.base_url}/repos/{owner}/{repo}/pulls/{pull_number}/reviews"
@@ -876,8 +837,7 @@ class GithubLakeflowConnect(LakeflowConnect):
                 ) from exc
 
             _fetch_reviews_for_pull(pull_number_int)
-            next_offset = {"cursor": self._init_time} if records else (start_offset or {})
-            return iter(records), next_offset
+            return self._select_new_reviews(records, start_offset, max_records)
 
         pr_state = table_options.get("state", "all")
         url = f"{self.base_url}/repos/{owner}/{repo}/pulls"
@@ -885,15 +845,27 @@ class GithubLakeflowConnect(LakeflowConnect):
 
         raw_prs = self._paginated_fetch(url, params, pagination, "pull_requests")
 
+        # Fetch all PRs before truncating: stopping early could move the id
+        # high-water mark past reviews on PRs not yet fetched.
         for pr in raw_prs:
-            if max_records is not None and len(records) >= max_records:
-                break
             number = pr.get("number")
             if isinstance(number, int):
                 _fetch_reviews_for_pull(number)
 
-        next_offset = {"cursor": self._init_time} if records else (start_offset or {})
-        return iter(records), next_offset
+        return self._select_new_reviews(records, start_offset, max_records)
+
+    @staticmethod
+    def _select_new_reviews(
+        records: list[dict], start_offset: dict | None, max_records: int | None
+    ) -> (Iterator[dict], dict):
+        """Emit reviews above the stored ``max_review_id`` (ids are monotonic), in id order."""
+        last_id = (start_offset or {}).get("max_review_id", -1)
+        new = sorted((r for r in records if r["id"] > last_id), key=lambda r: r["id"])
+        if max_records is not None:
+            new = new[:max_records]
+        if not new:
+            return iter([]), start_offset or {}
+        return iter(new), {"max_review_id": new[-1]["id"]}
 
     # ------------------------------------------------------------------
     # repository_files (source code contents)
@@ -902,12 +874,7 @@ class GithubLakeflowConnect(LakeflowConnect):
     def _get_default_branch(self, owner: str, repo: str) -> str:
         """Return the repository's default branch name (falls back to 'main')."""
         url = f"{self.base_url}/repos/{owner}/{repo}"
-        resp = self._session.get(url, timeout=30)
-        if resp.status_code != 200:
-            raise RuntimeError(
-                f"GitHub API error resolving default branch for "
-                f"{owner}/{repo}: {resp.status_code} {resp.text}"
-            )
+        resp = self._get(url, None, f"default branch of {owner}/{repo}")
         return (resp.json() or {}).get("default_branch") or "main"
 
     def _resolve_commit_tree(
@@ -918,12 +885,7 @@ class GithubLakeflowConnect(LakeflowConnect):
         Uses ``GET /repos/{owner}/{repo}/commits/{ref}`` (Contents: Read).
         """
         url = f"{self.base_url}/repos/{owner}/{repo}/commits/{ref}"
-        resp = self._session.get(url, timeout=30)
-        if resp.status_code != 200:
-            raise RuntimeError(
-                f"GitHub API error resolving ref {ref!r} for "
-                f"{owner}/{repo}: {resp.status_code} {resp.text}"
-            )
+        resp = self._get(url, None, f"ref {ref!r} of {owner}/{repo}")
         data = resp.json() or {}
         commit_sha = data.get("sha")
         tree_sha = ((data.get("commit") or {}).get("tree") or {}).get("sha")
@@ -942,13 +904,10 @@ class GithubLakeflowConnect(LakeflowConnect):
         repos). Builds full paths from nested, single-level tree responses.
         """
         url = f"{self.base_url}/repos/{owner}/{repo}/git/trees/{tree_sha}"
-        resp = self._session.get(url, timeout=30)
-        if resp.status_code != 200:
-            raise RuntimeError(
-                f"GitHub API error walking tree {tree_sha!r} for "
-                f"{owner}/{repo}: {resp.status_code} {resp.text}"
-            )
+        resp = self._get(url, None, f"tree {tree_sha!r} of {owner}/{repo}")
         data = resp.json() or {}
+        if data.get("truncated"):
+            raise RuntimeError(f"GitHub truncated tree {tree_sha!r} in {owner}/{repo}")
         blobs: list[dict] = []
         for entry in data.get("tree", []) or []:
             full_path = f"{prefix}{entry.get('path')}"
@@ -971,12 +930,7 @@ class GithubLakeflowConnect(LakeflowConnect):
         files are silently dropped.
         """
         url = f"{self.base_url}/repos/{owner}/{repo}/git/trees/{tree_sha}"
-        resp = self._session.get(url, params={"recursive": "1"}, timeout=30)
-        if resp.status_code != 200:
-            raise RuntimeError(
-                f"GitHub API error listing tree {tree_sha!r} for "
-                f"{owner}/{repo}: {resp.status_code} {resp.text}"
-            )
+        resp = self._get(url, {"recursive": "1"}, f"tree {tree_sha!r} of {owner}/{repo}")
         data = resp.json() or {}
         if data.get("truncated"):
             return self._walk_tree(owner, repo, tree_sha)
@@ -995,12 +949,7 @@ class GithubLakeflowConnect(LakeflowConnect):
         ``GET /repos/{owner}/{repo}/git/blobs/{sha}`` (Contents: Read).
         """
         url = f"{self.base_url}/repos/{owner}/{repo}/git/blobs/{blob_sha}"
-        resp = self._session.get(url, timeout=30)
-        if resp.status_code != 200:
-            raise RuntimeError(
-                f"GitHub API error fetching blob {blob_sha!r} for "
-                f"{owner}/{repo}: {resp.status_code} {resp.text}"
-            )
+        resp = self._get(url, None, f"blob {blob_sha!r} of {owner}/{repo}")
         data = resp.json() or {}
         return decode_blob_content(
             data.get("content"), data.get("encoding"), include_binary
@@ -1043,7 +992,10 @@ class GithubLakeflowConnect(LakeflowConnect):
             max_file_bytes = 1_000_000
 
         ref = table_options.get("ref") or self._get_default_branch(owner, repo)
-        commit_sha, tree_sha = self._resolve_commit_tree(owner, repo, ref)
+        # Resume batches against the commit the first batch resolved, so a push
+        # to a branch ref mid-read cannot shift the sorted index.
+        pinned_sha = (start_offset or {}).get("commit_sha")
+        commit_sha, tree_sha = self._resolve_commit_tree(owner, repo, pinned_sha or ref)
 
         blobs = [
             blob
@@ -1068,7 +1020,7 @@ class GithubLakeflowConnect(LakeflowConnect):
         )
 
         if start_index >= total:
-            return iter([]), start_offset if start_offset else {"index": total}
+            return iter([]), start_offset or {"index": total, "commit_sha": commit_sha}
 
         ingested_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
         host = "https://github.com" if self.base_url == "https://api.github.com" else None
@@ -1121,7 +1073,7 @@ class GithubLakeflowConnect(LakeflowConnect):
         if max_records is None:
             return iter(records), {}
 
-        next_offset = {"index": end_index}
+        next_offset = {"index": end_index, "commit_sha": commit_sha}
         if start_offset and start_offset == next_offset:
             return iter(records), start_offset
         return iter(records), next_offset

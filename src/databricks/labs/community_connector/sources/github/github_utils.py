@@ -212,7 +212,7 @@ def should_include_file(path: str, file_filter: FileFilter) -> bool:
     Uses ``fnmatch`` semantics, where ``*`` also matches ``/``.
     """
     for pattern in file_filter.exclude_globs:
-        if fnmatch.fnmatch(path, pattern):
+        if _glob_match(path, pattern):
             return False
 
     if not file_filter.extensions and not file_filter.include_globs:
@@ -220,7 +220,14 @@ def should_include_file(path: str, file_filter: FileFilter) -> bool:
 
     if any(path.endswith(ext) for ext in file_filter.extensions):
         return True
-    return any(fnmatch.fnmatch(path, pattern) for pattern in file_filter.include_globs)
+    return any(_glob_match(path, pattern) for pattern in file_filter.include_globs)
+
+
+def _glob_match(path: str, pattern: str) -> bool:
+    """``fnmatch``, plus a leading ``**/`` also matching at the repo root (no leading slash)."""
+    if fnmatch.fnmatch(path, pattern):
+        return True
+    return pattern.startswith("**/") and fnmatch.fnmatch(path, pattern[3:])
 
 
 def decode_blob_content(

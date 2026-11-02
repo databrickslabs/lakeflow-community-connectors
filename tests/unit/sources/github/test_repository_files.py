@@ -9,8 +9,14 @@ in CI / a Databricks workspace rather than on a bare laptop.
 import base64
 from types import SimpleNamespace
 
+import pytest
+
 from databricks.labs.community_connector.sources.github.github import (
     GithubLakeflowConnect,
+)
+from databricks.labs.community_connector.sources.github.github_utils import (
+    parse_file_filter,
+    should_include_file,
 )
 
 
@@ -60,6 +66,10 @@ def _base_routes():
     return {
         "/repos/o/r": {"default_branch": "main"},
         "/repos/o/r/commits/main": {
+            "sha": "commit123",
+            "commit": {"tree": {"sha": "tree123"}},
+        },
+        "/repos/o/r/commits/commit123": {
             "sha": "commit123",
             "commit": {"tree": {"sha": "tree123"}},
         },
@@ -161,11 +171,11 @@ def test_repository_files_index_batching_terminates():
 
     batch1, off1 = connector.read_table("repository_files", None, opts)
     rows1 = list(batch1)
-    assert len(rows1) == 1 and off1 == {"index": 1}
+    assert len(rows1) == 1 and off1 == {"index": 1, "commit_sha": "commit123"}
 
     batch2, off2 = connector.read_table("repository_files", off1, opts)
     rows2 = list(batch2)
-    assert len(rows2) == 1 and off2 == {"index": 2}
+    assert len(rows2) == 1 and off2 == {"index": 2, "commit_sha": "commit123"}
 
     # No files left: empty batch and a stable offset -> framework stops.
     batch3, off3 = connector.read_table("repository_files", off2, opts)
@@ -206,3 +216,43 @@ def test_repository_files_truncated_tree_falls_back_to_walk():
     )
     # Full paths are reconstructed across the directory walk.
     assert {r["path"] for r in records} == {"top.py", "pkg/mod.py"}
+
+
+def test_repository_files_batches_stay_on_first_commit():
+    routes = _base_routes()
+    connector = _make_connector(routes)
+    opts = {"owner": "o", "repo": "r", "include_extensions": "py", "max_records_per_batch": "1"}
+
+    _, off1 = connector.read_table("repository_files", None, opts)
+
+    # A push moves `main` to a tree with a new file that sorts first.
+    routes["/repos/o/r/commits/main"] = {"sha": "new", "commit": {"tree": {"sha": "treeNew"}}}
+    routes["/git/trees/treeNew TREE_RECURSIVE"] = {
+        "truncated": False,
+        "tree": [{"path": "aaa.py", "type": "blob", "sha": "bx", "size": 1, "mode": "100644"}],
+    }
+
+    batch2, off2 = connector.read_table("repository_files", off1, opts)
+    rows2 = list(batch2)
+    assert [r["path"] for r in rows2] == ["huge.py"]
+    assert rows2[0]["commit_sha"] == "commit123"
+    assert off2 == {"index": 2, "commit_sha": "commit123"}
+
+
+def test_repository_files_truncated_walk_level_raises():
+    routes = {
+        "/repos/o/r/commits/main": {"sha": "c1", "commit": {"tree": {"sha": "root"}}},
+        "/git/trees/root TREE_RECURSIVE": {"truncated": True, "tree": []},
+        "/git/trees/root TREE_WALK": {"truncated": True, "tree": []},
+    }
+    connector = _make_connector(routes)
+    with pytest.raises(RuntimeError, match="truncated"):
+        connector.read_table("repository_files", None, {"owner": "o", "repo": "r", "ref": "main"})
+
+
+def test_double_star_globs_match_repo_root():
+    file_filter = parse_file_filter({"exclude_globs": "**/vendor/**,**/node_modules/**"})
+    assert not should_include_file("vendor/lib.py", file_filter)
+    assert not should_include_file("node_modules/x/index.js", file_filter)
+    assert not should_include_file("app/vendor/lib.py", file_filter)
+    assert should_include_file("src/app.py", file_filter)
