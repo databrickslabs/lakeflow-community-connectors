@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated_at": "2026-11-02T07:01:58.480047Z",
+  "generated_at": "2026-11-02T07:45:33.897539Z",
   "endpoints": [
     {
       "method": "GET",
@@ -29,8 +29,8 @@
       "spec_path": "/projectsapi/{version}/Projects",
       "sample_url": "https://apis.e-conomic.com/projectsapi/v1.1.0/Projects",
       "status": "validated",
-      "calls": 3,
-      "matched": 3,
+      "calls": 2,
+      "matched": 2,
       "mismatched": 0,
       "no_spec": 0,
       "issues": []

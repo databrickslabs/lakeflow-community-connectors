@@ -43,7 +43,9 @@ from databricks.labs.community_connector.source_simulator.interceptor import (
     response_from_record,
 )
 
-_PAGE_SIZE = 20
+# Smaller than every demo table (5-10 live rows), so the connector follows
+# at least one ``cursor`` within the test suite's 8-record sample.
+_PAGE_SIZE = 5
 _CURSOR_PREFIX = "sim-"
 
 _CLAUSE_RE = re.compile(

@@ -20,12 +20,9 @@
     {
       "method": "GET",
       "url": "https://apis.e-conomic.com/projectsapi/v1.1.0/Projects",
-      "count": 3,
+      "count": 2,
       "param_shapes": [
-        [],
-        [
-          "filter"
-        ]
+        []
       ]
     },
     {

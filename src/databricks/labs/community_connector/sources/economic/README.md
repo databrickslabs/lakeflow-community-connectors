@@ -1,6 +1,6 @@
 # Lakeflow e-conomic Community Connector
 
-This documentation describes how to configure and use the **Visma e-conomic** Lakeflow community connector to ingest accounting and project data from the [e-conomic OpenAPI](https://apis.e-conomic.com/) into Databricks.
+This documentation provides setup instructions and reference information for the **Visma e-conomic** source connector. The connector ingests accounting and project data from the [e-conomic OpenAPI](https://apis.e-conomic.com/) into Databricks.
 
 The connector is **read-only**. It reads from the newer e-conomic OpenAPI family (`https://apis.e-conomic.com/`), not the legacy REST API (`restapi.e-conomic.com`). In this family each domain is a separate "resource API" with its own version. The connector reads from two of them:
 
@@ -56,7 +56,7 @@ There is no OAuth flow. Both tokens are long-lived static values, and the connec
 
 ### Obtaining the Required Parameters
 
-The exact screens in e-conomic change over time. Treat the steps below as an outline, and check the e-conomic developer documentation at <https://www.e-conomic.com/developer/connect> for the current procedure.
+e-conomic's official developer documentation at <https://www.e-conomic.com/developer/connect> is the authoritative guide for issuing tokens. The screens in the e-conomic developer portal change over time, and the steps below have not been verified click by click against the current portal. Treat them as an outline of the process, and follow e-conomic's documentation for the exact procedure.
 
 1. **Get a developer agreement.** Sign up for an e-conomic developer agreement through the e-conomic developer portal. This is where you register and manage apps.
 2. **Create an app.** In the developer agreement, create a new app. When you create it, choose the role the app requires. To read all four tables, choose `SuperUser`, or a role set that covers both `Sales` and `ProjectEmployee` (see [Prerequisites](#prerequisites)). Creating the app gives you:
@@ -102,11 +102,37 @@ All primary keys are integers that are unique within an agreement.
 - **CDC tables** (`projects`, `project_time_entries`): the connector reads incrementally with the `lastUpdated` field and upserts by primary key. See [Incremental sync behavior](#incremental-sync-behavior).
 - **No delete synchronization**: no table uses `cdc_with_deletes`. e-conomic has no deleted-records feed and no soft-delete flag for these resources, so a deleted project or time entry is never reported to the connector. See [Handling deletes](#handling-deletes-periodic-full-refresh).
 
+### Incremental sync behavior
+
+e-conomic returns list results in **primary-key order**, and its list endpoints cannot sort by `lastUpdated`. For that reason, the CDC tables (`projects`, `project_time_entries`) use a resumable scan ordered by primary key:
+
+1. **First run.** If `start_timestamp` is set, the connector reads every record with `lastUpdated >= start_timestamp`. Otherwise it reads the whole table.
+2. **Later runs.** The connector reads every record with `lastUpdated >= (stored high-water mark - lookback_seconds)`. The filter runs on the e-conomic side, so only changed records cross the network. The live e-conomic API accepts the full date-and-time filter the connector sends (for example `lastUpdated$gte:2024-12-07T23:04:00`).
+3. **Batching.** If a scan has more than `max_records_per_batch` matching records, it is split across several micro-batches. Each batch continues from the last primary key returned, by adding a primary-key condition to the same `lastUpdated` filter. The live API accepts this combined filter.
+4. **Committing progress.** The `lastUpdated` high-water mark advances only after a scan finishes. If a run fails partway, the next run repeats the scan and does not skip records. The new high-water mark is the largest `lastUpdated` seen, capped at the current UTC time when the run started. Records that change while a run is in progress are picked up by the next run.
+5. **Upserts.** Records are merged into the destination by primary key (`number`). The lookback window and repeated scans therefore never create duplicates.
+
+**Expect some rows to be re-read on every run.** e-conomic's `lastUpdated` values carry no time zone and appear to be Danish local time (CET/CEST, one or two hours ahead of UTC), while the high-water mark is capped at UTC "now". Rows changed in roughly the last one to two hours therefore have a `lastUpdated` later than the cap, and each run reads them again, on top of the `lookback_seconds` window. This is harmless: the upsert by primary key absorbs the repeated rows, and no changes are lost.
+
+Snapshot tables (`employees`, `customers`) read the full table on every run, using cursor pagination of up to 1,000 records per request.
+
+#### Handling deletes (periodic full refresh)
+
+e-conomic does not report deletions. Records that can be deleted in e-conomic include:
+
+- unapproved time entries,
+- projects that nothing else references.
+
+After a deletion, the row stays in the destination tables for `projects` and `project_time_entries` until you run a full refresh. Snapshot tables (`employees`, `customers`) pick up deletions automatically on the next run.
+
+If you need the destination to match e-conomic exactly, schedule a **periodic full refresh** of `projects` and `project_time_entries`. Use the pipeline UI (**Full refresh selection**) or the pipelines API (`full_refresh_selection`). Weekly or monthly is usually enough for accounting data volumes. A full refresh clears the stored progress, so the table is reloaded from `start_timestamp` if one is set, or from the full history otherwise. To keep all history after a full refresh, leave `start_timestamp` unset on tables you refresh fully.
+
 ### Schema highlights
 
 The schemas are static and defined by the connector. All records are flat, with no nested objects or arrays.
 
-- **Missing values are null.** e-conomic leaves empty properties out of its responses instead of returning `null`, and every column is nullable.
+- **Missing values are null.** e-conomic leaves empty properties out of its responses instead of returning `null`. Every column except the primary key is nullable.
+- **Timestamps appear to be Danish local time, with no time zone.** `lastUpdated` and the other date-time columns arrive without an offset, for example `2024-12-07T23:14:00`. Live checks against the e-conomic demo agreement show that they appear to be Danish local time (CET in winter, CEST in summer), not UTC. For example, a time entry whose text records `07-12-2024 23:13:32 +01:00` has `lastUpdated = 2024-12-07T23:14:00`. `lastUpdated` has whole-minute precision. See [Data Type Mapping](#data-type-mapping) for how to convert these values to UTC.
 - **Boolean `false` may arrive as null.** According to the e-conomic API documentation, a `false` boolean can be left out of the response body. In practice the behavior is inconsistent. When you filter on flags such as `isBarred`, `isClosed`, `isMainProject`, `isApproved`, `isReconciled`, `access` or `defaultDisableEInvoicing`, treat null as `false`, for example `coalesce(isBarred, false)`.
 - **`objectVersion`** (all tables) is an opaque concurrency token. It changes when a record changes, but it is not ordered and cannot be used as a change cursor.
 - **`projects`**:
@@ -152,32 +178,9 @@ The source-specific options below apply only to the **CDC tables** `projects` an
 
 | Option | Type | Default | Applies to | Description |
 |---|---|---|---|---|
-| `start_timestamp` | ISO-8601 string | none (full history) | `projects`, `project_time_entries` | Lower bound on `lastUpdated` for the **first** incremental run, for example `2024-01-01T00:00:00`. Used only when the table has no stored progress yet. If you omit it, the first run reads the full history. Values with `Z` or an offset are converted to UTC. Fractional seconds are dropped. An unparsable value fails the run. |
-| `lookback_seconds` | integer, `>= 0` | `600` | `projects`, `project_time_entries` | Number of seconds subtracted from the stored `lastUpdated` high-water mark at the start of each new scan, so that recently changed rows are read again. Re-read rows are de-duplicated by primary key. e-conomic stores `lastUpdated` with whole-minute precision, so keep this value at 60 or higher. |
+| `start_timestamp` | ISO-8601 string | none (full history) | `projects`, `project_time_entries` | Lower bound on `lastUpdated` for the **first** incremental run, for example `2024-01-01T00:00:00`. Used only when the table has no stored progress yet. If you omit it, the first run reads the full history. Because `lastUpdated` is Danish local time, write the value **without** an offset, in Danish local time. A value with `Z` or an offset is converted to UTC before it is compared with `lastUpdated`, which shifts the bound by one to two hours. Fractional seconds are dropped. An unparsable value fails the run. |
+| `lookback_seconds` | integer, `>= 0` | `600` | `projects`, `project_time_entries` | Number of seconds subtracted from the stored `lastUpdated` high-water mark at the start of each new scan, so that recently changed rows are read again. Re-read rows are de-duplicated by primary key. e-conomic stores `lastUpdated` with whole-minute precision, so keep this value at 60 or higher. Each run also re-reads roughly the last one to two hours of changes because of the time zone difference described in [Incremental sync behavior](#incremental-sync-behavior). |
 | `max_records_per_batch` | integer, `> 0` | `5000` | `projects`, `project_time_entries` | Maximum number of records the connector returns in one micro-batch. If a scan has more matching records, it continues in the next micro-batch from the last primary key it returned. Lower the value to reduce memory per batch. |
-
-## Incremental sync behavior
-
-e-conomic returns list results in **primary-key order**, and its list endpoints cannot sort by `lastUpdated`. For that reason, the CDC tables use a resumable scan ordered by primary key:
-
-1. **First run.** If `start_timestamp` is set, the connector reads every record with `lastUpdated >= start_timestamp`. Otherwise it reads the whole table.
-2. **Later runs.** The connector reads every record with `lastUpdated >= (stored high-water mark - lookback_seconds)`. The filter runs on the e-conomic side, so only changed records cross the network.
-3. **Batching.** If a scan has more than `max_records_per_batch` matching records, it is split across several micro-batches. Each batch continues from the last primary key returned.
-4. **Committing progress.** The `lastUpdated` high-water mark advances only after a scan finishes. If a run fails partway, the next run repeats the scan and does not skip records. The new high-water mark is the largest `lastUpdated` seen, capped at the time the run started. Records that change while a run is in progress are picked up by the next run.
-5. **Upserts.** Records are merged into the destination by primary key (`number`). The lookback window and repeated scans therefore never create duplicates.
-
-Snapshot tables (`employees`, `customers`) read the full table on every run, using cursor pagination of up to 1,000 records per request.
-
-### Handling deletes (periodic full refresh)
-
-e-conomic does not report deletions. Records that can be deleted in e-conomic include:
-
-- unapproved time entries,
-- projects that nothing else references.
-
-After a deletion, the row stays in the destination tables for `projects` and `project_time_entries` until you run a full refresh. Snapshot tables (`employees`, `customers`) pick up deletions automatically on the next run.
-
-If you need the destination to match e-conomic exactly, schedule a **periodic full refresh** of `projects` and `project_time_entries`. Use the pipeline UI (**Full refresh selection**) or the pipelines API (`full_refresh_selection`). Weekly or monthly is usually enough for accounting data volumes. A full refresh clears the stored progress, so the table is reloaded from `start_timestamp` if one is set, or from the full history otherwise. To keep all history after a full refresh, leave `start_timestamp` unset on tables you refresh fully.
 
 ## Data Type Mapping
 
@@ -187,7 +190,7 @@ If you need the destination to match e-conomic exactly, schedule a **periodic fu
 | number (double) | `numberOfHours`, `fixedPrice`, `costPrice`, `salesPrice`, `invoicedTotal`, `creditMaximum`, `mileage` | `DOUBLE` (`DoubleType`) | e-conomic sends amounts as JSON decimals (for example `4080.00`). If you need exact precision, cast to `DECIMAL` downstream. |
 | boolean | `isBarred`, `isClosed`, `isApproved`, `access` | `BOOLEAN` (`BooleanType`) | A missing value is null and may mean `false`. See [Schema highlights](#schema-highlights). |
 | string | `name`, `email`, `currency`, `description`, `text`, `objectVersion` | `STRING` (`StringType`) | |
-| date-time (ISO-8601, no offset) | `lastUpdated`, `date`, `deliveryDate`, `closedDate`, `directDebitMandateDate` | `TIMESTAMP` (`TimestampType`) | e-conomic sends timestamps without a time zone offset (for example `2024-12-07T23:14:00`) and does not document their time zone. Spark reads these values in the session time zone. |
+| date-time (ISO-8601, no offset) | `lastUpdated`, `date`, `deliveryDate`, `closedDate`, `directDebitMandateDate` | `TIMESTAMP` (`TimestampType`) | e-conomic sends timestamps without a time zone offset (for example `2024-12-07T23:14:00`). The values appear to be Danish local time (CET/CEST), not UTC. The connector stores the wall-clock value unchanged, and Spark interprets it in the session time zone. With a UTC session time zone, convert to true UTC with `to_utc_timestamp(lastUpdated, 'Europe/Copenhagen')`. |
 
 ## How to Run
 
@@ -283,8 +286,10 @@ e-conomic does not publish fixed bucket sizes or refill rates, and the actual li
   - The grant lacks the role for that resource. `employees` and `customers` need `Sales` or `SuperUser`. `projects` and `project_time_entries` need `ProjectEmployee` or `SuperUser`. Update the app's required role, and have the agreement grant access again if needed.
 - **`Invalid 'start_timestamp'` error**
   - `start_timestamp` must be a valid ISO-8601 value such as `2024-01-01T00:00:00`. The run fails before any request is sent to e-conomic.
+- **First run starts one to two hours off from `start_timestamp`**
+  - Remove the `Z` or offset from `start_timestamp` and give the value in Danish local time. Values with an offset are converted to UTC, while `lastUpdated` is Danish local time.
 - **`400 Bad Request`**
-  - e-conomic rejected the request parameters. Check that `projects_api_version` and `customers_api_version` point to versions that support the filters the connector uses (the defaults do), and see the `errorCode` / `detail` text in the error message.
+  - e-conomic rejected the request parameters. Check that `projects_api_version` and `customers_api_version` point to versions that support the filters the connector uses. The default versions accept these filters on the live API. See the `errorCode` / `detail` text in the error message.
 - **`404 Not Found` on every table**
   - Check `base_url`, `projects_api_version` and `customers_api_version`. An API version that does not exist on e-conomic returns `404`. Leave these options unset to use the tested defaults.
 - **Deleted projects or time entries still appear in Databricks**
@@ -293,6 +298,8 @@ e-conomic does not publish fixed bucket sizes or refill rates, and the actual li
   - Check that `externalOptionsAllowList` on the connection is exactly `max_records_per_batch,lookback_seconds,start_timestamp`.
   - `start_timestamp` only affects the first run. Changing it later has no effect until you run a full refresh of that table.
   - Options set on `employees` or `customers` are ignored, because those are snapshot tables.
+- **The same recent rows are processed on every run**
+  - This is expected. `lastUpdated` is Danish local time, while the connector caps its progress marker at UTC, so each run re-reads roughly the last one to two hours of changes plus `lookback_seconds`. The rows are upserted by primary key, so the destination has no duplicates (see [Incremental sync behavior](#incremental-sync-behavior)).
 - **Very few rows with the `demo` tokens**
   - This is expected. The public demo agreement holds only a small sample data set.
 
@@ -301,12 +308,13 @@ e-conomic does not publish fixed bucket sizes or refill rates, and the actual li
 - **Read-only.** The connector never writes back to e-conomic.
 - **Four tables only.** Related e-conomic resources are not covered, including Activities, Activity Groups, Employee Groups, Project Groups, Project Statuses, Mileages, Time Entry Prices, Cost Types, customer Contacts and Delivery Locations. Neither are other resource APIs such as products or invoices.
 - **No delete synchronization.** e-conomic exposes no deleted-records feed or soft-delete flag. The CDC tables keep deleted rows until you run a full refresh. Snapshot tables reflect deletions on every run.
-- **Rows with an empty `lastUpdated`.** The e-conomic schema allows `lastUpdated` to be null on projects. Such rows are loaded by an unfiltered first run, but later incremental runs cannot detect changes to them. A periodic full refresh also covers these rows.
+- **Rows with an empty `lastUpdated`.** The e-conomic schema allows `lastUpdated` to be null on projects. In live checks against the demo agreement, `lastUpdated` was set on every project and every time entry, so this looks rare. If such a row does exist, an unfiltered first run loads it, but later incremental runs cannot detect changes to it. A periodic full refresh also covers these rows.
 - **Freshness of project totals.** e-conomic documents that `lastUpdated` changes when a property of the record changes, and that changes to related records can also update it. It is not confirmed whether new time registrations always update `lastUpdated` on the parent project, so `costPrice`, `salesPrice` and `invoicedTotal` in `projects` may be stale between full refreshes. If these totals must always be current, run frequent full refreshes of `projects`. The table is usually small.
-- **Time zone of timestamps.** e-conomic sends timestamps without a time zone offset and does not document their time zone. Convert them downstream if you need UTC.
+- **Time zone of timestamps.** e-conomic sends timestamps without a time zone offset and does not document their time zone. Live checks indicate Danish local time (CET/CEST). The connector does not convert them, so convert downstream if you need UTC (see [Data Type Mapping](#data-type-mapping)). As a side effect, each incremental run re-reads roughly the last one to two hours of changes. The upsert by primary key absorbs these rows, and no data is lost.
+- **Multi-page reads not yet verified live.** e-conomic returns at most 1,000 records per page and the connector follows the pagination cursor across pages. The public demo agreement fits in a single page, so reads that span more than 1,000 records have not yet been verified against a live agreement. If a large table loads fewer rows than e-conomic shows, or a read fails with a pagination error, report it to the connector maintainers.
 - **Monetary values as `DOUBLE`.** Amounts are stored as floating-point numbers. Cast them to `DECIMAL` downstream for exact financial arithmetic.
 - **Single sequential reader.** e-conomic list endpoints cannot sort, the rate limit is per agreement, and accounting data sets are usually small. For these reasons the connector reads each table from a single reader, without partitioning.
-- **Safety limit on pages.** As a guard against a misbehaving cursor, one read follows at most 10,000 pages of up to 1,000 records each, which is about 10 million rows. A read also stops if e-conomic returns the same pagination cursor twice.
+- **Safety limit on pages.** As a guard against a misbehaving cursor, one read follows at most 10,000 pages of up to 1,000 records each, which is about 10 million rows, and fails with an error beyond that. A read also fails with an error if e-conomic returns the same pagination cursor twice.
 - **One agreement per connection.** To ingest several e-conomic companies, create a separate connection and pipeline for each agreement.
 
 ## References
