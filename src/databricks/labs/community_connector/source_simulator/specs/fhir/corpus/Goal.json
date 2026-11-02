@@ -1,0 +1,95 @@
+[
+  {
+    "resourceType": "Goal",
+    "id": "goal-1",
+    "meta": {
+      "versionId": "1",
+      "lastUpdated": "2024-02-01T00:00:00+00:00"
+    },
+    "lifecycleStatus": "active",
+    "description": {
+      "text": "quit smoking"
+    },
+    "subject": {
+      "reference": "Patient/p1"
+    },
+    "target": [
+      {
+        "measure": {
+          "coding": [
+            {
+              "system": "http://loinc.org",
+              "code": "39156-5"
+            }
+          ]
+        },
+        "detailQuantity": {
+          "value": 0,
+          "unit": "kg/m2"
+        }
+      }
+    ]
+  },
+  {
+    "resourceType": "Goal",
+    "id": "goal-2",
+    "meta": {
+      "versionId": "1",
+      "lastUpdated": "2024-02-02T00:00:00+00:00"
+    },
+    "lifecycleStatus": "active",
+    "description": {
+      "text": "reduce BMI"
+    },
+    "subject": {
+      "reference": "Patient/p2"
+    },
+    "target": [
+      {
+        "measure": {
+          "coding": [
+            {
+              "system": "http://loinc.org",
+              "code": "39156-5"
+            }
+          ]
+        },
+        "detailQuantity": {
+          "value": 24.9,
+          "unit": "kg/m2"
+        }
+      }
+    ]
+  },
+  {
+    "resourceType": "Goal",
+    "id": "goal-3",
+    "meta": {
+      "versionId": "1",
+      "lastUpdated": "2024-02-03T00:00:00+00:00"
+    },
+    "lifecycleStatus": "active",
+    "description": {
+      "text": "walk daily"
+    },
+    "subject": {
+      "reference": "Patient/p3"
+    },
+    "target": [
+      {
+        "measure": {
+          "coding": [
+            {
+              "system": "http://loinc.org",
+              "code": "39156-5"
+            }
+          ]
+        },
+        "detailQuantity": {
+          "value": 5.1,
+          "unit": "kg/m2"
+        }
+      }
+    ]
+  }
+]

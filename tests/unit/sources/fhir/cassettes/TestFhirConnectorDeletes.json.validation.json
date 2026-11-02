@@ -1,0 +1,45 @@
+{
+  "version": 1,
+  "generated_at": "2026-11-02T01:20:52.788286Z",
+  "endpoints": [
+    {
+      "method": "GET",
+      "spec_path": "/baseR4/Goal",
+      "sample_url": "https://hapi.fhir.org/baseR4/Goal?_count=500&_sort=_lastUpdated&_lastUpdated=le2026-11-02T01%3A20%3A51.147741Z",
+      "status": "validated",
+      "calls": 3,
+      "matched": 3,
+      "mismatched": 0,
+      "no_spec": 0,
+      "issues": []
+    },
+    {
+      "method": "GET",
+      "spec_path": "/baseR4/metadata",
+      "sample_url": "https://hapi.fhir.org/baseR4/metadata",
+      "status": "validated",
+      "calls": 1,
+      "matched": 1,
+      "mismatched": 0,
+      "no_spec": 0,
+      "issues": []
+    },
+    {
+      "method": "GET",
+      "spec_path": "/baseR4/{resource_type}/_history",
+      "sample_url": "https://hapi.fhir.org/baseR4/Goal/_history?_since=2026-11-01T23%3A20%3A52.630623Z&_count=100",
+      "status": "validated",
+      "calls": 1,
+      "matched": 1,
+      "mismatched": 0,
+      "no_spec": 0,
+      "issues": []
+    }
+  ],
+  "summary": {
+    "endpoints_total": 3,
+    "endpoints_validated": 3,
+    "endpoints_mismatched": 0,
+    "endpoints_missing_spec": 0
+  }
+}

@@ -12,6 +12,9 @@
     "zoho_crm": [
       "zoho_crm_oauth_setup.py"
     ],
+    "fhir": [
+      "validate_auth.py"
+    ],
     "microsoft_teams": [
       "sample-ingest.py"
     ],

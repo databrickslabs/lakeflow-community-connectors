@@ -1,0 +1,32 @@
+{
+  "connection_name": "hapi_fhir_conn",
+  "objects": [
+    {
+      "table": {
+        "source_table": "Patient",
+        "table_configuration": {
+          "page_size": "5",
+          "max_records_per_batch": "5"
+        }
+      }
+    },
+    {
+      "table": {
+        "source_table": "Observation",
+        "table_configuration": {
+          "page_size": "5",
+          "max_records_per_batch": "5"
+        }
+      }
+    },
+    {
+      "table": {
+        "source_table": "Condition",
+        "table_configuration": {
+          "page_size": "5",
+          "max_records_per_batch": "5"
+        }
+      }
+    }
+  ]
+}
