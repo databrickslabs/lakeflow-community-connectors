@@ -109,12 +109,58 @@ Say in the PR description which bump you made and why. For a MAJOR bump, also sa
 
 ### Framework
 
-Decide by what **connectors** need:
+The framework is the `lakeflow-community-connectors` package, built from the root `pyproject.toml` into `wheelhouse/_framework/`. Every pipeline installs it next to its connector wheel, so a framework change reaches every connector at once. Decide the bump by what **connectors** need, not by pipelines or tables.
 
-- **MAJOR**: at least one connector must change to keep working. For example, removing or renaming an interface method or mixin, changing a signature, adding a required key to `read_table_metadata()`, removing an `ingestion_type` value or a `libs/` helper, or changing the pipeline entry points.
-- **MINOR**: connectors keep working unchanged, and there's new capability. For example, an optional method with a default implementation, a new mixin, a new `libs/` helper, or a new `ingestion_type` value.
-- **PATCH**: fixes and internal changes.
+What counts as the framework:
 
-Connectors declare the framework as `lakeflow-community-connectors>=<min>,<<next major>`, for example `>=0.1.0,<1.0`. A connector bumps only when it changes itself, not because the framework did.
+- `interface/`: `LakeflowConnect` and the `Supports*` mixins
+- `libs/`: helpers that connectors import
+- `pipeline/` and `sparkpds/`: the ingestion pipeline entry point and the Spark data source registration
+- the root `pyproject.toml`: `requires-python` and the framework's dependencies
+- `source_simulator/` ships in the wheel but is test-only, so changing it doesn't need a bump
 
-The wizard installs the framework wheel next to any connector wheel from the same `master` revision, so a framework version must satisfy the range every connector declares. Before bumping the framework, update the affected connectors in the same PR (verify them, raise their cap, and bump each one), or defer the framework release. `build_wheelhouse.py --framework` checks every connector's range and fails on a mismatch.
+**MAJOR**: at least one connector must change to keep working.
+
+- Removing or renaming an interface method, a mixin, or a `libs/` helper that connectors import
+- Changing a method signature or return contract, for example adding a required argument or a required key in `read_table_metadata()`
+- Removing an `ingestion_type` value, or changing what an existing one means
+- Changing how offsets are passed to or stored for connectors
+- Changing the pipeline entry points or the data source registration that connectors rely on
+- Raising `requires-python`, or adding or tightening a dependency beyond what supported runtimes or existing connectors allow
+
+**MINOR**: connectors keep working unchanged, and there's new capability.
+
+- Adding an optional interface method with a default implementation (like `read_table_deletes()`)
+- Adding a new mixin, `libs/` helper, or `ingestion_type` value
+- Adding an optional argument or metadata key that has a default
+- Deprecating something that keeps working (removal is a later MAJOR)
+
+**PATCH**: fixes and internal changes connectors can't observe.
+
+- Bug fixes in `libs/`, `pipeline/` or `sparkpds/`
+- Performance, logging and error-message improvements, refactors
+- Removing an unused dependency, or widening a dependency range
+
+**No bump**: tests, CI, docs, and `source_simulator/` specs and corpus.
+
+#### Compatibility with connectors
+
+- Every connector declares the framework range it works with: `lakeflow-community-connectors>=<min>,<<next major>`, for example `>=0.1.0,<1.0`.
+- A connector raises `<min>` when it starts using a new framework feature, and bumps its own version (MINOR).
+- A connector bumps only when it changes itself, not because the framework did.
+- The wizard installs the framework and connector wheels from the same `master` revision, so every framework version on `master` must satisfy the range of every connector on `master`.
+
+#### Releasing a framework change
+
+1. Classify the change with the rules above and bump `version` in the root `pyproject.toml`.
+2. Rebuild with `python tools/scripts/build_wheelhouse.py --framework`. It checks every connector's declared range against the new version and fails on a mismatch.
+3. For each connector it reports:
+   - after a MINOR or PATCH, the connector pins below the new version: fix its range in the same PR.
+   - after a MAJOR, verify the connector against the new framework, change its code if needed, raise its cap to the next major (for example `<2.0`), and bump it by its own rules, all in the same PR. If the affected connectors can't all be updated, defer the framework release.
+4. Run `python tools/scripts/build_wheelhouse.py all --check --base origin/master` and confirm it passes.
+
+Examples:
+
+- **PATCH**: fix a retry helper in `libs/utils.py`. Framework `0.1.0` → `0.1.1`; no connector changes.
+- **MINOR**: add an optional mixin with a default. Framework `0.1.1` → `0.2.0`; connectors that adopt it raise their minimum to `>=0.2.0` and bump MINOR.
+- **MAJOR**: make `read_table_metadata()` require a new key. Framework `0.2.0` → `1.0.0`; in the same PR, every connector adds the key, moves its range to `>=1.0.0,<2.0`, and bumps (PATCH, or MAJOR if its tables are affected).

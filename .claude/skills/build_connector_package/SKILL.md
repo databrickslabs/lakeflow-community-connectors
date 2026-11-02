@@ -76,7 +76,7 @@ Skip this section for a new connector. Otherwise, compare the change with `maste
 3. If `master` already has a higher version than your branch's base, bump from `master`'s version.
 4. Record the bump in the commit message and PR description: `{{source_name}} 0.1.0 → 0.2.0 (MINOR): add the cohorts table`. For MAJOR, also list what users must do, per table.
 
-If the change also touches framework code (outside `sources/`), bump the root `pyproject.toml` by the framework rules in `CONTRIBUTING.md` (MAJOR if any connector must change, MINOR for new capability, PATCH for fixes) and rebuild with `--framework`. The new framework version must satisfy every connector's `lakeflow-community-connectors` range: if the script reports a mismatch, update those connectors in the same change (raise the cap and bump each one) or don't release the framework change.
+If the change also touches framework code (outside `sources/`), bump the root `pyproject.toml` by the framework rules in `CONTRIBUTING.md` (Versioning → Framework: MAJOR if any connector must change, MINOR for new capability, PATCH for fixes; `source_simulator/` changes don't bump) and rebuild with `--framework`. The new framework version must satisfy every connector's `lakeflow-community-connectors` range: if the script reports a mismatch, update those connectors in the same change (raise the cap and bump each one) or don't release the framework change.
 
 ## Build the prebuilt wheel (required)
 
