@@ -2,6 +2,21 @@
 
 This directory contains utility scripts for the Lakeflow Community Connectors project.
 
+## build_wheelhouse.py
+
+Builds the prebuilt wheels under `wheelhouse/` that the Databricks managed ingestion wizard installs, and checks that they match the source. See `CONTRIBUTING.md` (Prebuilt connector wheels, Versioning).
+
+```bash
+python3 tools/scripts/build_wheelhouse.py <source_name>     # rebuild one connector
+python3 tools/scripts/build_wheelhouse.py --framework       # rebuild the framework
+python3 tools/scripts/build_wheelhouse.py all               # every connector and the framework
+
+# Don't write; fail if a wheel is missing, stale, or changed without a version bump vs master
+python3 tools/scripts/build_wheelhouse.py <source_name> --check --base origin/master
+```
+
+A committed wheel is kept when nothing that affects pipelines changed (docs, the README text in `METADATA`, the build tool version, and the test-only source simulator are ignored), so rebuilding unchanged code doesn't churn binaries.
+
 ## merge_python_source.py
 
 Merges multiple source files into a single deployable Python file. This is useful for creating standalone source connectors that can be deployed without the full project structure.

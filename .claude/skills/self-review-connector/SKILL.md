@@ -187,7 +187,7 @@ that weren't hit (`coverage.endpoints_in_spec − coverage.endpoints_hit`).
 
 ---
 
-### Section C — Artifacts (10 checks)
+### Section C — Artifacts (13 checks)
 
 | # | Severity | Artifact | Path | Validation |
 |---|---|---|---|---|
@@ -201,6 +201,9 @@ that weren't hit (`coverage.endpoints_in_spec − coverage.endpoints_hit`).
 | C8 | BLOCKER | Simulator corpus | `src/.../source_simulator/specs/{{source_name}}/corpus/*.json` | every file is valid JSON |
 | C9 | BLOCKER | Test class | `tests/unit/sources/{{source_name}}/test_{{source_name}}_lakeflow_connect.py` | (covered by B1) |
 | C10 | BLOCKER | No runtime `pyspark` declaration | `src/.../sources/{{source_name}}/pyproject.toml` | parse TOML; `project.dependencies` must NOT contain any entry whose package name is `pyspark`. PySpark is provided by the Databricks runtime; declaring it at runtime causes pip-install conflicts on clusters (e.g. wheel pins `pyspark>=4.2.0.dev0` but cluster ships `pyspark==4.1.0`). Keep `pyspark` in `[project.optional-dependencies].dev` only. Fail with the exact remediation: "Move `pyspark` line from `[project.dependencies]` to `[project.optional-dependencies].dev` in `<path>`." |
+| C11 | BLOCKER | Prebuilt wheel in sync | `wheelhouse/{{source_name}}/` | `python tools/scripts/build_wheelhouse.py {{source_name}} --check` exits 0: exactly one wheel, named `lakeflow_community_connectors_{{source_name}}-<version>-py3-none-any.whl` with `<version>` from `pyproject.toml`, and built from the current source. Fail with the remediation the script prints. |
+| C12 | BLOCKER | Version bumped | `src/.../sources/{{source_name}}/pyproject.toml` | `python tools/scripts/build_wheelhouse.py {{source_name}} --check --base origin/master` reports no "bump `version`" error: if the wheel's contents changed since `master`, the version must differ from `master`'s. A connector not on `master` yet passes. |
+| C13 | MAJOR | Bump size matches the change | `git diff origin/master -- src/.../sources/{{source_name}}/` | skip if the version didn't change. Otherwise apply the Versioning rules in `CONTRIBUTING.md`: `warn` if the diff changes a primary key, cursor field, `ingestion_type`, column type, offset format, or removes/renames a table, column, connection parameter, table option or auth method, but the bump isn't MAJOR; or adds a table/option/auth method with only a PATCH bump. Cite the line that drives the expected bump. |
 
 ---
 
