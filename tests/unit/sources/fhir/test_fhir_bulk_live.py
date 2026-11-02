@@ -14,8 +14,11 @@ are therefore opt-in:
     FHIR_LIVE_BULK=1 .venv/bin/python -m pytest tests/unit/sources/fhir/test_fhir_bulk_live.py -v
 
 Without that variable they skip, so CI cannot hang on a flaky public endpoint.
-The cheap live checks (REST ground truth, cursor canonicalisation) always run
-when the server is reachable.
+The cheap REST checks still reach the network, so they are opt-in too:
+
+    FHIR_LIVE=1 .venv/bin/python -m pytest tests/unit/sources/fhir/test_fhir_bulk_live.py -v
+
+FHIR_LIVE_BULK=1 implies FHIR_LIVE=1. A default `pytest` run makes no network calls.
 """
 
 import json
@@ -50,6 +53,10 @@ EXPORT_TIMEOUT = 300
 _SKIP_BULK = pytest.mark.skipif(
     os.environ.get("FHIR_LIVE_BULK") != "1",
     reason="Set FHIR_LIVE_BULK=1 to run live $export tests (~2 min each).",
+)
+_SKIP_LIVE = pytest.mark.skipif(
+    "1" not in (os.environ.get("FHIR_LIVE"), os.environ.get("FHIR_LIVE_BULK")),
+    reason="Set FHIR_LIVE=1 to run cheap live REST checks against the configured server.",
 )
 
 
@@ -447,6 +454,26 @@ def test_cleanup_delete_does_not_raise_on_a_404(base_url):
 # --- Cheap live checks (no $export) ------------------------------------------
 
 
+def _oldest_last_updated(base, resource_type):
+    """lastUpdated of the oldest resource, so a `gt` bound on it is always selective.
+
+    A hard-coded date goes stale on a public server whose data keeps changing.
+    """
+    resp = requests.get(
+        f"{base}/{resource_type}",
+        params={"_count": "1", "_sort": "_lastUpdated"},
+        headers={"Accept": "application/fhir+json"},
+        timeout=60,
+    )
+    assert resp.status_code == 200, f"oldest-record query failed: HTTP {resp.status_code}"
+    entries = resp.json().get("entry") or []
+    stamp = entries and (entries[0]["resource"].get("meta") or {}).get("lastUpdated")
+    if not stamp:
+        pytest.skip(f"no {resource_type} with a lastUpdated on this server")
+    return stamp
+
+
+@_SKIP_LIVE
 def test_rest_last_updated_filter_is_honoured(base_url):
     """The REST path's `_lastUpdated` bound is selective on this server.
 
@@ -454,10 +481,11 @@ def test_rest_last_updated_filter_is_honoured(base_url):
     "server ignored the filter" guard in the REST read path.
     """
     unfiltered = _rest_count(base_url, "Patient")
-    filtered = _rest_count(base_url, "Patient", since="2026-08-01T00:00:00Z")
+    filtered = _rest_count(base_url, "Patient", since=_oldest_last_updated(base_url, "Patient"))
     assert 0 < filtered < unfiltered, f"filter not selective: {filtered} of {unfiltered}"
 
 
+@_SKIP_LIVE
 def test_rest_cursor_round_trip_returns_only_newer_records(base_url):
     """Feeding a cursor back must not return records at or before it.
 
@@ -466,7 +494,11 @@ def test_rest_cursor_round_trip_returns_only_newer_records(base_url):
     """
     resp = requests.get(
         f"{base_url}/Patient",
-        params={"_count": "100", "_sort": "_lastUpdated", "_lastUpdated": "gt2026-08-01T00:00:00Z"},
+        params={
+            "_count": "100",
+            "_sort": "_lastUpdated",
+            "_lastUpdated": f"gt{_oldest_last_updated(base_url, 'Patient')}",
+        },
         headers={"Accept": "application/fhir+json"},
         timeout=60,
     )

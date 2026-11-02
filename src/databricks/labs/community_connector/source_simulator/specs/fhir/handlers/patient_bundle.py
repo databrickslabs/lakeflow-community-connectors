@@ -10,12 +10,18 @@ Without this, the connector's micro-batch offset contract sees that the
 "server" returns the same records on every call regardless of the cursor,
 and (correctly) raises an error about the FHIR server ignoring
 ``_lastUpdated``.
+
+Repeated ``_lastUpdated`` values are ANDed, as FHIR search specifies (the
+connector sends ``gt<cursor>`` and ``le<init_ts>``), and ``_sort=_lastUpdated``
+is honoured. The shared query parser keeps only the last value of a repeated
+key, so the query string is parsed here.
 """
 
 from __future__ import annotations
 
 import json
 from typing import Any, List, Optional
+from urllib.parse import parse_qsl, urlsplit
 
 from requests.models import PreparedRequest, Response
 
@@ -23,10 +29,8 @@ from databricks.labs.community_connector.source_simulator.cassette import (
     ResponseRecord,
 )
 from databricks.labs.community_connector.source_simulator.interceptor import (
-    request_record_from_prepared,
     response_from_record,
 )
-
 
 _PREFIXES = ("gt", "ge", "lt", "le", "eq", "ne")
 
@@ -59,18 +63,20 @@ def _matches(value: Optional[str], prefix: str, target: str) -> bool:
 
 
 def serve_patient_bundle(prep: PreparedRequest, spec, corpus) -> Response:  # noqa: ARG001
-    req = request_record_from_prepared(prep)
+    query = parse_qsl(urlsplit(prep.url or "").query, keep_blank_values=True)
+    bounds = [_parse_prefix(v) for k, v in query if k == "_lastUpdated"]
     raw_resources: List[dict] = corpus.get("Patient") or []
 
-    prefix, target = _parse_prefix(req.query.get("_lastUpdated"))
-    filtered: List[dict] = []
-    for r in raw_resources:
-        if prefix is None:
-            filtered.append(r)
-            continue
-        last_updated = ((r.get("meta") or {}).get("lastUpdated"))
-        if _matches(last_updated, prefix, target):
-            filtered.append(r)
+    filtered: List[dict] = [
+        r
+        for r in raw_resources
+        if all(
+            _matches((r.get("meta") or {}).get("lastUpdated"), prefix, target)
+            for prefix, target in bounds
+        )
+    ]
+    if ("_sort", "_lastUpdated") in query:
+        filtered.sort(key=lambda r: (r.get("meta") or {}).get("lastUpdated") or "")
 
     bundle: dict[str, Any] = {
         "resourceType": "Bundle",

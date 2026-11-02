@@ -13,6 +13,12 @@ endpoints:
   - path: /fhir/Patient
     method: GET
     handler: databricks.labs.community_connector.source_simulator.specs.fhir.handlers.patient_bundle:serve_patient_bundle
+    # The corpus key lets synthesize_future_records clone future-dated Patients
+    # into the store the handler reads. A connector honouring its _init_ts cap
+    # (_lastUpdated=le<init_ts>) never sees them, so test_read_terminates
+    # exercises the cap.
+    corpus: Patient
+    synthesize_future_records: {cursor_field: meta.lastUpdated, count: 3}
   - path: /fhir/Observation
     method: GET
     corpus: empty_bundle

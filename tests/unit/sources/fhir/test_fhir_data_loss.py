@@ -11,7 +11,7 @@ from unittest.mock import patch
 
 import pytest
 
-from databricks.labs.community_connector.sources.fhir.fhir import FhirLakeflowConnect
+from databricks.labs.community_connector.sources.fhir.fhir import FhirLakeflowConnect, _canonical_ts
 from databricks.labs.community_connector.sources.fhir.fhir_bulk import BulkExportClient
 from databricks.labs.community_connector.sources.fhir.fhir_utils import SmartAuthClient
 
@@ -225,3 +225,17 @@ def test_snapshot_batch_read_returns_full_export(MockBulkClient):
     c = _connector(bulk_export_enabled="true", bulk_incremental_mode="full")
     records, _ = c.read_table("Patient", None, {})
     assert [r["resource_id"] for r in records] == ["p1", "p2"]
+
+
+# ── 4. The _init_ts cap is an upper bound on the query ────────────────────────
+
+
+@pytest.mark.parametrize("since", [None, T1])
+def test_rest_query_is_bounded_by_init_ts(since):
+    """Resources written after the trigger started wait for the next trigger."""
+    c = _connector()
+    with patch(ITER_PAGES, return_value=iter([])) as mock_pages:
+        c.read_table("Patient", {"cursor": since} if since else {}, {})
+    bounds = mock_pages.call_args.args[2]["_lastUpdated"]
+    expected_le = "le" + _canonical_ts(c._init_ts)
+    assert bounds == ([f"gt{since}", expected_le] if since else [expected_le])

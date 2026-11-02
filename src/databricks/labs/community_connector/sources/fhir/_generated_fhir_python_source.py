@@ -1639,9 +1639,13 @@ def register_lakeflow_source(spark):
 
             page_size = _int_option(table_options, "page_size", DEFAULT_PAGE_SIZE)
             page_delay = _float_option(table_options, "page_delay", PAGE_DELAY)
-            params: dict[str, str] = {"_count": str(page_size), "_sort": "_lastUpdated"}
+            # The upper bound is what makes _init_ts a real cap: resources written
+            # after this trigger started wait for the next one. Repeating
+            # _lastUpdated ANDs the two bounds (FHIR search, R4 §3.1.1.4.8).
+            bounds = [f"le{_canonical_ts(self._init_ts)}"]
             if since:
-                params["_lastUpdated"] = f"gt{since}"
+                bounds.insert(0, f"gt{since}")
+            params: dict = {"_count": str(page_size), "_sort": "_lastUpdated", "_lastUpdated": bounds}
 
             resources: list[dict] = []
             boundary = None  # lastUpdated of the resource that filled the budget
