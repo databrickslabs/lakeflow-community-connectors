@@ -11,7 +11,8 @@ python3 tools/scripts/build_wheelhouse.py <source_name>     # rebuild one connec
 python3 tools/scripts/build_wheelhouse.py --framework       # rebuild the framework
 python3 tools/scripts/build_wheelhouse.py all               # every connector and the framework
 
-# Don't write; fail if a wheel is missing, stale, or changed without a version bump vs master
+# Don't write; fail if a wheel is missing, stale, changed without a version bump vs master,
+# or if a connector's framework range excludes the framework version
 python3 tools/scripts/build_wheelhouse.py <source_name> --check --base origin/master
 ```
 

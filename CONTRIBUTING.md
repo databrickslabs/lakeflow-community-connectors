@@ -58,7 +58,7 @@ In the same PR as the change:
    python tools/scripts/build_wheelhouse.py <source_name> --check --base origin/master
    ```
 
-   It fails if a wheel is missing or stale, or if its contents changed without a version bump.
+   It fails if a wheel is missing or stale, if its contents changed without a version bump, or if a connector's declared framework range excludes the framework version.
 
 What needs a rebuild:
 
@@ -82,7 +82,8 @@ Decide by what an **existing pipeline** needs when it picks up the new wheel:
 - Changing a table's ingestion type (for example `snapshot` → `cdc`, or `cdc` → `cdc_with_deletes`)
 - Changing a primary key or cursor field
 - Renaming or removing a table, column, connection parameter, table option or auth method
-- Changing a column's type, or making a nullable column non-nullable
+- Changing a column's type, changing a nested struct's shape incompatibly, or making a nullable column non-nullable
+- Making an optional connection parameter or table option required
 - Changing what existing values mean (units, time zones, what one row represents)
 - Changing a default in a way that changes which data is returned
 - Changing the offset format so an old checkpoint can't be read
@@ -114,4 +115,6 @@ Decide by what **connectors** need:
 - **MINOR**: connectors keep working unchanged, and there's new capability. For example, an optional method with a default implementation, a new mixin, a new `libs/` helper, or a new `ingestion_type` value.
 - **PATCH**: fixes and internal changes.
 
-Connectors declare the framework as `lakeflow-community-connectors>=<min>,<<next major>`, for example `>=0.1.0,<1.0`. A connector bumps only when it changes itself, not because the framework did. A framework MAJOR needs every connector checked and its cap raised.
+Connectors declare the framework as `lakeflow-community-connectors>=<min>,<<next major>`, for example `>=0.1.0,<1.0`. A connector bumps only when it changes itself, not because the framework did.
+
+The wizard installs the framework wheel next to any connector wheel from the same `master` revision, so a framework version must satisfy the range every connector declares. Before bumping the framework, update the affected connectors in the same PR (verify them, raise their cap, and bump each one), or defer the framework release. `build_wheelhouse.py --framework` checks every connector's range and fails on a mismatch.

@@ -22,6 +22,12 @@ Usage:
 
     # Also fail if a wheel's contents changed since <ref> without a version bump:
     python tools/scripts/build_wheelhouse.py <source_name> --check --base origin/master
+
+Every run also checks that the framework version satisfies the
+`lakeflow-community-connectors` range each connector declares: every connector when
+the framework is a target, otherwise only the given connectors. The wizard installs
+the framework wheel next to any connector wheel from the same revision, so a
+mismatch would fail at install time.
 """
 
 import argparse
@@ -80,6 +86,45 @@ def expected_wheel_name(pyproject_text: str) -> str:
     name = re.sub(r"[-_.]+", "_", read_project_field(pyproject_text, "name")).lower()
     version = read_project_field(pyproject_text, "version")
     return f"{name}-{version}-py3-none-any.whl"
+
+
+def framework_requirement(pyproject_text: str) -> Optional[str]:
+    """Return the specifier a connector declares on the framework, e.g. `>=0.1.0,<1.0`."""
+    match = re.search(r'"lakeflow-community-connectors(?![-\w])\s*([^";]*)', pyproject_text)
+    return match.group(1).strip() if match else None
+
+
+def check_framework_compatibility(sources: List[str]) -> List[str]:
+    """Return errors for connectors whose declared framework range excludes the framework."""
+    from packaging.specifiers import InvalidSpecifier, SpecifierSet
+    from packaging.version import Version
+
+    framework_version = Version(
+        read_project_field(pyproject_path(FRAMEWORK).read_text(), "version")
+    )
+    errors = []
+    uncapped = []
+    for source in sources:
+        spec = framework_requirement(pyproject_path(source).read_text())
+        if spec is None:
+            errors.append(f"{source}: doesn't declare a lakeflow-community-connectors dependency")
+            continue
+        try:
+            specifiers = SpecifierSet(spec)
+        except InvalidSpecifier:
+            errors.append(f"{source}: invalid framework range `{spec}`")
+            continue
+        if framework_version not in specifiers:
+            errors.append(
+                f"{source}: requires lakeflow-community-connectors{spec}, but the framework is "
+                f"{framework_version}; update the connector in the same PR or defer the framework "
+                "release (see CONTRIBUTING.md, Versioning)"
+            )
+        if not any(s.operator in ("<", "<=", "==", "~=") for s in specifiers):
+            uncapped.append(source)
+    if uncapped:
+        print("note        no framework upper cap (add `,<{next major}`): " + ", ".join(uncapped))
+    return errors
 
 
 def comparable_contents(wheel_bytes: bytes) -> Dict[str, bytes]:
@@ -248,6 +293,8 @@ def main() -> int:
             errors += process(target, args.check, args.base)
         except (RuntimeError, ValueError) as exc:
             errors.append(f"{target}: {exc}")
+    connectors = list_sources() if FRAMEWORK in targets else targets
+    errors += check_framework_compatibility(connectors)
     for error in errors:
         print(f"ERROR  {error}", file=sys.stderr)
     return 1 if errors else 0

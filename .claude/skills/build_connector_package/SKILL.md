@@ -65,8 +65,8 @@ packages = ["databricks.labs.community_connector.sources.{{source_name}}"]
 Skip this section for a new connector. Otherwise, compare the change with `master` and bump `version` in `src/databricks/labs/community_connector/sources/{{source_name}}/pyproject.toml` once, by the largest change. The full rules and examples are in `CONTRIBUTING.md` (Versioning).
 
 1. For every table the change touches, decide what an existing pipeline needs after upgrading:
-   - **full refresh**: primary key, cursor, ingestion type, column type, value meaning or offset format changed, or past data must be repaired
-   - **user action**: a table, column, connection parameter, table option or auth method was renamed or removed, or a runtime requirement went past what supported runtimes provide
+   - **full refresh**: primary key, cursor, ingestion type, column type, nested struct shape, value meaning or offset format changed, or past data must be repaired
+   - **user action**: a table, column, connection parameter, table option or auth method was renamed or removed, an optional parameter or option became required, or a runtime requirement went past what supported runtimes provide
    - **nothing**
 2. Pick the bump:
    - **MAJOR** (`x.y.z` → `x+1.0.0`) if any table needs a full refresh or user action
@@ -76,7 +76,7 @@ Skip this section for a new connector. Otherwise, compare the change with `maste
 3. If `master` already has a higher version than your branch's base, bump from `master`'s version.
 4. Record the bump in the commit message and PR description: `{{source_name}} 0.1.0 → 0.2.0 (MINOR): add the cohorts table`. For MAJOR, also list what users must do, per table.
 
-If the change also touches framework code (outside `sources/`), bump the root `pyproject.toml` by the framework rules in `CONTRIBUTING.md` (MAJOR if any connector must change, MINOR for new capability, PATCH for fixes) and rebuild with `--framework`.
+If the change also touches framework code (outside `sources/`), bump the root `pyproject.toml` by the framework rules in `CONTRIBUTING.md` (MAJOR if any connector must change, MINOR for new capability, PATCH for fixes) and rebuild with `--framework`. The new framework version must satisfy every connector's `lakeflow-community-connectors` range: if the script reports a mismatch, update those connectors in the same change (raise the cap and bump each one) or don't release the framework change.
 
 ## Build the prebuilt wheel (required)
 
