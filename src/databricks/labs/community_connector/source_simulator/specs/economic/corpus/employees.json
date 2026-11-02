@@ -1,5 +1,62 @@
 [
   {
+    "number": 1,
+    "groupNumber": 1,
+    "name": "Martin Crane",
+    "isBarred": false,
+    "phone": "0763448762874",
+    "email": "redacted@example.com",
+    "objectVersion": "e208e159c08bb729"
+  },
+  {
+    "number": 2,
+    "groupNumber": 1,
+    "name": "Maris Crane",
+    "isBarred": false,
+    "phone": "09876555678",
+    "email": "redacted@example.com",
+    "objectVersion": "e303d469817ad17"
+  },
+  {
+    "number": 3,
+    "groupNumber": 1,
+    "name": "Barred employee",
+    "isBarred": true,
+    "phone": "098757787889",
+    "email": "redacted@example.com",
+    "objectVersion": "e6027a012e7c5653"
+  },
+  {
+    "number": 4,
+    "groupNumber": 1,
+    "name": "Donny Bosco",
+    "isBarred": false,
+    "objectVersion": "e711758fbb27d8c8"
+  },
+  {
+    "number": 5,
+    "groupNumber": 1,
+    "name": "John Timelogger",
+    "isBarred": false,
+    "email": "redacted@example.com",
+    "objectVersion": "1c15923bc3675bbf"
+  },
+  {
+    "number": 6,
+    "groupNumber": 1,
+    "name": "Mike Project Manager",
+    "isBarred": false,
+    "email": "redacted@example.com",
+    "objectVersion": "ed9c5cf53f9bf6d0"
+  },
+  {
+    "number": 8,
+    "groupNumber": 2,
+    "name": "Linda Carey",
+    "isBarred": false,
+    "objectVersion": "290a8e84011561de"
+  },
+  {
     "number": 1000,
     "groupNumber": 58706,
     "name": "foxtrot-104",
@@ -133,95 +190,5 @@
     "phone": "victor-747",
     "email": "oscar-290",
     "objectVersion": "lima-285"
-  },
-  {
-    "number": 1015,
-    "groupNumber": 58909,
-    "name": "foxtrot-791",
-    "isBarred": false,
-    "phone": "kilo-475",
-    "email": "alpha-947",
-    "objectVersion": "yankee-641"
-  },
-  {
-    "number": 1016,
-    "groupNumber": 29865,
-    "name": "bravo-518",
-    "isBarred": true,
-    "phone": "xray-596",
-    "email": "delta-414",
-    "objectVersion": "november-354"
-  },
-  {
-    "number": 1017,
-    "groupNumber": 97028,
-    "name": "alpha-892",
-    "isBarred": true,
-    "phone": "hotel-341",
-    "email": "xray-116",
-    "objectVersion": "delta-750"
-  },
-  {
-    "number": 1018,
-    "groupNumber": 47952,
-    "name": "november-787",
-    "isBarred": true,
-    "phone": "juliet-332",
-    "email": "victor-250",
-    "objectVersion": "hotel-650"
-  },
-  {
-    "number": 1019,
-    "groupNumber": 65497,
-    "name": "november-739",
-    "isBarred": false,
-    "phone": "kilo-471",
-    "email": "juliet-810",
-    "objectVersion": "oscar-211"
-  },
-  {
-    "number": 1020,
-    "groupNumber": 91766,
-    "name": "tango-130",
-    "isBarred": true,
-    "phone": "echo-293",
-    "email": "november-375",
-    "objectVersion": "uniform-298"
-  },
-  {
-    "number": 1021,
-    "groupNumber": 44846,
-    "name": "foxtrot-888",
-    "isBarred": false,
-    "phone": "foxtrot-575",
-    "email": "echo-957",
-    "objectVersion": "romeo-394"
-  },
-  {
-    "number": 1022,
-    "groupNumber": 13360,
-    "name": "quebec-117",
-    "isBarred": true,
-    "phone": "yankee-290",
-    "email": "tango-766",
-    "objectVersion": "xray-238"
-  },
-  {
-    "number": 1023,
-    "groupNumber": 79303,
-    "name": "delta-977",
-    "isBarred": false,
-    "phone": "victor-668",
-    "email": "mike-123",
-    "objectVersion": "india-584"
-  },
-  {
-    "number": 1024,
-    "groupNumber": 83576,
-    "name": "alpha-148",
-    "isBarred": false,
-    "phone": "golf-986",
-    "email": "india-828",
-    "objectVersion": "whiskey-839"
   }
 ]

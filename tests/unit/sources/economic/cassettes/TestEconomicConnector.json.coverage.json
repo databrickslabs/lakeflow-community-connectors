@@ -1,0 +1,43 @@
+{
+  "version": 1,
+  "endpoints": [
+    {
+      "method": "GET",
+      "url": "https://apis.e-conomic.com/customersapi/v3.1.0/Customers",
+      "count": 3,
+      "param_shapes": [
+        []
+      ]
+    },
+    {
+      "method": "GET",
+      "url": "https://apis.e-conomic.com/projectsapi/v1.1.0/Employees",
+      "count": 3,
+      "param_shapes": [
+        []
+      ]
+    },
+    {
+      "method": "GET",
+      "url": "https://apis.e-conomic.com/projectsapi/v1.1.0/Projects",
+      "count": 3,
+      "param_shapes": [
+        [],
+        [
+          "filter"
+        ]
+      ]
+    },
+    {
+      "method": "GET",
+      "url": "https://apis.e-conomic.com/projectsapi/v1.1.0/TimeEntries",
+      "count": 3,
+      "param_shapes": [
+        [],
+        [
+          "filter"
+        ]
+      ]
+    }
+  ]
+}

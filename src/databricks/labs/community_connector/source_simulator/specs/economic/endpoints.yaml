@@ -25,6 +25,21 @@
 # evaluation + cursor paging over the corpus, small page size so the
 # connector's cursor loop is exercised).
 #
+# Live-validated 2026-11-02 against the public "demo" agreement:
+#   * envelope is {"items": [...]} with no ``cursor`` key on the last page
+#     (demo tables are 5-10 rows, so a second page never occurs live;
+#     cursor paging is exercised only by the simulator's 20-item pages)
+#   * ``lastUpdated$gte:YYYY-MM-DDTHH:MM:SS`` and the combined
+#     ``...$and:number$gt:N`` form both return 200 with correctly filtered
+#     rows; an unmatched bound returns {"items": []}
+#   * timestamps are naive whole-minute values (no zone, no fraction); they
+#     appear to be Danish local time (a time entry whose text says
+#     "23:13:32 +01:00" has lastUpdated 23:14:00), not UTC
+#   * projects.lastUpdated was non-null on every demo row
+# The corpus is the live demo rows (re-seeded from the cassette via
+# tools.cassette_to_corpus) followed by 15 synthetic rows per table, re-keyed
+# from 1000 up, so every schema column and cursor paging stay covered.
+#
 # Termination: the connector caps its committed lastUpdated cursor at an
 # init-time snapshot and stamps completed scans with ``synced_at``.
 # ``synthesize_future_records`` adds post-now lastUpdated clones on the two
