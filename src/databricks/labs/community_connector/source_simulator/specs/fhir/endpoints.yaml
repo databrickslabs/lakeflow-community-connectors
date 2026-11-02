@@ -1,73 +1,96 @@
-# FHIR R4 server.
-#
-# Standard search response is a "Bundle" resource:
-#   {"resourceType": "Bundle", "type": "searchset", "entry": [...], "link": [...]}
-# Empty entry array → connector terminates.
+# FHIR R4 server, shaped like public HAPI R4 (https://hapi.fhir.org/baseR4) so a
+# live run (CONNECTOR_TEST_MODE=live, base_url=https://hapi.fhir.org/baseR4)
+# validates against it. Paths therefore use HAPI's /baseR4 base. Handlers live
+# in handlers/fhir_server.py; see its docstring for the measured shapes.
 
 endpoints:
   # CapabilityStatement: the connector reads fhirVersion from it once per run.
-  - path: /fhir/metadata
+  - path: /baseR4/metadata
     method: GET
     corpus: metadata
     response: {pagination_style: none, single_entity: true}
-  - path: /fhir/Patient
+
+  # SMART discovery. HAPI has no SMART auth, so this is a 404 there (and here);
+  # the success path is covered by mock tests.
+  - path: /baseR4/.well-known/smart-configuration
     method: GET
-    handler: databricks.labs.community_connector.source_simulator.specs.fhir.handlers.patient_bundle:serve_patient_bundle
-    # The corpus key lets synthesize_future_records clone future-dated Patients
-    # into the store the handler reads. A connector honouring its _init_ts cap
-    # (_lastUpdated=le<init_ts>) never sees them, so test_read_terminates
-    # exercises the cap.
+    handler: databricks.labs.community_connector.source_simulator.specs.fhir.handlers.fhir_server:serve_not_found
+
+  # Search, one entry per resource type. Patient's corpus also gets
+  # future-dated clones: a connector honouring its _init_ts cap
+  # (_lastUpdated=le<init_ts>) never sees them, so test_read_terminates
+  # exercises the cap.
+  - path: /baseR4/Patient
+    method: GET
+    handler: databricks.labs.community_connector.source_simulator.specs.fhir.handlers.fhir_server:serve_search
     corpus: Patient
     synthesize_future_records: {cursor_field: meta.lastUpdated, count: 3}
-  - path: /fhir/Observation
+  - path: /baseR4/Observation
     method: GET
-    corpus: empty_bundle
-    response: {pagination_style: none, single_entity: true}
-  - path: /fhir/Condition
+    handler: databricks.labs.community_connector.source_simulator.specs.fhir.handlers.fhir_server:serve_search
+  - path: /baseR4/Condition
     method: GET
-    corpus: empty_bundle
-    response: {pagination_style: none, single_entity: true}
-  - path: /fhir/Encounter
+    handler: databricks.labs.community_connector.source_simulator.specs.fhir.handlers.fhir_server:serve_search
+  - path: /baseR4/Encounter
     method: GET
-    corpus: empty_bundle
-    response: {pagination_style: none, single_entity: true}
-  - path: /fhir/Procedure
+    handler: databricks.labs.community_connector.source_simulator.specs.fhir.handlers.fhir_server:serve_search
+  - path: /baseR4/Procedure
     method: GET
-    corpus: empty_bundle
-    response: {pagination_style: none, single_entity: true}
-  - path: /fhir/MedicationRequest
+    handler: databricks.labs.community_connector.source_simulator.specs.fhir.handlers.fhir_server:serve_search
+  - path: /baseR4/MedicationRequest
     method: GET
-    corpus: empty_bundle
-    response: {pagination_style: none, single_entity: true}
-  - path: /fhir/DiagnosticReport
+    handler: databricks.labs.community_connector.source_simulator.specs.fhir.handlers.fhir_server:serve_search
+  - path: /baseR4/DiagnosticReport
     method: GET
-    corpus: empty_bundle
-    response: {pagination_style: none, single_entity: true}
-  - path: /fhir/AllergyIntolerance
+    handler: databricks.labs.community_connector.source_simulator.specs.fhir.handlers.fhir_server:serve_search
+  - path: /baseR4/AllergyIntolerance
     method: GET
-    corpus: empty_bundle
-    response: {pagination_style: none, single_entity: true}
-  - path: /fhir/Immunization
+    handler: databricks.labs.community_connector.source_simulator.specs.fhir.handlers.fhir_server:serve_search
+  - path: /baseR4/Immunization
     method: GET
-    corpus: empty_bundle
-    response: {pagination_style: none, single_entity: true}
-  - path: /fhir/Coverage
+    handler: databricks.labs.community_connector.source_simulator.specs.fhir.handlers.fhir_server:serve_search
+  - path: /baseR4/Coverage
     method: GET
-    corpus: empty_bundle
-    response: {pagination_style: none, single_entity: true}
-  - path: /fhir/CarePlan
+    handler: databricks.labs.community_connector.source_simulator.specs.fhir.handlers.fhir_server:serve_search
+  - path: /baseR4/CarePlan
     method: GET
-    corpus: empty_bundle
-    response: {pagination_style: none, single_entity: true}
-  - path: /fhir/Goal
+    handler: databricks.labs.community_connector.source_simulator.specs.fhir.handlers.fhir_server:serve_search
+  - path: /baseR4/Goal
     method: GET
-    corpus: empty_bundle
-    response: {pagination_style: none, single_entity: true}
-  - path: /fhir/Device
+    handler: databricks.labs.community_connector.source_simulator.specs.fhir.handlers.fhir_server:serve_search
+  - path: /baseR4/Device
     method: GET
-    corpus: empty_bundle
-    response: {pagination_style: none, single_entity: true}
-  - path: /fhir/DocumentReference
+    handler: databricks.labs.community_connector.source_simulator.specs.fhir.handlers.fhir_server:serve_search
+  - path: /baseR4/DocumentReference
     method: GET
-    corpus: empty_bundle
-    response: {pagination_style: none, single_entity: true}
+    handler: databricks.labs.community_connector.source_simulator.specs.fhir.handlers.fhir_server:serve_search
+
+  # Follow-on pages: HAPI's next links point at the server root.
+  - path: /baseR4
+    method: GET
+    handler: databricks.labs.community_connector.source_simulator.specs.fhir.handlers.fhir_server:serve_page
+
+  # Deletes (track_deletes=true): type-level history, newest first.
+  - path: /baseR4/{resource_type}/_history
+    method: GET
+    handler: databricks.labs.community_connector.source_simulator.specs.fhir.handlers.fhir_server:serve_history
+
+  # Bulk $export: kick-off (system and Patient scope), status poll, files, cleanup.
+  # A live poll answers 202 (in progress) before 200, and cleanup of a
+  # finished job is 404 on HAPI.
+  - path: /baseR4/$export
+    method: GET
+    handler: databricks.labs.community_connector.source_simulator.specs.fhir.handlers.fhir_server:serve_export_kickoff
+  - path: /baseR4/Patient/$export
+    method: GET
+    handler: databricks.labs.community_connector.source_simulator.specs.fhir.handlers.fhir_server:serve_export_kickoff
+  - path: /baseR4/$export-poll-status
+    method: GET
+    handler: databricks.labs.community_connector.source_simulator.specs.fhir.handlers.fhir_server:serve_export_status
+    response: {expected_status_codes: [202]}
+  - path: /baseR4/$export-poll-status
+    method: DELETE
+    handler: databricks.labs.community_connector.source_simulator.specs.fhir.handlers.fhir_server:serve_not_found
+  - path: /baseR4/Binary/{file_id}
+    method: GET
+    handler: databricks.labs.community_connector.source_simulator.specs.fhir.handlers.fhir_server:serve_export_file

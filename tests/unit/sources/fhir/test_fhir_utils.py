@@ -17,7 +17,7 @@ from databricks.labs.community_connector.sources.fhir.fhir_utils import (
 )
 
 CONFIG_PATH = Path(__file__).parent / "configs" / "dev_config.json"
-_SIMULATOR_BASE_URL = "https://simulator-fhir.example.com/fhir"
+_SIMULATOR_BASE_URL = "https://simulator-fhir.example.com/baseR4"
 _FHIR_SPEC_DIR = Path(_sim_pkg.__file__).parent / "specs" / "fhir"
 
 
