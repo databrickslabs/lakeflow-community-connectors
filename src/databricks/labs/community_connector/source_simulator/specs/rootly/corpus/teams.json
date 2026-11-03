@@ -1,0 +1,347 @@
+[
+  {
+    "id": "synthetic-teams-1",
+    "type": "groups",
+    "attributes": {
+      "name": "juliet-190",
+      "slug": "echo-533",
+      "managed_by": "quebec-107",
+      "description": "charlie-592",
+      "public_description": "hotel-791",
+      "public_name": "hotel-548",
+      "notify_emails": [],
+      "color": "november-861",
+      "position": 64725,
+      "backstage_id": "tango-254",
+      "external_id": "echo-394",
+      "pagerduty_id": "victor-470",
+      "pagerduty_service_id": "uniform-813",
+      "opsgenie_id": "papa-517",
+      "victor_ops_id": "hotel-110",
+      "pagertree_id": "quebec-152",
+      "cortex_id": "bravo-787",
+      "service_now_ci_sys_id": "delta-915",
+      "scim_group_id": "tango-746",
+      "user_ids": [
+        87164,
+        36821
+      ],
+      "admin_ids": [
+        1517
+      ],
+      "alerts_email_enabled": true,
+      "alerts_email_address": "romeo-828",
+      "alert_urgency_id": "yankee-431",
+      "slack_channels": [
+        {
+          "id": "papa-600",
+          "name": "delta-125"
+        },
+        {
+          "id": "charlie-367",
+          "name": "lima-113"
+        }
+      ],
+      "slack_aliases": [
+        {
+          "id": "delta-533",
+          "name": "delta-707"
+        },
+        {
+          "id": "sierra-315",
+          "name": "delta-187"
+        }
+      ],
+      "alert_broadcast_enabled": false,
+      "alert_broadcast_channel": {
+        "id": "yankee-199",
+        "name": "whiskey-653"
+      },
+      "incident_broadcast_enabled": true,
+      "incident_broadcast_channel": {
+        "id": "charlie-735",
+        "name": "uniform-550"
+      },
+      "auto_add_members_when_attached": true,
+      "auto_add_members_scope": "delta-301",
+      "schedule_override_policy": "juliet-509",
+      "properties": [
+        {
+          "catalog_property_id": "quebec-171",
+          "value": "tango-508"
+        },
+        {
+          "catalog_property_id": "juliet-149",
+          "value": "kilo-968"
+        }
+      ],
+      "created_at": "papa-144",
+      "updated_at": "kilo-300"
+    }
+  },
+  {
+    "id": "synthetic-teams-2",
+    "type": "groups",
+    "attributes": {
+      "name": "whiskey-957",
+      "slug": "victor-359",
+      "managed_by": "hotel-194",
+      "description": "lima-362",
+      "public_description": "charlie-780",
+      "public_name": "victor-282",
+      "notify_emails": [],
+      "color": "mike-420",
+      "position": 68022,
+      "backstage_id": "yankee-264",
+      "external_id": "quebec-920",
+      "pagerduty_id": "yankee-656",
+      "pagerduty_service_id": "india-909",
+      "opsgenie_id": "papa-804",
+      "victor_ops_id": "victor-982",
+      "pagertree_id": "november-522",
+      "cortex_id": "uniform-134",
+      "service_now_ci_sys_id": "papa-476",
+      "scim_group_id": "xray-328",
+      "user_ids": [
+        22885
+      ],
+      "admin_ids": [],
+      "alerts_email_enabled": false,
+      "alerts_email_address": "tango-680",
+      "alert_urgency_id": "india-289",
+      "slack_channels": [
+        {
+          "id": "romeo-668",
+          "name": "golf-499"
+        },
+        {
+          "id": "sierra-138",
+          "name": "echo-418"
+        }
+      ],
+      "slack_aliases": [
+        {
+          "id": "alpha-831",
+          "name": "whiskey-151"
+        },
+        {
+          "id": "mike-480",
+          "name": "tango-261"
+        }
+      ],
+      "alert_broadcast_enabled": false,
+      "alert_broadcast_channel": {
+        "id": "bravo-379",
+        "name": "victor-639"
+      },
+      "incident_broadcast_enabled": false,
+      "incident_broadcast_channel": {
+        "id": "whiskey-375",
+        "name": "papa-208"
+      },
+      "auto_add_members_when_attached": false,
+      "auto_add_members_scope": "delta-887",
+      "schedule_override_policy": "bravo-767",
+      "properties": [
+        {
+          "catalog_property_id": "juliet-122",
+          "value": "foxtrot-192"
+        }
+      ],
+      "created_at": "quebec-929",
+      "updated_at": "oscar-232"
+    }
+  },
+  {
+    "id": "synthetic-teams-3",
+    "type": "groups",
+    "attributes": {
+      "name": "uniform-544",
+      "slug": "bravo-548",
+      "managed_by": "november-183",
+      "description": "uniform-904",
+      "public_description": "delta-890",
+      "public_name": "kilo-972",
+      "notify_emails": [
+        "foxtrot-382",
+        "zulu-288"
+      ],
+      "color": "india-992",
+      "position": 34728,
+      "backstage_id": "bravo-654",
+      "external_id": "foxtrot-645",
+      "pagerduty_id": "yankee-755",
+      "pagerduty_service_id": "tango-337",
+      "opsgenie_id": "whiskey-891",
+      "victor_ops_id": "romeo-918",
+      "pagertree_id": "juliet-836",
+      "cortex_id": "quebec-111",
+      "service_now_ci_sys_id": "foxtrot-968",
+      "scim_group_id": "alpha-330",
+      "user_ids": [
+        38454
+      ],
+      "admin_ids": [
+        31202
+      ],
+      "alerts_email_enabled": false,
+      "alerts_email_address": "quebec-483",
+      "alert_urgency_id": "romeo-827",
+      "slack_channels": [],
+      "slack_aliases": [],
+      "alert_broadcast_enabled": true,
+      "alert_broadcast_channel": {
+        "id": "sierra-849",
+        "name": "tango-661"
+      },
+      "incident_broadcast_enabled": true,
+      "incident_broadcast_channel": {
+        "id": "november-480",
+        "name": "foxtrot-889"
+      },
+      "auto_add_members_when_attached": false,
+      "auto_add_members_scope": "alpha-505",
+      "schedule_override_policy": "lima-269",
+      "properties": [
+        {
+          "catalog_property_id": "foxtrot-973",
+          "value": "tango-228"
+        }
+      ],
+      "created_at": "juliet-774",
+      "updated_at": "sierra-393"
+    }
+  },
+  {
+    "id": "synthetic-teams-4",
+    "type": "groups",
+    "attributes": {
+      "name": "whiskey-392",
+      "slug": "lima-622",
+      "managed_by": "victor-254",
+      "description": "india-145",
+      "public_description": "zulu-606",
+      "public_name": "tango-277",
+      "notify_emails": [
+        "mike-431"
+      ],
+      "color": "quebec-305",
+      "position": 64675,
+      "backstage_id": "sierra-851",
+      "external_id": "alpha-964",
+      "pagerduty_id": "november-659",
+      "pagerduty_service_id": "kilo-489",
+      "opsgenie_id": "papa-756",
+      "victor_ops_id": "mike-638",
+      "pagertree_id": "echo-766",
+      "cortex_id": "alpha-318",
+      "service_now_ci_sys_id": "alpha-972",
+      "scim_group_id": "whiskey-318",
+      "user_ids": [
+        74427
+      ],
+      "admin_ids": [],
+      "alerts_email_enabled": false,
+      "alerts_email_address": "foxtrot-253",
+      "alert_urgency_id": "tango-973",
+      "slack_channels": [],
+      "slack_aliases": [
+        {
+          "id": "xray-166",
+          "name": "victor-326"
+        }
+      ],
+      "alert_broadcast_enabled": false,
+      "alert_broadcast_channel": {
+        "id": "papa-925",
+        "name": "november-492"
+      },
+      "incident_broadcast_enabled": false,
+      "incident_broadcast_channel": {
+        "id": "tango-420",
+        "name": "quebec-624"
+      },
+      "auto_add_members_when_attached": false,
+      "auto_add_members_scope": "bravo-357",
+      "schedule_override_policy": "papa-135",
+      "properties": [
+        {
+          "catalog_property_id": "sierra-336",
+          "value": "mike-332"
+        },
+        {
+          "catalog_property_id": "lima-493",
+          "value": "lima-416"
+        }
+      ],
+      "created_at": "india-321",
+      "updated_at": "charlie-821"
+    }
+  },
+  {
+    "id": "synthetic-teams-5",
+    "type": "groups",
+    "attributes": {
+      "name": "lima-369",
+      "slug": "quebec-977",
+      "managed_by": "echo-218",
+      "description": "bravo-410",
+      "public_description": "echo-735",
+      "public_name": "quebec-180",
+      "notify_emails": [
+        "yankee-570"
+      ],
+      "color": "bravo-916",
+      "position": 25459,
+      "backstage_id": "quebec-222",
+      "external_id": "echo-781",
+      "pagerduty_id": "charlie-266",
+      "pagerduty_service_id": "oscar-427",
+      "opsgenie_id": "victor-312",
+      "victor_ops_id": "xray-344",
+      "pagertree_id": "victor-796",
+      "cortex_id": "romeo-871",
+      "service_now_ci_sys_id": "india-232",
+      "scim_group_id": "november-748",
+      "user_ids": [],
+      "admin_ids": [
+        95626
+      ],
+      "alerts_email_enabled": false,
+      "alerts_email_address": "kilo-945",
+      "alert_urgency_id": "romeo-441",
+      "slack_channels": [
+        {
+          "id": "november-794",
+          "name": "delta-505"
+        }
+      ],
+      "slack_aliases": [
+        {
+          "id": "delta-444",
+          "name": "hotel-259"
+        },
+        {
+          "id": "whiskey-571",
+          "name": "charlie-247"
+        }
+      ],
+      "alert_broadcast_enabled": false,
+      "alert_broadcast_channel": {
+        "id": "india-415",
+        "name": "november-764"
+      },
+      "incident_broadcast_enabled": false,
+      "incident_broadcast_channel": {
+        "id": "golf-970",
+        "name": "papa-347"
+      },
+      "auto_add_members_when_attached": false,
+      "auto_add_members_scope": "lima-278",
+      "schedule_override_policy": "echo-457",
+      "properties": [],
+      "created_at": "bravo-618",
+      "updated_at": "victor-338"
+    }
+  }
+]

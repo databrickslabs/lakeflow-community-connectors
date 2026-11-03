@@ -1,0 +1,190 @@
+[
+  {
+    "id": "synthetic-schedules-1",
+    "type": "schedules",
+    "attributes": {
+      "name": "zulu-594",
+      "description": "hotel-571",
+      "all_time_coverage": true,
+      "time_zone": "foxtrot-131",
+      "slack_user_group": {
+        "id": "lima-590",
+        "name": "charlie-114"
+      },
+      "slack_channel": {
+        "id": "papa-611",
+        "name": "foxtrot-405"
+      },
+      "owner_group_ids": [
+        "foxtrot-789",
+        "yankee-428"
+      ],
+      "owner_user_id": 9764,
+      "sync_linear_enabled": false,
+      "include_shadows_in_slack_notifications": false,
+      "shift_start_notifications_enabled": true,
+      "shift_update_notifications_enabled": false,
+      "shift_report_enabled": false,
+      "shift_report_day_of_week": "golf-713",
+      "shift_report_time_of_day": "kilo-190",
+      "shift_report_time_zone": "lima-649",
+      "business_hours": {
+        "start_time": "zulu-460",
+        "end_time": "romeo-332",
+        "include_weekends": true
+      },
+      "created_at": "foxtrot-794",
+      "updated_at": "november-681"
+    }
+  },
+  {
+    "id": "synthetic-schedules-2",
+    "type": "schedules",
+    "attributes": {
+      "name": "november-603",
+      "description": "papa-873",
+      "all_time_coverage": false,
+      "time_zone": "india-332",
+      "slack_user_group": {
+        "id": "juliet-881",
+        "name": "whiskey-482"
+      },
+      "slack_channel": {
+        "id": "tango-433",
+        "name": "whiskey-645"
+      },
+      "owner_group_ids": [
+        "papa-385"
+      ],
+      "owner_user_id": 27134,
+      "sync_linear_enabled": true,
+      "include_shadows_in_slack_notifications": false,
+      "shift_start_notifications_enabled": true,
+      "shift_update_notifications_enabled": true,
+      "shift_report_enabled": true,
+      "shift_report_day_of_week": "lima-999",
+      "shift_report_time_of_day": "whiskey-396",
+      "shift_report_time_zone": "zulu-752",
+      "business_hours": {
+        "start_time": "xray-470",
+        "end_time": "quebec-984",
+        "include_weekends": true
+      },
+      "created_at": "lima-595",
+      "updated_at": "papa-654"
+    }
+  },
+  {
+    "id": "synthetic-schedules-3",
+    "type": "schedules",
+    "attributes": {
+      "name": "juliet-254",
+      "description": "hotel-995",
+      "all_time_coverage": true,
+      "time_zone": "papa-192",
+      "slack_user_group": {
+        "id": "golf-200",
+        "name": "tango-565"
+      },
+      "slack_channel": {
+        "id": "kilo-616",
+        "name": "oscar-911"
+      },
+      "owner_group_ids": [
+        "uniform-790",
+        "romeo-865"
+      ],
+      "owner_user_id": 30094,
+      "sync_linear_enabled": false,
+      "include_shadows_in_slack_notifications": true,
+      "shift_start_notifications_enabled": true,
+      "shift_update_notifications_enabled": false,
+      "shift_report_enabled": false,
+      "shift_report_day_of_week": "papa-156",
+      "shift_report_time_of_day": "charlie-363",
+      "shift_report_time_zone": "november-474",
+      "business_hours": {
+        "start_time": "victor-149",
+        "end_time": "echo-485",
+        "include_weekends": false
+      },
+      "created_at": "yankee-925",
+      "updated_at": "whiskey-278"
+    }
+  },
+  {
+    "id": "synthetic-schedules-4",
+    "type": "schedules",
+    "attributes": {
+      "name": "kilo-565",
+      "description": "juliet-246",
+      "all_time_coverage": true,
+      "time_zone": "yankee-649",
+      "slack_user_group": {
+        "id": "charlie-711",
+        "name": "yankee-827"
+      },
+      "slack_channel": {
+        "id": "xray-921",
+        "name": "lima-915"
+      },
+      "owner_group_ids": [
+        "india-543"
+      ],
+      "owner_user_id": 40080,
+      "sync_linear_enabled": true,
+      "include_shadows_in_slack_notifications": true,
+      "shift_start_notifications_enabled": false,
+      "shift_update_notifications_enabled": false,
+      "shift_report_enabled": true,
+      "shift_report_day_of_week": "bravo-863",
+      "shift_report_time_of_day": "victor-517",
+      "shift_report_time_zone": "kilo-479",
+      "business_hours": {
+        "start_time": "foxtrot-300",
+        "end_time": "india-355",
+        "include_weekends": true
+      },
+      "created_at": "sierra-783",
+      "updated_at": "alpha-291"
+    }
+  },
+  {
+    "id": "synthetic-schedules-5",
+    "type": "schedules",
+    "attributes": {
+      "name": "tango-363",
+      "description": "tango-212",
+      "all_time_coverage": true,
+      "time_zone": "echo-515",
+      "slack_user_group": {
+        "id": "alpha-612",
+        "name": "kilo-192"
+      },
+      "slack_channel": {
+        "id": "india-714",
+        "name": "charlie-626"
+      },
+      "owner_group_ids": [
+        "zulu-216",
+        "uniform-997"
+      ],
+      "owner_user_id": 48017,
+      "sync_linear_enabled": true,
+      "include_shadows_in_slack_notifications": false,
+      "shift_start_notifications_enabled": false,
+      "shift_update_notifications_enabled": true,
+      "shift_report_enabled": true,
+      "shift_report_day_of_week": "charlie-592",
+      "shift_report_time_of_day": "echo-490",
+      "shift_report_time_zone": "whiskey-824",
+      "business_hours": {
+        "start_time": "delta-395",
+        "end_time": "tango-615",
+        "include_weekends": false
+      },
+      "created_at": "uniform-255",
+      "updated_at": "november-427"
+    }
+  }
+]

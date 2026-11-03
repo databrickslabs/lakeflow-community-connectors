@@ -1,0 +1,117 @@
+# Synthetic Phase 1 fixture. Not validated against a live Rootly account.
+# Custom handler models JSON:API pagination metadata and opaque incident cursors.
+endpoints:
+  - path: /v1/incidents
+    method: GET
+    corpus: incidents
+    handler: databricks.labs.community_connector.source_simulator.specs.rootly.handlers:list_resources
+    strict_params: true
+    response:
+      pagination_style: page_number
+      wrapper:
+        records_key: data
+    params:
+      "page[number]":
+        role: page
+      "page[size]":
+        role: per_page
+        default: 100
+        max: 100
+      "page[after]":
+        role: ignore
+  - path: /v1/services
+    method: GET
+    corpus: services
+    handler: databricks.labs.community_connector.source_simulator.specs.rootly.handlers:list_resources
+    strict_params: true
+    response:
+      pagination_style: page_number
+      wrapper:
+        records_key: data
+    params:
+      "page[number]":
+        role: page
+      "page[size]":
+        role: per_page
+        default: 100
+        max: 100
+  - path: /v1/users
+    method: GET
+    corpus: users
+    handler: databricks.labs.community_connector.source_simulator.specs.rootly.handlers:list_resources
+    strict_params: true
+    response:
+      pagination_style: page_number
+      wrapper:
+        records_key: data
+    params:
+      "page[number]":
+        role: page
+      "page[size]":
+        role: per_page
+        default: 100
+        max: 100
+  - path: /v1/teams
+    method: GET
+    corpus: teams
+    handler: databricks.labs.community_connector.source_simulator.specs.rootly.handlers:list_resources
+    strict_params: true
+    response:
+      pagination_style: page_number
+      wrapper:
+        records_key: data
+    params:
+      "page[number]":
+        role: page
+      "page[size]":
+        role: per_page
+        default: 100
+        max: 100
+  - path: /v1/severities
+    method: GET
+    corpus: severities
+    handler: databricks.labs.community_connector.source_simulator.specs.rootly.handlers:list_resources
+    strict_params: true
+    response:
+      pagination_style: page_number
+      wrapper:
+        records_key: data
+    params:
+      "page[number]":
+        role: page
+      "page[size]":
+        role: per_page
+        default: 100
+        max: 100
+  - path: /v1/escalation_policies
+    method: GET
+    corpus: escalation_policies
+    handler: databricks.labs.community_connector.source_simulator.specs.rootly.handlers:list_resources
+    strict_params: true
+    response:
+      pagination_style: page_number
+      wrapper:
+        records_key: data
+    params:
+      "page[number]":
+        role: page
+      "page[size]":
+        role: per_page
+        default: 100
+        max: 100
+  - path: /v1/schedules
+    method: GET
+    corpus: schedules
+    handler: databricks.labs.community_connector.source_simulator.specs.rootly.handlers:list_resources
+    strict_params: true
+    response:
+      pagination_style: page_number
+      wrapper:
+        records_key: data
+    params:
+      "page[number]":
+        role: page
+      "page[size]":
+        role: per_page
+        default: 100
+        max: 100

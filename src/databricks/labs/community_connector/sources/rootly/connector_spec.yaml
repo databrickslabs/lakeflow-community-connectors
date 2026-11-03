@@ -1,0 +1,9 @@
+display_name: Rootly
+connection:
+  parameters:
+    - name: api_token
+      type: string
+      required: true
+      secret: true
+      description: Rootly API key with permission to read the selected resources.
+external_options_allowlist: "page_size"
