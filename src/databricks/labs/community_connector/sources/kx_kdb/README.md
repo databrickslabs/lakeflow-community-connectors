@@ -145,8 +145,9 @@ node.
 - Offline bundle members with absolute paths, `..` components, or symbolic
   links are rejected before extraction.
 - Setup changes only `QLIC`, `QHOME`, `PYKX_LICENSED`, and, once, `PATH` in
-  the Python process, and appends the PyKX fallback directory to `sys.path`.
-  `HOME` and the working directory are not changed.
+  the Python process. When the PyKX fallback is used, its directory is also
+  appended once to `sys.path` and `PYTHONPATH` (PyKX imports itself in a child
+  process while it starts). `HOME` and the working directory are not changed.
 - The PyKX fallback is pinned by version, not by wheel hash.
 
 ## Connection parameters

@@ -395,6 +395,12 @@ def _ensure_pykx_package(config: PyKxRuntimeConfig, home: Path) -> None:
     # copies pip resolves for PyKX.
     if str(target) not in sys.path:
         sys.path.append(str(target))
+    # PyKX initializes embedded q by importing itself in a child Python
+    # process, which sees only PYTHONPATH, not this process's sys.path.
+    current = os.environ.get("PYTHONPATH", "")
+    entries = current.split(os.pathsep) if current else []
+    if str(target) not in entries:
+        os.environ["PYTHONPATH"] = os.pathsep.join([*entries, str(target)])
 
 
 def _run_pip_install(config: PyKxRuntimeConfig, target: Path) -> None:

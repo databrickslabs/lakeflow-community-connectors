@@ -381,7 +381,10 @@ def test_offline_runtime_installs_the_pinned_pykx_once_per_node(monkeypatch, tmp
     assert _LICENSE_B64 not in call["env"].values()
     assert call["stdin"] is subprocess.DEVNULL
     assert sys.path[-1] == str(target)
-    assert os.environ["PYTHONPATH"] == "/databricks/jars/protected.jar"
+    # PyKX imports itself in a child process while it initializes embedded q.
+    assert os.environ["PYTHONPATH"] == f"/databricks/jars/protected.jar{os.pathsep}{target}"
+    runtime_mod._ensure_pykx_package(config, runtime_mod._runtime_home(config))
+    assert os.environ["PYTHONPATH"].split(os.pathsep).count(str(target)) == 1
 
 
 def test_pykx_install_failure_is_reported_and_retried(monkeypatch, tmp_path):
