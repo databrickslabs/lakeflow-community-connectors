@@ -224,7 +224,7 @@ jobs:
       # setup-uv instead of actions/setup-python: on runners with no cached Python,
       # setup-python upgrades pip from pypi.org, which the protected runners can't reach.
       - name: Setup uv
-        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9  # v9.0.0
+        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2  # v10.3.3
         with:
           version: "0.11.7"
           checksum: "6681d691eb7f9c00ac6a3af54252f7ab29ae72f0c8f95bdc7f9d1401c23ea868"
@@ -274,7 +274,7 @@ jobs:
       # setup-uv instead of actions/setup-python: on runners with no cached Python,
       # setup-python upgrades pip from pypi.org, which the protected runners can't reach.
       - name: Setup uv
-        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9  # v9.0.0
+        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2  # v10.3.3
         with:
           version: "0.11.7"
           checksum: "6681d691eb7f9c00ac6a3af54252f7ab29ae72f0c8f95bdc7f9d1401c23ea868"
@@ -324,7 +324,7 @@ jobs:
       # setup-uv instead of actions/setup-python: on runners with no cached Python,
       # setup-python upgrades pip from pypi.org, which the protected runners can't reach.
       - name: Setup uv
-        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9  # v9.0.0
+        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2  # v10.3.3
         with:
           version: "0.11.7"
           checksum: "6681d691eb7f9c00ac6a3af54252f7ab29ae72f0c8f95bdc7f9d1401c23ea868"
@@ -374,7 +374,7 @@ jobs:
       # setup-uv instead of actions/setup-python: on runners with no cached Python,
       # setup-python upgrades pip from pypi.org, which the protected runners can't reach.
       - name: Setup uv
-        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9  # v9.0.0
+        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2  # v10.3.3
         with:
           version: "0.11.7"
           checksum: "6681d691eb7f9c00ac6a3af54252f7ab29ae72f0c8f95bdc7f9d1401c23ea868"
@@ -426,7 +426,7 @@ jobs:
       # setup-uv instead of actions/setup-python: on runners with no cached Python,
       # setup-python upgrades pip from pypi.org, which the protected runners can't reach.
       - name: Setup uv
-        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9  # v9.0.0
+        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2  # v10.3.3
         with:
           version: "0.11.7"
           checksum: "6681d691eb7f9c00ac6a3af54252f7ab29ae72f0c8f95bdc7f9d1401c23ea868"
