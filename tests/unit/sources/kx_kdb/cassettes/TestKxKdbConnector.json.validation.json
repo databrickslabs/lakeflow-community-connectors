@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated_at": "2026-09-29T03:50:00Z",
+  "generated_at": "2026-11-03T18:50:00Z",
   "endpoints": [],
   "summary": {
     "status": "clean",
@@ -10,24 +10,49 @@
     "endpoints_validated": 0,
     "endpoints_mismatched": 0,
     "endpoints_missing_spec": 0,
-    "record_mode_tests_passed": 197,
+    "record_mode_tests_passed": 246,
     "record_mode_tests_skipped": 4,
-    "managed_full_refresh_status": "COMPLETED",
-    "managed_full_refresh_rows": 1877827162,
+    "connector_wheel": "lakeflow_community_connectors_kx_kdb-0.1.16 (commit c81a8f6)",
+    "managed_full_read_status": "COMPLETED",
+    "managed_full_read_rows": 1877830657,
+    "managed_full_read_batches": 21,
+    "managed_full_read_batch_seconds": 4100,
     "managed_incremental_status": "COMPLETED",
-    "managed_incremental_rows": 3495,
+    "managed_incremental_new_batches": 0,
     "rows": 1877830657,
+    "dates": 4937,
     "min_date": "2008.01.01",
     "max_date": "2023.12.30",
     "q_reconciled_date_symbol_pairs": 45869,
     "q_count_mismatches": 0,
-    "initialization_seconds": 73.3
+    "q_null_checks": 192,
+    "q_null_mismatches": 0,
+    "missing_column_dates": {
+      "2022.10.10": {
+        "missing_columns": ["size"],
+        "rows": 2865635,
+        "size_nulls": 2865635,
+        "table_option": "missing_columns=null"
+      }
+    },
+    "race_test": {
+      "partial_date": "2023.12.30",
+      "partial_files": ["sym", "time"],
+      "batches_while_partial": 0,
+      "rows_after_completion": 3495,
+      "q_rows": 3495,
+      "pair_mismatches": 0
+    },
+    "initialization_seconds": 51
   },
   "notes": [
     "KX KDB HDB is a filesystem source and makes no HTTP requests.",
     "Record mode exercises the deterministic temporary HDB contract.",
-    "Licensed managed validation ran a full refresh bounded by end_date, then an incremental update that appended only the next date.",
+    "q ground truth was recomputed on 2026-11-03 with the new runtime: per (date, sym) counts for all 4,938 dates and null counts for price, size and time on 64 sampled dates.",
     "Every (date, symbol) row count in the destination table equals q's count of the HDB sym column, including rows whose symbol index is beyond the root sym file.",
-    "A licensed PyKX edge HDB matched q values for empty and slash symbols, a 10,005-row slice, nulls, 0W, longs above 2**53, byte, short, string, char, temporal, and timespan columns."
+    "With the default missing_columns=fail, the stream committed every date up to 2022.10.08 and then stopped at 2022.10.10, whose .d lists size without a size file. The run was completed with missing_columns=null.",
+    "End-of-day race test on a scratch copy of 2023.12.28-2023.12.30: with only sym and time written for 2023.12.30 and no .d, an update committed no batch; after price, size and .d were written, the next update appended exactly q's 3,495 rows.",
+    "install_kdb.sh --offline -y rejects a run without --b64lic/--k4b64lic, so the license stays on the installer command line.",
+    "managed_full_read_batch_seconds sums the time from each update's flow start to its last batch; the earlier single-batch build took about 23 minutes."
   ]
 }
