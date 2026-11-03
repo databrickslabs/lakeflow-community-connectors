@@ -39,11 +39,12 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from requests.models import PreparedRequest, Response
 
 from databricks.labs.community_connector.source_simulator.cassette import RequestRecord
-from databricks.labs.community_connector.source_simulator.corpus import CorpusStore
+from databricks.labs.community_connector.source_simulator.corpus import CorpusStore, get_field
 from databricks.labs.community_connector.source_simulator.endpoint_spec import (
     EndpointSpec,
     match_endpoint,
@@ -55,7 +56,6 @@ from databricks.labs.community_connector.source_simulator.handler import (
 from databricks.labs.community_connector.source_simulator.interceptor import (
     request_record_from_prepared,
 )
-
 
 # ----- result shapes -----------------------------------------------------
 
@@ -94,6 +94,7 @@ class LiveValidator:
         # Keyed by (method, spec_path) — collapses many concrete URLs into one
         # logical endpoint. For unmatched requests, key is (method, raw_url).
         self._results: Dict[Tuple[str, str], EndpointValidation] = {}
+        self._cursor_pairs: Dict[tuple, Dict[str, Optional[str]]] = {}
 
     def observe(self, prep: PreparedRequest, live_response: Response) -> None:
         """Record one request/response pair against the spec."""
@@ -113,7 +114,8 @@ class LiveValidator:
 
         spec, _path_params = match
         try:
-            spec_response = self._handler.handle(prep)
+            spec_prep = self._translate_cursor(prep, req_rec, spec)
+            spec_response = self._handler.handle(spec_prep)
         except UnknownEndpoint as e:
             self._record(
                 method=req_rec.method,
@@ -136,6 +138,7 @@ class LiveValidator:
             return
 
         issues = _diff(live_response, spec_response, spec)
+        self._remember_cursor(req_rec, spec, live_response, spec_response)
         self._record(
             method=req_rec.method,
             spec_path=spec.path,
@@ -144,6 +147,56 @@ class LiveValidator:
             mismatched=bool(issues),
             issues=issues,
         )
+
+    def _cursor_scope(self, request: RequestRecord, spec: EndpointSpec) -> tuple:
+        ignored = {spec.validation_cursor.request_param}
+        if spec.page:
+            ignored.add(spec.page.name)
+        return request.match_key(frozenset(ignored))
+
+    def _translate_cursor(self, prep, request, spec):
+        """Translate only tokens paired from earlier responses in this query chain.
+
+        Live tokens cannot index an independent synthetic corpus. Never decode
+        them or substitute arbitrary pages, and never mutate the real request.
+        """
+        cursor = spec.validation_cursor
+        if cursor is None:
+            return prep
+        scope = self._cursor_scope(request, spec)
+        token = request.query.get(cursor.request_param)
+        if token is None:
+            self._cursor_pairs[scope] = {}
+            return prep
+        pairs = self._cursor_pairs.get(scope, {})
+        if token not in pairs:
+            raise ValueError("unobserved live continuation token")
+        replacement = pairs[token]
+        if replacement is None:
+            raise ValueError("synthetic corpus exhausted before live continuation; extend corpus")
+        parts = urlsplit(prep.url)
+        query = [
+            (key, replacement if key == cursor.request_param else value)
+            for key, value in parse_qsl(parts.query, keep_blank_values=True)
+        ]
+        translated = prep.copy()
+        translated.url = urlunsplit(parts._replace(query=urlencode(query)))
+        return translated
+
+    def _remember_cursor(self, request, spec, live_response, spec_response):
+        cursor = spec.validation_cursor
+        if cursor is None or live_response.status_code != 200 or spec_response.status_code != 200:
+            return
+        try:
+            live_token = get_field(live_response.json(), cursor.response_path)
+            synthetic_token = get_field(spec_response.json(), cursor.response_path)
+        except ValueError:
+            return  # Invalid JSON is already reported by _diff.
+        if isinstance(live_token, str) and live_token:
+            pairs = self._cursor_pairs.setdefault(self._cursor_scope(request, spec), {})
+            pairs[live_token] = (
+                synthetic_token if isinstance(synthetic_token, str) and synthetic_token else None
+            )
 
     # --- internals ---
 

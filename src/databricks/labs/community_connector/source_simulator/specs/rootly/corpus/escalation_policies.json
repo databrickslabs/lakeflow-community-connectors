@@ -23,6 +23,40 @@
       },
       "created_at": "november-733",
       "updated_at": "uniform-601"
+    },
+    "relationships": {
+      "escalation_levels": {
+        "data": [
+          {
+            "id": "synthetic-escalation_levels-1",
+            "type": "escalation_levels"
+          }
+        ]
+      },
+      "escalation_paths": {
+        "data": [
+          {
+            "id": "synthetic-escalation_paths-1",
+            "type": "escalation_paths"
+          }
+        ]
+      },
+      "groups": {
+        "data": [
+          {
+            "id": "synthetic-groups-1",
+            "type": "groups"
+          }
+        ]
+      },
+      "services": {
+        "data": [
+          {
+            "id": "synthetic-services-1",
+            "type": "services"
+          }
+        ]
+      }
     }
   },
   {
@@ -49,6 +83,40 @@
       },
       "created_at": "india-950",
       "updated_at": "bravo-712"
+    },
+    "relationships": {
+      "escalation_levels": {
+        "data": [
+          {
+            "id": "synthetic-escalation_levels-2",
+            "type": "escalation_levels"
+          }
+        ]
+      },
+      "escalation_paths": {
+        "data": [
+          {
+            "id": "synthetic-escalation_paths-2",
+            "type": "escalation_paths"
+          }
+        ]
+      },
+      "groups": {
+        "data": [
+          {
+            "id": "synthetic-groups-2",
+            "type": "groups"
+          }
+        ]
+      },
+      "services": {
+        "data": [
+          {
+            "id": "synthetic-services-2",
+            "type": "services"
+          }
+        ]
+      }
     }
   },
   {
@@ -79,6 +147,40 @@
       },
       "created_at": "tango-623",
       "updated_at": "whiskey-706"
+    },
+    "relationships": {
+      "escalation_levels": {
+        "data": [
+          {
+            "id": "synthetic-escalation_levels-3",
+            "type": "escalation_levels"
+          }
+        ]
+      },
+      "escalation_paths": {
+        "data": [
+          {
+            "id": "synthetic-escalation_paths-3",
+            "type": "escalation_paths"
+          }
+        ]
+      },
+      "groups": {
+        "data": [
+          {
+            "id": "synthetic-groups-3",
+            "type": "groups"
+          }
+        ]
+      },
+      "services": {
+        "data": [
+          {
+            "id": "synthetic-services-3",
+            "type": "services"
+          }
+        ]
+      }
     }
   },
   {
@@ -108,6 +210,40 @@
       },
       "created_at": "delta-298",
       "updated_at": "charlie-960"
+    },
+    "relationships": {
+      "escalation_levels": {
+        "data": [
+          {
+            "id": "synthetic-escalation_levels-4",
+            "type": "escalation_levels"
+          }
+        ]
+      },
+      "escalation_paths": {
+        "data": [
+          {
+            "id": "synthetic-escalation_paths-4",
+            "type": "escalation_paths"
+          }
+        ]
+      },
+      "groups": {
+        "data": [
+          {
+            "id": "synthetic-groups-4",
+            "type": "groups"
+          }
+        ]
+      },
+      "services": {
+        "data": [
+          {
+            "id": "synthetic-services-4",
+            "type": "services"
+          }
+        ]
+      }
     }
   },
   {
@@ -131,6 +267,40 @@
       },
       "created_at": "charlie-961",
       "updated_at": "mike-511"
+    },
+    "relationships": {
+      "escalation_levels": {
+        "data": [
+          {
+            "id": "synthetic-escalation_levels-5",
+            "type": "escalation_levels"
+          }
+        ]
+      },
+      "escalation_paths": {
+        "data": [
+          {
+            "id": "synthetic-escalation_paths-5",
+            "type": "escalation_paths"
+          }
+        ]
+      },
+      "groups": {
+        "data": [
+          {
+            "id": "synthetic-groups-5",
+            "type": "groups"
+          }
+        ]
+      },
+      "services": {
+        "data": [
+          {
+            "id": "synthetic-services-5",
+            "type": "services"
+          }
+        ]
+      }
     }
   }
 ]

@@ -1,0 +1,86 @@
+{
+  "version": 1,
+  "endpoints": [
+    {
+      "method": "GET",
+      "url": "https://api.rootly.com/v1/escalation_policies",
+      "count": 6,
+      "param_shapes": [
+        [
+          "page[number]",
+          "page[size]"
+        ]
+      ]
+    },
+    {
+      "method": "GET",
+      "url": "https://api.rootly.com/v1/incidents",
+      "count": 6,
+      "param_shapes": [
+        [
+          "page[number]",
+          "page[size]"
+        ],
+        [
+          "page[after]",
+          "page[size]"
+        ]
+      ]
+    },
+    {
+      "method": "GET",
+      "url": "https://api.rootly.com/v1/schedules",
+      "count": 6,
+      "param_shapes": [
+        [
+          "page[number]",
+          "page[size]"
+        ]
+      ]
+    },
+    {
+      "method": "GET",
+      "url": "https://api.rootly.com/v1/services",
+      "count": 6,
+      "param_shapes": [
+        [
+          "page[number]",
+          "page[size]"
+        ]
+      ]
+    },
+    {
+      "method": "GET",
+      "url": "https://api.rootly.com/v1/severities",
+      "count": 6,
+      "param_shapes": [
+        [
+          "page[number]",
+          "page[size]"
+        ]
+      ]
+    },
+    {
+      "method": "GET",
+      "url": "https://api.rootly.com/v1/teams",
+      "count": 6,
+      "param_shapes": [
+        [
+          "page[number]",
+          "page[size]"
+        ]
+      ]
+    },
+    {
+      "method": "GET",
+      "url": "https://api.rootly.com/v1/users",
+      "count": 6,
+      "param_shapes": [
+        [
+          "page[number]",
+          "page[size]"
+        ]
+      ]
+    }
+  ]
+}

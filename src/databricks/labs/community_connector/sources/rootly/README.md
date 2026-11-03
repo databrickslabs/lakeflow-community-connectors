@@ -1,8 +1,10 @@
 # Lakeflow Rootly Community Connector
 
 Ingest Rootly incident and on-call configuration data into Databricks using read-only API requests.
-This initial version supports full refreshes of seven objects. It has been tested with synthetic
-responses; live Rootly and Databricks pipeline validation are still pending.
+This initial version supports full refreshes of seven objects. Synthetic tests and sampled live
+Rootly reads passed on November 3, 2026, with all seven simulator endpoints validating cleanly.
+The live run samples five records per table and exercises numbered and incident cursor pagination;
+it does not establish full-account completeness. Databricks pipeline validation is still pending.
 
 ## Prerequisites
 

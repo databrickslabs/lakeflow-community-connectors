@@ -1,4 +1,4 @@
-# Synthetic Phase 1 fixture. Not validated against a live Rootly account.
+# Synthetic fixtures. Live response-shape reports accompany the connector tests.
 # Custom handler models JSON:API pagination metadata and opaque incident cursors.
 endpoints:
   - path: /v1/incidents
@@ -6,6 +6,9 @@ endpoints:
     corpus: incidents
     handler: databricks.labs.community_connector.source_simulator.specs.rootly.handlers:list_resources
     strict_params: true
+    validation_cursor:
+      request_param: "page[after]"
+      response_path: meta.next_cursor
     response:
       pagination_style: page_number
       wrapper:

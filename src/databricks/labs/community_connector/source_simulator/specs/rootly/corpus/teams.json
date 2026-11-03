@@ -77,6 +77,32 @@
       ],
       "created_at": "papa-144",
       "updated_at": "kilo-300"
+    },
+    "relationships": {
+      "users": {
+        "data": [
+          {
+            "id": "synthetic-users-1",
+            "type": "users"
+          }
+        ]
+      },
+      "schedules": {
+        "data": [
+          {
+            "id": "synthetic-schedules-1",
+            "type": "schedules"
+          }
+        ]
+      },
+      "escalation_policies": {
+        "data": [
+          {
+            "id": "synthetic-escalation_policies-1",
+            "type": "escalation_policies"
+          }
+        ]
+      }
     }
   },
   {
@@ -150,6 +176,32 @@
       ],
       "created_at": "quebec-929",
       "updated_at": "oscar-232"
+    },
+    "relationships": {
+      "users": {
+        "data": [
+          {
+            "id": "synthetic-users-2",
+            "type": "users"
+          }
+        ]
+      },
+      "schedules": {
+        "data": [
+          {
+            "id": "synthetic-schedules-2",
+            "type": "schedules"
+          }
+        ]
+      },
+      "escalation_policies": {
+        "data": [
+          {
+            "id": "synthetic-escalation_policies-2",
+            "type": "escalation_policies"
+          }
+        ]
+      }
     }
   },
   {
@@ -210,6 +262,32 @@
       ],
       "created_at": "juliet-774",
       "updated_at": "sierra-393"
+    },
+    "relationships": {
+      "users": {
+        "data": [
+          {
+            "id": "synthetic-users-3",
+            "type": "users"
+          }
+        ]
+      },
+      "schedules": {
+        "data": [
+          {
+            "id": "synthetic-schedules-3",
+            "type": "schedules"
+          }
+        ]
+      },
+      "escalation_policies": {
+        "data": [
+          {
+            "id": "synthetic-escalation_policies-3",
+            "type": "escalation_policies"
+          }
+        ]
+      }
     }
   },
   {
@@ -276,6 +354,32 @@
       ],
       "created_at": "india-321",
       "updated_at": "charlie-821"
+    },
+    "relationships": {
+      "users": {
+        "data": [
+          {
+            "id": "synthetic-users-4",
+            "type": "users"
+          }
+        ]
+      },
+      "schedules": {
+        "data": [
+          {
+            "id": "synthetic-schedules-4",
+            "type": "schedules"
+          }
+        ]
+      },
+      "escalation_policies": {
+        "data": [
+          {
+            "id": "synthetic-escalation_policies-4",
+            "type": "escalation_policies"
+          }
+        ]
+      }
     }
   },
   {
@@ -342,6 +446,32 @@
       "properties": [],
       "created_at": "bravo-618",
       "updated_at": "victor-338"
+    },
+    "relationships": {
+      "users": {
+        "data": [
+          {
+            "id": "synthetic-users-5",
+            "type": "users"
+          }
+        ]
+      },
+      "schedules": {
+        "data": [
+          {
+            "id": "synthetic-schedules-5",
+            "type": "schedules"
+          }
+        ]
+      },
+      "escalation_policies": {
+        "data": [
+          {
+            "id": "synthetic-escalation_policies-5",
+            "type": "escalation_policies"
+          }
+        ]
+      }
     }
   }
 ]

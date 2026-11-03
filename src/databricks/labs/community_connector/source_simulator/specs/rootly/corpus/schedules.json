@@ -35,6 +35,22 @@
       },
       "created_at": "foxtrot-794",
       "updated_at": "november-681"
+    },
+    "relationships": {
+      "owner_user": {
+        "data": {
+          "id": "synthetic-owner_user-1",
+          "type": "owner_user"
+        }
+      },
+      "escalation_policies": {
+        "data": [
+          {
+            "id": "synthetic-escalation_policies-1",
+            "type": "escalation_policies"
+          }
+        ]
+      }
     }
   },
   {
@@ -72,6 +88,22 @@
       },
       "created_at": "lima-595",
       "updated_at": "papa-654"
+    },
+    "relationships": {
+      "owner_user": {
+        "data": {
+          "id": "synthetic-owner_user-2",
+          "type": "owner_user"
+        }
+      },
+      "escalation_policies": {
+        "data": [
+          {
+            "id": "synthetic-escalation_policies-2",
+            "type": "escalation_policies"
+          }
+        ]
+      }
     }
   },
   {
@@ -110,6 +142,22 @@
       },
       "created_at": "yankee-925",
       "updated_at": "whiskey-278"
+    },
+    "relationships": {
+      "owner_user": {
+        "data": {
+          "id": "synthetic-owner_user-3",
+          "type": "owner_user"
+        }
+      },
+      "escalation_policies": {
+        "data": [
+          {
+            "id": "synthetic-escalation_policies-3",
+            "type": "escalation_policies"
+          }
+        ]
+      }
     }
   },
   {
@@ -147,6 +195,22 @@
       },
       "created_at": "sierra-783",
       "updated_at": "alpha-291"
+    },
+    "relationships": {
+      "owner_user": {
+        "data": {
+          "id": "synthetic-owner_user-4",
+          "type": "owner_user"
+        }
+      },
+      "escalation_policies": {
+        "data": [
+          {
+            "id": "synthetic-escalation_policies-4",
+            "type": "escalation_policies"
+          }
+        ]
+      }
     }
   },
   {
@@ -185,6 +249,22 @@
       },
       "created_at": "uniform-255",
       "updated_at": "november-427"
+    },
+    "relationships": {
+      "owner_user": {
+        "data": {
+          "id": "synthetic-owner_user-5",
+          "type": "owner_user"
+        }
+      },
+      "escalation_policies": {
+        "data": [
+          {
+            "id": "synthetic-escalation_policies-5",
+            "type": "escalation_policies"
+          }
+        ]
+      }
     }
   }
 ]
