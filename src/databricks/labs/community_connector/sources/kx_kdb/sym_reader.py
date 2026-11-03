@@ -60,6 +60,8 @@ class PartitionShape:
     how a sparse table looks. ``complete`` is False while the partition cannot
     be read safely; ``reason`` then says why, and ``recent`` is True when the
     only problem is that a file changed within the configured minimum age.
+    ``missing_columns`` lists ``.d`` columns without a file that were allowed
+    to be read as nulls.
     """
 
     present: bool
@@ -67,6 +69,7 @@ class PartitionShape:
     row_count: int = 0
     reason: str = ""
     recent: bool = False
+    missing_columns: tuple[str, ...] = ()
 
 
 def _sym_file_path(hdb_root_path: str) -> str:
@@ -140,13 +143,16 @@ def read_partition_shape(
     runtime_config: PyKxRuntimeConfig,
     check_all_columns: bool,
     min_age_seconds: float = 0.0,
+    allow_missing_columns: bool = False,
 ) -> PartitionShape:
     """Check that one table partition is fully written and return its row count.
 
     A partition is complete when ``.d`` exists, every column it lists has a
     file, and the counted columns have the same length. ``check_all_columns``
-    counts every column; otherwise only the first column of ``.d`` is counted.
-    ``min_age_seconds`` also requires the newest file to be at least that old.
+    counts every column; otherwise only the first column of ``.d`` that has a
+    file is counted. ``min_age_seconds`` also requires the newest file to be at
+    least that old. ``allow_missing_columns`` accepts ``.d`` columns without a
+    file, as long as at least one column has one.
     """
     entries = scan_partition_table(hdb_root_path, date_partition, kdb_table_name)
     if entries is None:
@@ -181,12 +187,15 @@ def read_partition_shape(
         validate_hdb_name(column, "column name")
 
     missing = [column for column in columns if not _is_regular_file(entries, column)]
-    if missing:
+    if missing and not allow_missing_columns:
         return incomplete(f"is missing column files {missing}")
     if not columns:
         return PartitionShape(present=True, complete=True, row_count=0)
+    readable = [column for column in columns if column not in missing]
+    if not readable:
+        return incomplete(f"has no file for any column listed in .d {columns}")
 
-    counted = columns if check_all_columns else columns[:1]
+    counted = readable if check_all_columns else readable[:1]
     try:
         counts = _int_list(
             kx.q(
@@ -201,7 +210,9 @@ def read_partition_shape(
     if len(set(counts)) > 1:
         lengths = dict(zip(counted, counts))
         return incomplete(f"has columns of different lengths {lengths}")
-    return PartitionShape(present=True, complete=True, row_count=counts[0])
+    return PartitionShape(
+        present=True, complete=True, row_count=counts[0], missing_columns=tuple(missing)
+    )
 
 
 def _chunk_slices(row_count: int, chunk_size: int) -> Iterator[tuple[int, int]]:
@@ -220,12 +231,14 @@ def read_kdb_row_range(
     total_rows: int,
     runtime_config: PyKxRuntimeConfig,
     column_defs: List[dict],
+    allow_missing_columns: bool = False,
 ) -> Iterator[dict]:
     """Read rows ``[row_offset, row_offset + row_count)`` of one table partition.
 
     ``total_rows`` is the partition row count seen at planning time. The read
     fails if any schema column no longer has that many rows (q would return
-    nulls for indexes past the end of a short column) or is missing.
+    nulls for indexes past the end of a short column). A schema column without
+    a file fails the read, or is read as nulls with ``allow_missing_columns``.
     """
     if row_offset < 0 or row_count < 0 or row_offset + row_count > total_rows:
         raise ValueError(
@@ -240,15 +253,27 @@ def read_kdb_row_range(
         )
 
     column_names = [column["name"] for column in column_defs]
-    physical_columns = [name for name in column_names if name != "date"]
-    missing = [name for name in physical_columns if not _is_regular_file(entries, name)]
-    if missing:
+    schema_columns = [name for name in column_names if name != "date"]
+    missing = [name for name in schema_columns if not _is_regular_file(entries, name)]
+    if missing and not allow_missing_columns:
         raise RuntimeError(
             f"Table partition {partition_path} is missing column files {missing}. The "
             "partition is incomplete or its columns differ from the inferred schema."
         )
-    if row_count == 0 or not physical_columns:
+    physical_columns = [name for name in schema_columns if name not in missing]
+    if missing:
+        logger.warning(
+            "Table partition %s has no files for columns %s; reading them as nulls.",
+            partition_path,
+            missing,
+        )
+    if row_count == 0 or not schema_columns:
         return
+    if not physical_columns:
+        raise RuntimeError(
+            f"Table partition {partition_path} has no file for any schema column; it "
+            f"was planned with {total_rows} rows."
+        )
 
     kx = prepare_pykx(runtime_config)
     _ensure_sym_domain(kx, hdb_root_path)

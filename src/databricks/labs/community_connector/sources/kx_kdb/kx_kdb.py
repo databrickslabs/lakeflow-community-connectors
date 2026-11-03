@@ -40,6 +40,7 @@ logger = logging.getLogger(__name__)
 DEFAULT_MAX_DATES_PER_BATCH = 250
 DEFAULT_MAX_TASKS_PER_BATCH = 2000
 DEFAULT_MAX_ROWS_PER_TASK = 2_000_000
+_MISSING_COLUMN_POLICIES = ("fail", "null")
 _REMOVED_TABLE_OPTIONS = ("partition_strategy", "sym_column")
 
 
@@ -143,11 +144,12 @@ class KxKdbLakeflowConnect(LakeflowConnect, SupportsPartitionedStream):
 
         max_rows = self._max_rows_per_task(table_options)
         min_age = self._min_partition_age_seconds(table_options)
+        allow_missing = self._allow_missing_columns(table_options)
         newest = latest_table_partition(self.hdb_root_path, table_name)
         descriptors: list[dict] = []
         total_rows = 0
         for partition in selected:
-            shape = self._partition_shape(table_name, partition, newest, min_age)
+            shape = self._partition_shape(table_name, partition, newest, min_age, allow_missing)
             if not shape.complete:
                 raise RuntimeError(
                     f"KX KDB table {table_name!r} date {partition} is in this batch but "
@@ -194,6 +196,7 @@ class KxKdbLakeflowConnect(LakeflowConnect, SupportsPartitionedStream):
             total_rows=total_rows,
             runtime_config=self.runtime_config,
             column_defs=self._column_defs(table_name, table_options),
+            allow_missing_columns=self._allow_missing_columns(table_options),
         )
 
     def _admitted_partitions(
@@ -208,10 +211,12 @@ class KxKdbLakeflowConnect(LakeflowConnect, SupportsPartitionedStream):
 
         Admission stops before the table's newest date while that date is
         still being written, and before any date changed within
-        ``min_partition_age_minutes``. It fails on any other incomplete date,
-        so the offset never moves past a date that has not been read. With
-        ``capped``, admission also stops at ``max_dates_per_batch`` dates or
-        ``max_tasks_per_batch`` tasks; the first date is always admitted.
+        ``min_partition_age_minutes``. Any other incomplete date ends a capped
+        batch just before it, so the dates before it are committed, and fails
+        once it is the first date to admit; the offset never moves past a date
+        that has not been read. With ``capped``, admission also stops at
+        ``max_dates_per_batch`` dates or ``max_tasks_per_batch`` tasks; the
+        first date is always admitted.
         """
         self._validate_table_options(table_options)
         start_partition = normalize_partition_date((start_offset or {}).get("date_partition"))
@@ -232,13 +237,14 @@ class KxKdbLakeflowConnect(LakeflowConnect, SupportsPartitionedStream):
         )
         max_rows = self._max_rows_per_task(table_options)
         min_age = self._min_partition_age_seconds(table_options)
+        allow_missing = self._allow_missing_columns(table_options)
 
         admitted: list[str] = []
         tasks = 0
         for partition in candidates:
             if capped and len(admitted) >= max_dates:
                 break
-            shape = self._partition_shape(table_name, partition, newest, min_age)
+            shape = self._partition_shape(table_name, partition, newest, min_age, allow_missing)
             if not shape.complete:
                 if partition == newest or shape.recent:
                     logger.info(
@@ -248,10 +254,29 @@ class KxKdbLakeflowConnect(LakeflowConnect, SupportsPartitionedStream):
                         shape.reason,
                     )
                     break
+                if capped and admitted:
+                    logger.warning(
+                        "KX KDB table=%s ends this batch before incomplete date %s: %s",
+                        table_name,
+                        partition,
+                        shape.reason,
+                    )
+                    break
                 raise RuntimeError(
                     f"KX KDB table {table_name!r} date {partition} is incomplete: "
                     f"{shape.reason}. Only the newest date of a table may still be "
-                    "in progress. Repair the partition, or set start_date after it."
+                    "in progress. Repair the partition (for a missing column, "
+                    "dbmaint's addcol fills it with nulls), or set the table option "
+                    "missing_columns to 'null' to read missing columns of older "
+                    "dates as nulls."
+                )
+            if shape.missing_columns:
+                logger.warning(
+                    "KX KDB table=%s date %s has no files for columns %s; reading them "
+                    "as nulls because missing_columns is 'null'.",
+                    table_name,
+                    partition,
+                    list(shape.missing_columns),
                 )
             date_tasks = math.ceil(shape.row_count / max_rows)
             if capped and admitted and tasks + date_tasks > max_tasks:
@@ -286,12 +311,15 @@ class KxKdbLakeflowConnect(LakeflowConnect, SupportsPartitionedStream):
         date_partition: str,
         newest: str,
         min_age_seconds: float,
+        allow_missing_columns: bool,
     ) -> PartitionShape:
-        cache_key = (table_name.lower(), date_partition)
+        is_newest = date_partition == newest
+        # The newest date may still be written, so its columns stay required.
+        allow_missing = allow_missing_columns and not is_newest
+        cache_key = (table_name.lower(), date_partition, allow_missing)
         cached = self._shape_cache.get(cache_key)
         if cached is not None:
             return cached
-        is_newest = date_partition == newest
         shape = read_partition_shape(
             hdb_root_path=self.hdb_root_path,
             kdb_table_name=self._actual_table_name(table_name),
@@ -299,6 +327,7 @@ class KxKdbLakeflowConnect(LakeflowConnect, SupportsPartitionedStream):
             runtime_config=self.runtime_config,
             check_all_columns=is_newest,
             min_age_seconds=min_age_seconds,
+            allow_missing_columns=allow_missing,
         )
         # Older complete dates are immutable. The newest date may still be
         # written, and a sparse date's table directory may still appear, so
@@ -358,6 +387,13 @@ class KxKdbLakeflowConnect(LakeflowConnect, SupportsPartitionedStream):
             )
         return minutes * 60
 
+    @staticmethod
+    def _allow_missing_columns(table_options: dict[str, str]) -> bool:
+        policy = str(table_options.get("missing_columns", "fail")).strip().lower() or "fail"
+        if policy not in _MISSING_COLUMN_POLICIES:
+            raise ValueError(f"Unsupported missing_columns {policy!r}. Expected 'fail' or 'null'.")
+        return policy == "null"
+
     def _validate_table_options(self, table_options: dict[str, str]) -> None:
         removed = [key for key in _REMOVED_TABLE_OPTIONS if key in table_options]
         if removed:
@@ -366,6 +402,7 @@ class KxKdbLakeflowConnect(LakeflowConnect, SupportsPartitionedStream):
                 "split into row ranges; use max_rows_per_task to size them."
             )
         self._ingestion_mode(table_options)
+        self._allow_missing_columns(table_options)
 
     def _ingestion_mode(self, table_options: dict[str, str]) -> str:
         mode = str(table_options.get("ingestion_mode", "append")).strip().lower()

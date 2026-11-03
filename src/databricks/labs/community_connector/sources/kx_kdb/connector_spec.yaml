@@ -65,4 +65,4 @@ connection:
         Optional limit for table discovery. Set to 0 or omit to scan all date
         partitions when listing tables.
 
-external_options_allowlist: "start_date,end_date,ingestion_mode,max_dates_per_batch,max_tasks_per_batch,max_rows_per_task,min_partition_age_minutes"
+external_options_allowlist: "start_date,end_date,ingestion_mode,max_dates_per_batch,max_tasks_per_batch,max_rows_per_task,min_partition_age_minutes,missing_columns"

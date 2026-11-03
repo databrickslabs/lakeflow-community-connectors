@@ -338,6 +338,7 @@ def test_spec_allowlist_contains_only_table_options():
         "max_tasks_per_batch",
         "max_rows_per_task",
         "min_partition_age_minutes",
+        "missing_columns",
     }
 
 

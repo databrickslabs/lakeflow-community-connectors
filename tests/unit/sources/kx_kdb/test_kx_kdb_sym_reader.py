@@ -153,6 +153,27 @@ def test_partition_missing_a_dot_d_column_file_is_incomplete(monkeypatch, tmp_pa
     assert "['price']" in shape.reason
 
 
+def test_missing_column_file_can_be_allowed_for_older_dates(monkeypatch, tmp_path):
+    _partition(tmp_path, files=("sym", "time"))
+    fake_kx = _use(monkeypatch, _FakeKx(_three_rows()))
+
+    shape = _shape(tmp_path, check_all_columns=False, allow_missing_columns=True)
+
+    assert (shape.complete, shape.row_count, shape.missing_columns) == (True, 3, ("price",))
+    counted = [args[0] for query, args in fake_kx.calls if query == sym_reader._COLUMN_COUNTS_Q]
+    assert counted == [[f"{tmp_path}/2024.01.01/TRADES/sym"]]
+
+
+def test_partition_without_any_column_file_stays_incomplete(monkeypatch, tmp_path):
+    _partition(tmp_path, files=())
+    _use(monkeypatch, _FakeKx(_three_rows()))
+
+    shape = _shape(tmp_path, allow_missing_columns=True)
+
+    assert not shape.complete
+    assert "no file for any column" in shape.reason
+
+
 def test_unequal_column_lengths_make_the_newest_date_incomplete(monkeypatch, tmp_path):
     _partition(tmp_path)
     columns = _three_rows()
@@ -277,6 +298,20 @@ def test_row_range_fails_on_a_missing_schema_column(monkeypatch, tmp_path):
 
     with pytest.raises(RuntimeError, match=r"missing column files \['price'\]"):
         _rows(tmp_path)
+
+
+def test_row_range_reads_an_allowed_missing_column_as_nulls(monkeypatch, tmp_path, caplog):
+    _partition(tmp_path, files=("sym", "time"))
+    fake_kx = _use(monkeypatch, _FakeKx(_three_rows()))
+
+    with caplog.at_level("WARNING"):
+        records = _rows(tmp_path, allow_missing_columns=True)
+
+    assert [record["price"] for record in records] == [None, None, None]
+    assert [record["sym"] for record in records] == ["AAPL", "AAPL", "MSFT"]
+    reads = [args[0] for query, args in fake_kx.calls if query == sym_reader._READ_ROWS_Q]
+    assert all(not path.endswith("/price") for paths in reads for path in paths)
+    assert "reading them as nulls" in caplog.text
 
 
 def test_row_range_fails_when_the_partition_disappeared(tmp_path):

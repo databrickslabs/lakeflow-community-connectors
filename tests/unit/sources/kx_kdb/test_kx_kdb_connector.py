@@ -161,20 +161,63 @@ def test_newest_date_is_admitted_once_it_is_complete(monkeypatch, tmp_path):
     )
 
 
-def test_incomplete_interior_date_raises_instead_of_being_skipped(monkeypatch, tmp_path):
+def test_incomplete_older_date_is_never_skipped(monkeypatch, tmp_path):
     connector = _connector(_build_hdb(tmp_path))
     _Shapes(monkeypatch, **{"2024_01_02": _incomplete("is missing column files ['price']")})
 
-    with pytest.raises(RuntimeError, match=r"2024\.01\.02 is incomplete.*price"):
-        connector.latest_offset("trades", {})
+    # The dates before it are committed first, then the stream fails on it.
+    first = connector.latest_offset("trades", {})
+    assert first == {"date_partition": "2024.01.01"}
+    with pytest.raises(RuntimeError, match=r"2024\.01\.02 is incomplete.*price") as excinfo:
+        connector.latest_offset("trades", {}, first)
+    assert "missing_columns" in str(excinfo.value)
+    assert "start_date" not in str(excinfo.value)
 
 
-def test_end_date_makes_every_selected_date_interior(monkeypatch, tmp_path):
+def test_batch_read_fails_on_an_incomplete_older_date(monkeypatch, tmp_path):
     connector = _connector(_build_hdb(tmp_path))
     _Shapes(monkeypatch, **{"2024_01_02": _incomplete()})
 
     with pytest.raises(RuntimeError, match="incomplete"):
-        connector.latest_offset("trades", {"end_date": "2024.01.02"})
+        connector.get_partitions("trades", {})
+
+
+def test_end_date_makes_every_selected_date_an_older_date(monkeypatch, tmp_path):
+    connector = _connector(_build_hdb(tmp_path))
+    _Shapes(monkeypatch, **{"2024_01_02": _incomplete()})
+    options = {"end_date": "2024.01.02"}
+
+    first = connector.latest_offset("trades", options)
+    assert first == {"date_partition": "2024.01.01"}
+    with pytest.raises(RuntimeError, match="incomplete"):
+        connector.latest_offset("trades", options, first)
+
+
+def test_missing_columns_null_admits_older_dates_but_not_the_newest(monkeypatch, tmp_path):
+    connector = _connector(_build_hdb(tmp_path))
+    shapes = _Shapes(monkeypatch)
+    options = {"missing_columns": "null"}
+
+    connector.latest_offset("trades", options)
+
+    allowed = {call["date_partition"]: call["allow_missing_columns"] for call in shapes.calls}
+    assert allowed == {"2024.01.01": True, "2024.01.02": True, "2024.01.03": False}
+
+
+def test_missing_columns_defaults_to_fail(monkeypatch, tmp_path):
+    connector = _connector(_build_hdb(tmp_path))
+    shapes = _Shapes(monkeypatch)
+
+    connector.latest_offset("trades", {})
+
+    assert {call["allow_missing_columns"] for call in shapes.calls} == {False}
+
+
+def test_unknown_missing_columns_policy_is_rejected(tmp_path):
+    connector = _connector(_build_hdb(tmp_path))
+
+    with pytest.raises(ValueError, match="missing_columns"):
+        connector.read_table_metadata("trades", {"missing_columns": "skip"})
 
 
 def test_only_the_newest_date_counts_every_column_but_every_date_checks_age(monkeypatch, tmp_path):
@@ -486,3 +529,13 @@ def test_read_partition_routes_row_range_descriptor(monkeypatch, tmp_path):
     assert captured["kdb_table_name"] == "TRADES"
     assert captured["date_partition"] == "2024.01.01"
     assert (captured["row_offset"], captured["row_count"], captured["total_rows"]) == (4, 2, 6)
+    assert captured["allow_missing_columns"] is False
+
+    list(
+        connector.read_partition(
+            "trades",
+            {"date_partition": "2024.01.01", "row_offset": 0, "row_count": 1, "total_rows": 6},
+            {"missing_columns": "null"},
+        )
+    )
+    assert captured["allow_missing_columns"] is True

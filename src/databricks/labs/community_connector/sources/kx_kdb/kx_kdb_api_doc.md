@@ -99,9 +99,15 @@ admits a date only when its table partition is complete:
 
 If the newest date, or a date that changed within the minimum age, is not
 complete, the batch stops before it and the offset does not move past it. Any
-other incomplete date fails the batch with the partition path and reason; it
-is never skipped. A date without the table's directory (a sparse table) is
-admitted as empty and checked again in later batches.
+other incomplete date ends the batch just before it, so the dates before it
+are committed, and then fails the next batch with the partition path and
+reason; it is never skipped. A date without the table's directory (a sparse
+table) is admitted as empty and checked again in later batches.
+
+With `missing_columns` set to `null`, an older date whose `.d` lists columns
+without a file is admitted if at least one column has a file; the missing
+columns are read as nulls and a warning names them. This matches what
+dbmaint's `addcol` would write. The newest date always needs every column.
 
 These checks rely on the writer creating `.d` after the column files, as
 `.Q.dpft` does. For a writer that creates `.d` first or rewrites columns in
@@ -134,7 +140,8 @@ Dates with no rows produce no descriptors. Row counts of older complete dates
 are cached on the driver; the newest date is checked again each batch.
 
 `read_partition()` loads the root `sym` domain, then fails if any schema
-column is missing or does not have `total_rows` rows. It reads rows
+column does not have `total_rows` rows, or is missing (unless
+`missing_columns` is `null`, which reads it as nulls). It reads rows
 `row_offset + til row_count` of every column in chunks of at most 10,000 rows,
 so a task touches only its own rows and does not need the whole date in
 Python memory. Rows keep their on-disk order. Every row of the date is read
@@ -227,6 +234,7 @@ Secret handling:
 | `max_tasks_per_batch` | `2000` | Most tasks in one micro-batch, except a single larger date |
 | `max_rows_per_task` | `2000000` | Most rows in one task |
 | `min_partition_age_minutes` | `0` | Minimum time since a date's last file change before it is admitted |
+| `missing_columns` | `fail` | `fail` or `null`; how an older date's `.d` column without a file is handled |
 
 `partition_strategy` and `sym_column` from earlier builds are rejected.
 

@@ -2065,6 +2065,8 @@ def register_lakeflow_source(spark):
         how a sparse table looks. ``complete`` is False while the partition cannot
         be read safely; ``reason`` then says why, and ``recent`` is True when the
         only problem is that a file changed within the configured minimum age.
+        ``missing_columns`` lists ``.d`` columns without a file that were allowed
+        to be read as nulls.
         """
 
         present: bool
@@ -2072,6 +2074,7 @@ def register_lakeflow_source(spark):
         row_count: int = 0
         reason: str = ""
         recent: bool = False
+        missing_columns: tuple[str, ...] = ()
 
 
     def _sym_file_path(hdb_root_path: str) -> str:
@@ -2145,13 +2148,16 @@ def register_lakeflow_source(spark):
         runtime_config: PyKxRuntimeConfig,
         check_all_columns: bool,
         min_age_seconds: float = 0.0,
+        allow_missing_columns: bool = False,
     ) -> PartitionShape:
         """Check that one table partition is fully written and return its row count.
 
         A partition is complete when ``.d`` exists, every column it lists has a
         file, and the counted columns have the same length. ``check_all_columns``
-        counts every column; otherwise only the first column of ``.d`` is counted.
-        ``min_age_seconds`` also requires the newest file to be at least that old.
+        counts every column; otherwise only the first column of ``.d`` that has a
+        file is counted. ``min_age_seconds`` also requires the newest file to be at
+        least that old. ``allow_missing_columns`` accepts ``.d`` columns without a
+        file, as long as at least one column has one.
         """
         entries = scan_partition_table(hdb_root_path, date_partition, kdb_table_name)
         if entries is None:
@@ -2186,12 +2192,15 @@ def register_lakeflow_source(spark):
             validate_hdb_name(column, "column name")
 
         missing = [column for column in columns if not _is_regular_file(entries, column)]
-        if missing:
+        if missing and not allow_missing_columns:
             return incomplete(f"is missing column files {missing}")
         if not columns:
             return PartitionShape(present=True, complete=True, row_count=0)
+        readable = [column for column in columns if column not in missing]
+        if not readable:
+            return incomplete(f"has no file for any column listed in .d {columns}")
 
-        counted = columns if check_all_columns else columns[:1]
+        counted = readable if check_all_columns else readable[:1]
         try:
             counts = _int_list(
                 kx.q(
@@ -2206,7 +2215,9 @@ def register_lakeflow_source(spark):
         if len(set(counts)) > 1:
             lengths = dict(zip(counted, counts))
             return incomplete(f"has columns of different lengths {lengths}")
-        return PartitionShape(present=True, complete=True, row_count=counts[0])
+        return PartitionShape(
+            present=True, complete=True, row_count=counts[0], missing_columns=tuple(missing)
+        )
 
 
     def _chunk_slices(row_count: int, chunk_size: int) -> Iterator[tuple[int, int]]:
@@ -2225,12 +2236,14 @@ def register_lakeflow_source(spark):
         total_rows: int,
         runtime_config: PyKxRuntimeConfig,
         column_defs: List[dict],
+        allow_missing_columns: bool = False,
     ) -> Iterator[dict]:
         """Read rows ``[row_offset, row_offset + row_count)`` of one table partition.
 
         ``total_rows`` is the partition row count seen at planning time. The read
         fails if any schema column no longer has that many rows (q would return
-        nulls for indexes past the end of a short column) or is missing.
+        nulls for indexes past the end of a short column). A schema column without
+        a file fails the read, or is read as nulls with ``allow_missing_columns``.
         """
         if row_offset < 0 or row_count < 0 or row_offset + row_count > total_rows:
             raise ValueError(
@@ -2245,15 +2258,27 @@ def register_lakeflow_source(spark):
             )
 
         column_names = [column["name"] for column in column_defs]
-        physical_columns = [name for name in column_names if name != "date"]
-        missing = [name for name in physical_columns if not _is_regular_file(entries, name)]
-        if missing:
+        schema_columns = [name for name in column_names if name != "date"]
+        missing = [name for name in schema_columns if not _is_regular_file(entries, name)]
+        if missing and not allow_missing_columns:
             raise RuntimeError(
                 f"Table partition {partition_path} is missing column files {missing}. The "
                 "partition is incomplete or its columns differ from the inferred schema."
             )
-        if row_count == 0 or not physical_columns:
+        physical_columns = [name for name in schema_columns if name not in missing]
+        if missing:
+            logger.warning(
+                "Table partition %s has no files for columns %s; reading them as nulls.",
+                partition_path,
+                missing,
+            )
+        if row_count == 0 or not schema_columns:
             return
+        if not physical_columns:
+            raise RuntimeError(
+                f"Table partition {partition_path} has no file for any schema column; it "
+                f"was planned with {total_rows} rows."
+            )
 
         kx = prepare_pykx(runtime_config)
         _ensure_sym_domain(kx, hdb_root_path)
@@ -2584,6 +2609,7 @@ def register_lakeflow_source(spark):
     DEFAULT_MAX_DATES_PER_BATCH = 250
     DEFAULT_MAX_TASKS_PER_BATCH = 2000
     DEFAULT_MAX_ROWS_PER_TASK = 2_000_000
+    _MISSING_COLUMN_POLICIES = ("fail", "null")
     _REMOVED_TABLE_OPTIONS = ("partition_strategy", "sym_column")
 
 
@@ -2687,11 +2713,12 @@ def register_lakeflow_source(spark):
 
             max_rows = self._max_rows_per_task(table_options)
             min_age = self._min_partition_age_seconds(table_options)
+            allow_missing = self._allow_missing_columns(table_options)
             newest = latest_table_partition(self.hdb_root_path, table_name)
             descriptors: list[dict] = []
             total_rows = 0
             for partition in selected:
-                shape = self._partition_shape(table_name, partition, newest, min_age)
+                shape = self._partition_shape(table_name, partition, newest, min_age, allow_missing)
                 if not shape.complete:
                     raise RuntimeError(
                         f"KX KDB table {table_name!r} date {partition} is in this batch but "
@@ -2738,6 +2765,7 @@ def register_lakeflow_source(spark):
                 total_rows=total_rows,
                 runtime_config=self.runtime_config,
                 column_defs=self._column_defs(table_name, table_options),
+                allow_missing_columns=self._allow_missing_columns(table_options),
             )
 
         def _admitted_partitions(
@@ -2752,10 +2780,12 @@ def register_lakeflow_source(spark):
 
             Admission stops before the table's newest date while that date is
             still being written, and before any date changed within
-            ``min_partition_age_minutes``. It fails on any other incomplete date,
-            so the offset never moves past a date that has not been read. With
-            ``capped``, admission also stops at ``max_dates_per_batch`` dates or
-            ``max_tasks_per_batch`` tasks; the first date is always admitted.
+            ``min_partition_age_minutes``. Any other incomplete date ends a capped
+            batch just before it, so the dates before it are committed, and fails
+            once it is the first date to admit; the offset never moves past a date
+            that has not been read. With ``capped``, admission also stops at
+            ``max_dates_per_batch`` dates or ``max_tasks_per_batch`` tasks; the
+            first date is always admitted.
             """
             self._validate_table_options(table_options)
             start_partition = normalize_partition_date((start_offset or {}).get("date_partition"))
@@ -2776,13 +2806,14 @@ def register_lakeflow_source(spark):
             )
             max_rows = self._max_rows_per_task(table_options)
             min_age = self._min_partition_age_seconds(table_options)
+            allow_missing = self._allow_missing_columns(table_options)
 
             admitted: list[str] = []
             tasks = 0
             for partition in candidates:
                 if capped and len(admitted) >= max_dates:
                     break
-                shape = self._partition_shape(table_name, partition, newest, min_age)
+                shape = self._partition_shape(table_name, partition, newest, min_age, allow_missing)
                 if not shape.complete:
                     if partition == newest or shape.recent:
                         logger.info(
@@ -2792,10 +2823,29 @@ def register_lakeflow_source(spark):
                             shape.reason,
                         )
                         break
+                    if capped and admitted:
+                        logger.warning(
+                            "KX KDB table=%s ends this batch before incomplete date %s: %s",
+                            table_name,
+                            partition,
+                            shape.reason,
+                        )
+                        break
                     raise RuntimeError(
                         f"KX KDB table {table_name!r} date {partition} is incomplete: "
                         f"{shape.reason}. Only the newest date of a table may still be "
-                        "in progress. Repair the partition, or set start_date after it."
+                        "in progress. Repair the partition (for a missing column, "
+                        "dbmaint's addcol fills it with nulls), or set the table option "
+                        "missing_columns to 'null' to read missing columns of older "
+                        "dates as nulls."
+                    )
+                if shape.missing_columns:
+                    logger.warning(
+                        "KX KDB table=%s date %s has no files for columns %s; reading them "
+                        "as nulls because missing_columns is 'null'.",
+                        table_name,
+                        partition,
+                        list(shape.missing_columns),
                     )
                 date_tasks = math.ceil(shape.row_count / max_rows)
                 if capped and admitted and tasks + date_tasks > max_tasks:
@@ -2830,12 +2880,15 @@ def register_lakeflow_source(spark):
             date_partition: str,
             newest: str,
             min_age_seconds: float,
+            allow_missing_columns: bool,
         ) -> PartitionShape:
-            cache_key = (table_name.lower(), date_partition)
+            is_newest = date_partition == newest
+            # The newest date may still be written, so its columns stay required.
+            allow_missing = allow_missing_columns and not is_newest
+            cache_key = (table_name.lower(), date_partition, allow_missing)
             cached = self._shape_cache.get(cache_key)
             if cached is not None:
                 return cached
-            is_newest = date_partition == newest
             shape = read_partition_shape(
                 hdb_root_path=self.hdb_root_path,
                 kdb_table_name=self._actual_table_name(table_name),
@@ -2843,6 +2896,7 @@ def register_lakeflow_source(spark):
                 runtime_config=self.runtime_config,
                 check_all_columns=is_newest,
                 min_age_seconds=min_age_seconds,
+                allow_missing_columns=allow_missing,
             )
             # Older complete dates are immutable. The newest date may still be
             # written, and a sparse date's table directory may still appear, so
@@ -2902,6 +2956,13 @@ def register_lakeflow_source(spark):
                 )
             return minutes * 60
 
+        @staticmethod
+        def _allow_missing_columns(table_options: dict[str, str]) -> bool:
+            policy = str(table_options.get("missing_columns", "fail")).strip().lower() or "fail"
+            if policy not in _MISSING_COLUMN_POLICIES:
+                raise ValueError(f"Unsupported missing_columns {policy!r}. Expected 'fail' or 'null'.")
+            return policy == "null"
+
         def _validate_table_options(self, table_options: dict[str, str]) -> None:
             removed = [key for key in _REMOVED_TABLE_OPTIONS if key in table_options]
             if removed:
@@ -2910,6 +2971,7 @@ def register_lakeflow_source(spark):
                     "split into row ranges; use max_rows_per_task to size them."
                 )
             self._ingestion_mode(table_options)
+            self._allow_missing_columns(table_options)
 
         def _ingestion_mode(self, table_options: dict[str, str]) -> str:
             mode = str(table_options.get("ingestion_mode", "append")).strip().lower()

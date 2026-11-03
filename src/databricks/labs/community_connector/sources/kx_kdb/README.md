@@ -176,6 +176,7 @@ node.
 | `max_tasks_per_batch` | `2000` | Most Spark tasks in one micro-batch; a single larger date is still admitted alone |
 | `max_rows_per_task` | `2000000` | Most rows read by one Spark task |
 | `min_partition_age_minutes` | `0` | Minimum time since a date's last file change before it is admitted |
+| `missing_columns` | `fail` | `fail` stops at an older date whose `.d` lists a column without a file; `null` reads such columns as nulls and logs a warning. The newest date always needs every column |
 
 Example table selection:
 
@@ -216,9 +217,10 @@ Example table selection:
    table's newest date must also have columns of equal length. When
    `min_partition_age_minutes` is set, no file of the date may have changed
    within that time. The batch stops before the newest date, or a recently
-   changed date, until it passes; any other incomplete date fails the batch
-   instead of being skipped. Admission stops at `max_dates_per_batch` dates or
-   `max_tasks_per_batch` tasks.
+   changed date, until it passes. Any other incomplete date ends the batch
+   just before it, so earlier dates are committed, and then fails the next
+   batch instead of being skipped. Admission stops at `max_dates_per_batch`
+   dates or `max_tasks_per_batch` tasks.
 3. `get_partitions()` reads each admitted date's row count from the first
    column in `.d` and emits JSON-serializable
    `{date_partition, row_offset, row_count, total_rows}` descriptors of at
@@ -243,6 +245,9 @@ Example table selection:
   length differs from the planned row count.
 - Copy or sync the root `sym` file before the date directories that use it;
   rows enumerated past the end of `sym` are ingested with an empty symbol.
+- An older date whose `.d` lists a column without a file (q cannot select
+  that partition either) stops ingestion until the partition is repaired, for
+  example with dbmaint's `addcol`, or `missing_columns` is set to `null`.
 - Directory listings are reused for up to five minutes per Python worker.
 - Segmented HDBs (`par.txt`) are not supported.
 
