@@ -106,6 +106,34 @@ def test_empty_snapshot(connector, transport):
 
 
 @pytest.mark.parametrize(
+    "table",
+    ["incidents", "services", "users", "teams", "severities", "escalation_policies", "schedules"],
+)
+def test_page_size_reaches_each_table_endpoint(connector, transport, table):
+    calls, replies, _ = transport
+    replies.append(response(page([])))
+    rows, _ = connector.read_table(table, None, {"page_size": "2"})
+    assert list(rows) == []
+    assert calls[0][0] == f"https://api.rootly.com/v1/{table}"
+    assert calls[0][1]["params"] == {"page[number]": "1", "page[size]": "2"}
+
+
+def test_later_snapshot_refresh_reads_current_source_state(connector, transport):
+    calls, replies, _ = transport
+    replies.extend(
+        [
+            response(page([resource("removed-later"), resource("unchanged")])),
+            response(page([resource("unchanged"), resource("created-later")])),
+        ]
+    )
+    rows, checkpoint = connector.read_table("incidents", None, {})
+    assert [row["id"] for row in rows] == ["removed-later", "unchanged"]
+    rows, _ = connector.read_table("incidents", checkpoint, {})
+    assert [row["id"] for row in rows] == ["unchanged", "created-later"]
+    assert len(calls) == 2
+
+
+@pytest.mark.parametrize(
     "body",
     [
         [],
