@@ -327,6 +327,49 @@ def test_offline_runtime_installs_and_sets_the_environment_once_per_process(monk
     assert applies == installs
 
 
+def test_home_points_at_the_install_only_while_pykx_is_imported(monkeypatch, tmp_path):
+    monkeypatch.setattr(runtime_mod, "_install_once", lambda *_: None)
+    monkeypatch.setenv("HOME", "/root")
+    monkeypatch.delitem(sys.modules, "pykx", raising=False)
+    homes_at_import = []
+
+    def _import_module(name):
+        homes_at_import.append(os.environ["HOME"])
+        return types.SimpleNamespace(__name__=name)
+
+    monkeypatch.setattr(runtime_mod.importlib, "import_module", _import_module)
+    config = _offline_config(tmp_path)
+
+    runtime_mod.prepare_pykx(config)
+
+    assert homes_at_import == [str(runtime_mod._runtime_home(config))]
+    assert os.environ["HOME"] == "/root"
+
+
+def test_home_is_restored_when_the_import_fails(monkeypatch, tmp_path):
+    monkeypatch.setattr(runtime_mod, "_install_once", lambda *_: None)
+    monkeypatch.setenv("HOME", "/root")
+    monkeypatch.delitem(sys.modules, "pykx", raising=False)
+
+    def _import_module(_name):
+        raise RuntimeError("Failed to initialize embedded q")
+
+    monkeypatch.setattr(runtime_mod.importlib, "import_module", _import_module)
+
+    with pytest.raises(RuntimeError, match="embedded q"):
+        runtime_mod.prepare_pykx(_offline_config(tmp_path))
+    assert os.environ["HOME"] == "/root"
+
+
+def test_preinstalled_runtime_keeps_home(monkeypatch, tmp_path):
+    _stub_import(monkeypatch)
+    monkeypatch.setenv("HOME", "/home/user")
+
+    runtime_mod.prepare_pykx(PyKxRuntimeConfig(license_directory=str(_volume(tmp_path))))
+
+    assert os.environ["HOME"] == "/home/user"
+
+
 def test_missing_pykx_names_the_pipeline_requirement(monkeypatch, tmp_path):
     _stub_import(monkeypatch, missing=True)
     monkeypatch.setattr(runtime_mod.subprocess, "run", _SubprocessRecorder([]))

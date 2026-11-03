@@ -1500,7 +1500,30 @@ def register_lakeflow_source(spark):
                     _install_once(config, home)
                 _apply_pykx_environment(config, home)
                 _PREPARED_RUNTIME_KEYS.add(runtime_key)
-            return _import_pykx(config)
+            install_home = _runtime_home(config) if config.uses_offline_bundle else None
+            with _home_during_import(install_home):
+                return _import_pykx(config)
+
+
+    @contextlib.contextmanager
+    def _home_during_import(home: Path | None):
+        """Point ``HOME`` at the KDB-X install while PyKX starts, then restore it.
+
+        Embedded q reads ``$HOME/.kx/config`` at startup, and the process ``HOME``
+        may not be readable (``/root`` for serverless workers).
+        """
+        if home is None:
+            yield
+            return
+        original = os.environ.get("HOME")
+        os.environ["HOME"] = str(home)
+        try:
+            yield
+        finally:
+            if original is None:
+                os.environ.pop("HOME", None)
+            else:
+                os.environ["HOME"] = original
 
 
     def _import_pykx(config: PyKxRuntimeConfig):

@@ -196,8 +196,11 @@ PyKX is imported after setup. Setup sets only `QLIC`, `QHOME` (the install's
 `.kx` directory), `PYKX_LICENSED`, and adds the install's `bin` directory to
 `PATH` once. The PyKX fallback directory is appended once to `sys.path`, so
 the runtime's own packages keep precedence, and to `PYTHONPATH`, because PyKX
-imports itself in a child process while it initializes embedded q. Setup does
-not change `HOME` or the working directory. Processes wait at most 25 minutes for another process's
+imports itself in a child process while it initializes embedded q. With an
+offline bundle, `HOME` points at the install only while PyKX is imported,
+because embedded q reads `$HOME/.kx/config` at startup and the process `HOME`
+may not be readable (`/root` on serverless workers); it is restored
+afterwards. The working directory is not changed. Processes wait at most 25 minutes for another process's
 install on the same node.
 
 Secret handling:

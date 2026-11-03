@@ -147,7 +147,10 @@ node.
 - Setup changes only `QLIC`, `QHOME`, `PYKX_LICENSED`, and, once, `PATH` in
   the Python process. When the PyKX fallback is used, its directory is also
   appended once to `sys.path` and `PYTHONPATH` (PyKX imports itself in a child
-  process while it starts). `HOME` and the working directory are not changed.
+  process while it starts). With an offline bundle, `HOME` points at the
+  install only while PyKX is imported, because embedded q reads
+  `$HOME/.kx/config` at startup, and is then restored. The working directory
+  is not changed.
 - The PyKX fallback is pinned by version, not by wheel hash.
 
 ## Connection parameters
