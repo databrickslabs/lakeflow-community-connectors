@@ -1,0 +1,104 @@
+[
+  {
+    "number": 1,
+    "groupNumber": 1,
+    "name": "Martin Crane",
+    "isBarred": false,
+    "phone": "0763448762874",
+    "email": "redacted@example.com",
+    "objectVersion": "e208e159c08bb729"
+  },
+  {
+    "number": 2,
+    "groupNumber": 1,
+    "name": "Maris Crane",
+    "isBarred": false,
+    "phone": "09876555678",
+    "email": "redacted@example.com",
+    "objectVersion": "e303d469817ad17"
+  },
+  {
+    "number": 3,
+    "groupNumber": 1,
+    "name": "Barred employee",
+    "isBarred": true,
+    "phone": "098757787889",
+    "email": "redacted@example.com",
+    "objectVersion": "e6027a012e7c5653"
+  },
+  {
+    "number": 4,
+    "groupNumber": 1,
+    "name": "Donny Bosco",
+    "isBarred": false,
+    "objectVersion": "e711758fbb27d8c8"
+  },
+  {
+    "number": 5,
+    "groupNumber": 1,
+    "name": "John Timelogger",
+    "isBarred": false,
+    "email": "redacted@example.com",
+    "objectVersion": "1c15923bc3675bbf"
+  },
+  {
+    "number": 6,
+    "groupNumber": 1,
+    "name": "Mike Project Manager",
+    "isBarred": false,
+    "email": "redacted@example.com",
+    "objectVersion": "ed9c5cf53f9bf6d0"
+  },
+  {
+    "number": 8,
+    "groupNumber": 2,
+    "name": "Linda Carey",
+    "isBarred": false,
+    "objectVersion": "290a8e84011561de"
+  },
+  {
+    "number": 1000,
+    "groupNumber": 58706,
+    "name": "foxtrot-104",
+    "isBarred": false,
+    "phone": "alpha-352",
+    "email": "bravo-258",
+    "objectVersion": "golf-555"
+  },
+  {
+    "number": 1001,
+    "groupNumber": 2801,
+    "name": "xray-573",
+    "isBarred": true,
+    "phone": "delta-540",
+    "email": "echo-270",
+    "objectVersion": "november-343"
+  },
+  {
+    "number": 1002,
+    "groupNumber": 74322,
+    "name": "hotel-293",
+    "isBarred": false,
+    "phone": "echo-185",
+    "email": "juliet-409",
+    "objectVersion": "quebec-833"
+  },
+  {
+    "number": 1003,
+    "groupNumber": 69574,
+    "name": "juliet-843",
+    "isBarred": true,
+    "phone": "golf-345",
+    "email": "alpha-855",
+    "objectVersion": "lima-517"
+  },
+  {
+    "number": 1004,
+    "groupNumber": 82450,
+    "name": "hotel-948",
+    "isBarred": false,
+    "phone": "xray-437",
+    "email": "xray-624",
+    "objectVersion": "india-362"
+  }
+]

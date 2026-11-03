@@ -1,0 +1,105 @@
+[
+  {
+    "number": 1,
+    "groupNumber": 1,
+    "name": "Marketing",
+    "isBarred": false,
+    "inLieuCode": 1,
+    "hideInSearch": false,
+    "cutoffDate": "2022-08-26T00:00:00",
+    "salesPriceBefore": 50.0,
+    "salesPriceAfter": 100.0,
+    "costPriceMarkupPercentage": 100.0,
+    "objectVersion": "fdf8ec5dd45a9e8d"
+  },
+  {
+    "number": 2,
+    "groupNumber": 2,
+    "name": "Packaging",
+    "isBarred": false,
+    "inLieuCode": 1,
+    "hideInSearch": false,
+    "objectVersion": "dd02113a794dd26e"
+  },
+  {
+    "number": 3,
+    "groupNumber": 3,
+    "name": "Unproductive activity",
+    "isBarred": false,
+    "inLieuCode": 2,
+    "hideInSearch": false,
+    "cutoffDate": "2022-08-31T00:00:00",
+    "objectVersion": "feb1c655206d1f3b"
+  },
+  {
+    "number": 4,
+    "groupNumber": 1,
+    "name": "Accounting",
+    "isBarred": true,
+    "inLieuCode": 1,
+    "hideInSearch": false,
+    "cutoffDate": "2022-05-25T00:00:00",
+    "salesPriceBefore": 100.0,
+    "salesPriceAfter": 200.0,
+    "costPriceMarkupPercentage": 100.0,
+    "objectVersion": "b027c115580309fd"
+  },
+  {
+    "number": 5,
+    "groupNumber": 1,
+    "name": "Online services",
+    "isBarred": false,
+    "inLieuCode": 2,
+    "hideInSearch": false,
+    "cutoffDate": "2022-05-29T00:00:00",
+    "salesPriceBefore": 100.0,
+    "salesPriceAfter": 200.0,
+    "costPriceMarkupPercentage": 100.0,
+    "objectVersion": "f63ce277812be136"
+  },
+  {
+    "number": 71,
+    "groupNumber": 1,
+    "name": "Activity Number 71",
+    "isBarred": false,
+    "inLieuCode": 0,
+    "hideInSearch": false,
+    "objectVersion": "a501598f0366f99"
+  },
+  {
+    "number": 72,
+    "groupNumber": 1,
+    "name": "Activity Number 72",
+    "isBarred": false,
+    "inLieuCode": 0,
+    "hideInSearch": false,
+    "objectVersion": "12b1cd24bed76f81"
+  },
+  {
+    "number": 73,
+    "groupNumber": 1,
+    "name": "Activity Number 73",
+    "isBarred": false,
+    "inLieuCode": 0,
+    "hideInSearch": false,
+    "objectVersion": "f2254a3d4d08f38d"
+  },
+  {
+    "number": 74,
+    "groupNumber": 1,
+    "name": "Activity Number 74",
+    "isBarred": false,
+    "inLieuCode": 0,
+    "hideInSearch": false,
+    "objectVersion": "fa8701c91ba9f375"
+  },
+  {
+    "number": 75,
+    "groupNumber": 1,
+    "name": "Activity Number 75",
+    "isBarred": false,
+    "inLieuCode": 0,
+    "hideInSearch": false,
+    "objectVersion": "d9fa7ee1a9db7781"
+  }
+]

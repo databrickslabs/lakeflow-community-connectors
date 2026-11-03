@@ -1,0 +1,16 @@
+[
+  {
+    "number": 1,
+    "name": "Quote sent",
+    "type": 1,
+    "priority": 1,
+    "objectVersion": "998cdd5c4f1f1a7"
+  },
+  {
+    "number": 2,
+    "name": "Realised",
+    "type": 2,
+    "priority": 2,
+    "objectVersion": "e639dbd8d5e45e71"
+  }
+]

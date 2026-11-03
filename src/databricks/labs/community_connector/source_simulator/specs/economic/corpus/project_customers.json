@@ -1,0 +1,27 @@
+[
+  {
+    "number": 1,
+    "name": "Decathlon",
+    "objectVersion": "f23c2fbf3cc20649"
+  },
+  {
+    "number": 2,
+    "name": "Intersport",
+    "objectVersion": "ef7cdd87b898f888"
+  },
+  {
+    "number": 3,
+    "name": "Barred customer",
+    "objectVersion": "faa6399b4c1e20db"
+  },
+  {
+    "number": 4,
+    "name": "Customer with EAN",
+    "objectVersion": "85c3d8229665ad2"
+  },
+  {
+    "number": 5,
+    "name": "Les Freres Heureux",
+    "objectVersion": "ff21e41fe03cc2ae"
+  }
+]
