@@ -20,3 +20,11 @@ class TestGithubConnector(LakeflowConnectTests):
     allow_empty_first_read = frozenset({
         "reviews", "comments", "pull_requests", "issues",
     })
+    # content_base64 is only populated for binary files when include_binary is
+    # set. The simulator serves one single-entity blob for every sha, so a
+    # sample can't hold both a decodable text file (populates content) and a
+    # binary file (populates content_base64); the latter is covered by the
+    # dedicated test_repository_files unit tests instead.
+    allow_null_columns = {
+        "repository_files": {"content_base64"},
+    }
