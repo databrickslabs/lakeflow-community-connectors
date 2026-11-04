@@ -45,6 +45,7 @@ from pyspark.sql.types import (
     VariantType,
     VariantVal,
 )
+from urllib.parse import parse_qs, urlparse
 import base64
 import logging
 import requests
@@ -2072,8 +2073,11 @@ def register_lakeflow_source(spark):
             changes, which keeps end_offset != start_offset and signals
             forward progress to the streaming framework.
 
-            When the ``ids`` table option is set, bypasses this path and
-            fetches those specific items (snapshot-style).
+            When the ``ids`` table option is set, only those items are fetched
+            (no WIQL discovery), under the same watermark rule. Returning them with
+            an unchanged offset, as an earlier "snapshot-style" version did, made
+            the first batch of a managed run abort with
+            SIMPLE_STREAM_READER_OFFSET_DID_NOT_ADVANCE (the table is cdc).
             """
             explicit_ids = table_options.get("ids")
             projects = self._resolve_projects(table_options)
@@ -2088,13 +2092,8 @@ def register_lakeflow_source(spark):
                     ids_to_fetch = [
                         i.strip() for i in explicit_ids.split(",") if i.strip()
                     ]
-                    records, _ = self._fetch_workitems_by_ids(
-                        project, ids_to_fetch
-                    )
-                    all_records.extend(records)
-                    continue
-
-                ids_to_fetch = self._discover_workitem_ids(project)
+                else:
+                    ids_to_fetch = self._discover_workitem_ids(project)
                 if not ids_to_fetch:
                     continue
 
@@ -2111,9 +2110,6 @@ def register_lakeflow_source(spark):
                     watermarks[project] = max_changed
                     watermarks_advanced = True
 
-            if explicit_ids:
-                # Explicit-IDs path is snapshot-like — stable offset terminates
-                return iter(all_records), start_offset
             # If no watermarks advanced, no new changes — return empty to satisfy
             # Spark's SimpleDataSourceStreamReader contract: a non-empty batch
             # must always be paired with a strictly advancing end offset.
@@ -2272,7 +2268,9 @@ def register_lakeflow_source(spark):
                     all_records.append(rec)
 
                 is_last_batch = data.get("isLastBatch", True)
-                next_token = data.get("continuationToken")
+                next_token = data.get("continuationToken") or self._token_from_next_link(
+                    data.get("nextLink")
+                )
                 if not is_last_batch and next_token:
                     # Mid-pagination — resume this project on the next call.
                     # Watermarks stay untouched until the project fully drains.
@@ -2293,6 +2291,22 @@ def register_lakeflow_source(spark):
             # All projects drained for this pass — stable offset signals "done".
             # On the next pipeline run the watermarks drive an incremental sync.
             return iter(all_records), {"watermarks": watermarks}
+
+        @staticmethod
+        def _token_from_next_link(next_link: str | None) -> str | None:
+            """Extract ``continuationToken`` from a reporting ``nextLink`` URL.
+
+            The last batch can carry the watermark only inside ``nextLink``
+            (``...?continuationToken=3;2;1``) with no top-level
+            ``continuationToken`` field, as in Microsoft's documented first-batch
+            example. Without this fallback no watermark was saved, so the next run
+            re-read every revision with an unchanged offset and aborted with
+            SIMPLE_STREAM_READER_OFFSET_DID_NOT_ADVANCE.
+            """
+            if not next_link:
+                return None
+            values = parse_qs(urlparse(next_link).query).get("continuationToken")
+            return values[0] if values else None
 
         @staticmethod
         def _parse_wir_offset(
