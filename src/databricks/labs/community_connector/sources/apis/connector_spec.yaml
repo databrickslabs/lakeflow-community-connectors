@@ -1,0 +1,83 @@
+# Apis REST Service Community Connector Spec
+# This file defines the specification for the Apis REST Service connector including
+# connection parameters and allowlist options.
+
+# ============================================================================
+# Connection Parameters
+# These are provided when creating the Unity Catalog connection.
+# The Apis REST Service is a Hive-instance-scoped REST API for industrial
+# data historians. Authentication uses a static bearer token via the
+# Authorization header.
+# ============================================================================
+display_name: Apis
+
+connection:
+  parameters:
+    - name: base_url
+      type: string
+      required: true
+      description: >
+        Root URL of the Apis REST Service, e.g. http://hive-host:8080.
+        This is the base endpoint for all API calls to the historian.
+        Required. Aliases: host, url.
+
+    - name: token
+      type: string
+      required: true
+      secret: true
+      description: >
+        Pre-issued bearer token sent in the Authorization header for API access.
+        Required. Aliases: api_token, access_token, bearer_token.
+        The Apis spec defines no OAuth2 flow or token endpoint, so the credential
+        is treated as a static pre-issued token.
+
+    - name: auth_scheme
+      type: string
+      required: false
+      description: >
+        Prefix for the Authorization header value. Defaults to "Bearer".
+        Set to an empty string (or "none"/"raw") to send the bare token.
+        The spec models the header as a raw apiKey and does not state which
+        form the server expects, so this option allows operators to adapt.
+
+    - name: instance
+      type: string
+      required: false
+      description: >
+        Comma-separated Hive instance name(s) to ingest data from.
+        When omitted, the connector resolves instance names via GET /hive discovery.
+        Can be overridden per table via table options.
+        Aliases: instances.
+
+    - name: request_timeout
+      type: string
+      required: false
+      description: >
+        Per-request timeout in seconds (default 30).
+        Set to a positive integer to control how long the connector waits
+        for API responses before timing out.
+
+    - name: max_retries
+      type: string
+      required: false
+      description: >
+        Number of retry attempts per request before giving up (default 4).
+        The connector uses exponential backoff on transient failures
+        (429, 500, 502, 503, 504).
+
+    - name: verify_ssl
+      type: string
+      required: false
+      description: >
+        Set to 'false' to skip TLS verification.
+        On-premises Hive deployments often use self-signed certificates.
+        Default is 'true'. Not recommended for production unless necessary.
+
+# ============================================================================
+# External Options Allowlist
+# These table-specific options must be included in the externalOptionsAllowList
+# parameter of the UC connection to allow them to be passed through.
+# These options control per-table read behavior for the items, values,
+# and timeseries tables.
+# ============================================================================
+external_options_allowlist: "instance,instances,item,items,item_patterns,attrib,attribs,quality,aggregate,interval,start_timestamp,backfill_days,window_seconds,max_partitions,max_records_per_batch,max_windows_per_read,items_per_request"
