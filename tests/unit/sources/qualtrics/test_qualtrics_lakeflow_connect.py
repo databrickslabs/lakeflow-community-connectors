@@ -8,6 +8,10 @@ class TestQualtricsConnector(LakeflowConnectWriteBackTests, LakeflowConnectTests
     connector_class = QualtricsLakeflowConnect
     test_utils_class = LakeflowConnectWriteTestUtils
     simulator_source = "qualtrics"
+    # Known: returns records without advancing the offset, which would abort a
+    # managed incremental pipeline (SIMPLE_STREAM_READER_OFFSET_DID_NOT_ADVANCE).
+    # Pending owner confirmation/fix; tracked in #307. Remove when fixed.
+    offset_advance_exempt_tables = frozenset({"distributions"})
     replay_config = {
         "api_token": "simulator-fake-token",
         "datacenter_id": "iad1",

@@ -734,6 +734,160 @@ class LakeflowConnectTests:
         )
 
     # ------------------------------------------------------------------
+    # test_read_offset_advances_with_records  (per-table, collected)
+    # ------------------------------------------------------------------
+
+    def test_read_offset_advances_with_records(self):
+        """A non-empty batch must return an offset different from the one given.
+
+        Spark's ``SimpleDataSourceStreamReader`` rejects a microbatch that
+        returns records without advancing the end offset
+        (``SIMPLE_STREAM_READER_OFFSET_DID_NOT_ADVANCE``), which aborts the
+        pipeline. ``test_read_terminates`` only checks that offsets eventually
+        converge, so a connector that re-emits boundary records at an
+        unchanged offset passes it and then fails on a real managed run.
+
+        Applies to incremental tables only: snapshot tables are read in batch
+        and may legitimately return the same offset every time.
+        """
+        tables = [
+            t for t in self._non_partitioned_tables()
+            if self._ingestion_type(t) != "snapshot"
+            and t not in self.offset_advance_exempt_tables
+        ]
+        if not tables:
+            pytest.skip("No non-partitioned incremental tables to check")
+        errors = []
+        for table in tables:
+            try:
+                err = self._validate_offset_advances(table)
+            except Exception as e:  # pylint: disable=broad-except
+                err = f"[{table}] Offset-advance check error: {e}"
+            if err:
+                errors.append(err)
+        if errors:
+            pytest.fail("\n\n".join(errors))
+
+    def _validate_offset_advances(self, table: str) -> Optional[str]:
+        """Feed each offset back (like the termination loop) and flag any call
+        that returns records while leaving the offset unchanged."""
+        offset: Any = {}
+        for i in range(self.read_termination_max_iterations):
+            start_json = json.dumps(offset, sort_keys=True, default=str)
+            iterator, offset = self.connector.read_table(table, offset, self._opts(table))
+            got_records = bool(self._consume(iterator, max_records=1))
+            end_json = json.dumps(offset, sort_keys=True, default=str)
+            if got_records and end_json == start_json:
+                return (
+                    f"[{table}] read_table call {i + 1} returned records but did not "
+                    f"advance the offset (offset stayed {end_json}).\n"
+                    "  Fix: a non-empty batch must return an end offset different "
+                    "from the start offset; Spark's SimpleDataSourceStreamReader "
+                    "aborts with SIMPLE_STREAM_READER_OFFSET_DID_NOT_ADVANCE. "
+                    "Typical cause: an inclusive (>=) cursor boundary re-emitting "
+                    "the boundary record."
+                )
+            if end_json == start_json:
+                return None  # converged with an empty batch
+        return None  # non-convergence is reported by test_read_terminates
+
+    # ------------------------------------------------------------------
+    # test_read_drains_full_corpus  (per-table, collected)
+    # ------------------------------------------------------------------
+
+    # Tables exempt from ``test_read_offset_advances_with_records``. Use only
+    # for a known, tracked violation pending a connector fix (each entry should
+    # reference its issue). A table here would abort a managed incremental
+    # pipeline with SIMPLE_STREAM_READER_OFFSET_DID_NOT_ADVANCE, so this list
+    # is a to-do list, not a permanent allowance.
+    offset_advance_exempt_tables: frozenset = frozenset()
+
+    # Tables exempt from ``test_read_drains_full_corpus``: those whose
+    # ``corpus/<table>.json`` is intentionally not 1:1 with the rows a full
+    # drain returns (e.g. the connector filters by a default window, or the
+    # file feeds several tables). Document the reason next to each entry.
+    completeness_exempt_tables: frozenset = frozenset()
+
+    def test_read_drains_full_corpus(self):
+        """Draining read_table returns every record in the table's corpus.
+
+        Catches silent truncation: a connector that stops paginating early
+        (e.g. it follows a continuation link the API never returns) still
+        passes the other read tests, because they only sample a few records.
+        Here, ``read_table`` is called until the offset converges, and the
+        distinct primary keys returned must cover every record in
+        ``corpus/<table>.json``.
+
+        Simulate mode only, and only for tables whose corpus file is named
+        after the table. Only a partial drain fails (some records, not all);
+        an empty drain means the read doesn't draw from that corpus. Records
+        the simulator synthesizes beyond the init-time cap are not in the
+        corpus file and are not expected.
+        """
+        if _resolve_env_mode_for_simulator(self.simulator_source) != MODE_SIMULATE:
+            pytest.skip("Completeness check only enforced in simulate mode")
+        corpus_dir = self._simulator_corpus_dir()
+        if corpus_dir is None:
+            pytest.skip("No simulator corpus")
+        tables = [
+            t for t in self._non_partitioned_tables()
+            if t not in self.completeness_exempt_tables
+            and (corpus_dir / f"{t}.json").exists()
+        ]
+        if not tables:
+            pytest.skip("No tables with a matching corpus/<table>.json")
+        errors = []
+        for table in tables:
+            try:
+                err = self._validate_full_drain(table, corpus_dir / f"{table}.json")
+            except Exception as e:  # pylint: disable=broad-except
+                err = f"[{table}] Completeness check error: {e}"
+            if err:
+                errors.append(err)
+        if errors:
+            pytest.fail("\n\n".join(errors))
+
+    def _validate_full_drain(self, table: str, corpus_path: Path) -> Optional[str]:
+        with open(corpus_path, encoding="utf-8") as fh:
+            corpus = json.load(fh)
+        if not isinstance(corpus, list) or not corpus:
+            return None
+        meta = self.connector.read_table_metadata(table, self._opts(table)) or {}
+        pks = meta.get("primary_keys") or []
+
+        def _key(rec):
+            row = rec if isinstance(rec, dict) else rec.asDict(recursive=True)
+            if pks:
+                return tuple(json.dumps(row.get(k), sort_keys=True, default=str) for k in pks)
+            return json.dumps(row, sort_keys=True, default=str)
+
+        seen = set()
+        offset: Any = {}
+        for _ in range(self.read_termination_max_iterations):
+            start_json = json.dumps(offset, sort_keys=True, default=str)
+            iterator, offset = self.connector.read_table(table, offset, self._opts(table))
+            for rec in self._consume(iterator, max_records=10**9):
+                seen.add(_key(rec))
+            if offset is None or json.dumps(offset, sort_keys=True, default=str) == start_json:
+                break
+
+        # Flag only a PARTIAL drain. Zero records means the default read
+        # doesn't draw from this corpus at all (child tables needing parent
+        # ids, date windows, ...) and is covered by the empty-first-read
+        # check; truncation shows up as some records but not all.
+        if 0 < len(seen) < len(corpus):
+            return (
+                f"[{table}] Draining read_table returned {len(seen)} distinct records, "
+                f"but corpus/{table}.json has {len(corpus)}.\n"
+                "  Fix: the connector is dropping records, most often by stopping "
+                "pagination early (e.g. following a continuation link the API "
+                "doesn't return). If the gap is intentional (default filter, shared "
+                "corpus file), add the table to completeness_exempt_tables with a "
+                "comment explaining why."
+            )
+        return None
+
+    # ------------------------------------------------------------------
     # test_every_column_populated_by_at_least_one_record  (per-table, collected)
     # ------------------------------------------------------------------
 
