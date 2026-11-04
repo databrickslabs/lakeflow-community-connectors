@@ -916,6 +916,62 @@ def register_lakeflow_source(spark):
                 break
 
 
+    def skip_top_paginate(
+        session: requests.Session,
+        url: str,
+        params: dict[str, str],
+        label: str,
+        records_key: str = "value",
+        *,
+        timeout: int = DEFAULT_TIMEOUT,
+    ) -> Iterator[dict[str, Any]]:
+        """Yield records from a ``skip`` / ``top`` paginated Unified Catalog endpoint.
+
+        Live behaviour (verified against a Purview tenant): ``dataProducts`` and
+        ``terms`` return ``{value, count}`` and **no** ``nextLink`` — the caller
+        pages by advancing ``skip``. ``params`` must already carry ``top``.
+
+        * ``skip`` advances by the number of records actually returned (not by
+          ``top``), so a server that caps ``top`` below the requested size still
+          pages correctly instead of stopping early.
+        * Stops on an empty page, or once ``skip`` reaches ``count`` when the
+          response reports it.
+        * If a response ever does carry a ``nextLink``, it is followed instead
+          (it already embeds ``skip``/``top``), so the helper works with either
+          continuation shape.
+        * Guard: if a page repeats the previous page's first record (a server
+          ignoring ``skip``), stop rather than loop forever re-reading it.
+        """
+        skip = 0
+        prev_first_id: Any = None
+        next_url: str | None = None
+        while True:
+            if next_url:
+                body = api_get(session, next_url, None, label, timeout=timeout)
+            else:
+                page_params = dict(params)
+                page_params["skip"] = str(skip)
+                body = api_get(session, url, page_params, label, timeout=timeout)
+
+            batch = body.get(records_key) or []
+            if not batch:
+                return
+            first_id = batch[0].get("id") if isinstance(batch[0], dict) else None
+            if first_id is not None and first_id == prev_first_id:
+                return
+            prev_first_id = first_id
+
+            yield from batch
+            skip += len(batch)
+
+            next_url = body.get("nextLink") or None
+            if next_url:
+                continue
+            count = body.get("count")
+            if isinstance(count, int) and skip >= count:
+                return
+
+
     def normalize_contacts(value: Any) -> dict[str, Any] | None:
         """Normalize a ``ContactsMap`` to the declared struct shape.
 
@@ -1082,7 +1138,8 @@ def register_lakeflow_source(spark):
         ) -> tuple[Iterator[dict], dict]:
             """Read data products incrementally on ``systemData.lastModifiedAt``.
 
-            Paginated by ``skip`` / ``top`` with a ``nextLink`` follow. Optional
+            Paginated by advancing ``skip`` (``top`` = page size); the endpoint
+            returns ``count`` but no ``nextLink`` — see ``skip_top_paginate``. Optional
             ``domain_id`` scopes to a single governance domain.
             """
             params = {"api-version": API_VERSION, "top": str(self._page_size)}
@@ -1092,7 +1149,7 @@ def register_lakeflow_source(spark):
                 params["orderBy"] = table_options["order_by"]
 
             url = f"{self.endpoint}{_CATALOG_BASE}/dataProducts"
-            record_iter = next_link_paginate(self._session, url, params, "data_products")
+            record_iter = skip_top_paginate(self._session, url, params, "data_products")
             return self._incremental_from_iter(
                 record_iter, start_offset, transform=self._shape_data_product
             )
@@ -1102,7 +1159,8 @@ def register_lakeflow_source(spark):
         ) -> tuple[Iterator[dict], dict]:
             """Read glossary terms incrementally on ``systemData.lastModifiedAt``.
 
-            Paginated by ``skip`` / ``top`` with a ``nextLink`` follow. Optional
+            Paginated by advancing ``skip`` (``top`` = page size); the endpoint
+            returns ``count`` but no ``nextLink`` — see ``skip_top_paginate``. Optional
             ``domain_id`` / ``parent_id`` / ``keyword`` narrow the extract.
             """
             params = {"api-version": API_VERSION, "top": str(self._page_size)}
@@ -1116,7 +1174,7 @@ def register_lakeflow_source(spark):
                 params["orderBy"] = table_options["order_by"]
 
             url = f"{self.endpoint}{_CATALOG_BASE}/terms"
-            record_iter = next_link_paginate(self._session, url, params, "terms")
+            record_iter = skip_top_paginate(self._session, url, params, "terms")
             return self._incremental_from_iter(
                 record_iter, start_offset, transform=self._shape_term
             )

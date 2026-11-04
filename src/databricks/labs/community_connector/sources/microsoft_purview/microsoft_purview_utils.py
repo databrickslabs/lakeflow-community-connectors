@@ -6,14 +6,15 @@ models across the endpoints this connector uses:
 * **``$skipToken`` continuation** (``/datagovernance/catalog/businessdomains``):
   the response carries an opaque continuation via a ``nextLink`` URL; the
   connector follows ``nextLink`` until it is absent.
-* **``skip`` / ``top`` + ``nextLink``** (``/datagovernance/catalog/dataProducts``,
-  ``/datagovernance/catalog/terms``): page by following the absolute
-  ``nextLink`` URL returned in each ``PagedX`` body until it is absent.
+* **``skip`` / ``top``** (``/datagovernance/catalog/dataProducts``,
+  ``/datagovernance/catalog/terms``): verified live, these return
+  ``{value, count}`` and **no** ``nextLink``, so the connector advances
+  ``skip`` itself (``skip_top_paginate``). Following only ``nextLink`` here
+  reads just the first page and silently truncates at ``top`` records.
 
-Both list shapes wrap records in a ``value`` array and (except on the last
-page) a ``nextLink`` URL. A single ``next_link_paginate`` helper follows
-``nextLink`` for all three endpoints, so the connector never has to construct
-continuation URLs itself.
+Both list shapes wrap records in a ``value`` array. ``next_link_paginate``
+handles the ``nextLink`` continuation; ``skip_top_paginate`` handles
+``skip``/``top`` (and still follows a ``nextLink`` if one is ever returned).
 
 All requests carry an explicit ``timeout`` and retry on 429/5xx with
 exponential backoff (honouring ``Retry-After`` when present).
@@ -113,6 +114,62 @@ def next_link_paginate(
         page_params = None
         if not batch:
             break
+
+
+def skip_top_paginate(
+    session: requests.Session,
+    url: str,
+    params: dict[str, str],
+    label: str,
+    records_key: str = "value",
+    *,
+    timeout: int = DEFAULT_TIMEOUT,
+) -> Iterator[dict[str, Any]]:
+    """Yield records from a ``skip`` / ``top`` paginated Unified Catalog endpoint.
+
+    Live behaviour (verified against a Purview tenant): ``dataProducts`` and
+    ``terms`` return ``{value, count}`` and **no** ``nextLink`` — the caller
+    pages by advancing ``skip``. ``params`` must already carry ``top``.
+
+    * ``skip`` advances by the number of records actually returned (not by
+      ``top``), so a server that caps ``top`` below the requested size still
+      pages correctly instead of stopping early.
+    * Stops on an empty page, or once ``skip`` reaches ``count`` when the
+      response reports it.
+    * If a response ever does carry a ``nextLink``, it is followed instead
+      (it already embeds ``skip``/``top``), so the helper works with either
+      continuation shape.
+    * Guard: if a page repeats the previous page's first record (a server
+      ignoring ``skip``), stop rather than loop forever re-reading it.
+    """
+    skip = 0
+    prev_first_id: Any = None
+    next_url: str | None = None
+    while True:
+        if next_url:
+            body = api_get(session, next_url, None, label, timeout=timeout)
+        else:
+            page_params = dict(params)
+            page_params["skip"] = str(skip)
+            body = api_get(session, url, page_params, label, timeout=timeout)
+
+        batch = body.get(records_key) or []
+        if not batch:
+            return
+        first_id = batch[0].get("id") if isinstance(batch[0], dict) else None
+        if first_id is not None and first_id == prev_first_id:
+            return
+        prev_first_id = first_id
+
+        yield from batch
+        skip += len(batch)
+
+        next_url = body.get("nextLink") or None
+        if next_url:
+            continue
+        count = body.get("count")
+        if isinstance(count, int) and skip >= count:
+            return
 
 
 def normalize_contacts(value: Any) -> dict[str, Any] | None:

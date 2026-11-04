@@ -36,6 +36,7 @@ from databricks.labs.community_connector.sources.microsoft_purview.microsoft_pur
     next_link_paginate,
     normalize_contacts,
     request_with_retry,
+    skip_top_paginate,
 )
 
 # An init cap comfortably after any record timestamp used here, so the
@@ -190,6 +191,108 @@ class TestNextLinkPaginate:
         assert out == []
         # Must not follow nextLink after an empty page.
         assert len(session.calls) == 1
+
+
+class TestReaderReadsAllPages:
+    """Reader-level regression for the truncation bug: read_table must return
+    every record across skip/top pages when the endpoint sends no nextLink.
+    (The LakeflowConnectTests harness does not compare record counts against
+    the corpus, so it cannot catch truncation — this test does.)"""
+
+    @staticmethod
+    def _page(ids, count):
+        return _Resp(json_body={
+            "value": [
+                {"id": i, "systemData": {"lastModifiedAt": f"2026-01-01T00:00:{n:02d}Z"}}
+                for n, i in ids
+            ],
+            "count": count,
+        })
+
+    @pytest.mark.parametrize("table", ["terms", "data_products"])
+    def test_read_table_returns_records_from_every_page(self, table):
+        conn = _connector(page_size="2")
+        conn._session = _Session([
+            self._page([(0, "a"), (1, "b")], 5),
+            self._page([(2, "c"), (3, "d")], 5),
+            self._page([(4, "e")], 5),
+        ])
+        records, end_offset = _drain(conn.read_table(table, {}, {}))
+        assert [r["id"] for r in records] == ["a", "b", "c", "d", "e"]
+        assert end_offset == {"cursor": "2026-01-01T00:00:04Z"}
+
+
+class TestSkipTopPaginate:
+    """skip/top paging for dataProducts / terms. Verified live: these endpoints
+    return ``{value, count}`` and NO ``nextLink``, so the connector must advance
+    ``skip`` itself. Following only nextLink truncated at ``top`` records."""
+
+    @staticmethod
+    def _recs(*ids):
+        return [{"id": i} for i in ids]
+
+    def test_regression_reads_past_first_page_without_nextlink(self):
+        """The Altria bug: 250 terms, top=100, no nextLink -> must yield all 250,
+        not stop at 100."""
+        pages = [
+            _Resp(json_body={"value": self._recs(*range(0, 100)), "count": 250}),
+            _Resp(json_body={"value": self._recs(*range(100, 200)), "count": 250}),
+            _Resp(json_body={"value": self._recs(*range(200, 250)), "count": 250}),
+        ]
+        session = _Session(pages)
+        out = list(skip_top_paginate(session, "https://x/terms", {"top": "100"}, "terms"))
+        assert [r["id"] for r in out] == list(range(250))
+        assert [c[1]["skip"] for c in session.calls] == ["0", "100", "200"]
+        assert all(c[1]["top"] == "100" for c in session.calls)
+
+    def test_stops_when_count_reached_without_extra_call(self):
+        session = _Session([
+            _Resp(json_body={"value": self._recs("a", "b"), "count": 3}),
+            _Resp(json_body={"value": self._recs("c"), "count": 3}),
+        ])
+        out = list(skip_top_paginate(session, "https://x/t", {"top": "2"}, "t"))
+        assert [r["id"] for r in out] == ["a", "b", "c"]
+        assert len(session.calls) == 2  # no wasted empty-page request
+
+    def test_stops_on_empty_page_when_no_count(self):
+        session = _Session([
+            _Resp(json_body={"value": self._recs("a", "b")}),
+            _Resp(json_body={"value": []}),
+        ])
+        out = list(skip_top_paginate(session, "https://x/t", {"top": "2"}, "t"))
+        assert [r["id"] for r in out] == ["a", "b"]
+        assert [c[1]["skip"] for c in session.calls] == ["0", "2"]
+
+    def test_server_capped_top_still_pages_everything(self):
+        """If the server returns fewer than the requested top per page, skip must
+        advance by the records actually returned (not by top) and keep going."""
+        session = _Session([
+            _Resp(json_body={"value": self._recs("a", "b"), "count": 5}),
+            _Resp(json_body={"value": self._recs("c", "d"), "count": 5}),
+            _Resp(json_body={"value": self._recs("e"), "count": 5}),
+        ])
+        out = list(skip_top_paginate(session, "https://x/t", {"top": "1000"}, "t"))
+        assert [r["id"] for r in out] == ["a", "b", "c", "d", "e"]
+        assert [c[1]["skip"] for c in session.calls] == ["0", "2", "4"]
+
+    def test_follows_nextlink_if_one_is_returned(self):
+        session = _Session([
+            _Resp(json_body={"value": self._recs("a"), "nextLink": "https://x/p2"}),
+            _Resp(json_body={"value": self._recs("b")}),
+            _Resp(json_body={"value": []}),
+        ])
+        out = list(skip_top_paginate(session, "https://x/t", {"top": "1"}, "t"))
+        assert [r["id"] for r in out] == ["a", "b"]
+        assert session.calls[1] == ("https://x/p2", None)
+
+    def test_server_ignoring_skip_does_not_loop_forever(self):
+        """Guard: a server that ignores skip returns the same page again; stop
+        instead of re-reading it indefinitely."""
+        same = {"value": self._recs("a", "b")}
+        session = _Session([_Resp(json_body=same), _Resp(json_body=same)])
+        out = list(skip_top_paginate(session, "https://x/t", {"top": "2"}, "t"))
+        assert [r["id"] for r in out] == ["a", "b"]
+        assert len(session.calls) == 2
 
 
 # --------------------------------------------------------------------------- #
@@ -452,7 +555,9 @@ class TestTableOptionsToQueryParams:
             calls.append({"url": url, "params": dict(params), "label": label})
             return iter([])
 
+        # business_domains pages via nextLink; data_products / terms via skip/top.
         monkeypatch.setattr(mp, "next_link_paginate", fake)
+        monkeypatch.setattr(mp, "skip_top_paginate", fake)
         return calls
 
     def test_business_domains_translates_write_only(self, monkeypatch):
