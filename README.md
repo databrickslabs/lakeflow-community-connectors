@@ -18,6 +18,27 @@ Tests run against live source environments (no mocks):
 - **Unit tests** — For complex connector-specific logic
 - **Write-back testing** *(recommended)* — Write data, read it back, verify incremental reads and deletes
 
+## Reusable incremental-read helpers
+
+A connector that pages a keyset- or continuation-paginated endpoint while filtering incrementally on a modified-since cursor can reuse the **resumable CDC** helper in [`libs/resumable.py`](src/databricks/labs/community_connector/libs/resumable.py) instead of hand-rolling the offset state machine. A run killed partway through a long scan (commonly an m2m OAuth token expiring) then **resumes** from the last page on the next run instead of restarting.
+
+```python
+from databricks.labs.community_connector.libs.resumable import resumable_cdc_read
+
+records, end_offset = resumable_cdc_read(
+    start_offset=start_offset,   # framework-checkpointed offset (may be None)
+    snapshot_ts=self._init_ts,   # frozen upper bound so the microbatch terminates
+    paginate=lambda token: ...,  # token -> Iterator[(batch, next_token)]
+    cursor_of=lambda raw: ...,   # raw -> comparable cursor (or None)
+    shape=self._shape_row,       # raw -> output row
+    max_records=...,             # page-granular batch cap, or None
+)
+```
+
+The watermark advances **only after a provably complete pass**, so truncation never skips a record and a fresh pass's strict `> watermark` filter can't miss one. Cursor values are compared with plain ordering, so any consistent, JSON-serialisable type works (int epoch ms, ISO-8601 strings, …). See the Collibra `assets` reader for a reference use.
+
+Because SDP forbids imports, a shared lib is *inlined* into the merged source at build time. To add one: create `libs/<name>.py`, list `<name>` in `OPTIONAL_SHARED_LIBS` in [`tools/scripts/merge_python_source.py`](tools/scripts/merge_python_source.py), and add `libs/<name>.py` to the shared-file triggers in `.github/workflows/generate-merged-source-file.yml`. It is then inlined only into connectors that import it (`libs/utils.py` is the exception — always inlined).
+
 ## Develop a New Connector
 
 Build connectors with AI-assisted workflows using [Claude Code](https://docs.anthropic.com/en/docs/claude-code) or [Cursor](https://www.cursor.com/). All commands and skills are defined under `.claude/` and auto-discovered by both tools.
