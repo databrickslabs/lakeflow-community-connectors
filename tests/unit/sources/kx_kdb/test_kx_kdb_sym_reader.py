@@ -10,6 +10,7 @@ import pytest
 from databricks.labs.community_connector.sources.kx_kdb import sym_reader
 from databricks.labs.community_connector.sources.kx_kdb.runtime import PyKxRuntimeConfig
 from databricks.labs.community_connector.sources.kx_kdb.sym_reader import (
+    probe_partition_shape,
     read_kdb_row_range,
     read_partition_shape,
 )
@@ -44,9 +45,13 @@ class _FakeKx:
             return self.dot_d
         if query == sym_reader._COLUMN_COUNTS_Q:
             return [len(self.columns[path.rsplit("/", 1)[-1]]) for path in args[0]]
+        if query == sym_reader._MAP_COLUMNS_Q:
+            return [self.columns[path.rsplit("/", 1)[-1]] for path in args[0]]
+        if query == sym_reader._MAPPED_COUNTS_Q:
+            return [len(column) for column in args[0]]
         if query == sym_reader._READ_ROWS_Q:
-            paths, offset, size = args
-            return [self.columns[path.rsplit("/", 1)[-1]][offset : offset + size] for path in paths]
+            mapped, offset, size = args
+            return [column[offset : offset + size] for column in mapped]
         raise AssertionError(f"unexpected q query: {query!r}")
 
 
@@ -237,8 +242,149 @@ def test_unsafe_column_name_in_dot_d_is_rejected(monkeypatch, tmp_path):
 
 
 # ---------------------------------------------------------------------------
+# probe_partition_shape (file headers, no q)
+# ---------------------------------------------------------------------------
+
+
+def _q_symbol_list(names):
+    """Bytes q writes for a symbol list such as .d."""
+    return b"\xff\x01\x0b\x00\x00\x00\x00\x00" + b"".join(n.encode() + b"\0" for n in names)
+
+
+def _q_vector(type_code, width, rows, attr=0):
+    """Bytes q writes for an uncompressed fixed-width vector of ``rows`` elements."""
+    return b"\xfe\x20" + bytes([type_code, attr]) + bytes(12) + bytes(width * rows)
+
+
+def _q_enum(rows):
+    """Bytes of an enumerated, parted sym column: not readable by length."""
+    return b"\xfd\x20" + bytes(14) + b"sym\0" + bytes(12) + bytes(8 * rows + 40)
+
+
+def _q_partition(tmp_path, columns, dot_d=None):
+    (tmp_path / "sym").write_bytes(b"stub")
+    partition = tmp_path / "2024.01.01" / "TRADES"
+    partition.mkdir(parents=True)
+    for name, payload in columns.items():
+        (partition / name).write_bytes(payload)
+    names = list(columns) if dot_d is None else dot_d
+    (partition / ".d").write_bytes(_q_symbol_list(names))
+    return partition
+
+
+def _probe(tmp_path, **overrides):
+    kwargs = {
+        "hdb_root_path": str(tmp_path),
+        "kdb_table_name": "TRADES",
+        "date_partition": "2024.01.01",
+    }
+    kwargs.update(overrides)
+    return probe_partition_shape(**kwargs)
+
+
+def test_probe_counts_rows_from_the_first_fixed_width_column(tmp_path):
+    _q_partition(
+        tmp_path,
+        {"sym": _q_enum(3495), "time": _q_vector(12, 8, 3495), "price": _q_vector(9, 8, 3495)},
+    )
+
+    shape = _probe(tmp_path)
+
+    assert (shape.present, shape.complete, shape.row_count) == (True, True, 3495)
+
+
+@pytest.mark.parametrize(
+    ("type_code", "width"), [(1, 1), (2, 16), (5, 2), (6, 4), (8, 4), (10, 1), (14, 4), (16, 8)]
+)
+def test_probe_knows_the_width_of_each_fixed_width_type(tmp_path, type_code, width):
+    _q_partition(tmp_path, {"c": _q_vector(type_code, width, 7)})
+
+    assert _probe(tmp_path).row_count == 7
+
+
+def test_probe_skips_attributed_and_truncated_columns(tmp_path):
+    _q_partition(
+        tmp_path,
+        {
+            "a": _q_vector(7, 8, 5, attr=1),
+            "b": _q_vector(7, 8, 5)[:-3],
+            "c": _q_vector(9, 8, 5),
+        },
+    )
+
+    assert _probe(tmp_path).row_count == 5
+
+
+def test_probe_defers_to_q_when_no_column_is_fixed_width(tmp_path):
+    _q_partition(tmp_path, {"sym": _q_enum(5), "z": b"kxzipped" + bytes(64)})
+
+    assert _probe(tmp_path) is None
+
+
+def test_probe_defers_to_q_when_dot_d_is_not_a_plain_symbol_list(tmp_path):
+    partition = _q_partition(tmp_path, {"time": _q_vector(12, 8, 5)})
+    (partition / ".d").write_bytes(b"kxzipped" + bytes(32))
+
+    assert _probe(tmp_path) is None
+
+
+def test_probe_applies_the_same_completeness_rules_as_q(tmp_path):
+    _q_partition(
+        tmp_path, {"sym": _q_enum(5), "time": _q_vector(12, 8, 5)}, dot_d=["sym", "time", "size"]
+    )
+
+    missing = _probe(tmp_path)
+    assert not missing.complete and "['size']" in missing.reason
+
+    allowed = _probe(tmp_path, allow_missing_columns=True)
+    assert (allowed.complete, allowed.row_count, allowed.missing_columns) == (True, 5, ("size",))
+
+
+def test_probe_reports_absent_partitions_missing_dot_d_and_recent_files(tmp_path):
+    (tmp_path / "sym").write_bytes(b"stub")
+    (tmp_path / "2024.01.01").mkdir()
+    assert not _probe(tmp_path).present
+
+    partition = tmp_path / "2024.01.01" / "TRADES"
+    partition.mkdir()
+    (partition / "time").write_bytes(_q_vector(12, 8, 5))
+    assert "no .d file" in _probe(tmp_path).reason
+
+    (partition / ".d").write_bytes(_q_symbol_list(["time"]))
+    assert _probe(tmp_path, min_age_seconds=600).recent
+
+
+def test_probe_handles_an_empty_table(tmp_path):
+    _q_partition(tmp_path, {}, dot_d=[])
+
+    shape = _probe(tmp_path)
+
+    assert (shape.complete, shape.row_count) == (True, 0)
+
+
+def test_probe_rejects_unsafe_column_names(tmp_path):
+    _q_partition(tmp_path, {"time": _q_vector(12, 8, 5)}, dot_d=["time", "../escape"])
+
+    with pytest.raises(ValueError, match="column name"):
+        _probe(tmp_path)
+
+
+# ---------------------------------------------------------------------------
 # read_kdb_row_range
 # ---------------------------------------------------------------------------
+
+
+def test_row_range_maps_each_column_once_per_task(monkeypatch, tmp_path):
+    _partition(tmp_path)
+    monkeypatch.setattr(sym_reader, "_ROW_CHUNK_SIZE", 1)
+    fake_kx = _use(monkeypatch, _FakeKx(_three_rows()))
+
+    assert len(_rows(tmp_path)) == 3
+
+    queries = [query for query, _ in fake_kx.calls]
+    assert queries.count(sym_reader._MAP_COLUMNS_Q) == 1
+    assert queries.count(sym_reader._READ_ROWS_Q) == 3
+    assert sym_reader._COLUMN_COUNTS_Q not in queries
 
 
 def test_row_range_reads_only_its_rows_in_chunks(monkeypatch, tmp_path):
@@ -309,8 +455,8 @@ def test_row_range_reads_an_allowed_missing_column_as_nulls(monkeypatch, tmp_pat
 
     assert [record["price"] for record in records] == [None, None, None]
     assert [record["sym"] for record in records] == ["AAPL", "AAPL", "MSFT"]
-    reads = [args[0] for query, args in fake_kx.calls if query == sym_reader._READ_ROWS_Q]
-    assert all(not path.endswith("/price") for paths in reads for path in paths)
+    mapped = [args[0] for query, args in fake_kx.calls if query == sym_reader._MAP_COLUMNS_Q]
+    assert [[path.rsplit("/", 1)[-1] for path in paths] for paths in mapped] == [["sym", "time"]]
     assert "reading them as nulls" in caplog.text
 
 

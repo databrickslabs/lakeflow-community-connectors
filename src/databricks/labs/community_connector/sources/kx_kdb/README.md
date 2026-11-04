@@ -172,9 +172,9 @@ node.
 | `start_date` | First date | Inclusive partition filter |
 | `end_date` | Last date | Inclusive partition filter |
 | `ingestion_mode` | `append` | Only `append` is supported |
-| `max_dates_per_batch` | `250` | Most dates admitted to one micro-batch |
-| `max_tasks_per_batch` | `2000` | Most Spark tasks in one micro-batch; a single larger date is still admitted alone |
-| `max_rows_per_task` | `2000000` | Most rows read by one Spark task |
+| `max_dates_per_batch` | `1000` | Most dates admitted to one micro-batch |
+| `max_tasks_per_batch` | `5000` | Most Spark tasks in one micro-batch; a single larger date is still admitted alone |
+| `max_rows_per_task` | `1000000` | Most rows read by one Spark task |
 | `min_partition_age_minutes` | `0` | Minimum time since a date's last file change before it is admitted |
 | `missing_columns` | `fail` | `fail` stops at an older date whose `.d` lists a column without a file; `null` reads such columns as nulls and logs a warning. The newest date always needs every column |
 

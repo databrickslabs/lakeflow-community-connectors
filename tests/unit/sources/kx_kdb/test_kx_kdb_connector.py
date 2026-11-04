@@ -9,7 +9,10 @@ from databricks.labs.community_connector.sources.kx_kdb import filesystem
 from databricks.labs.community_connector.sources.kx_kdb._generated_kx_kdb_python_source import (
     register_lakeflow_source,
 )
-from databricks.labs.community_connector.sources.kx_kdb.kx_kdb import KxKdbLakeflowConnect
+from databricks.labs.community_connector.sources.kx_kdb.kx_kdb import (
+    DEFAULT_MAX_ROWS_PER_TASK,
+    KxKdbLakeflowConnect,
+)
 from databricks.labs.community_connector.sources.kx_kdb.sym_reader import PartitionShape
 
 _MODULE = "databricks.labs.community_connector.sources.kx_kdb.kx_kdb"
@@ -40,18 +43,31 @@ def _connector(tmp_path):
 
 
 class _Shapes:
-    """Fake partition shapes keyed by date; unlisted dates are complete with 3 rows."""
+    """Fake partition shapes keyed by date; unlisted dates are complete with 3 rows.
 
-    def __init__(self, monkeypatch, **by_date):
+    Serves both the q check (``read_partition_shape``) and the header reader
+    (``probe_partition_shape``); ``undecided`` dates make the header reader
+    return None so the connector falls back to q.
+    """
+
+    def __init__(self, monkeypatch, undecided=(), **by_date):
         self.by_date = {date.replace("_", "."): shape for date, shape in by_date.items()}
+        self.undecided = set(undecided)
         self.calls: list[dict] = []
         monkeypatch.setattr(f"{_MODULE}.read_partition_shape", self)
+        monkeypatch.setattr(f"{_MODULE}.probe_partition_shape", self.probe)
 
-    def __call__(self, **kwargs):
-        self.calls.append(kwargs)
+    def __call__(self, via="q", **kwargs):
+        self.calls.append({"via": via, **kwargs})
         return self.by_date.get(
             kwargs["date_partition"], PartitionShape(present=True, complete=True, row_count=3)
         )
+
+    def probe(self, **kwargs):
+        if kwargs["date_partition"] in self.undecided:
+            self.calls.append({"via": "probe-undecided", "check_all_columns": False, **kwargs})
+            return None
+        return self(via="probe", check_all_columns=False, **kwargs)
 
 
 def _complete(rows):
@@ -157,7 +173,7 @@ def test_newest_date_is_admitted_once_it_is_complete(monkeypatch, tmp_path):
 
     assert connector.latest_offset("trades", {}, start) == {"date_partition": "2024.01.03"}
     assert connector.get_partitions("trades", {}, start, {"date_partition": "2024.01.03"}) == (
-        _ranges("2024.01.03", 5, 2_000_000)
+        _ranges("2024.01.03", 5, DEFAULT_MAX_ROWS_PER_TASK)
     )
 
 
@@ -252,6 +268,36 @@ def test_minimum_age_is_validated_even_when_the_newest_date_is_excluded(tmp_path
         )
 
 
+def test_older_dates_use_the_header_reader_and_the_newest_uses_q(monkeypatch, tmp_path):
+    connector = _connector(_build_hdb(tmp_path))
+    shapes = _Shapes(monkeypatch)
+
+    connector.latest_offset("trades", {})
+
+    via = {call["date_partition"]: call["via"] for call in shapes.calls}
+    assert via == {"2024.01.01": "probe", "2024.01.02": "probe", "2024.01.03": "q"}
+
+
+def test_dates_the_header_reader_cannot_decide_fall_back_to_q(monkeypatch, tmp_path):
+    connector = _connector(_build_hdb(tmp_path))
+    shapes = _Shapes(monkeypatch, undecided={"2024.01.02"})
+
+    assert connector.latest_offset("trades", {}) == {"date_partition": "2024.01.03"}
+
+    calls = [(call["date_partition"], call["via"]) for call in shapes.calls]
+    assert ("2024.01.02", "probe-undecided") in calls
+    assert ("2024.01.02", "q") in calls
+
+
+def test_only_dates_within_the_batch_cap_are_probed(monkeypatch, tmp_path):
+    connector = _connector(_build_hdb(tmp_path))
+    shapes = _Shapes(monkeypatch)
+
+    connector.latest_offset("trades", {"max_dates_per_batch": "1"})
+
+    assert [call["date_partition"] for call in shapes.calls] == ["2024.01.01"]
+
+
 def test_complete_older_dates_are_probed_once(monkeypatch, tmp_path):
     connector = _connector(_build_hdb(tmp_path))
     shapes = _Shapes(monkeypatch)
@@ -334,7 +380,9 @@ def test_a_sparse_date_is_probed_again_in_case_its_table_appears(monkeypatch, tm
 
     shapes.by_date["2024.01.02"] = _complete(4)
 
-    assert connector.get_partitions("trades", {}, start, end) == _ranges("2024.01.02", 4, 2_000_000)
+    assert connector.get_partitions("trades", {}, start, end) == _ranges(
+        "2024.01.02", 4, DEFAULT_MAX_ROWS_PER_TASK
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -364,7 +412,7 @@ def test_get_partitions_skips_empty_dates(monkeypatch, tmp_path):
         "trades", {}, {"date_partition": "2024.01.01"}, {"date_partition": "2024.01.03"}
     )
 
-    assert partitions == _ranges("2024.01.03", 3, 2_000_000)
+    assert partitions == _ranges("2024.01.03", 3, DEFAULT_MAX_ROWS_PER_TASK)
 
 
 def test_get_partitions_returns_nothing_for_equal_offsets(monkeypatch, tmp_path):

@@ -90,10 +90,12 @@ class _RangeKx:
         self.queries.append(query)
         if query == sym_reader._LOAD_SYM_DOMAIN_Q:
             return None
-        if query == sym_reader._COLUMN_COUNTS_Q:
+        if query == sym_reader._MAP_COLUMNS_Q:
+            return [f"mapped:{path}" for path in args[0]]
+        if query == sym_reader._MAPPED_COUNTS_Q:
             return [self.row_count] * len(args[0])
         if query == sym_reader._READ_ROWS_Q:
-            _paths, offset, size = args
+            _mapped, offset, size = args
             self.range_requests.append((offset, size))
             return [["AAPL"] * size, [float(index) for index in range(offset, offset + size)]]
         raise AssertionError(f"unexpected q query: {query!r}")
@@ -151,8 +153,8 @@ def test_row_read_projects_row_indices_into_the_per_column_lambda():
     # q lambdas do not close over outer locals; an unprojected inner lambda
     # returns projections instead of column values.
     assert "idx: off + til m" in sym_reader._READ_ROWS_Q
-    assert "{[idx; p]" in sym_reader._READ_ROWS_Q
-    assert "[idx] each column_paths" in sym_reader._READ_ROWS_Q
+    assert "{[idx; c]" in sym_reader._READ_ROWS_Q
+    assert "[idx] each columns" in sym_reader._READ_ROWS_Q
     assert "16h=type v; `long$v" in sym_reader._READ_ROWS_Q
     assert "(type v) in 13 14 17 18 19h" in sym_reader._READ_ROWS_Q
 
@@ -655,10 +657,11 @@ def test_latest_offset_sees_new_dates_after_discovery_ttl(monkeypatch, tmp_path)
     (tmp_path / "sym").write_bytes(b"stub")
     for date in ("2024.01.01", "2024.01.02"):
         (tmp_path / date / "TRADES").mkdir(parents=True)
-    monkeypatch.setattr(
-        f"{_MODULE}.read_partition_shape",
-        lambda **_: PartitionShape(present=True, complete=True, row_count=1),
-    )
+    for name in ("read_partition_shape", "probe_partition_shape"):
+        monkeypatch.setattr(
+            f"{_MODULE}.{name}",
+            lambda **_: PartitionShape(present=True, complete=True, row_count=1),
+        )
     connector = KxKdbLakeflowConnect(
         {"hdb_root_path": str(tmp_path), "license_volume_path": "/tmp/lic"}
     )

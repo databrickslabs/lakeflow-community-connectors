@@ -122,16 +122,19 @@ without the caps.
 
 ## Partition model
 
-`get_partitions()` takes each admitted date's row count on the driver (q
-`count` of the first column in `.d`, of every column for the newest date) and
-splits the date into contiguous row ranges of at most `max_rows_per_task`
-rows:
+The driver checks each date once. Older dates are read from their file
+headers on several threads: `.d` is a plain q symbol list, and the row count
+comes from the size of the first uncompressed, unattributed fixed-width
+column. Dates in another layout (for example compressed columns) and the
+table's newest date, whose columns are all counted, are checked with q.
+`get_partitions()` then splits each admitted date into contiguous row ranges
+of at most `max_rows_per_task` rows:
 
 ```json
 {
   "date_partition": "2024.01.02",
-  "row_offset": 2000000,
-  "row_count": 2000000,
+  "row_offset": 1000000,
+  "row_count": 1000000,
   "total_rows": 5123456
 }
 ```
@@ -144,7 +147,7 @@ column does not have `total_rows` rows, or is missing (unless
 `missing_columns` is `null`, which reads it as nulls). It reads rows
 `row_offset + til row_count` of every column in chunks of at most 10,000 rows,
 so a task touches only its own rows and does not need the whole date in
-Python memory. Rows keep their on-disk order. Every row of the date is read
+Python memory. Each task maps its column files once. Rows keep their on-disk order. Every row of the date is read
 exactly once, including rows whose symbol index is null or beyond the root
 `sym` file; those symbols are ingested as an empty string. Copy or sync the
 root `sym` file before the date directories that use it.
@@ -230,9 +233,9 @@ Secret handling:
 | `start_date` | First available date | Inclusive lower discovery filter |
 | `end_date` | Last available date | Inclusive upper discovery filter |
 | `ingestion_mode` | `append` | Must remain `append` |
-| `max_dates_per_batch` | `250` | Most dates admitted to one micro-batch |
-| `max_tasks_per_batch` | `2000` | Most tasks in one micro-batch, except a single larger date |
-| `max_rows_per_task` | `2000000` | Most rows in one task |
+| `max_dates_per_batch` | `1000` | Most dates admitted to one micro-batch |
+| `max_tasks_per_batch` | `5000` | Most tasks in one micro-batch, except a single larger date |
+| `max_rows_per_task` | `1000000` | Most rows in one task |
 | `min_partition_age_minutes` | `0` | Minimum time since a date's last file change before it is admitted |
 | `missing_columns` | `fail` | `fail` or `null`; how an older date's `.d` column without a file is handled |
 

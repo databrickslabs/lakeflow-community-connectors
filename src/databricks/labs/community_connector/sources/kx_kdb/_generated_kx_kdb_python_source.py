@@ -26,6 +26,7 @@ import re
 import sys
 import time
 
+from concurrent.futures import ThreadPoolExecutor
 from pyspark.sql import Row
 from pyspark.sql.datasource import (
     DataSource,
@@ -2043,15 +2044,46 @@ def register_lakeflow_source(spark):
     _LOAD_SYM_DOMAIN_Q = "{[p] `sym set get hsym p}"
     _READ_DOT_D_Q = "{[p] get hsym p}"
     _COLUMN_COUNTS_Q = "{[paths] {count get hsym x} each paths}"
+    _MAP_COLUMNS_Q = "{[paths] {get hsym x} each paths}"
+    _MAPPED_COUNTS_Q = "{[columns] count each columns}"
     # q lambdas do not capture outer locals, so ``idx`` is projected explicitly.
     # Timespans (16h) become nanosecond longs because Python timedelta drops
     # sub-microsecond precision. Month, date, minute, second, and time columns
     # (13h, 14h, 17h-19h) become q-formatted strings with nulls as generic null.
     _READ_ROWS_Q = (
-        "{[column_paths; off; m] idx: off + til m; {[idx; p] v: (get hsym p) idx; "
+        "{[columns; off; m] idx: off + til m; {[idx; c] v: c idx; "
         "$[16h=type v; `long$v; (type v) in 13 14 17 18 19h; "
-        "{$[null x; (::); string x]} each v; v]}[idx] each column_paths}"
+        "{$[null x; (::); string x]} each v; v]}[idx] each columns}"
     )
+
+    # Layout that q writes for a symbol list such as .d: an 8-byte header, then
+    # null-terminated names.
+    _SYMBOL_LIST_MAGIC = b"\xff\x01\x0b\x00"
+    _SYMBOL_LIST_HEADER_BYTES = 8
+    _MAX_SYMBOL_LIST_BYTES = 1 << 20
+    # Layout that q writes for an uncompressed, unattributed fixed-width vector: a
+    # 16-byte header (magic, type, then zeros) followed by the elements.
+    _SIMPLE_VECTOR_MAGIC = b"\xfe\x20"
+    _SIMPLE_VECTOR_HEADER_BYTES = 16
+    _Q_TYPE_WIDTHS = {
+        1: 1,
+        2: 16,
+        4: 1,
+        5: 2,
+        6: 4,
+        7: 8,
+        8: 4,
+        9: 8,
+        10: 1,
+        12: 8,
+        13: 4,
+        14: 4,
+        15: 8,
+        16: 8,
+        17: 4,
+        18: 4,
+        19: 4,
+    }
 
     _SYM_DOMAIN_LOCK = ProcessLocalLock()
     _LOADED_SYM_DOMAIN: dict[str, tuple[int, int]] = ProcessLocalDict()
@@ -2159,46 +2191,25 @@ def register_lakeflow_source(spark):
         least that old. ``allow_missing_columns`` accepts ``.d`` columns without a
         file, as long as at least one column has one.
         """
-        entries = scan_partition_table(hdb_root_path, date_partition, kdb_table_name)
-        if entries is None:
-            return PartitionShape(present=False, complete=True)
-        partition_path = hdb_child_path(hdb_root_path, date_partition, kdb_table_name)
-
-        def incomplete(reason: str) -> PartitionShape:
-            return PartitionShape(present=True, complete=False, reason=f"{partition_path} {reason}")
-
-        if not _is_regular_file(entries, ".d"):
-            return incomplete("has no .d file")
-        if min_age_seconds > 0:
-            age = time.time() - partition_last_modified(entries)
-            if age < min_age_seconds:
-                return PartitionShape(
-                    present=True,
-                    complete=False,
-                    recent=True,
-                    reason=(
-                        f"{partition_path} was modified {age:.0f}s ago, less than the "
-                        f"configured minimum age of {min_age_seconds:.0f}s"
-                    ),
-                )
+        entries, partition_path, shape = _shape_prelude(
+            hdb_root_path, kdb_table_name, date_partition, min_age_seconds
+        )
+        if shape is not None:
+            return shape
 
         kx = prepare_pykx(runtime_config)
         _ensure_sym_domain(kx, hdb_root_path)
         try:
             columns = _text_list(kx.q(_READ_DOT_D_Q, hdb_child_path(partition_path, ".d")))
         except Exception as exc:
-            return incomplete(f"has a .d file that q cannot read ({type(exc).__name__})")
-        for column in columns:
-            validate_hdb_name(column, "column name")
-
-        missing = [column for column in columns if not _is_regular_file(entries, column)]
-        if missing and not allow_missing_columns:
-            return incomplete(f"is missing column files {missing}")
-        if not columns:
-            return PartitionShape(present=True, complete=True, row_count=0)
-        readable = [column for column in columns if column not in missing]
-        if not readable:
-            return incomplete(f"has no file for any column listed in .d {columns}")
+            return _incomplete(
+                partition_path, f"has a .d file that q cannot read ({type(exc).__name__})"
+            )
+        missing, readable, shape = _check_columns(
+            entries, partition_path, columns, allow_missing_columns
+        )
+        if shape is not None:
+            return shape
 
         counted = readable if check_all_columns else readable[:1]
         try:
@@ -2209,15 +2220,160 @@ def register_lakeflow_source(spark):
                 )
             )
         except Exception as exc:
-            return incomplete(f"has column files that q cannot read ({type(exc).__name__})")
+            return _incomplete(
+                partition_path, f"has column files that q cannot read ({type(exc).__name__})"
+            )
         if len(counts) != len(counted):
-            return incomplete(f"returned {len(counts)} counts for {len(counted)} columns")
+            return _incomplete(
+                partition_path, f"returned {len(counts)} counts for {len(counted)} columns"
+            )
         if len(set(counts)) > 1:
             lengths = dict(zip(counted, counts))
-            return incomplete(f"has columns of different lengths {lengths}")
+            return _incomplete(partition_path, f"has columns of different lengths {lengths}")
         return PartitionShape(
             present=True, complete=True, row_count=counts[0], missing_columns=tuple(missing)
         )
+
+
+    def probe_partition_shape(
+        *,
+        hdb_root_path: str,
+        kdb_table_name: str,
+        date_partition: str,
+        min_age_seconds: float = 0.0,
+        allow_missing_columns: bool = False,
+    ) -> PartitionShape | None:
+        """Check one table partition from file headers only, without q.
+
+        Applies the same checks as ``read_partition_shape`` with
+        ``check_all_columns=False`` and is safe to call from several threads. The
+        row count comes from the first column stored as an uncompressed,
+        unattributed fixed-width vector. Returns None when ``.d`` or no column is
+        in that layout (for example compressed files), so the caller can ask q.
+        """
+        entries, partition_path, shape = _shape_prelude(
+            hdb_root_path, kdb_table_name, date_partition, min_age_seconds
+        )
+        if shape is not None:
+            return shape
+        columns = _read_symbol_list_file(hdb_child_path(partition_path, ".d"))
+        if columns is None:
+            return None
+        missing, readable, shape = _check_columns(
+            entries, partition_path, columns, allow_missing_columns
+        )
+        if shape is not None:
+            return shape
+        for column in readable:
+            count = _simple_vector_length(hdb_child_path(partition_path, column), entries[column])
+            if count is not None:
+                return PartitionShape(
+                    present=True, complete=True, row_count=count, missing_columns=tuple(missing)
+                )
+        return None
+
+
+    def _incomplete(partition_path: str, reason: str) -> PartitionShape:
+        return PartitionShape(present=True, complete=False, reason=f"{partition_path} {reason}")
+
+
+    def _shape_prelude(
+        hdb_root_path: str, kdb_table_name: str, date_partition: str, min_age_seconds: float
+    ) -> tuple[dict[str, os.DirEntry] | None, str, PartitionShape | None]:
+        """Run the checks that need only a directory listing.
+
+        Returns ``(entries, partition_path, shape)``; ``shape`` is set when these
+        checks already decide the partition.
+        """
+        entries = scan_partition_table(hdb_root_path, date_partition, kdb_table_name)
+        if entries is None:
+            return None, "", PartitionShape(present=False, complete=True)
+        partition_path = hdb_child_path(hdb_root_path, date_partition, kdb_table_name)
+        if not _is_regular_file(entries, ".d"):
+            return entries, partition_path, _incomplete(partition_path, "has no .d file")
+        if min_age_seconds > 0:
+            age = time.time() - partition_last_modified(entries)
+            if age < min_age_seconds:
+                return (
+                    entries,
+                    partition_path,
+                    PartitionShape(
+                        present=True,
+                        complete=False,
+                        recent=True,
+                        reason=(
+                            f"{partition_path} was modified {age:.0f}s ago, less than the "
+                            f"configured minimum age of {min_age_seconds:.0f}s"
+                        ),
+                    ),
+                )
+        return entries, partition_path, None
+
+
+    def _check_columns(
+        entries: dict[str, os.DirEntry],
+        partition_path: str,
+        columns: list[str],
+        allow_missing_columns: bool,
+    ) -> tuple[list[str], list[str], PartitionShape | None]:
+        """Validate the ``.d`` columns against the files on disk.
+
+        Returns ``(missing, readable, shape)``; ``shape`` is set when the columns
+        already decide the partition.
+        """
+        for column in columns:
+            validate_hdb_name(column, "column name")
+        missing = [column for column in columns if not _is_regular_file(entries, column)]
+        if missing and not allow_missing_columns:
+            return missing, [], _incomplete(partition_path, f"is missing column files {missing}")
+        if not columns:
+            return [], [], PartitionShape(present=True, complete=True, row_count=0)
+        readable = [column for column in columns if column not in missing]
+        if not readable:
+            return (
+                missing,
+                [],
+                _incomplete(partition_path, f"has no file for any column listed in .d {columns}"),
+            )
+        return missing, readable, None
+
+
+    def _read_symbol_list_file(path: str) -> list[str] | None:
+        """Return the names in a q symbol-list file such as ``.d``, or None if unrecognized."""
+        with open(path, "rb") as handle:
+            raw = handle.read(_MAX_SYMBOL_LIST_BYTES + 1)
+        if len(raw) > _MAX_SYMBOL_LIST_BYTES or not raw.startswith(_SYMBOL_LIST_MAGIC):
+            return None
+        body = raw[_SYMBOL_LIST_HEADER_BYTES:]
+        if not body:
+            return []
+        if not body.endswith(b"\0"):
+            return None
+        try:
+            return [name.decode("utf-8") for name in body[:-1].split(b"\0")]
+        except UnicodeDecodeError:
+            return None
+
+
+    def _simple_vector_length(path: str, entry: os.DirEntry) -> int | None:
+        """Return the length of an unattributed fixed-width q vector file, or None."""
+        try:
+            with open(path, "rb") as handle:
+                header = handle.read(_SIMPLE_VECTOR_HEADER_BYTES)
+            size = entry.stat(follow_symlinks=False).st_size
+        except OSError:
+            return None
+        if (
+            len(header) < _SIMPLE_VECTOR_HEADER_BYTES
+            or not header.startswith(_SIMPLE_VECTOR_MAGIC)
+            or any(header[3:])
+        ):
+            return None
+        width = _Q_TYPE_WIDTHS.get(header[2])
+        payload = size - _SIMPLE_VECTOR_HEADER_BYTES
+        if width is None or payload < 0 or payload % width:
+            return None
+        return payload // width
 
 
     def _chunk_slices(row_count: int, chunk_size: int) -> Iterator[tuple[int, int]]:
@@ -2282,8 +2438,13 @@ def register_lakeflow_source(spark):
 
         kx = prepare_pykx(runtime_config)
         _ensure_sym_domain(kx, hdb_root_path)
-        column_paths = [hdb_child_path(partition_path, column) for column in physical_columns]
-        counts = dict(zip(physical_columns, _int_list(kx.q(_COLUMN_COUNTS_Q, column_paths))))
+        # Map every column once; each chunk then indexes the mapped vectors instead
+        # of opening the files again over FUSE.
+        columns = kx.q(
+            _MAP_COLUMNS_Q,
+            [hdb_child_path(partition_path, column) for column in physical_columns],
+        )
+        counts = dict(zip(physical_columns, _int_list(kx.q(_MAPPED_COUNTS_Q, columns))))
         if len(counts) != len(physical_columns) or any(
             count != total_rows for count in counts.values()
         ):
@@ -2299,7 +2460,7 @@ def register_lakeflow_source(spark):
 
         try:
             for offset, size in _chunk_slices(row_count, _ROW_CHUNK_SIZE):
-                vectors = kx.q(_READ_ROWS_Q, column_paths, int(row_offset + offset), int(size))
+                vectors = kx.q(_READ_ROWS_Q, columns, int(row_offset + offset), int(size))
                 frame = _column_vectors_to_frame(physical_columns, vectors, expected_rows=size)
                 for column in symbol_columns:
                     frame[column] = frame[column].map(_symbol_text)
@@ -2314,6 +2475,8 @@ def register_lakeflow_source(spark):
                 del frame, normalized
                 gc.collect()
         finally:
+            # Unmaps the column files before the next task in this worker.
+            del columns
             gc.collect()
 
 
@@ -2606,9 +2769,11 @@ def register_lakeflow_source(spark):
 
     logger = logging.getLogger(__name__)
 
-    DEFAULT_MAX_DATES_PER_BATCH = 250
-    DEFAULT_MAX_TASKS_PER_BATCH = 2000
-    DEFAULT_MAX_ROWS_PER_TASK = 2_000_000
+    DEFAULT_MAX_DATES_PER_BATCH = 1000
+    DEFAULT_MAX_TASKS_PER_BATCH = 5000
+    DEFAULT_MAX_ROWS_PER_TASK = 1_000_000
+    # Each date probe is a few FUSE round trips; threads overlap them.
+    _PROBE_THREADS = 16
     _MISSING_COLUMN_POLICIES = ("fail", "null")
     _REMOVED_TABLE_OPTIONS = ("partition_strategy", "sym_column")
 
@@ -2715,10 +2880,11 @@ def register_lakeflow_source(spark):
             min_age = self._min_partition_age_seconds(table_options)
             allow_missing = self._allow_missing_columns(table_options)
             newest = latest_table_partition(self.hdb_root_path, table_name)
+            shapes = self._partition_shapes(table_name, selected, newest, min_age, allow_missing)
             descriptors: list[dict] = []
             total_rows = 0
             for partition in selected:
-                shape = self._partition_shape(table_name, partition, newest, min_age, allow_missing)
+                shape = shapes[partition]
                 if not shape.complete:
                     raise RuntimeError(
                         f"KX KDB table {table_name!r} date {partition} is in this batch but "
@@ -2808,12 +2974,14 @@ def register_lakeflow_source(spark):
             min_age = self._min_partition_age_seconds(table_options)
             allow_missing = self._allow_missing_columns(table_options)
 
+            if capped:
+                candidates = candidates[:max_dates]
+            shapes = self._partition_shapes(table_name, candidates, newest, min_age, allow_missing)
+
             admitted: list[str] = []
             tasks = 0
             for partition in candidates:
-                if capped and len(admitted) >= max_dates:
-                    break
-                shape = self._partition_shape(table_name, partition, newest, min_age, allow_missing)
+                shape = shapes[partition]
                 if not shape.complete:
                     if partition == newest or shape.recent:
                         logger.info(
@@ -2874,6 +3042,55 @@ def register_lakeflow_source(spark):
                 )
             return admitted
 
+        def _partition_shapes(
+            self,
+            table_name: str,
+            dates: list[str],
+            newest: str,
+            min_age_seconds: float,
+            allow_missing_columns: bool,
+        ) -> dict[str, PartitionShape]:
+            """Return the shape of each date.
+
+            Older dates are read from their file headers on several threads. The
+            newest date, and any date whose files the header reader does not
+            recognize, are checked with q one at a time.
+            """
+            actual_table_name = self._actual_table_name(table_name)
+            shapes: dict[str, PartitionShape] = {}
+            pending = []
+            for date_partition in dates:
+                cached = self._shape_cache.get(
+                    self._shape_key(table_name, date_partition, newest, allow_missing_columns)
+                )
+                if cached is not None:
+                    shapes[date_partition] = cached
+                elif date_partition != newest:
+                    pending.append(date_partition)
+
+            def probe(date_partition: str) -> PartitionShape | None:
+                return probe_partition_shape(
+                    hdb_root_path=self.hdb_root_path,
+                    kdb_table_name=actual_table_name,
+                    date_partition=date_partition,
+                    min_age_seconds=min_age_seconds,
+                    allow_missing_columns=allow_missing_columns,
+                )
+
+            if pending:
+                with ThreadPoolExecutor(max_workers=min(_PROBE_THREADS, len(pending))) as pool:
+                    for date_partition, shape in zip(pending, pool.map(probe, pending)):
+                        if shape is not None:
+                            shapes[date_partition] = self._remember_shape(
+                                table_name, date_partition, newest, allow_missing_columns, shape
+                            )
+            for date_partition in dates:
+                if date_partition not in shapes:
+                    shapes[date_partition] = self._partition_shape(
+                        table_name, date_partition, newest, min_age_seconds, allow_missing_columns
+                    )
+            return shapes
+
         def _partition_shape(
             self,
             table_name: str,
@@ -2883,9 +3100,7 @@ def register_lakeflow_source(spark):
             allow_missing_columns: bool,
         ) -> PartitionShape:
             is_newest = date_partition == newest
-            # The newest date may still be written, so its columns stay required.
-            allow_missing = allow_missing_columns and not is_newest
-            cache_key = (table_name.lower(), date_partition, allow_missing)
+            cache_key = self._shape_key(table_name, date_partition, newest, allow_missing_columns)
             cached = self._shape_cache.get(cache_key)
             if cached is not None:
                 return cached
@@ -2896,13 +3111,34 @@ def register_lakeflow_source(spark):
                 runtime_config=self.runtime_config,
                 check_all_columns=is_newest,
                 min_age_seconds=min_age_seconds,
-                allow_missing_columns=allow_missing,
+                allow_missing_columns=cache_key[2],
             )
+            return self._remember_shape(
+                table_name, date_partition, newest, allow_missing_columns, shape
+            )
+
+        @staticmethod
+        def _shape_key(
+            table_name: str, date_partition: str, newest: str, allow_missing_columns: bool
+        ) -> tuple[str, str, bool]:
+            # The newest date may still be written, so its columns stay required.
+            allow_missing = allow_missing_columns and date_partition != newest
+            return (table_name.lower(), date_partition, allow_missing)
+
+        def _remember_shape(
+            self,
+            table_name: str,
+            date_partition: str,
+            newest: str,
+            allow_missing_columns: bool,
+            shape: PartitionShape,
+        ) -> PartitionShape:
             # Older complete dates are immutable. The newest date may still be
             # written, and a sparse date's table directory may still appear, so
             # both are checked again each time.
-            if shape.complete and shape.present and not is_newest:
-                self._shape_cache[cache_key] = shape
+            if shape.complete and shape.present and date_partition != newest:
+                key = self._shape_key(table_name, date_partition, newest, allow_missing_columns)
+                self._shape_cache[key] = shape
             return shape
 
         def _required_option(self, key: str) -> str:

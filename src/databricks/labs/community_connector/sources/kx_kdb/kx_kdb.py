@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import math
+from concurrent.futures import ThreadPoolExecutor
 from itertools import chain
 from pathlib import Path
 from typing import Iterator, Sequence
@@ -31,15 +32,18 @@ from databricks.labs.community_connector.sources.kx_kdb.schema import (
 )
 from databricks.labs.community_connector.sources.kx_kdb.sym_reader import (
     PartitionShape,
+    probe_partition_shape,
     read_kdb_row_range,
     read_partition_shape,
 )
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_MAX_DATES_PER_BATCH = 250
-DEFAULT_MAX_TASKS_PER_BATCH = 2000
-DEFAULT_MAX_ROWS_PER_TASK = 2_000_000
+DEFAULT_MAX_DATES_PER_BATCH = 1000
+DEFAULT_MAX_TASKS_PER_BATCH = 5000
+DEFAULT_MAX_ROWS_PER_TASK = 1_000_000
+# Each date probe is a few FUSE round trips; threads overlap them.
+_PROBE_THREADS = 16
 _MISSING_COLUMN_POLICIES = ("fail", "null")
 _REMOVED_TABLE_OPTIONS = ("partition_strategy", "sym_column")
 
@@ -146,10 +150,11 @@ class KxKdbLakeflowConnect(LakeflowConnect, SupportsPartitionedStream):
         min_age = self._min_partition_age_seconds(table_options)
         allow_missing = self._allow_missing_columns(table_options)
         newest = latest_table_partition(self.hdb_root_path, table_name)
+        shapes = self._partition_shapes(table_name, selected, newest, min_age, allow_missing)
         descriptors: list[dict] = []
         total_rows = 0
         for partition in selected:
-            shape = self._partition_shape(table_name, partition, newest, min_age, allow_missing)
+            shape = shapes[partition]
             if not shape.complete:
                 raise RuntimeError(
                     f"KX KDB table {table_name!r} date {partition} is in this batch but "
@@ -239,12 +244,14 @@ class KxKdbLakeflowConnect(LakeflowConnect, SupportsPartitionedStream):
         min_age = self._min_partition_age_seconds(table_options)
         allow_missing = self._allow_missing_columns(table_options)
 
+        if capped:
+            candidates = candidates[:max_dates]
+        shapes = self._partition_shapes(table_name, candidates, newest, min_age, allow_missing)
+
         admitted: list[str] = []
         tasks = 0
         for partition in candidates:
-            if capped and len(admitted) >= max_dates:
-                break
-            shape = self._partition_shape(table_name, partition, newest, min_age, allow_missing)
+            shape = shapes[partition]
             if not shape.complete:
                 if partition == newest or shape.recent:
                     logger.info(
@@ -305,6 +312,55 @@ class KxKdbLakeflowConnect(LakeflowConnect, SupportsPartitionedStream):
             )
         return admitted
 
+    def _partition_shapes(
+        self,
+        table_name: str,
+        dates: list[str],
+        newest: str,
+        min_age_seconds: float,
+        allow_missing_columns: bool,
+    ) -> dict[str, PartitionShape]:
+        """Return the shape of each date.
+
+        Older dates are read from their file headers on several threads. The
+        newest date, and any date whose files the header reader does not
+        recognize, are checked with q one at a time.
+        """
+        actual_table_name = self._actual_table_name(table_name)
+        shapes: dict[str, PartitionShape] = {}
+        pending = []
+        for date_partition in dates:
+            cached = self._shape_cache.get(
+                self._shape_key(table_name, date_partition, newest, allow_missing_columns)
+            )
+            if cached is not None:
+                shapes[date_partition] = cached
+            elif date_partition != newest:
+                pending.append(date_partition)
+
+        def probe(date_partition: str) -> PartitionShape | None:
+            return probe_partition_shape(
+                hdb_root_path=self.hdb_root_path,
+                kdb_table_name=actual_table_name,
+                date_partition=date_partition,
+                min_age_seconds=min_age_seconds,
+                allow_missing_columns=allow_missing_columns,
+            )
+
+        if pending:
+            with ThreadPoolExecutor(max_workers=min(_PROBE_THREADS, len(pending))) as pool:
+                for date_partition, shape in zip(pending, pool.map(probe, pending)):
+                    if shape is not None:
+                        shapes[date_partition] = self._remember_shape(
+                            table_name, date_partition, newest, allow_missing_columns, shape
+                        )
+        for date_partition in dates:
+            if date_partition not in shapes:
+                shapes[date_partition] = self._partition_shape(
+                    table_name, date_partition, newest, min_age_seconds, allow_missing_columns
+                )
+        return shapes
+
     def _partition_shape(
         self,
         table_name: str,
@@ -314,9 +370,7 @@ class KxKdbLakeflowConnect(LakeflowConnect, SupportsPartitionedStream):
         allow_missing_columns: bool,
     ) -> PartitionShape:
         is_newest = date_partition == newest
-        # The newest date may still be written, so its columns stay required.
-        allow_missing = allow_missing_columns and not is_newest
-        cache_key = (table_name.lower(), date_partition, allow_missing)
+        cache_key = self._shape_key(table_name, date_partition, newest, allow_missing_columns)
         cached = self._shape_cache.get(cache_key)
         if cached is not None:
             return cached
@@ -327,13 +381,34 @@ class KxKdbLakeflowConnect(LakeflowConnect, SupportsPartitionedStream):
             runtime_config=self.runtime_config,
             check_all_columns=is_newest,
             min_age_seconds=min_age_seconds,
-            allow_missing_columns=allow_missing,
+            allow_missing_columns=cache_key[2],
         )
+        return self._remember_shape(
+            table_name, date_partition, newest, allow_missing_columns, shape
+        )
+
+    @staticmethod
+    def _shape_key(
+        table_name: str, date_partition: str, newest: str, allow_missing_columns: bool
+    ) -> tuple[str, str, bool]:
+        # The newest date may still be written, so its columns stay required.
+        allow_missing = allow_missing_columns and date_partition != newest
+        return (table_name.lower(), date_partition, allow_missing)
+
+    def _remember_shape(
+        self,
+        table_name: str,
+        date_partition: str,
+        newest: str,
+        allow_missing_columns: bool,
+        shape: PartitionShape,
+    ) -> PartitionShape:
         # Older complete dates are immutable. The newest date may still be
         # written, and a sparse date's table directory may still appear, so
         # both are checked again each time.
-        if shape.complete and shape.present and not is_newest:
-            self._shape_cache[cache_key] = shape
+        if shape.complete and shape.present and date_partition != newest:
+            key = self._shape_key(table_name, date_partition, newest, allow_missing_columns)
+            self._shape_cache[key] = shape
         return shape
 
     def _required_option(self, key: str) -> str:
