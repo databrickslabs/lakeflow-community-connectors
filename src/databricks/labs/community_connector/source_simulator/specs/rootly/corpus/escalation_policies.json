@@ -1,0 +1,306 @@
+[
+  {
+    "id": "synthetic-escalation_policies-1",
+    "type": "escalation_policies",
+    "attributes": {
+      "name": "sierra-820",
+      "description": "echo-165",
+      "repeat_count": 95189,
+      "created_by_user_id": 33726,
+      "last_updated_by_user_id": 23391,
+      "group_ids": [
+        "mike-102",
+        "hotel-411"
+      ],
+      "service_ids": [
+        "tango-163"
+      ],
+      "business_hours": {
+        "time_zone": "romeo-176",
+        "days": [],
+        "start_time": "zulu-962",
+        "end_time": "romeo-436"
+      },
+      "created_at": "november-733",
+      "updated_at": "uniform-601"
+    },
+    "relationships": {
+      "escalation_levels": {
+        "data": [
+          {
+            "id": "synthetic-escalation_levels-1",
+            "type": "escalation_levels"
+          }
+        ]
+      },
+      "escalation_paths": {
+        "data": [
+          {
+            "id": "synthetic-escalation_paths-1",
+            "type": "escalation_paths"
+          }
+        ]
+      },
+      "groups": {
+        "data": [
+          {
+            "id": "synthetic-groups-1",
+            "type": "groups"
+          }
+        ]
+      },
+      "services": {
+        "data": [
+          {
+            "id": "synthetic-services-1",
+            "type": "services"
+          }
+        ]
+      }
+    }
+  },
+  {
+    "id": "synthetic-escalation_policies-2",
+    "type": "escalation_policies",
+    "attributes": {
+      "name": "whiskey-858",
+      "description": "tango-520",
+      "repeat_count": 26222,
+      "created_by_user_id": 22397,
+      "last_updated_by_user_id": 26929,
+      "group_ids": [
+        "papa-832"
+      ],
+      "service_ids": [
+        "foxtrot-396",
+        "zulu-349"
+      ],
+      "business_hours": {
+        "time_zone": "victor-612",
+        "days": [],
+        "start_time": "whiskey-758",
+        "end_time": "quebec-593"
+      },
+      "created_at": "india-950",
+      "updated_at": "bravo-712"
+    },
+    "relationships": {
+      "escalation_levels": {
+        "data": [
+          {
+            "id": "synthetic-escalation_levels-2",
+            "type": "escalation_levels"
+          }
+        ]
+      },
+      "escalation_paths": {
+        "data": [
+          {
+            "id": "synthetic-escalation_paths-2",
+            "type": "escalation_paths"
+          }
+        ]
+      },
+      "groups": {
+        "data": [
+          {
+            "id": "synthetic-groups-2",
+            "type": "groups"
+          }
+        ]
+      },
+      "services": {
+        "data": [
+          {
+            "id": "synthetic-services-2",
+            "type": "services"
+          }
+        ]
+      }
+    }
+  },
+  {
+    "id": "synthetic-escalation_policies-3",
+    "type": "escalation_policies",
+    "attributes": {
+      "name": "echo-645",
+      "description": "golf-156",
+      "repeat_count": 84297,
+      "created_by_user_id": 51633,
+      "last_updated_by_user_id": 76924,
+      "group_ids": [
+        "xray-821",
+        "hotel-176"
+      ],
+      "service_ids": [
+        "delta-169",
+        "whiskey-819"
+      ],
+      "business_hours": {
+        "time_zone": "whiskey-582",
+        "days": [
+          "sierra-582",
+          "sierra-115"
+        ],
+        "start_time": "yankee-832",
+        "end_time": "charlie-931"
+      },
+      "created_at": "tango-623",
+      "updated_at": "whiskey-706"
+    },
+    "relationships": {
+      "escalation_levels": {
+        "data": [
+          {
+            "id": "synthetic-escalation_levels-3",
+            "type": "escalation_levels"
+          }
+        ]
+      },
+      "escalation_paths": {
+        "data": [
+          {
+            "id": "synthetic-escalation_paths-3",
+            "type": "escalation_paths"
+          }
+        ]
+      },
+      "groups": {
+        "data": [
+          {
+            "id": "synthetic-groups-3",
+            "type": "groups"
+          }
+        ]
+      },
+      "services": {
+        "data": [
+          {
+            "id": "synthetic-services-3",
+            "type": "services"
+          }
+        ]
+      }
+    }
+  },
+  {
+    "id": "synthetic-escalation_policies-4",
+    "type": "escalation_policies",
+    "attributes": {
+      "name": "foxtrot-261",
+      "description": "delta-293",
+      "repeat_count": 99484,
+      "created_by_user_id": 35260,
+      "last_updated_by_user_id": 83697,
+      "group_ids": [
+        "yankee-685",
+        "november-789"
+      ],
+      "service_ids": [
+        "alpha-526"
+      ],
+      "business_hours": {
+        "time_zone": "yankee-429",
+        "days": [
+          "uniform-915",
+          "tango-364"
+        ],
+        "start_time": "charlie-766",
+        "end_time": "uniform-525"
+      },
+      "created_at": "delta-298",
+      "updated_at": "charlie-960"
+    },
+    "relationships": {
+      "escalation_levels": {
+        "data": [
+          {
+            "id": "synthetic-escalation_levels-4",
+            "type": "escalation_levels"
+          }
+        ]
+      },
+      "escalation_paths": {
+        "data": [
+          {
+            "id": "synthetic-escalation_paths-4",
+            "type": "escalation_paths"
+          }
+        ]
+      },
+      "groups": {
+        "data": [
+          {
+            "id": "synthetic-groups-4",
+            "type": "groups"
+          }
+        ]
+      },
+      "services": {
+        "data": [
+          {
+            "id": "synthetic-services-4",
+            "type": "services"
+          }
+        ]
+      }
+    }
+  },
+  {
+    "id": "synthetic-escalation_policies-5",
+    "type": "escalation_policies",
+    "attributes": {
+      "name": "yankee-740",
+      "description": "yankee-432",
+      "repeat_count": 54418,
+      "created_by_user_id": 7259,
+      "last_updated_by_user_id": 70385,
+      "group_ids": [
+        "golf-273"
+      ],
+      "service_ids": [],
+      "business_hours": {
+        "time_zone": "xray-662",
+        "days": [],
+        "start_time": "india-575",
+        "end_time": "papa-653"
+      },
+      "created_at": "charlie-961",
+      "updated_at": "mike-511"
+    },
+    "relationships": {
+      "escalation_levels": {
+        "data": [
+          {
+            "id": "synthetic-escalation_levels-5",
+            "type": "escalation_levels"
+          }
+        ]
+      },
+      "escalation_paths": {
+        "data": [
+          {
+            "id": "synthetic-escalation_paths-5",
+            "type": "escalation_paths"
+          }
+        ]
+      },
+      "groups": {
+        "data": [
+          {
+            "id": "synthetic-groups-5",
+            "type": "groups"
+          }
+        ]
+      },
+      "services": {
+        "data": [
+          {
+            "id": "synthetic-services-5",
+            "type": "services"
+          }
+        ]
+      }
+    }
+  }
+]
