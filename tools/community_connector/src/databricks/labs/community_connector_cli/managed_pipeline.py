@@ -24,9 +24,13 @@ Two input shapes are supported, disambiguated by
   contains an ``ingestion_definition`` key. The CLI treats it as authoritative
   and only adds the managed-ingestion ``configuration`` flag, the connector
   ``environment`` (when absent), and any values passed explicitly on the CLI.
+  The common CLI path also normalizes positively identified HubSpot table maps.
 """
 
 import copy
+import json
+import re
+from pathlib import PurePosixPath
 from typing import List, Optional
 
 SOURCE_TYPE_COMMUNITY = "COMMUNITY"
@@ -235,3 +239,105 @@ def augment_full_pipeline_body(
         body["environment"] = {"dependencies": list(dependencies)}
 
     return body
+
+
+# Deliberately HubSpot-specific: other sources do not promise envelope semantics.
+_HUBSPOT_TABLE_OPTION_KEYS = frozenset({
+    "max_records_per_batch", "history_properties", "history_since",
+    "history_lookback_minutes", "include_properties", "exclude_properties",
+    "association_sync_mode", "pipeline_object_types",
+})
+
+
+def _hubspot_option_dict(table: dict) -> dict:
+    """Return a mutable copied table's options, rejecting malformed containers."""
+    connector = table.setdefault("connector_options", {})
+    if not isinstance(connector, dict):
+        raise ManagedPipelineSpecError("HubSpot connector options must be an object")
+    community = connector.setdefault("community_connector_options", {})
+    if not isinstance(community, dict):
+        raise ManagedPipelineSpecError("HubSpot community connector options must be an object")
+    options = community.setdefault("options", {})
+    if not isinstance(options, dict):
+        raise ManagedPipelineSpecError("HubSpot table options must be an object")
+    return options
+
+
+def normalize_hubspot_table_configs(body: dict, source_name: Optional[str] = None) -> dict:
+    """Copy a managed body and repeat one authoritative HubSpot options map.
+
+    Identify only by explicit CLI source name or the declared distribution's wheel
+    filename. No connection lookup, table-name guessing, or dependency execution.
+    HubSpot schema/report selection cannot produce a complete local map.
+    """
+    result = copy.deepcopy(body)
+    environment = result.get("environment")
+    dependencies = environment.get("dependencies", []) if isinstance(environment, dict) else []
+    hubspot = source_name == "hubspot" if source_name is not None else any(
+        isinstance(dep, str) and re.fullmatch(
+            r"lakeflow_community_connectors_hubspot-[^-]+(?:-[0-9][^-]*)?-[^-]+-[^-]+-[^-]+\.whl",
+            PurePosixPath(dep).name,
+        )
+        for dep in dependencies or []
+    )
+    if not hubspot:
+        return result
+    definition = result.get("ingestion_definition")
+    if (not isinstance(definition, dict)
+            or definition.get("source_type", SOURCE_TYPE_COMMUNITY) != SOURCE_TYPE_COMMUNITY):
+        raise ManagedPipelineSpecError("HubSpot requires a COMMUNITY ingestion definition")
+    objects = definition.get("objects", [])
+    if not isinstance(objects, list):
+        raise ManagedPipelineSpecError("HubSpot objects must be a list")
+    configs, envelopes, option_dicts = {}, [], []
+    for obj in objects:
+        if (not isinstance(obj, dict)
+                or set(obj).intersection({"table", "schema", "report"}) != {"table"}):
+            raise ManagedPipelineSpecError("HubSpot isolation requires explicit table selectors")
+        table = obj["table"]
+        if not isinstance(table, dict) or table.get("source_schema", "default") != "default":
+            raise ManagedPipelineSpecError("HubSpot isolation requires the default source schema")
+        name = table.get("source_table")
+        if not isinstance(name, str) or not name or name.strip() != name:
+            raise ManagedPipelineSpecError("HubSpot requires a nonempty source table name")
+        options = _hubspot_option_dict(table)
+        selected = {key: value for key, value in options.items() if key != "tableConfigs"}
+        if any(key not in _HUBSPOT_TABLE_OPTION_KEYS or not isinstance(value, str)
+               for key, value in selected.items()):
+            raise ManagedPipelineSpecError(
+                "HubSpot table options contain unsupported keys or values"
+            )
+        if name in configs and configs[name] != selected:
+            raise ManagedPipelineSpecError(
+                "HubSpot duplicate source tables have conflicting options"
+            )
+        configs[name] = selected
+        option_dicts.append(options)
+        if "tableConfigs" in options:
+            envelopes.append(options["tableConfigs"])
+
+    def unique_object(pairs):
+        value = {}
+        for key, item in pairs:
+            if key in value:
+                raise ValueError("duplicate key")
+            value[key] = item
+        return value
+
+    for raw in envelopes:
+        try:
+            if not isinstance(raw, str):
+                raise ValueError("not a string")
+            existing = json.loads(raw, object_pairs_hook=unique_object)
+        except (ValueError, TypeError, RecursionError):
+            raise ManagedPipelineSpecError(
+                "HubSpot tableConfigs is invalid JSON or has duplicate keys"
+            ) from None
+        if existing != configs:
+            raise ManagedPipelineSpecError(
+                "HubSpot tableConfigs conflicts with explicit table options"
+            )
+    serialized = json.dumps(configs, sort_keys=True, separators=(",", ":"))
+    for options in option_dicts:
+        options["tableConfigs"] = serialized
+    return result

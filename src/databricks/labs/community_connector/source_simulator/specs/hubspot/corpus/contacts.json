@@ -2,15 +2,17 @@
   {
     "id": "1000",
     "createdAt": "2024-01-01T00:00:00Z",
-    "updatedAt": "2024-02-01T00:00:00Z",
+    "updatedAt": "2026-10-06T21:52:21.810Z",
     "archived": false,
-    "properties": {"name": "Sample"},
+    "properties": {
+      "name": "Sample"
+    },
     "companies": []
   },
   {
     "id": "1001",
     "createdAt": "2024-01-02T00:00:00Z",
-    "updatedAt": "2024-02-02T00:00:00Z",
+    "updatedAt": "2026-10-06T21:52:21.571Z",
     "archived": false,
     "properties": null,
     "companies": []
@@ -18,7 +20,7 @@
   {
     "id": "1002",
     "createdAt": "2024-01-03T00:00:00Z",
-    "updatedAt": "2024-02-03T00:00:00Z",
+    "updatedAt": "2026-10-06T21:52:21.810Z",
     "archived": false,
     "properties": null,
     "companies": []
@@ -26,7 +28,7 @@
   {
     "id": "1003",
     "createdAt": "2024-01-04T00:00:00Z",
-    "updatedAt": "2024-02-04T00:00:00Z",
+    "updatedAt": "2026-10-06T23:20:29.843Z",
     "archived": false,
     "properties": null,
     "companies": []

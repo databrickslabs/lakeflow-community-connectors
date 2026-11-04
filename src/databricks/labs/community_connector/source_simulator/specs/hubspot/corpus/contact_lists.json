@@ -1,0 +1,15 @@
+[
+  {
+    "listId": "list-1",
+    "listVersion": 1,
+    "name": "Synthetic contacts",
+    "objectTypeId": "0-1",
+    "processingType": "MANUAL",
+    "processingStatus": "COMPLETE",
+    "createdAt": "2024-03-01T00:00:00.000Z",
+    "updatedAt": "2024-03-01T00:00:00.000Z",
+    "additionalProperties": {
+      "size": "1"
+    }
+  }
+]

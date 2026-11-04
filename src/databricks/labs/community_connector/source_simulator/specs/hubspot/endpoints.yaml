@@ -1,21 +1,53 @@
-# HubSpot CRM API v3.
+# HubSpot CRM API 2026-09.
 #
 # Connector flow:
-# * ``list_tables`` → GET ``/crm/v3/schemas`` to discover custom objects
+# * ``list_tables`` → GET ``/crm-object-schemas/2026-09/schemas`` to discover custom objects
 #   (we return empty results so the connector falls back to the standard
 #   set of 9 CRM objects).
-# * ``get_table_schema`` → GET ``/properties/v2/{type}/properties`` to
-#   discover field types (we return [] so the connector builds a minimal
-#   schema with just id/createdAt/updatedAt/archived/associations/properties).
-# * ``read_table`` → GET ``/crm/v3/objects/{table}`` first call;
-#   POST ``/crm/v3/objects/{table}/search`` for incremental reads.
+# * ``get_table_schema`` → GET ``/crm/properties/2026-09/{type}`` to
+#   discover field types from the v3 results wrapper.
+# * ``read_table`` → GET ``/crm/objects/2026-09/{table}`` first call;
+#   POST ``/crm/objects/2026-09/{table}/search`` for incremental reads.
+# * ``{object}_property_history`` tables → POST ``.../search`` for changed IDs,
+#   then POST ``/crm/objects/2026-09/{object}/batch/read`` (custom handler) served
+#   from the ``{object}_history`` corpus.
 #
 # Response wrapper for listing endpoints: ``{"results": [...], "paging": {}}``
 # with paging empty so the connector terminates after one page.
 
 endpoints:
+  # Synthetic fixtures for the six complete-snapshot endpoint families.
+  - path: /crm/owners/2026-09
+    method: GET
+    corpus: owners
+    response: {pagination_style: none, wrapper: {records_key: results}}
+  - path: /crm/pipelines/2026-09/{object_type}
+    method: GET
+    corpus: pipelines
+    response: {pagination_style: none, wrapper: {records_key: results}}
+  - path: /marketing/v3/forms
+    method: GET
+    corpus: forms
+    response: {pagination_style: none, wrapper: {records_key: results}}
+  - path: /crm/lists/2026-09/all
+    method: POST
+    corpus: contact_lists
+    response: {pagination_style: none, wrapper: {records_key: results}}
+  - path: /crm/lists/2026-09/{list_id}/memberships
+    method: GET
+    corpus: contact_list_memberships
+    response: {pagination_style: none, wrapper: {records_key: results}}
+  - path: /form-integrations/v1/submissions/forms/{form_id}
+    method: GET
+    corpus: form_submissions
+    response: {pagination_style: none, wrapper: {records_key: results}}
+
+  - path: /crm/associations/2026-09/{from_type}/{to_type}/batch/read
+    method: POST
+    handler: databricks.labs.community_connector.source_simulator.specs.hubspot.handlers.associations:serve_associations
+
   # Discovery — empty schemas → no custom objects.
-  - path: /crm/v3/schemas
+  - path: /crm-object-schemas/2026-09/schemas
     method: GET
     corpus: schemas
     response:
@@ -24,84 +56,74 @@ endpoints:
 
   # Discovery — properties per object type. The connector handles an empty
   # list by building the minimal base schema.
-  - path: /properties/v2/{object_type}/properties
+  - path: /crm/properties/2026-09/{object_type}
     method: GET
     corpus: properties
     response:
       pagination_style: none
+      wrapper: {records_key: results}
 
   # Per-table listing endpoints (GET).
-  - path: /crm/v3/objects/contacts
+  - path: /crm/objects/2026-09/contacts
     method: GET
-    corpus: contacts
-    response: {pagination_style: none, wrapper: {records_key: results, extras: {paging: {}}}}
-  - path: /crm/v3/objects/companies
+    handler: databricks.labs.community_connector.source_simulator.specs.hubspot.handlers.search:serve_objects
+  - path: /crm/objects/2026-09/companies
     method: GET
-    corpus: companies
-    response: {pagination_style: none, wrapper: {records_key: results, extras: {paging: {}}}}
-  - path: /crm/v3/objects/deals
+    handler: databricks.labs.community_connector.source_simulator.specs.hubspot.handlers.search:serve_objects
+  - path: /crm/objects/2026-09/deals
     method: GET
-    corpus: deals
-    response: {pagination_style: none, wrapper: {records_key: results, extras: {paging: {}}}}
-  - path: /crm/v3/objects/tickets
+    handler: databricks.labs.community_connector.source_simulator.specs.hubspot.handlers.search:serve_objects
+  - path: /crm/objects/2026-09/tickets
     method: GET
-    corpus: tickets
-    response: {pagination_style: none, wrapper: {records_key: results, extras: {paging: {}}}}
-  - path: /crm/v3/objects/calls
+    handler: databricks.labs.community_connector.source_simulator.specs.hubspot.handlers.search:serve_objects
+  - path: /crm/objects/2026-09/calls
     method: GET
-    corpus: calls
-    response: {pagination_style: none, wrapper: {records_key: results, extras: {paging: {}}}}
-  - path: /crm/v3/objects/emails
+    handler: databricks.labs.community_connector.source_simulator.specs.hubspot.handlers.search:serve_objects
+  - path: /crm/objects/2026-09/emails
     method: GET
-    corpus: emails
-    response: {pagination_style: none, wrapper: {records_key: results, extras: {paging: {}}}}
-  - path: /crm/v3/objects/meetings
+    handler: databricks.labs.community_connector.source_simulator.specs.hubspot.handlers.search:serve_objects
+  - path: /crm/objects/2026-09/meetings
     method: GET
-    corpus: meetings
-    response: {pagination_style: none, wrapper: {records_key: results, extras: {paging: {}}}}
-  - path: /crm/v3/objects/tasks
+    handler: databricks.labs.community_connector.source_simulator.specs.hubspot.handlers.search:serve_objects
+  - path: /crm/objects/2026-09/tasks
     method: GET
-    corpus: tasks
-    response: {pagination_style: none, wrapper: {records_key: results, extras: {paging: {}}}}
-  - path: /crm/v3/objects/notes
+    handler: databricks.labs.community_connector.source_simulator.specs.hubspot.handlers.search:serve_objects
+  - path: /crm/objects/2026-09/notes
     method: GET
-    corpus: notes
-    response: {pagination_style: none, wrapper: {records_key: results, extras: {paging: {}}}}
+    handler: databricks.labs.community_connector.source_simulator.specs.hubspot.handlers.search:serve_objects
 
-  # Search endpoint (POST) — used for incremental reads. Same wrapper.
-  - path: /crm/v3/objects/contacts/search
+  # Search models time/ID filters, ordering, and bounded paging.
+  - path: /crm/objects/2026-09/contacts/search
     method: POST
-    corpus: contacts
-    response: {pagination_style: none, wrapper: {records_key: results, extras: {paging: {}, total: 0}}}
-  - path: /crm/v3/objects/companies/search
+    handler: databricks.labs.community_connector.source_simulator.specs.hubspot.handlers.search:serve_search
+  - path: /crm/objects/2026-09/companies/search
     method: POST
-    corpus: companies
-    response: {pagination_style: none, wrapper: {records_key: results, extras: {paging: {}, total: 0}}}
-  - path: /crm/v3/objects/deals/search
+    handler: databricks.labs.community_connector.source_simulator.specs.hubspot.handlers.search:serve_search
+  - path: /crm/objects/2026-09/deals/search
     method: POST
-    corpus: deals
-    response: {pagination_style: none, wrapper: {records_key: results, extras: {paging: {}, total: 0}}}
-  - path: /crm/v3/objects/tickets/search
+    handler: databricks.labs.community_connector.source_simulator.specs.hubspot.handlers.search:serve_search
+  - path: /crm/objects/2026-09/tickets/search
     method: POST
-    corpus: tickets
-    response: {pagination_style: none, wrapper: {records_key: results, extras: {paging: {}, total: 0}}}
-  - path: /crm/v3/objects/calls/search
+    handler: databricks.labs.community_connector.source_simulator.specs.hubspot.handlers.search:serve_search
+  - path: /crm/objects/2026-09/calls/search
     method: POST
-    corpus: calls
-    response: {pagination_style: none, wrapper: {records_key: results, extras: {paging: {}, total: 0}}}
-  - path: /crm/v3/objects/emails/search
+    handler: databricks.labs.community_connector.source_simulator.specs.hubspot.handlers.search:serve_search
+  - path: /crm/objects/2026-09/emails/search
     method: POST
-    corpus: emails
-    response: {pagination_style: none, wrapper: {records_key: results, extras: {paging: {}, total: 0}}}
-  - path: /crm/v3/objects/meetings/search
+    handler: databricks.labs.community_connector.source_simulator.specs.hubspot.handlers.search:serve_search
+  - path: /crm/objects/2026-09/meetings/search
     method: POST
-    corpus: meetings
-    response: {pagination_style: none, wrapper: {records_key: results, extras: {paging: {}, total: 0}}}
-  - path: /crm/v3/objects/tasks/search
+    handler: databricks.labs.community_connector.source_simulator.specs.hubspot.handlers.search:serve_search
+  - path: /crm/objects/2026-09/tasks/search
     method: POST
-    corpus: tasks
-    response: {pagination_style: none, wrapper: {records_key: results, extras: {paging: {}, total: 0}}}
-  - path: /crm/v3/objects/notes/search
+    handler: databricks.labs.community_connector.source_simulator.specs.hubspot.handlers.search:serve_search
+  - path: /crm/objects/2026-09/notes/search
     method: POST
-    corpus: notes
-    response: {pagination_style: none, wrapper: {records_key: results, extras: {paging: {}, total: 0}}}
+    handler: databricks.labs.community_connector.source_simulator.specs.hubspot.handlers.search:serve_search
+
+  # Batch read (POST) — used by the {object}_property_history tables to fetch
+  # propertiesWithHistory for the IDs found via search. Inputs live in the
+  # JSON body, so a custom handler filters the {object}_history corpus by ID.
+  - path: /crm/objects/2026-09/{object_type}/batch/read
+    method: POST
+    handler: databricks.labs.community_connector.source_simulator.specs.hubspot.handlers.batch_read:serve_batch_read

@@ -507,3 +507,31 @@ tools/community_connector/
 ## License
 
 See the repository root for license information.
+
+
+### HubSpot table option isolation in managed pipelines
+
+For HubSpot, managed create and update normalize both bare and full specs by
+adding the same serialized `tableConfigs` map to every explicit table's
+`connector_options.community_connector_options.options`. Existing flat options,
+table mappings, order, destinations, and dependencies are preserved. Full specs
+remain authoritative except for this deterministic option-envelope addition.
+The input object is not mutated.
+
+Identification uses the explicit connector source name, or the exact
+`lakeflow_community_connectors_hubspot` distribution wheel filename in the final
+environment dependencies. Update can therefore reuse recognized existing wheels.
+Unknown/renamed wheels without explicit source identity are passed through and
+receive no isolation guarantee. Explicit other-source identity leaves other
+connectors unchanged; table and connection names are never used to guess identity.
+
+HubSpot isolation requires explicit table selectors with absent/default
+`source_schema`. Schema/report selectors and conflicting options for repeated
+source tables are rejected. Identical repeated source tables may target different
+destinations. Existing envelopes must agree with the complete explicit option
+map. Entries admit only declared HubSpot table options with string values;
+credentials, routing keys, and nested envelopes are rejected without printing
+values. An empty entry is meaningful and cannot inherit the last object's filters.
+Existing UC connections must include the framework `tableConfigs` option in their
+external options allowlist. This local normalization still requires validation
+against the actual managed consumer's planning and execution transport.
