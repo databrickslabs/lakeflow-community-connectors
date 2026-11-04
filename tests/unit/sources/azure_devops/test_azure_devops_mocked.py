@@ -197,6 +197,102 @@ def test_workitems_wiql_scoped_to_project(conn):
 
 
 # ---------------------------------------------------------------------------
+# Offset must advance on every non-empty batch (#307). Spark's
+# SimpleDataSourceStreamReader aborts a managed run with
+# SIMPLE_STREAM_READER_OFFSET_DID_NOT_ADVANCE otherwise.
+# ---------------------------------------------------------------------------
+
+
+def _items(*pairs):
+    """Work items as the bulk GET returns them: ``fields`` is a dict."""
+    return {
+        "count": len(pairs),
+        "value": [
+            {"id": i, "rev": 1, "fields": {"System.Id": i, "System.ChangedDate": changed}}
+            for i, changed in pairs
+        ],
+    }
+
+
+def test_workitems_explicit_ids_first_call_advances_offset(conn):
+    """With the ``ids`` option, the first call used to return the items with the
+    unchanged offset ``{}``, aborting the first batch of a managed run."""
+    conn._session.get.return_value = _response(
+        json_body=_items((1, "2024-01-01T10:00:00Z"), (2, "2024-01-03T10:00:00Z"))
+    )
+
+    records, offset = conn._read_workitems({}, {"project": "proj1", "ids": "1,2"})
+
+    assert [r["id"] for r in records] == [1, 2]
+    assert offset == {"watermarks": {"proj1": "2024-01-03T10:00:00Z"}}
+    conn._session.post.assert_not_called()  # explicit ids skip WIQL discovery
+
+
+def test_workitems_explicit_ids_unchanged_returns_empty_batch(conn):
+    """Nothing changed since the watermark: empty batch, same offset (converges)."""
+    conn._session.get.return_value = _response(
+        json_body=_items((1, "2024-01-01T10:00:00Z"), (2, "2024-01-03T10:00:00Z"))
+    )
+    start = {"watermarks": {"proj1": "2024-01-03T10:00:00Z"}}
+
+    records, offset = conn._read_workitems(start, {"project": "proj1", "ids": "1,2"})
+
+    assert list(records) == []
+    assert offset == start
+
+
+def test_workitem_revisions_watermark_taken_from_next_link(conn):
+    """Microsoft's documented last batch can carry the token only inside
+    ``nextLink``. It used to be dropped, so no watermark was saved and the next
+    run re-read everything with an unchanged offset."""
+    conn._session.get.return_value = _response(
+        json_body={
+            "values": [{"id": 1, "rev": 1, "fields": {}}],
+            "isLastBatch": True,
+            "nextLink": (
+                "https://dev.azure.com/testorg/proj1/_apis/wit/reporting/"
+                "workItemRevisions?continuationToken=3;2;1&api-version=7.1"
+            ),
+        }
+    )
+
+    records, offset = conn._read_workitem_revisions({}, {"project": "proj1"})
+
+    assert len(list(records)) == 1
+    assert offset == {"watermarks": {"proj1": "3;2;1"}}
+
+
+def test_workitem_revisions_next_run_passes_watermark_and_converges(conn):
+    """The saved watermark is sent back; no newer revisions means an empty batch
+    with the same offset."""
+    conn._session.get.return_value = _response(
+        json_body={
+            "values": [],
+            "isLastBatch": True,
+            "nextLink": (
+                "https://dev.azure.com/testorg/proj1/_apis/wit/reporting/"
+                "workItemRevisions?continuationToken=3;2;1&api-version=7.1"
+            ),
+        }
+    )
+    start = {"watermarks": {"proj1": "3;2;1"}}
+
+    records, offset = conn._read_workitem_revisions(start, {"project": "proj1"})
+
+    assert list(records) == []
+    assert offset == start
+    params = conn._session.get.call_args.kwargs.get("params") or conn._session.get.call_args.args[1]
+    assert params["continuationToken"] == "3;2;1"
+
+
+def test_token_from_next_link_handles_missing_and_absent_param():
+    extract = AzureDevopsLakeflowConnect._token_from_next_link
+    assert extract(None) is None
+    assert extract("https://x/y?api-version=7.1") is None
+    assert extract("https://x/y?continuationToken=abc&api-version=7.1") == "abc"
+
+
+# ---------------------------------------------------------------------------
 # _read_pullrequests — incremental watermarks
 # ---------------------------------------------------------------------------
 

@@ -139,14 +139,9 @@ endpoints:
         records_key: value
         extras: {count: 0}
 
+  # Custom handler: models the watermark (token returned only inside nextLink,
+  # as in Microsoft's documented last-batch example; passing it back yields
+  # an empty batch). See handlers/workitem_revisions.py.
   - path: /{organization}/{project}/_apis/wit/reporting/workitemrevisions
     method: GET
-    corpus: workitem_revisions
-    response:
-      pagination_style: none
-      wrapper:
-        records_key: values
-        extras:
-          count: 0
-          isLastBatch: true
-          nextLink: null
+    handler: databricks.labs.community_connector.source_simulator.specs.azure_devops.handlers.workitem_revisions:serve_workitem_revisions
