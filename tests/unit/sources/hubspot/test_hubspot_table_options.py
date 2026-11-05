@@ -348,6 +348,14 @@ def test_association_selection_is_schema_metadata_and_cache_safe(generated):
                 conn.read_table_metadata("calls", {"associations": value})
             with pytest.raises(ValueError, match="associations"):
                 conn.get_table_schema("calls", {"associations": value})
+            with pytest.raises(ValueError, match="associations"):
+                list(conn.read_table_between_offsets(
+                    "calls", {}, {}, {"associations": value}
+                ))
+            with pytest.raises(ValueError, match="associations"):
+                list(conn.read_table_between_offsets("calls", {}, {}, {
+                    "tableConfigs": json.dumps({"calls": {"associations": value}})
+                }))
 
 
 @pytest.mark.parametrize("generated", [False, True])

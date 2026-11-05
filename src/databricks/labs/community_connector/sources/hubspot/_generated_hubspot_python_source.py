@@ -1938,6 +1938,10 @@ def register_lakeflow_source(spark):
                     table_name, start_offset, end_offset, table_options
                 )
             if start_offset == end_offset:
+                if table_name not in NON_CRM_TABLES and "associations" in table_options:
+                    if table_name not in self.list_tables():
+                        raise ValueError(f"Unsupported table: {table_name}")
+                    self._get_associations_for_object(table_name, table_options)
                 return iter([])
             if (table_name in self._ACTIVITY_BOOTSTRAP_TABLES
                     and not self._uses_snapshot(table_name, table_options)):
