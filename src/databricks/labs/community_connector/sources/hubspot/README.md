@@ -106,6 +106,17 @@ deduplicated and sorted across pages and labels. Empty arrays mean a successful
 empty read. Missing parents are retried; incomplete responses or invalid cursors
 fail the read before it returns a new checkpoint.
 
+By default, each CRM table includes every association target listed in its
+discovered graph. Set the table option `associations` to a comma-separated subset,
+such as `contacts,companies`, to request only those columns and relationships. Set
+`associations=` to request none. Targets must exactly match the discovered names;
+duplicates, whitespace, empty tokens, and unknown targets are rejected. The same
+selection controls schema discovery, metadata, API hydration, and emitted rows, so
+unselected targets are absent rather than represented as empty arrays. Changing
+this option changes the physical table schema and requires a fresh destination or
+an explicit schema migration. Add `associations` to an existing Unity Catalog
+connection's external options allowlist before using it.
+
 If a completed batch still reports only `OBJECT_NOT_FOUND` after those retries,
 the connector reconciles every unresolved parent through the documented
 single-record association GET API. Each read starts at page one and replaces

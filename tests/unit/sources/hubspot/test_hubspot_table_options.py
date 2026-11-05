@@ -321,3 +321,83 @@ def test_ingestion_agent_preexisting_lowercase_routing_rejected():
     dispatcher = IngestionAgentDispatcher(options=options, connector=conn, init_error=None)
     with pytest.raises(AgentError, match="requires option 'tableName'"):
         dispatcher.schema()
+
+
+@pytest.mark.parametrize("generated", [False, True])
+def test_association_selection_is_schema_metadata_and_cache_safe(generated):
+    conn = _connector_class(generated)({"access_token": "constructor-only"})
+    with mock.patch.object(conn, "list_tables", return_value=["calls"]), mock.patch.object(
+        conn, "_get_object_properties", return_value=[]
+    ):
+        cases = [
+            ({}, ["contacts", "companies", "deals", "tickets"]),
+            ({"associations": "companies,contacts"}, ["contacts", "companies"]),
+            ({"associations": "tickets"}, ["tickets"]),
+            ({"associations": ""}, []),
+        ]
+        for options, expected in cases + list(reversed(cases)):
+            metadata = conn.read_table_metadata("calls", options)
+            schema = conn.get_table_schema("calls", options)
+            assert metadata["associations"] == expected
+            assert [name for name in schema.fieldNames() if name in {
+                "contacts", "companies", "deals", "tickets"
+            }] == expected
+
+        for value in ["contacts,contacts", "contacts, companies", "contacts,", "unknown"]:
+            with pytest.raises(ValueError, match="associations"):
+                conn.read_table_metadata("calls", {"associations": value})
+            with pytest.raises(ValueError, match="associations"):
+                conn.get_table_schema("calls", {"associations": value})
+
+
+@pytest.mark.parametrize("generated", [False, True])
+@pytest.mark.parametrize("envelope", [False, True])
+@pytest.mark.parametrize("table", ["calls", "meetings"])
+@pytest.mark.parametrize("selection,expected", [
+    ("contacts,companies", ["contacts", "companies"]),
+    ("", []),
+])
+def test_association_selection_controls_actual_batch_reader(
+    generated, envelope, table, selection, expected
+):
+    from pyspark.sql.datasource import InputPartition
+    from databricks.labs.community_connector.sparkpds.lakeflow_datasource import LakeflowBatchReader
+
+    selected = {"associations": selection}
+    options = {"tableName": table, **selected}
+    constructor = {"access_token": "constructor-only"}
+    if envelope:
+        options = {"tableName": table, "tableConfigs": json.dumps({table: selected})}
+        constructor["tableConfigs"] = options["tableConfigs"]
+    conn = _connector_class(generated)(constructor)
+    parent = {
+        "id": "1", "createdAt": "2026-01-01T00:00:00.000Z",
+        "updatedAt": "2026-01-02T00:00:00.000Z", "archived": False,
+        "properties": {"hs_lastmodifieddate": "2026-01-02T00:00:00.000Z"},
+    }
+
+    def associations(_from_type, target, parent_ids):
+        assert parent_ids == ["1"]
+        return {"1": [f"{target}-1"]}
+
+    with mock.patch.object(conn, "list_tables", return_value=[table]), mock.patch.object(
+        conn, "_get_object_properties",
+        return_value=[{"name": "hs_lastmodifieddate", "type": "string"}],
+    ), mock.patch.object(
+        conn, "_fetch_full_refresh_batch", return_value=([parent.copy()], None)
+    ), mock.patch.object(conn._associations, "read", side_effect=associations) as read:
+        schema = conn.get_table_schema(table, options)
+        metadata = conn.read_table_metadata(table, options)
+        rows = list(LakeflowBatchReader(options, schema, conn).read(InputPartition(None)))
+
+    assert metadata["associations"] == expected
+    assert [name for name in schema.fieldNames() if name in {
+        "contacts", "companies", "deals", "tickets"
+    }] == expected
+    assert len(rows) == 1
+    row = rows[0].asDict()
+    assert {name: row[name] for name in expected} == {
+        name: [f"{name}-1"] for name in expected
+    }
+    assert not ({"contacts", "companies", "deals", "tickets"} - set(expected)) & row.keys()
+    assert [call.args[1] for call in read.call_args_list] == expected
