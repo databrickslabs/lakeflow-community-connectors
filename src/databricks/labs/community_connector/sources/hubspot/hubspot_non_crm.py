@@ -14,12 +14,18 @@ from pyspark.sql.types import (
     ArrayType, BooleanType, LongType, MapType, StringType, StructField, StructType,
 )
 
+from databricks.labs.community_connector.sources.hubspot.hubspot_http import (
+    HUBSPOT_MAX_RETRIES,
+    HUBSPOT_REQUEST_TIMEOUT_S,
+    HubspotHttpClient,
+)
+
 NON_CRM_TABLES = (
     "owners", "pipelines", "forms", "contact_lists",
     "contact_list_memberships", "form_submissions",
 )
-NON_CRM_MAX_RETRIES = 5
-NON_CRM_TIMEOUT_S = 60
+NON_CRM_MAX_RETRIES = HUBSPOT_MAX_RETRIES
+NON_CRM_TIMEOUT_S = HUBSPOT_REQUEST_TIMEOUT_S
 NON_CRM_MIN_INTERVAL_S = 0.11
 NON_CRM_PIPELINE_TYPES = {
     "0-3", "0-5", "0-27", "0-421", "0-410", "0-136", "0-420",
@@ -74,13 +80,13 @@ class HubspotNonCrm:
     """Read all partitions and pages before returning a snapshot."""
 
     def __init__(self, base_url, auth_header, custom_types: Callable, post: Callable,
-                 sleep: Callable = time.sleep):
+                 sleep: Callable = time.sleep, http=None):
         self.base_url = base_url.rstrip("/")
         self.auth_header = auth_header
         self._custom_types = custom_types
         self._post = post
         self._sleep = sleep
-        self._last_get = None
+        self._http = http or HubspotHttpClient(auth_header, sleep=sleep)
 
     @staticmethod
     def list_tables() -> list[str]:
@@ -131,29 +137,19 @@ class HubspotNonCrm:
         return StructType(fields[table] + _non_crm_fields(["payload"]))
 
     def _get(self, route, params):
-        for attempt in range(NON_CRM_MAX_RETRIES + 1):
-            now = time.monotonic()
-            if self._last_get is not None:
-                delay = NON_CRM_MIN_INTERVAL_S - (now - self._last_get)
-                if delay > 0:
-                    self._sleep(delay)
-            self._last_get = time.monotonic()
-            response = requests.get(self.base_url + route, headers=self.auth_header,
-                                    params=params, timeout=NON_CRM_TIMEOUT_S)
-            if response.status_code == 200:
-                return response.json()
-            if response.status_code == 429 and attempt < NON_CRM_MAX_RETRIES:
-                try:
-                    delay = float(response.headers.get("Retry-After", 2 ** attempt))
-                    if not 0 <= delay <= 30:
-                        delay = min(2 ** attempt, 30)
-                except (ValueError, TypeError):
-                    delay = min(2 ** attempt, 30)
-                self._sleep(delay)
-                continue
-            # Do not leak response bodies, tokens, or identifiers into errors.
+        response = self._http.get(
+            self.base_url + route,
+            operation="non-CRM GET",
+            params=params,
+            kind="non_crm",
+            min_interval=NON_CRM_MIN_INTERVAL_S,
+        )
+        if response.status_code != 200:
             raise RuntimeError(f"HubSpot non-CRM HTTP {response.status_code}")
-        raise RuntimeError("HubSpot non-CRM retries exhausted")
+        try:
+            return response.json()
+        except ValueError:
+            raise RuntimeError("Malformed HubSpot non-CRM JSON") from None
 
     def _pages(self, route, params=None, body=None):
         cursor = None

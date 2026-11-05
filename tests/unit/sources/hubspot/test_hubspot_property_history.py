@@ -235,10 +235,10 @@ def test_429_gives_up_after_max_retries():
             reader.read_table("contacts_property_history", {}, {})
 
 
-def test_non_429_error_is_raised_immediately():
+def test_permanent_error_is_raised_immediately():
     reader = _reader()
-    with mock.patch.object(hph.requests, "post", return_value=_Resp(500)) as post:
-        with pytest.raises(RuntimeError, match="500"):
+    with mock.patch.object(hph.requests, "post", return_value=_Resp(400)) as post:
+        with pytest.raises(RuntimeError, match="400"):
             reader.read_table("contacts_property_history", {}, {})
     assert post.call_count == 1
 

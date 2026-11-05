@@ -25,9 +25,10 @@ https://api.hubapi.com
 ## Rate Limits
 
 HubSpot limits vary by endpoint family, subscription, and private-app entitlement.
-Search has its own limits and a 10,000-result query window. The connector uses
-bounded retries for HTTP429 and separate request pacing. Do not treat configured
-pacing as a guaranteed account-wide budget when multiple pipelines share a token.
+Search has its own limits and a 10,000-result query window. The connector retries
+safe GET and read-only POST requests after HTTP429/500/502/503 or request
+exceptions, with separate request pacing. Do not treat configured pacing as a
+guaranteed account-wide budget when multiple pipelines share a token.
 
 ## Pagination
 
@@ -175,9 +176,11 @@ before returning any rows, through the framework's optional
 - General burst limits for privately distributed apps: 100 requests / 10 s
   (Free/Starter), 190 / 10 s (Professional/Enterprise), 250 / 10 s with the API
   limit increase. Daily: 250k / 625k / 1M per account.
-- 429 responses: retried up to 5 times, honouring `Retry-After` when present,
-  else exponential backoff (1, 2, 4, 8, 16 s; capped at 30 s). Retry applies to
-  history reads; other endpoint families have their own retry behavior.
+- HTTP429/500/502/503 responses and request exceptions: retried up to 5 times
+  for safe GET and read-only POST requests. A valid `Retry-After` value is capped
+  at 30 seconds; otherwise retries use exponential backoff (1, 2, 4, 8, 16 s).
+  Permanent HTTP failures remain fatal and response bodies are not copied into
+  connector errors.
 
 ### Known gaps (to confirm in live testing)
 

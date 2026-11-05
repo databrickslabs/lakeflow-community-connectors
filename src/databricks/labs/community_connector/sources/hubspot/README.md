@@ -200,7 +200,7 @@ Property-history tables retain their own ingestion strategy.
 - **How it reads**: the Search API finds objects whose last-modified date changed since the last run (Search does not return history), then the Batch Read API (`POST /crm/objects/2026-09/{object}/batch/read`) fetches `propertiesWithHistory` for those objects, up to 50 IDs per call.
 - **Pagination and checkpoints**: Search sorts by numeric `hs_object_id` within a frozen modification-time window. Every page starts a new query with `hs_object_id GT <last hydrated ID>`, avoiding Search's 10,000-result paging window. Checkpoints retain the scan bounds, last ID, completion flag, parent count, and rolling parent-ID digest. Legacy `updatedAt` checkpoints remain readable. Admission can stop after a complete batch of parents, even within a timestamp group.
 - **Replay**: A new scan includes the configured lookback before the saved watermark. All selected parents' requested history is emitted, including entries older than that watermark, except where `history_since` explicitly excludes them. CDC keys deduplicate repeated history entries. Failed-batch recovery honors the recorded ending frontier and ignores admission limits. If Search membership changes during recovery, its parent count/digest check fails before returning rows.
-- **Rate limiting**: Search calls are paced below HubSpot's Search limit. HTTP429 responses use bounded retries, honoring `Retry-After` or exponential backoff.
+- **Rate limiting**: Search calls are paced below HubSpot's Search limit. Safe GET and read-only POST requests retry HTTP429/500/502/503 and request exceptions up to five times, honoring a valid bounded `Retry-After` value or using exponential backoff.
 - **Partial history responses**: Batch results must have status `COMPLETE`. Missing requested parent IDs are retried, including HTTP200/207 partial responses; unresolved parents fail the read before returning a checkpoint. Records deleted between Search and Batch Read are not silently discarded.
 
 Lookback provides bounded recovery: indexing delays longer than the configured
@@ -357,7 +357,7 @@ Follow the Lakeflow Community Connector UI, which will guide you through setting
 
 **Common Issues:**
 - **Authentication Errors**: Verify access token is correct and has proper scopes
-- **Rate Limiting**: Reduce sync frequency or implement exponential backoff
+- **Rate Limiting**: The connector retries transient reads with bounded backoff; reduce sync frequency if the retry budget is repeatedly exhausted
 - **Missing Data**: Check Private App permissions and scopes
 - **Schema Changes**: Update connector code if HubSpot adds new fields
 

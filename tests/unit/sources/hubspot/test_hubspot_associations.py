@@ -398,6 +398,7 @@ def test_get_transport_never_exposes_payload_url_or_chained_exception(generated,
     import traceback
     connector = transport_connector(generated)
     connector._history._throttle = Mock()
+    connector._history._sleep = Mock()
     response = Mock(status_code=failure if isinstance(failure, int) else 200, text="PRIVATE_BODY")
     response.json.side_effect = ValueError("PRIVATE_JSON")
     with patch("requests.get", **({"side_effect": requests.RequestException("PRIVATE_EXCEPTION")}
@@ -407,6 +408,8 @@ def test_get_transport_never_exposes_payload_url_or_chained_exception(generated,
     assert "PRIVATE" not in str(raised.value)
     assert raised.value.__suppress_context__ or raised.value.__context__ is None
     assert "PRIVATE_EXCEPTION" not in "".join(traceback.format_exception(raised.value))
+    if failure == "request":
+        assert connector._history._sleep.call_count == 5
 
 
 @pytest.mark.parametrize("generated", [False, True])

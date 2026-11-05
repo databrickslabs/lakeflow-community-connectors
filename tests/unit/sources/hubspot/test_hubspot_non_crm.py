@@ -216,7 +216,7 @@ def test_cursor_cycles(cursors):
         read.read_table("contact_lists", {})
 
 
-@pytest.mark.parametrize("status", [403, 404, 500])
+@pytest.mark.parametrize("status", [403, 404])
 def test_error_after_successful_page_aborts_snapshot_without_body_leak(status):
     read, _, _ = helper()
     with patch(NON_CRM_TEST_GET, side_effect=[
@@ -226,6 +226,19 @@ def test_error_after_successful_page_aborts_snapshot_without_body_leak(status):
             read.read_table("owners", {})
     assert str(error.value) == f"HubSpot non-CRM HTTP {status}"
     assert get.call_count == 2
+
+
+def test_server_error_after_successful_page_exhausts_retries_without_body_leak():
+    read, _, _ = helper()
+    unavailable = response(status=500)
+    unavailable.text = "PRIVATE_BODY"
+    with patch(NON_CRM_TEST_GET, side_effect=[
+        response(page({"id": "a"}, after="next")), *([unavailable] * 6),
+    ]) as get:
+        with pytest.raises(RuntimeError, match="status=500") as error:
+            read.read_table("owners", {})
+    assert "PRIVATE" not in str(error.value)
+    assert get.call_count == 7
 
 
 def test_failed_archived_partition_is_not_skipped():

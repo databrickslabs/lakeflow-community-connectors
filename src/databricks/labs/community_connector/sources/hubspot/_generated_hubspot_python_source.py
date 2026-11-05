@@ -53,6 +53,7 @@ from pyspark.sql.types import (
 from urllib.parse import quote
 import base64
 import hashlib
+import math
 import requests
 
 
@@ -886,6 +887,114 @@ def register_lakeflow_source(spark):
 
 
     ########################################################
+    # src/databricks/labs/community_connector/sources/hubspot/hubspot_http.py
+    ########################################################
+
+    HUBSPOT_MAX_RETRIES = 5
+    HUBSPOT_MAX_BACKOFF_S = 30.0
+    HUBSPOT_REQUEST_TIMEOUT_S = 60
+    HUBSPOT_RETRIABLE_STATUSES = frozenset({429, 500, 502, 503})
+
+
+    class HubspotHttpClient:
+        """Replay only safe GETs and read-only POSTs after transient failures."""
+
+        def __init__(
+            self,
+            auth_header: dict,
+            sleep: Optional[Callable[[float], None]] = None,
+            throttle: Optional[Callable[[str, float], None]] = None,
+        ) -> None:
+            self._auth_header = auth_header
+            self._sleep = sleep or time.sleep
+            self._external_throttle = throttle
+            self._last_call = {}
+
+        @staticmethod
+        def retry_delay(response, attempt: int) -> float:
+            """Return a finite, bounded delay from Retry-After or exponential backoff."""
+            headers = getattr(response, "headers", None) or {}
+            retry_after = headers.get("Retry-After")
+            if retry_after is not None:
+                try:
+                    seconds = float(retry_after)
+                    if math.isfinite(seconds) and seconds >= 0:
+                        return min(seconds, HUBSPOT_MAX_BACKOFF_S)
+                except (TypeError, ValueError):
+                    pass
+            return min(2.0 ** attempt, HUBSPOT_MAX_BACKOFF_S)
+
+        def _throttle(self, kind: Optional[str], min_interval: float) -> None:
+            if not kind or min_interval <= 0:
+                return
+            if self._external_throttle is not None:
+                self._external_throttle(kind, min_interval)
+                return
+            now = time.monotonic()
+            last = self._last_call.get(kind)
+            if last is not None and now - last < min_interval:
+                self._sleep(min_interval - (now - last))
+            self._last_call[kind] = time.monotonic()
+
+        def _request(
+            self,
+            method: str,
+            url: str,
+            *,
+            operation: str,
+            params: Optional[dict] = None,
+            json_body: Optional[dict] = None,
+            kind: Optional[str] = None,
+            min_interval: float = 0,
+            timeout: int = HUBSPOT_REQUEST_TIMEOUT_S,
+        ):
+            """Issue an idempotent read and retry only bounded transient failures."""
+            send = getattr(requests, method)
+            request_args = {"headers": self._auth_header, "timeout": timeout}
+            if params is not None:
+                request_args["params"] = params
+            if json_body is not None:
+                request_args["json"] = json_body
+
+            for attempt in range(HUBSPOT_MAX_RETRIES + 1):
+                self._throttle(kind, min_interval)
+                try:
+                    response = send(url, **request_args)
+                except requests.RequestException:
+                    if attempt < HUBSPOT_MAX_RETRIES:
+                        self._sleep(min(2.0 ** attempt, HUBSPOT_MAX_BACKOFF_S))
+                        continue
+                    raise RuntimeError(
+                        f"HubSpot {operation} failed after retries (request error)"
+                    ) from None
+
+                if response.status_code in HUBSPOT_RETRIABLE_STATUSES:
+                    if attempt < HUBSPOT_MAX_RETRIES:
+                        self._sleep(self.retry_delay(response, attempt))
+                        continue
+                    raise RuntimeError(
+                        f"HubSpot {operation} failed after retries "
+                        f"(status={response.status_code})"
+                    ) from None
+                return response
+
+            raise RuntimeError(f"HubSpot {operation} exhausted retries")  # pragma: no cover
+
+        def get(self, url: str, *, operation: str, params=None, kind=None, min_interval=0):
+            return self._request(
+                "get", url, operation=operation, params=params,
+                kind=kind, min_interval=min_interval,
+            )
+
+        def post(self, url: str, body: dict, *, operation: str, kind=None, min_interval=0):
+            """POST only to HubSpot Search, batch-read, and list-read endpoints."""
+            return self._request(
+                "post", url, operation=operation, json_body=body,
+                kind=kind, min_interval=min_interval,
+            )
+
+
+    ########################################################
     # src/databricks/labs/community_connector/sources/hubspot/hubspot_non_crm.py
     ########################################################
 
@@ -893,8 +1002,8 @@ def register_lakeflow_source(spark):
         "owners", "pipelines", "forms", "contact_lists",
         "contact_list_memberships", "form_submissions",
     )
-    NON_CRM_MAX_RETRIES = 5
-    NON_CRM_TIMEOUT_S = 60
+    NON_CRM_MAX_RETRIES = HUBSPOT_MAX_RETRIES
+    NON_CRM_TIMEOUT_S = HUBSPOT_REQUEST_TIMEOUT_S
     NON_CRM_MIN_INTERVAL_S = 0.11
     NON_CRM_PIPELINE_TYPES = {
         "0-3", "0-5", "0-27", "0-421", "0-410", "0-136", "0-420",
@@ -949,13 +1058,13 @@ def register_lakeflow_source(spark):
         """Read all partitions and pages before returning a snapshot."""
 
         def __init__(self, base_url, auth_header, custom_types: Callable, post: Callable,
-                     sleep: Callable = time.sleep):
+                     sleep: Callable = time.sleep, http=None):
             self.base_url = base_url.rstrip("/")
             self.auth_header = auth_header
             self._custom_types = custom_types
             self._post = post
             self._sleep = sleep
-            self._last_get = None
+            self._http = http or HubspotHttpClient(auth_header, sleep=sleep)
 
         @staticmethod
         def list_tables() -> list[str]:
@@ -1006,29 +1115,19 @@ def register_lakeflow_source(spark):
             return StructType(fields[table] + _non_crm_fields(["payload"]))
 
         def _get(self, route, params):
-            for attempt in range(NON_CRM_MAX_RETRIES + 1):
-                now = time.monotonic()
-                if self._last_get is not None:
-                    delay = NON_CRM_MIN_INTERVAL_S - (now - self._last_get)
-                    if delay > 0:
-                        self._sleep(delay)
-                self._last_get = time.monotonic()
-                response = requests.get(self.base_url + route, headers=self.auth_header,
-                                        params=params, timeout=NON_CRM_TIMEOUT_S)
-                if response.status_code == 200:
-                    return response.json()
-                if response.status_code == 429 and attempt < NON_CRM_MAX_RETRIES:
-                    try:
-                        delay = float(response.headers.get("Retry-After", 2 ** attempt))
-                        if not 0 <= delay <= 30:
-                            delay = min(2 ** attempt, 30)
-                    except (ValueError, TypeError):
-                        delay = min(2 ** attempt, 30)
-                    self._sleep(delay)
-                    continue
-                # Do not leak response bodies, tokens, or identifiers into errors.
+            response = self._http.get(
+                self.base_url + route,
+                operation="non-CRM GET",
+                params=params,
+                kind="non_crm",
+                min_interval=NON_CRM_MIN_INTERVAL_S,
+            )
+            if response.status_code != 200:
                 raise RuntimeError(f"HubSpot non-CRM HTTP {response.status_code}")
-            raise RuntimeError("HubSpot non-CRM retries exhausted")
+            try:
+                return response.json()
+            except ValueError:
+                raise RuntimeError("Malformed HubSpot non-CRM JSON") from None
 
         def _pages(self, route, params=None, body=None):
             cursor = None
@@ -1202,10 +1301,10 @@ def register_lakeflow_source(spark):
     BATCH_READ_SIZE = 50  # history reduces per-request capacity; stay well under 100
     BATCH_MIN_INTERVAL_S = 0.1
 
-    # 429 handling
-    MAX_RETRIES = 5
-    MAX_BACKOFF_S = 30.0
-    REQUEST_TIMEOUT_S = 60
+    # Backwards-compatible names retained for tests and adjacent helpers.
+    MAX_RETRIES = HUBSPOT_MAX_RETRIES
+    MAX_BACKOFF_S = HUBSPOT_MAX_BACKOFF_S
+    REQUEST_TIMEOUT_S = HUBSPOT_REQUEST_TIMEOUT_S
 
 
     def is_history_table(table_name: str) -> bool:
@@ -1284,8 +1383,9 @@ def register_lakeflow_source(spark):
             init_ts: str,
             get_property_names: Callable[[str], List[str]],
             get_cursor_property: Callable[[str], str],
-            sleep: Callable[[float], None] = time.sleep,
+            sleep: Optional[Callable[[float], None]] = None,
             get_api_object_type: Optional[Callable[[str], str]] = None,
+            http: Optional[HubspotHttpClient] = None,
         ) -> None:
             self.base_url = base_url
             self.auth_header = auth_header
@@ -1296,8 +1396,13 @@ def register_lakeflow_source(spark):
             self._get_property_names = get_property_names
             self._get_cursor_property = get_cursor_property
             self._get_api_object_type = get_api_object_type or (lambda obj: obj)
-            self._sleep = sleep
+            self._sleep = sleep or time.sleep
             self._last_call: Dict[str, float] = {}
+            self._http = http or HubspotHttpClient(
+                auth_header,
+                sleep=lambda delay: self._sleep(delay),
+                throttle=lambda kind, interval: self._throttle(kind, interval),
+            )
 
         # ------------------------------------------------------------------
         # Metadata
@@ -1635,32 +1740,21 @@ def register_lakeflow_source(spark):
             )
 
         def _post(self, kind: str, url: str, body: dict, min_interval: float) -> dict:
-            """POST with throttling and 429 retry (Retry-After or exponential backoff)."""
-            for attempt in range(MAX_RETRIES + 1):
-                self._throttle(kind, min_interval)
-                resp = requests.post(
-                    url, headers=self.auth_header, json=body, timeout=REQUEST_TIMEOUT_S
-                )
-                # Batch read returns 207 when some IDs fail (e.g. deleted mid-run).
-                if resp.status_code in (200, 207):
-                    return resp.json()
-                if resp.status_code == 429 and attempt < MAX_RETRIES:
-                    self._sleep(self._retry_delay(resp, attempt))
-                    continue
-                raise RuntimeError(
-                    f"HubSpot API error for {url}: {resp.status_code} {resp.text}"
-                )
-            raise RuntimeError(f"HubSpot API error for {url}: exhausted retries")
+            """POST to an idempotent read endpoint under the shared retry policy."""
+            resp = self._http.post(
+                url, body, operation=f"{kind} POST", kind=kind, min_interval=min_interval
+            )
+            # Batch read returns 207 when some IDs fail (e.g. deleted mid-run).
+            if resp.status_code not in (200, 207):
+                raise RuntimeError(f"HubSpot {kind} POST failed (status={resp.status_code})")
+            try:
+                return resp.json()
+            except ValueError:
+                raise RuntimeError(f"Malformed HubSpot {kind} POST JSON") from None
 
         @staticmethod
         def _retry_delay(resp, attempt: int) -> float:
-            retry_after = resp.headers.get("Retry-After") if resp.headers else None
-            if retry_after:
-                try:
-                    return min(max(float(retry_after), 0.0), MAX_BACKOFF_S)
-                except ValueError:
-                    pass
-            return min(2.0 ** attempt, MAX_BACKOFF_S)
+            return HubspotHttpClient.retry_delay(resp, attempt)
 
         def _throttle(self, kind: str, min_interval: float) -> None:
             now = time.monotonic()
@@ -1804,33 +1898,31 @@ def register_lakeflow_source(spark):
                 ],
                 get_api_object_type=self._get_api_object_type,
             )
+            self._http = self._history._http
             self._associations = HubspotAssociations(
                 self.base_url, self._history._post, get=self._get_association_page
             )
             self._non_crm = HubspotNonCrm(
-                self.base_url, self.auth_header, self._custom_api_types, self._history._post
+                self.base_url, self.auth_header, self._custom_api_types, self._history._post,
+                http=self._http,
             )
 
         def _get_association_page(self, kind, url, params, min_interval):
             """Bounded GET transport without response bodies or record IDs in errors."""
-            for attempt in range(MAX_RETRIES + 1):
-                self._history._throttle(kind, min_interval)
+            response = self._http.get(
+                url,
+                operation="association GET",
+                params=params,
+                kind=kind,
+                min_interval=min_interval,
+            )
+            if response.status_code == 200:
                 try:
-                    response = requests.get(
-                        url, headers=self.auth_header, params=params, timeout=REQUEST_TIMEOUT_S
-                    )
-                except requests.RequestException:
-                    raise RuntimeError("HubSpot association GET request failed") from None
-                if response.status_code == 200:
-                    try:
-                        return response.json()
-                    except ValueError:
-                        raise RuntimeError("Malformed HubSpot association GET JSON") from None
-                if response.status_code == 429 and attempt < MAX_RETRIES:
-                    self._history._sleep(self._history._retry_delay(response, attempt))
-                    continue
+                    return response.json()
+                except ValueError:
+                    raise RuntimeError("Malformed HubSpot association GET JSON") from None
+            if response.status_code != 200:
                 raise RuntimeError(f"HubSpot association GET failed (status={response.status_code})")
-            raise RuntimeError("HubSpot association GET exhausted retries")
 
         def read_table_between_offsets(self, table_name, start_offset, end_offset, table_options):
             table_options = self._resolve_table_options(table_name, table_options)
@@ -1878,14 +1970,17 @@ def register_lakeflow_source(spark):
             if self._custom_objects is not None:
                 return list(self._custom_objects)
             url = f"{self.base_url}/crm-object-schemas/2026-09/schemas"
-            resp = requests.get(url, headers=self.auth_header, timeout=60)
+            resp = self._http.get(url, operation="schema discovery GET")
             # Schema access is optional for accounts ingesting only standard CRM
             # objects. Do not cache a denied response as successful empty discovery.
             if resp.status_code == 403 and not require_access:
                 return []
             if resp.status_code != 200:
                 raise RuntimeError(f"HubSpot schema discovery failed: HTTP {resp.status_code}")
-            schemas = resp.json().get("results")
+            try:
+                schemas = resp.json().get("results")
+            except ValueError:
+                raise RuntimeError("Malformed HubSpot schema discovery JSON") from None
             if not isinstance(schemas, list):
                 raise RuntimeError("Malformed HubSpot schema discovery results")
             names_by_type = {v: k for k, v in self._STANDARD_OBJECT_TYPES.items()}
@@ -2271,14 +2366,19 @@ def register_lakeflow_source(spark):
             url = f"{self.base_url}/crm/properties/2026-09/{api_type}"
 
             try:
-                resp = requests.get(url, headers=self.auth_header, timeout=60)
+                resp = self._http.get(url, operation="properties GET")
                 if resp.status_code != 200:
                     raise RuntimeError(
                         f"HubSpot Properties API error for {object_type}: "
-                        f"{resp.status_code} {resp.text}"
+                        f"status={resp.status_code}"
                     )
 
-                properties = resp.json()["results"]
+                try:
+                    properties = resp.json()["results"]
+                except (KeyError, TypeError, ValueError):
+                    raise RuntimeError(
+                        f"Malformed HubSpot properties response for {object_type}"
+                    ) from None
                 self._property_types[object_type] = {
                     prop["name"]: str(prop.get("type", "string")).lower() for prop in properties
                 }
@@ -2576,13 +2676,14 @@ def register_lakeflow_source(spark):
                 url += f"&properties={','.join(property_names)}"
             # Relationships are read separately with complete per-parent pagination.
 
-            resp = requests.get(url, headers=self.auth_header, timeout=60)
+            resp = self._http.get(url, operation="object-list GET")
             if resp.status_code != 200:
-                raise Exception(
-                    f"HubSpot API error for {table_name}: {resp.status_code} {resp.text}"
-                )
+                raise RuntimeError(f"HubSpot object-list GET failed (status={resp.status_code})")
 
-            data = resp.json()
+            try:
+                data = resp.json()
+            except ValueError:
+                raise RuntimeError("Malformed HubSpot object-list JSON") from None
             if not isinstance(data, dict) or not isinstance(data.get("results"), list):
                 raise RuntimeError("Malformed HubSpot object results")
             if (any(key in data for key in ("errors", "numErrors", "category"))
@@ -2647,14 +2748,15 @@ def register_lakeflow_source(spark):
 
             api_type = self._get_api_object_type(table_name)
             url = f"{self.base_url}/crm/objects/2026-09/{api_type}/search"
-            resp = requests.post(url, headers=self.auth_header, json=search_body, timeout=60)
+            resp = self._http.post(url, search_body, operation="object-search POST")
 
             if resp.status_code != 200:
-                raise Exception(
-                    f"HubSpot API error for {table_name}: {resp.status_code} {resp.text}"
-                )
+                raise RuntimeError(f"HubSpot object-search POST failed (status={resp.status_code})")
 
-            data = resp.json()
+            try:
+                data = resp.json()
+            except ValueError:
+                raise RuntimeError("Malformed HubSpot object-search JSON") from None
             records = data.get("results", [])
             next_after = data.get("paging", {}).get("next", {}).get("after")
 
@@ -2754,14 +2856,14 @@ def register_lakeflow_source(spark):
             """Test the connection to HubSpot API"""
             try:
                 url = f"{self.base_url}/crm/objects/2026-09/contacts?limit=1"
-                resp = requests.get(url, headers=self.auth_header, timeout=60)
+                resp = self._http.get(url, operation="connection-test GET")
 
                 if resp.status_code == 200:
                     return {"status": "success", "message": "Connection successful"}
                 else:
                     return {
                         "status": "error",
-                        "message": f"API error: {resp.status_code} {resp.text}",
+                        "message": f"API error: {resp.status_code}",
                     }
             except Exception as e:
                 return {"status": "error", "message": f"Connection failed: {str(e)}"}

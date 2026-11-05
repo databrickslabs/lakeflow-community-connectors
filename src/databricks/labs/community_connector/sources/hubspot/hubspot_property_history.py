@@ -24,6 +24,13 @@ from typing import Callable, Dict, Iterator, List, Optional, Tuple
 import requests
 from pyspark.sql.types import LongType, StringType, StructField, StructType
 
+from databricks.labs.community_connector.sources.hubspot.hubspot_http import (
+    HUBSPOT_MAX_BACKOFF_S,
+    HUBSPOT_MAX_RETRIES,
+    HUBSPOT_REQUEST_TIMEOUT_S,
+    HubspotHttpClient,
+)
+
 HISTORY_SUFFIX = "_property_history"
 
 # Standard CRM objects that get a property history table. Custom objects
@@ -63,10 +70,10 @@ SEARCH_MIN_INTERVAL_S = 0.25  # search is limited to 5 req/s per account
 BATCH_READ_SIZE = 50  # history reduces per-request capacity; stay well under 100
 BATCH_MIN_INTERVAL_S = 0.1
 
-# 429 handling
-MAX_RETRIES = 5
-MAX_BACKOFF_S = 30.0
-REQUEST_TIMEOUT_S = 60
+# Backwards-compatible names retained for tests and adjacent helpers.
+MAX_RETRIES = HUBSPOT_MAX_RETRIES
+MAX_BACKOFF_S = HUBSPOT_MAX_BACKOFF_S
+REQUEST_TIMEOUT_S = HUBSPOT_REQUEST_TIMEOUT_S
 
 
 def is_history_table(table_name: str) -> bool:
@@ -145,8 +152,9 @@ class HubspotPropertyHistory:  # pylint: disable=too-many-instance-attributes
         init_ts: str,
         get_property_names: Callable[[str], List[str]],
         get_cursor_property: Callable[[str], str],
-        sleep: Callable[[float], None] = time.sleep,
+        sleep: Optional[Callable[[float], None]] = None,
         get_api_object_type: Optional[Callable[[str], str]] = None,
+        http: Optional[HubspotHttpClient] = None,
     ) -> None:
         self.base_url = base_url
         self.auth_header = auth_header
@@ -157,8 +165,13 @@ class HubspotPropertyHistory:  # pylint: disable=too-many-instance-attributes
         self._get_property_names = get_property_names
         self._get_cursor_property = get_cursor_property
         self._get_api_object_type = get_api_object_type or (lambda obj: obj)
-        self._sleep = sleep
+        self._sleep = sleep or time.sleep
         self._last_call: Dict[str, float] = {}
+        self._http = http or HubspotHttpClient(
+            auth_header,
+            sleep=lambda delay: self._sleep(delay),
+            throttle=lambda kind, interval: self._throttle(kind, interval),
+        )
 
     # ------------------------------------------------------------------
     # Metadata
@@ -496,32 +509,21 @@ class HubspotPropertyHistory:  # pylint: disable=too-many-instance-attributes
         )
 
     def _post(self, kind: str, url: str, body: dict, min_interval: float) -> dict:
-        """POST with throttling and 429 retry (Retry-After or exponential backoff)."""
-        for attempt in range(MAX_RETRIES + 1):
-            self._throttle(kind, min_interval)
-            resp = requests.post(
-                url, headers=self.auth_header, json=body, timeout=REQUEST_TIMEOUT_S
-            )
-            # Batch read returns 207 when some IDs fail (e.g. deleted mid-run).
-            if resp.status_code in (200, 207):
-                return resp.json()
-            if resp.status_code == 429 and attempt < MAX_RETRIES:
-                self._sleep(self._retry_delay(resp, attempt))
-                continue
-            raise RuntimeError(
-                f"HubSpot API error for {url}: {resp.status_code} {resp.text}"
-            )
-        raise RuntimeError(f"HubSpot API error for {url}: exhausted retries")
+        """POST to an idempotent read endpoint under the shared retry policy."""
+        resp = self._http.post(
+            url, body, operation=f"{kind} POST", kind=kind, min_interval=min_interval
+        )
+        # Batch read returns 207 when some IDs fail (e.g. deleted mid-run).
+        if resp.status_code not in (200, 207):
+            raise RuntimeError(f"HubSpot {kind} POST failed (status={resp.status_code})")
+        try:
+            return resp.json()
+        except ValueError:
+            raise RuntimeError(f"Malformed HubSpot {kind} POST JSON") from None
 
     @staticmethod
     def _retry_delay(resp, attempt: int) -> float:
-        retry_after = resp.headers.get("Retry-After") if resp.headers else None
-        if retry_after:
-            try:
-                return min(max(float(retry_after), 0.0), MAX_BACKOFF_S)
-            except ValueError:
-                pass
-        return min(2.0 ** attempt, MAX_BACKOFF_S)
+        return HubspotHttpClient.retry_delay(resp, attempt)
 
     def _throttle(self, kind: str, min_interval: float) -> None:
         now = time.monotonic()

@@ -34,7 +34,8 @@ class ArchiveAPI(ActivityAPI):
         assert query["archived"] == ["true"]
         index = int(query.get("after", ["0"])[0])
         self.archive_calls += 1
-        assert self.archive_calls <= 6, "unbounded archive pagination"
+        # One successful page plus six bounded attempts for the failing page.
+        assert self.archive_calls <= 7, "unbounded archive pagination"
         if index == self.fail_page:
             return Mock(status_code=503, text="synthetic later page failure")
         data = {"results": [self.pages[index]]}
