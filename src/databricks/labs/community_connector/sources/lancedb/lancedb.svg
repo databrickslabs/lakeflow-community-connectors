@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 286 286" role="img" aria-label="LanceDB">
+  <title>LanceDB</title>
+  <circle cx="54" cy="54" r="30" fill="#000000"/>
+  <circle cx="113" cy="54" r="30" fill="#000000"/>
+  <circle cx="173" cy="54" r="30" fill="#000000"/>
+  <circle cx="54" cy="113" r="30" fill="#000000"/>
+  <circle cx="173" cy="113" r="30" fill="#000000"/>
+  <circle cx="232" cy="113" r="30" fill="#000000"/>
+  <circle cx="54" cy="173" r="30" fill="#000000"/>
+  <circle cx="113" cy="173" r="30" fill="#000000"/>
+  <circle cx="173" cy="173" r="30" fill="#000000"/>
+  <circle cx="113" cy="232" r="30" fill="#000000"/>
+  <circle cx="232" cy="232" r="30" fill="#000000"/>
+</svg>
