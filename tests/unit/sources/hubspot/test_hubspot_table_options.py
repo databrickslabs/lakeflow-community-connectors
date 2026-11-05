@@ -141,7 +141,9 @@ def test_five_tables_and_consumer_paths_stay_isolated(generated):
             "tableConfigs": json.dumps(configs)}
     with mock.patch.object(conn, "list_tables", return_value=list(bodies)), mock.patch.object(
         conn, "_get_object_properties", return_value=properties
-    ), mock.patch.object(conn, "_read_data", return_value=([], {})) as read:
+    ), mock.patch.object(conn, "_read_data", return_value=([], {})) as read, mock.patch.object(
+        conn, "_read_activity_bootstrap", return_value=([], {})
+    ) as bootstrap:
         for name in [*bodies, *reversed(bodies)]:
             options = {**opts, "tableName": name}
             schema = conn.get_table_schema(name, options)
@@ -157,7 +159,10 @@ def test_five_tables_and_consumer_paths_stay_isolated(generated):
             agent_metadata = dict((row["key"], row["value"]) for row in
                                   _default_get_object_metadata(conn, table_name=name, table_options=options))
             assert agent_metadata["ingestion_type"] == metadata["ingestion_type"]
-            assert read.call_args.kwargs["table_options"] == configs[name]
+            if name == "meetings":
+                assert read.call_args.kwargs["table_options"] == configs[name]
+            else:
+                assert bootstrap.call_args.args[2] == configs[name]
         # Delete reads must select the calls entry too, not only ignore wrong values.
         with mock.patch.object(conn, "_fetch_full_refresh_batch", return_value=([], None)) as fetch:
             conn.read_table_deletes("calls", {}, opts)
@@ -286,7 +291,9 @@ def test_ingestion_agent_supported_routing_with_lowercase_envelope(generated):
     props = [{"name": name, "type": "string"} for name in ["hs_call_body", "hs_note_body", "hs_lastmodifieddate"]]
     with mock.patch.object(conn, "list_tables", return_value=["calls"]), mock.patch.object(
         conn, "_get_object_properties", return_value=props
-    ), mock.patch.object(conn, "_read_data", return_value=([], {})) as read:
+    ), mock.patch.object(conn, "_read_data", return_value=([], {})), mock.patch.object(
+        conn, "_read_activity_bootstrap", return_value=([], {})
+    ) as bootstrap:
         for operation in ["read_table", "get_object_metadata"]:
             # The dispatcher currently requires canonical tableName after its
             # plain-dict copy. The separate regression below records that limit.
@@ -298,7 +305,7 @@ def test_ingestion_agent_supported_routing_with_lowercase_envelope(generated):
             if operation == "read_table":
                 assert schema["properties"].dataType.fieldNames() == ["hs_call_body", "hs_lastmodifieddate"]
                 assert rows == []
-                assert read.call_args.kwargs["table_options"] == {"include_properties": "hs_call_body"}
+                assert bootstrap.call_args.args[2] == {"include_properties": "hs_call_body"}
             else:
                 assert any(row["key"] == "ingestion_type" and row["value"] == "cdc_with_deletes" for row in rows)
 

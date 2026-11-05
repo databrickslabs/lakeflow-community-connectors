@@ -36,7 +36,14 @@ HubSpot paginates with an opaque `paging.next.after` cursor. The
 connector follows it until either:
 1. The endpoint returns no `paging.next.after`, or
 2. The configured `max_records_per_batch` (admission control) is reached, in
-   which case the partial cursor is returned and the next microbatch resumes.
+   which case a supported resumable scan stops after the current page and the
+   next microbatch resumes from the opaque cursor.
+
+Initial calls, emails, tasks, and notes reads persist that cursor with one
+frozen upper timestamp. Their `updatedAt` watermark remains unchanged until
+the object-list pass completes, then CDC starts from the frozen boundary.
+Replay must reproduce the recorded page range or fail closed. Object-list
+pagination is not a transactional snapshot during concurrent source changes.
 
 ## Tables
 

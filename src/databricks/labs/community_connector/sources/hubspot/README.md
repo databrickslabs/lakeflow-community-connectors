@@ -229,6 +229,14 @@ order. Large archive inventories can therefore increase request volume and
 memory use. Only archives returned within HubSpot's retention are observable;
 hard deletes and expired archives are not guaranteed.
 
+The initial active read for calls, emails, tasks, and notes is a resumable
+bootstrap. When `max_records_per_batch` is set, it stops only after a complete
+HubSpot page and saves the opaque `paging.next.after` cursor plus one frozen
+upper timestamp. It does not advance `updatedAt` until every page completes.
+After completion, CDC begins from that frozen boundary, so records observed
+beyond the boundary can be replayed safely as upserts. The object-list API is
+not a point-in-time snapshot; concurrent changes can affect page membership.
+
 Meetings use complete active snapshots by default. HubSpot rejects archived
 meeting listing with `VALIDATION_ERROR` for `MEETING_EVENT` (`0-47`). Each read
 therefore enumerates the complete current meeting set, even with a saved offset
@@ -316,7 +324,7 @@ Python interface still receives these values as its `table_options` map.
 
 | Option | Applies to | Default | Description |
 |---|---|---|---|
-| `max_records_per_batch` | all incremental tables | no cap | Soft limit on records returned per microbatch. History stops after complete parent batches and saves an ID frontier; one parent can exceed the cap. Object reads drain parents sharing the last processed `updatedAt` before stopping. |
+| `max_records_per_batch` | all incremental tables | no cap | Soft limit on records returned per microbatch. Initial calls/emails/tasks/notes bootstraps stop after complete HubSpot pages and persist the opaque page cursor without advancing the CDC watermark. History stops after complete parent batches and saves an ID frontier; one parent can exceed the cap. Incremental object reads drain parents sharing the last processed `updatedAt` before stopping. |
 | `association_sync_mode` | object tables | `incremental` | `incremental` refreshes selected changed parents. `full_refresh` uses snapshot ingestion and reconciles all current relationships on every update. Add this option to an existing UC connection's external options allowlist before using it. |
 | `pipeline_object_types` | `pipelines` | deals, tickets, tasks, discovered custom types | Comma-separated canonical object type IDs. Replaces the default partition inventory; each configured partition must succeed. |
 | `history_properties` | `*_property_history` | all properties | Comma-separated property names to fetch history for (e.g. `lifecyclestage,hs_lead_status,dealstage`). Recommended for portals with many properties, because requesting history for every property makes each Batch Read response larger. |

@@ -27,6 +27,9 @@ from databricks.labs.community_connector.sources.hubspot.hubspot_property_histor
 
 
 class HubspotLakeflowConnect(LakeflowConnect):
+    _ACTIVITY_BOOTSTRAP_TABLES = frozenset({"calls", "emails", "notes", "tasks"})
+    _ACTIVITY_BOOTSTRAP_KEY = "activity_bootstrap"
+
     _STANDARD_OBJECT_TYPES = {
         "contacts": "0-1", "companies": "0-2", "deals": "0-3", "tickets": "0-5",
         "calls": "0-48", "emails": "0-49", "meetings": "0-47", "tasks": "0-27",
@@ -188,6 +191,21 @@ class HubspotLakeflowConnect(LakeflowConnect):
             return self._history.read_between_offsets(
                 table_name, start_offset, end_offset, table_options
             )
+        if start_offset == end_offset:
+            return iter([])
+        if table_name in self._ACTIVITY_BOOTSTRAP_TABLES:
+            expected = self._activity_bootstrap_state(end_offset or {})
+            upper = expected["upper"] if expected is not None else None
+            state = self._activity_bootstrap_state(start_offset or {}, upper)
+            if state is not None and not state["complete"]:
+                if expected is None:
+                    raise RuntimeError("HubSpot activity bootstrap replay offset is missing")
+                rows, actual_end = self._read_activity_bootstrap(
+                    table_name, start_offset or {}, table_options, state
+                )
+                if actual_end != end_offset:
+                    raise RuntimeError("HubSpot activity bootstrap replay range changed")
+                return iter(rows)
         return self.read_table(table_name, start_offset, table_options)[0]
 
     def _custom_api_types(self) -> List[str]:
@@ -696,9 +714,18 @@ class HubspotLakeflowConnect(LakeflowConnect):
         if is_history_table(table_name):
             return self._history.read_table(table_name, start_offset, table_options)
 
+        start_offset = start_offset or {}
+        if table_name in self._ACTIVITY_BOOTSTRAP_TABLES:
+            bootstrap = self._activity_bootstrap_state(start_offset)
+            if bootstrap is not None and not bootstrap["complete"]:
+                rows, end = self._read_activity_bootstrap(
+                    table_name, start_offset, table_options, bootstrap
+                )
+                return iter(rows), end
+
         # Determine if this is an incremental read
         is_incremental = (
-            start_offset is not None and start_offset.get("updatedAt") is not None
+            start_offset.get("updatedAt") is not None
         )
         if self._uses_snapshot(table_name, table_options):
             is_incremental = False
@@ -710,6 +737,88 @@ class HubspotLakeflowConnect(LakeflowConnect):
             incremental=is_incremental,
             table_options=table_options,
         )
+
+    def _activity_bootstrap_state(self, offset: dict, upper_override: str = None):
+        """Validate a persisted activity scan or create the initial state."""
+        key = self._ACTIVITY_BOOTSTRAP_KEY
+        if key not in offset:
+            if offset.get("updatedAt") is not None:
+                return None
+            upper = upper_override or self._init_ts
+            try:
+                self._archive_time(upper)
+            except RuntimeError:
+                raise RuntimeError("Malformed HubSpot activity bootstrap boundary") from None
+            return {"upper": upper, "after": None, "complete": False}
+
+        state = offset[key]
+        if not isinstance(state, dict) or set(state) != {"upper", "after", "complete"}:
+            raise RuntimeError("Malformed HubSpot activity bootstrap offset")
+        upper, after, complete = state["upper"], state["after"], state["complete"]
+        try:
+            self._archive_time(upper)
+        except RuntimeError:
+            raise RuntimeError("Malformed HubSpot activity bootstrap boundary") from None
+        if not isinstance(complete, bool):
+            raise RuntimeError("Malformed HubSpot activity bootstrap completion flag")
+        if after is not None and (
+            isinstance(after, bool) or not isinstance(after, (str, int)) or not str(after)
+        ):
+            raise RuntimeError("Malformed HubSpot activity bootstrap cursor")
+        if complete:
+            if after is not None or offset.get("updatedAt") != upper:
+                raise RuntimeError("Malformed completed HubSpot activity bootstrap offset")
+        elif after is None or "updatedAt" in offset:
+            raise RuntimeError("Malformed incomplete HubSpot activity bootstrap offset")
+        return {"upper": upper, "after": after, "complete": complete}
+
+    def _read_activity_bootstrap(self, table_name, start_offset, table_options, state):
+        """Read complete object-list pages and persist only the next opaque cursor."""
+        metadata = self.read_table_metadata(table_name, table_options)
+        property_names = metadata.get("property_names", [])
+        associations = metadata.get("associations", [])
+        max_records = self._parse_max_records(table_options)
+        after = state["after"]
+        seen_cursors = {str(after)} if after is not None else set()
+        seen_ids = set()
+        rows = []
+
+        while True:
+            records, next_after = self._fetch_full_refresh_batch(
+                table_name, property_names, associations, after, archived=False
+            )
+            if not records and next_after is not None:
+                raise RuntimeError("Empty HubSpot activity bootstrap page has pagination")
+            for record in records:
+                if not isinstance(record, dict) or record.get("archived", False) is not False:
+                    raise RuntimeError("Malformed HubSpot activity bootstrap record")
+                identity = record.get("id")
+                if (isinstance(identity, bool) or not isinstance(identity, (str, int))
+                        or not str(identity).strip()):
+                    raise RuntimeError("Malformed HubSpot activity bootstrap identity")
+                identity = str(identity)
+                if identity in seen_ids:
+                    raise RuntimeError("Duplicate HubSpot activity bootstrap identity")
+                seen_ids.add(identity)
+
+            self._hydrate_associations(table_name, records, associations)
+            rows.extend(self._transform_records(records, table_name, property_names))
+            if next_after is None:
+                end_state = {"upper": state["upper"], "after": None, "complete": True}
+                return rows, {
+                    self._ACTIVITY_BOOTSTRAP_KEY: end_state,
+                    "updatedAt": state["upper"],
+                }
+
+            cursor = str(next_after)
+            if cursor in seen_cursors:
+                raise RuntimeError("HubSpot activity bootstrap cursor repeated")
+            seen_cursors.add(cursor)
+            if max_records is not None and len(rows) >= max_records:
+                end_state = {"upper": state["upper"], "after": next_after, "complete": False}
+                return rows, {self._ACTIVITY_BOOTSTRAP_KEY: end_state}
+            after = next_after
+            time.sleep(0.1)
 
     @staticmethod
     def _archive_time(value):
