@@ -1,7 +1,7 @@
 """Meetings must reconcile from complete active snapshots, never archive paging."""
 import copy
 from unittest.mock import Mock, patch
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import urlparse
 
 import pytest
 
@@ -18,11 +18,11 @@ class SnapshotAPI(ActivityAPI):
     def get(self, url, **kwargs):
         if urlparse(url).path != f"/crm/objects/2026-09/{self.table}":
             return super().get(url, **kwargs)
-        query = parse_qs(urlparse(url).query)
-        assert query["archived"] == ["false"], "meetings cannot list archives"
+        query = kwargs["params"]
+        assert query["archived"] == "false", "meetings cannot list archives"
         self.active_calls += 1
         assert self.active_calls < 6, "unbounded active pagination"
-        index = int(query.get("after", ["0"])[0])
+        index = int(query.get("after", "0"))
         return Mock(status_code=200, json=lambda: copy.deepcopy(self.pages[index]))
 
 
@@ -99,7 +99,7 @@ def test_numeric_zero_cursor_is_followed_not_treated_as_end(generated):
     def get(url, **kwargs):
         if urlparse(url).path != "/crm/objects/2026-09/meetings":
             return api.get(url, **kwargs)
-        calls.append(url)
+        calls.append((url, kwargs))
         payload = ({"results": [api.parent()], "paging": {"next": {"after": 0}}}
                    if len(calls) == 1 else {"results": [{**api.parent(), "id": "2"}]})
         return Mock(status_code=200, json=lambda: copy.deepcopy(payload))
@@ -108,7 +108,7 @@ def test_numeric_zero_cursor_is_followed_not_treated_as_end(generated):
         conn, _, _ = consumer("meetings", generated)
         rows, _ = conn.read_table("meetings", {}, {})
         assert {r["id"] for r in rows} == {"1", "2"}
-        assert parse_qs(urlparse(calls[1]).query)["after"] == ["0"]
+        assert calls[1][1]["params"]["after"] == 0
 
 
 @pytest.mark.parametrize("generated", [False, True])

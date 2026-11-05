@@ -1,7 +1,7 @@
 """Archive reconciliation must not checkpoint past unordered, unscanned pages."""
 
 import copy
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import urlparse
 from unittest.mock import Mock, patch
 
 import pytest
@@ -30,9 +30,9 @@ class ArchiveAPI(ActivityAPI):
     def get(self, url, **kwargs):
         if urlparse(url).path != f"/crm/objects/2026-09/{self.table}":
             return super().get(url, **kwargs)
-        query = parse_qs(urlparse(url).query)
-        assert query["archived"] == ["true"]
-        index = int(query.get("after", ["0"])[0])
+        query = kwargs["params"]
+        assert query["archived"] == "true"
+        index = int(query.get("after", "0"))
         self.archive_calls += 1
         # One successful page plus six bounded attempts for the failing page.
         assert self.archive_calls <= 7, "unbounded archive pagination"

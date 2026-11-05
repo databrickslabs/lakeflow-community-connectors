@@ -7,7 +7,7 @@ from decimal import Decimal
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import urlparse
 
 import pytest
 from pyspark.sql.types import _make_type_verifier
@@ -111,9 +111,9 @@ def test_nonempty_activity_fields_survive_reader(table, incremental, generated):
         assert all(item["propertyName"] == "hs_lastmodifieddate"
                    for group in body["filterGroups"] for item in group["filters"])
     else:
-        url = next(url for method, url, _ in api.requests
-                   if urlparse(url).path == f"/crm/objects/2026-09/{table}")
-        requested = parse_qs(urlparse(url).query)["properties"][0].split(",")
+        kwargs = next(kwargs for method, url, kwargs in api.requests
+                      if urlparse(url).path == f"/crm/objects/2026-09/{table}")
+        requested = kwargs["params"]["properties"].split(",")
         assert set(api.properties) <= set(requested)
 
 

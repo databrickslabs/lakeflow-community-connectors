@@ -234,8 +234,19 @@ bootstrap. When `max_records_per_batch` is set, it stops only after a complete
 HubSpot page and saves the opaque `paging.next.after` cursor plus one frozen
 upper timestamp. It does not advance `updatedAt` until every page completes.
 After completion, CDC begins from that frozen boundary, so records observed
-beyond the boundary can be replayed safely as upserts. The object-list API is
-not a point-in-time snapshot; concurrent changes can affect page membership.
+beyond the boundary can be replayed safely as upserts. The versioned offset is
+bound to its table and includes the emitted membership count and digest,
+bounded cursor-history hashes, and a total page count. Exact Spark replays fail
+closed if the same cursor range returns different IDs or versions. Future
+boundaries, oversized cursors, cursor cycles, and scans beyond the hard page
+limit are rejected. The object-list API is not a point-in-time snapshot;
+concurrent changes can still move records between pages during a multi-batch
+scan. A keyset/Search bootstrap would be needed to eliminate that residual API
+ordering risk.
+
+Full-refresh association mode is a snapshot, not a resumable activity
+bootstrap. It drains all active pages in one batch-reader invocation and
+ignores `max_records_per_batch`, preserving authoritative snapshot membership.
 
 Meetings use complete active snapshots by default. HubSpot rejects archived
 meeting listing with `VALIDATION_ERROR` for `MEETING_EVENT` (`0-47`). Each read

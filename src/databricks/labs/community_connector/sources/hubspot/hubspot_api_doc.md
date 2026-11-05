@@ -42,8 +42,18 @@ connector follows it until either:
 Initial calls, emails, tasks, and notes reads persist that cursor with one
 frozen upper timestamp. Their `updatedAt` watermark remains unchanged until
 the object-list pass completes, then CDC starts from the frozen boundary.
-Replay must reproduce the recorded page range or fail closed. Object-list
-pagination is not a transactional snapshot during concurrent source changes.
+The versioned offset is bound to the table and records the emitted row count,
+a deterministic digest of `(id, updatedAt)` membership, a bounded history of
+cursor hashes, and a total page count. Replay must reproduce that exact range
+or fail closed. Future boundaries, oversized cursors, short cursor cycles, and
+scans exceeding 100,000 pages are rejected. Object-list pagination is not a
+transactional snapshot during concurrent source changes, so records can still
+move between different pages while a multi-microbatch bootstrap is running.
+
+Snapshot ingestion, including `association_sync_mode=full_refresh`, does not
+use the resumable bootstrap offset. A snapshot drains every object-list page in
+one read and ignores `max_records_per_batch` so the batch reader cannot publish
+a truncated authoritative set.
 
 ## Tables
 

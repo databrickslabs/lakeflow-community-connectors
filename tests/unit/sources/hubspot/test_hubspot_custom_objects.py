@@ -4,7 +4,7 @@ import runpy
 from datetime import datetime
 from pathlib import Path
 from types import SimpleNamespace
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import urlparse
 from unittest import mock
 
 import pytest
@@ -49,7 +49,7 @@ def test_custom_object_id_used_for_properties_snapshot_incremental_and_history(g
     stamp = "2024-03-01T00:00:00.000Z"
     parent = {"id": "1", "updatedAt": stamp, "properties": {"vin": "example-vin"}}
 
-    def get(url, **_kwargs):
+    def get(url, **kwargs):
         path = url.split("api.hubapi.com", 1)[1].split("?", 1)[0]
         paths.append(path)
         if path == "/crm-object-schemas/2026-09/schemas":
@@ -112,16 +112,16 @@ def test_wide_object_filters_properties_before_building_snapshot_request(generat
     expected = {selected, "hs_lastmodifieddate"}
     object_requests = []
 
-    def get(url, **_kwargs):
+    def get(url, **kwargs):
         path = urlparse(url).path
         if path == "/crm-object-schemas/2026-09/schemas":
             return _Response({"results": []})
         if path == "/crm/properties/2026-09/deals":
             return _Response({"results": properties})
         assert path == "/crm/objects/2026-09/deals"
-        object_requests.append(url)
+        object_requests.append((url, kwargs))
         assert len(url.encode("utf-8")) < 8192
-        requested = set(parse_qs(urlparse(url).query)["properties"][0].split(","))
+        requested = set(kwargs["params"]["properties"].split(","))
         assert requested == expected
         return _Response({"results": [{
             "id": "1",
@@ -189,7 +189,7 @@ def test_custom_association_definitions_are_order_independent(generated):
         ]},
     ]
 
-    def get(url, **_kwargs):
+    def get(url, **kwargs):
         return _Response({"results": schemas if url.endswith("/schemas") else []})
 
     conn = _connector_class(generated)({"access_token": "test-only-token"})
@@ -237,14 +237,14 @@ def test_custom_associations_are_complete_in_snapshot_and_incremental(generated,
     }
     association_calls = []
 
-    def get(url, **_kwargs):
+    def get(url, **kwargs):
         path = urlparse(url).path
         if path == "/crm-object-schemas/2026-09/schemas":
             return _Response({"results": schemas})
         if path.startswith("/crm/properties/2026-09/"):
             return _Response({"results": []})
         assert path == f"/crm/objects/2026-09/{types[table]}"
-        assert "associations" not in parse_qs(urlparse(url).query)
+        assert "associations" not in kwargs["params"]
         return _Response({"results": parents[types[table]]})
 
     def post(url, json, **_kwargs):
@@ -438,16 +438,16 @@ def test_custom_object_archived_records_are_emitted_as_deletes(generated):
     archived_at = "2024-03-02T00:00:00Z"
     seen_queries = []
 
-    def get(url, **_kwargs):
+    def get(url, **kwargs):
         path = urlparse(url).path
-        query = parse_qs(urlparse(url).query)
+        query = kwargs.get("params", {})
         if path == "/crm-object-schemas/2026-09/schemas":
             return _Response({"results": [{"name": "Cars", "objectTypeId": "2-12345"}]})
         if path == "/crm/properties/2026-09/2-12345":
             return _Response({"results": [{"name": "vin", "type": "string"}]})
         assert path == "/crm/objects/2026-09/2-12345"
         seen_queries.append(query)
-        if query.get("archived") == ["true"]:
+        if query.get("archived") == "true":
             return _Response({"results": [{
                 "id": "9",
                 "archived": True,
@@ -468,4 +468,4 @@ def test_custom_object_archived_records_are_emitted_as_deletes(generated):
     assert rows[0]["archived"] is True
     assert rows[0]["updatedAt"] == "2024-03-02T00:00:00.000Z"
     assert offset == {"updatedAt": conn._init_ts}
-    assert any(query.get("archived") == ["true"] for query in seen_queries)
+    assert any(query.get("archived") == "true" for query in seen_queries)

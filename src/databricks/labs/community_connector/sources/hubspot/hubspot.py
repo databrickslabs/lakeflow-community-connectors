@@ -1,3 +1,4 @@
+import hashlib
 import json
 import time
 from datetime import datetime, timezone
@@ -29,6 +30,10 @@ from databricks.labs.community_connector.sources.hubspot.hubspot_property_histor
 class HubspotLakeflowConnect(LakeflowConnect):
     _ACTIVITY_BOOTSTRAP_TABLES = frozenset({"calls", "emails", "notes", "tasks"})
     _ACTIVITY_BOOTSTRAP_KEY = "activity_bootstrap"
+    _ACTIVITY_BOOTSTRAP_VERSION = 1
+    _ACTIVITY_BOOTSTRAP_CURSOR_HISTORY = 64
+    _ACTIVITY_BOOTSTRAP_MAX_PAGES = 100_000
+    _MAX_OBJECT_CURSOR_LENGTH = 4096
 
     _STANDARD_OBJECT_TYPES = {
         "contacts": "0-1", "companies": "0-2", "deals": "0-3", "tickets": "0-5",
@@ -193,10 +198,11 @@ class HubspotLakeflowConnect(LakeflowConnect):
             )
         if start_offset == end_offset:
             return iter([])
-        if table_name in self._ACTIVITY_BOOTSTRAP_TABLES:
-            expected = self._activity_bootstrap_state(end_offset or {})
+        if (table_name in self._ACTIVITY_BOOTSTRAP_TABLES
+                and not self._uses_snapshot(table_name, table_options)):
+            expected = self._activity_bootstrap_state(end_offset or {}, table_name)
             upper = expected["upper"] if expected is not None else None
-            state = self._activity_bootstrap_state(start_offset or {}, upper)
+            state = self._activity_bootstrap_state(start_offset or {}, table_name, upper)
             if state is not None and not state["complete"]:
                 if expected is None:
                     raise RuntimeError("HubSpot activity bootstrap replay offset is missing")
@@ -715,8 +721,9 @@ class HubspotLakeflowConnect(LakeflowConnect):
             return self._history.read_table(table_name, start_offset, table_options)
 
         start_offset = start_offset or {}
-        if table_name in self._ACTIVITY_BOOTSTRAP_TABLES:
-            bootstrap = self._activity_bootstrap_state(start_offset)
+        if (table_name in self._ACTIVITY_BOOTSTRAP_TABLES
+                and not self._uses_snapshot(table_name, table_options)):
+            bootstrap = self._activity_bootstrap_state(start_offset, table_name)
             if bootstrap is not None and not bootstrap["complete"]:
                 rows, end = self._read_activity_bootstrap(
                     table_name, start_offset, table_options, bootstrap
@@ -738,7 +745,23 @@ class HubspotLakeflowConnect(LakeflowConnect):
             table_options=table_options,
         )
 
-    def _activity_bootstrap_state(self, offset: dict, upper_override: str = None):
+    @staticmethod
+    def _activity_range_digest(records: List[Dict]) -> str:
+        """Fingerprint the exact identities and versions emitted for replay."""
+        members = sorted(
+            (str(record.get("id")), str(record.get("updatedAt") or ""))
+            for record in records
+        )
+        payload = json.dumps(members, ensure_ascii=True, separators=(",", ":"))
+        return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+    @staticmethod
+    def _activity_cursor_hash(cursor) -> str:
+        return hashlib.sha256(str(cursor).encode("utf-8")).hexdigest()
+
+    def _activity_bootstrap_state(
+        self, offset: dict, table_name: str, upper_override: str = None
+    ):
         """Validate a persisted activity scan or create the initial state."""
         key = self._ACTIVITY_BOOTSTRAP_KEY
         if key not in offset:
@@ -749,28 +772,68 @@ class HubspotLakeflowConnect(LakeflowConnect):
                 self._archive_time(upper)
             except RuntimeError:
                 raise RuntimeError("Malformed HubSpot activity bootstrap boundary") from None
-            return {"upper": upper, "after": None, "complete": False}
+            return {
+                "version": self._ACTIVITY_BOOTSTRAP_VERSION,
+                "table": table_name,
+                "upper": upper,
+                "after": None,
+                "complete": False,
+                "range_count": 0,
+                "range_digest": self._activity_range_digest([]),
+                "cursor_hashes": [],
+                "pages": 0,
+            }
 
         state = offset[key]
-        if not isinstance(state, dict) or set(state) != {"upper", "after", "complete"}:
+        required = {
+            "version", "table", "upper", "after", "complete", "range_count",
+            "range_digest", "cursor_hashes", "pages",
+        }
+        if not isinstance(state, dict) or set(state) != required:
             raise RuntimeError("Malformed HubSpot activity bootstrap offset")
+        if state["version"] != self._ACTIVITY_BOOTSTRAP_VERSION:
+            raise RuntimeError("Unsupported HubSpot activity bootstrap offset version")
+        if state["table"] != table_name:
+            raise RuntimeError("HubSpot activity bootstrap offset belongs to another table")
         upper, after, complete = state["upper"], state["after"], state["complete"]
         try:
-            self._archive_time(upper)
+            upper_time = self._archive_time(upper)
+            init_time = self._archive_time(self._init_ts)
         except RuntimeError:
             raise RuntimeError("Malformed HubSpot activity bootstrap boundary") from None
+        if upper_time > init_time:
+            raise RuntimeError("HubSpot activity bootstrap boundary is in the future")
         if not isinstance(complete, bool):
             raise RuntimeError("Malformed HubSpot activity bootstrap completion flag")
         if after is not None and (
             isinstance(after, bool) or not isinstance(after, (str, int)) or not str(after)
+            or len(str(after).encode("utf-8")) > self._MAX_OBJECT_CURSOR_LENGTH
         ):
             raise RuntimeError("Malformed HubSpot activity bootstrap cursor")
+        count, digest = state["range_count"], state["range_digest"]
+        if (isinstance(count, bool) or not isinstance(count, int) or count < 0
+                or not isinstance(digest, str) or len(digest) != 64
+                or any(char not in "0123456789abcdef" for char in digest)):
+            raise RuntimeError("Malformed HubSpot activity bootstrap replay proof")
+        cursor_hashes, pages = state["cursor_hashes"], state["pages"]
+        if (not isinstance(cursor_hashes, list)
+                or len(cursor_hashes) > self._ACTIVITY_BOOTSTRAP_CURSOR_HISTORY
+                or any(not isinstance(value, str) or len(value) != 64
+                       or any(char not in "0123456789abcdef" for char in value)
+                       for value in cursor_hashes)
+                or len(set(cursor_hashes)) != len(cursor_hashes)
+                or isinstance(pages, bool) or not isinstance(pages, int)
+                or pages < len(cursor_hashes) or pages > self._ACTIVITY_BOOTSTRAP_MAX_PAGES):
+            raise RuntimeError("Malformed HubSpot activity bootstrap pagination history")
         if complete:
             if after is not None or offset.get("updatedAt") != upper:
                 raise RuntimeError("Malformed completed HubSpot activity bootstrap offset")
         elif after is None or "updatedAt" in offset:
             raise RuntimeError("Malformed incomplete HubSpot activity bootstrap offset")
-        return {"upper": upper, "after": after, "complete": complete}
+        if after is not None and (
+                not cursor_hashes or cursor_hashes[-1] != self._activity_cursor_hash(after)):
+            raise RuntimeError("Malformed HubSpot activity bootstrap cursor history")
+        return {name: state[name] for name in required}
 
     def _read_activity_bootstrap(self, table_name, start_offset, table_options, state):
         """Read complete object-list pages and persist only the next opaque cursor."""
@@ -779,14 +842,20 @@ class HubspotLakeflowConnect(LakeflowConnect):
         associations = metadata.get("associations", [])
         max_records = self._parse_max_records(table_options)
         after = state["after"]
-        seen_cursors = {str(after)} if after is not None else set()
+        cursor_hashes = list(state["cursor_hashes"])
+        seen_cursor_hashes = set(cursor_hashes)
+        pages = state["pages"]
         seen_ids = set()
         rows = []
+        proof_records = []
 
         while True:
+            if pages >= self._ACTIVITY_BOOTSTRAP_MAX_PAGES:
+                raise RuntimeError("HubSpot activity bootstrap exceeded the page limit")
             records, next_after = self._fetch_full_refresh_batch(
                 table_name, property_names, associations, after, archived=False
             )
+            pages += 1
             if not records and next_after is not None:
                 raise RuntimeError("Empty HubSpot activity bootstrap page has pagination")
             for record in records:
@@ -800,22 +869,49 @@ class HubspotLakeflowConnect(LakeflowConnect):
                 if identity in seen_ids:
                     raise RuntimeError("Duplicate HubSpot activity bootstrap identity")
                 seen_ids.add(identity)
+            proof_records.extend(records)
 
             self._hydrate_associations(table_name, records, associations)
             rows.extend(self._transform_records(records, table_name, property_names))
+            proof = {
+                "range_count": len(proof_records),
+                "range_digest": self._activity_range_digest(proof_records),
+            }
             if next_after is None:
-                end_state = {"upper": state["upper"], "after": None, "complete": True}
+                end_state = {
+                    "version": self._ACTIVITY_BOOTSTRAP_VERSION,
+                    "table": table_name,
+                    "upper": state["upper"],
+                    "after": None,
+                    "complete": True,
+                    **proof,
+                    "cursor_hashes": cursor_hashes,
+                    "pages": pages,
+                }
                 return rows, {
                     self._ACTIVITY_BOOTSTRAP_KEY: end_state,
                     "updatedAt": state["upper"],
                 }
 
-            cursor = str(next_after)
-            if cursor in seen_cursors:
+            cursor_hash = self._activity_cursor_hash(next_after)
+            if cursor_hash in seen_cursor_hashes:
                 raise RuntimeError("HubSpot activity bootstrap cursor repeated")
-            seen_cursors.add(cursor)
+            seen_cursor_hashes.add(cursor_hash)
+            cursor_hashes.append(cursor_hash)
+            cursor_hashes = cursor_hashes[-self._ACTIVITY_BOOTSTRAP_CURSOR_HISTORY:]
+            if pages >= self._ACTIVITY_BOOTSTRAP_MAX_PAGES:
+                raise RuntimeError("HubSpot activity bootstrap exceeded the page limit")
             if max_records is not None and len(rows) >= max_records:
-                end_state = {"upper": state["upper"], "after": next_after, "complete": False}
+                end_state = {
+                    "version": self._ACTIVITY_BOOTSTRAP_VERSION,
+                    "table": table_name,
+                    "upper": state["upper"],
+                    "after": next_after,
+                    "complete": False,
+                    **proof,
+                    "cursor_hashes": cursor_hashes,
+                    "pages": pages,
+                }
                 return rows, {self._ACTIVITY_BOOTSTRAP_KEY: end_state}
             after = next_after
             time.sleep(0.1)
@@ -1035,15 +1131,19 @@ class HubspotLakeflowConnect(LakeflowConnect):
         """Fetch a batch of records using full refresh API"""
         archived_param = "true" if archived else "false"
         api_type = self._get_api_object_type(table_name)
-        url = f"{self.base_url}/crm/objects/2026-09/{api_type}?limit=100&archived={archived_param}"
+        url = f"{self.base_url}/crm/objects/2026-09/{api_type}"
+        params = {"limit": 100, "archived": archived_param}
 
         if after is not None:
-            url += f"&after={after}"
+            if (isinstance(after, bool) or not isinstance(after, (str, int)) or not str(after)
+                    or len(str(after).encode("utf-8")) > self._MAX_OBJECT_CURSOR_LENGTH):
+                raise RuntimeError("Malformed HubSpot object pagination cursor")
+            params["after"] = after
         if property_names:
-            url += f"&properties={','.join(property_names)}"
+            params["properties"] = ",".join(property_names)
         # Relationships are read separately with complete per-parent pagination.
 
-        resp = self._http.get(url, operation="object-list GET")
+        resp = self._http.get(url, operation="object-list GET", params=params)
         if resp.status_code != 200:
             raise RuntimeError(f"HubSpot object-list GET failed (status={resp.status_code})")
 
@@ -1066,7 +1166,9 @@ class HubspotLakeflowConnect(LakeflowConnect):
             if not isinstance(nxt, dict) or "after" not in nxt:
                 raise RuntimeError("Malformed HubSpot object pagination cursor")
             next_after = nxt["after"]
-            if isinstance(next_after, bool) or not isinstance(next_after, (str, int)) or not str(next_after):
+            if (isinstance(next_after, bool) or not isinstance(next_after, (str, int))
+                    or not str(next_after)
+                    or len(str(next_after).encode("utf-8")) > self._MAX_OBJECT_CURSOR_LENGTH):
                 raise RuntimeError("Malformed HubSpot object pagination cursor")
 
         return records, next_after
