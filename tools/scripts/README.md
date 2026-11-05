@@ -4,17 +4,22 @@ This directory contains utility scripts for the Lakeflow Community Connectors pr
 
 ## build_wheelhouse.py
 
-Builds the prebuilt wheels under `wheelhouse/` that the Databricks managed ingestion wizard installs, and checks that they match the source. See `CONTRIBUTING.md` (Prebuilt connector wheels, Versioning).
+Builds the prebuilt wheels under `wheelhouse/` that the Databricks managed ingestion wizard installs, and checks them against the source. CI runs it: the Check Wheelhouse workflow on every PR, and the Build Wheelhouse workflow after merge, which opens a PR with the rebuilt wheels. See `CONTRIBUTING.md` (Prebuilt connector wheels, Versioning).
 
 ```bash
-python3 tools/scripts/build_wheelhouse.py <source_name>     # rebuild one connector
-python3 tools/scripts/build_wheelhouse.py --framework       # rebuild the framework
+# The Check Wheelhouse PR check: build without writing; fail if a wheel changed under a
+# version master already publishes, or a change log is out of date
+python3 tools/scripts/build_wheelhouse.py <source_name> --dry-run --base origin/master
+
+python3 tools/scripts/build_wheelhouse.py <source_name>     # write wheelhouse/<source_name>/
+python3 tools/scripts/build_wheelhouse.py --framework       # write wheelhouse/_framework/
 python3 tools/scripts/build_wheelhouse.py all               # every connector and the framework
 
-# Don't write; fail if a wheel is missing, stale, changed without a version bump vs master,
-# or if a connector's framework range excludes the framework version
-python3 tools/scripts/build_wheelhouse.py <source_name> --check --base origin/master
+# Don't write; also fail if a committed wheel is missing or stale (for reviewing a bot PR)
+python3 tools/scripts/build_wheelhouse.py all --check
 ```
+
+`--no-isolation` builds with the installed `setuptools` and `wheel` instead of an isolated build environment; CI uses it with the hash-pinned `requirements/build.txt`.
 
 Every run also checks each target's `version-change-log.md`: the newest entry must be for the `pyproject.toml` version (see `CONTRIBUTING.md`, Change log).
 

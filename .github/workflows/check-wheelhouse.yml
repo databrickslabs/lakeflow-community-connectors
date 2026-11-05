@@ -1,0 +1,84 @@
+name: Check Wheelhouse
+
+# Builds every wheel from the PR and fails if a wheel's contents changed under a
+# version master already publishes, or if a change log doesn't have an entry for
+# the pyproject.toml version. It doesn't require the PR to commit wheels: Build
+# Wheelhouse rebuilds them after merge. It's advisory (not a required check):
+# a change that can't affect pipelines may merge without a bump.
+#
+# pull_request_target (instead of pull_request) so fork-PR runs get the OIDC
+# token configure-jfrog-pypi needs; the Authorize step gates fork code the same
+# way as the other workflows. See CONTRIBUTING.md.
+on:
+  pull_request_target:
+    branches: [master]
+    # Default types plus `labeled` so a maintainer's `safe-to-test` add fires CI
+    # on the exact labeled SHA.
+    types: [opened, synchronize, reopened, labeled]
+
+permissions:
+  contents: read
+  id-token: write  # JFrog OIDC token exchange (see .github/actions/configure-jfrog-pypi)
+
+jobs:
+  check-wheelhouse:
+    runs-on:
+      group: databrickslabs-protected-runner-group
+      labels: linux-ubuntu-latest
+    steps:
+      # Runs before any fork-controlled code is on disk. Explicit failure (rather
+      # than a job-level `if:` skip) so branch protection sees `failure`.
+      - name: Authorize
+        env:
+          HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
+          BASE_REPO: ${{ github.repository }}
+          ACTION: ${{ github.event.action }}
+          LABEL_NAME: ${{ github.event.label.name }}
+        run: |
+          if [ "$HEAD_REPO" = "$BASE_REPO" ]; then
+            echo "OK: same-repo PR ($HEAD_REPO)."
+            exit 0
+          fi
+          if [ "$ACTION" = "labeled" ] && [ "$LABEL_NAME" = "safe-to-test" ]; then
+            echo "OK: fork PR was just labeled 'safe-to-test'."
+            exit 0
+          fi
+          echo "::error title=Fork PR not authorized::Apply (or re-apply) the 'safe-to-test' label to authorize CI on this commit. See CONTRIBUTING.md."
+          exit 1
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          # The version check reads master's committed wheels with `git show`.
+          fetch-depth: 0
+          persist-credentials: false
+          # Deliberate: the point is to build the PR's code. The Authorize step
+          # above is what gates fork code.
+          allow-unsafe-pr-checkout: true
+
+      # setup-uv instead of actions/setup-python: on runners with no cached Python,
+      # setup-python upgrades pip from pypi.org, which the protected runners can't reach.
+      - name: Setup uv
+        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2  # v10.3.3
+        with:
+          version: "0.11.7"
+          checksum: "6681d691eb7f9c00ac6a3af54252f7ab29ae72f0c8f95bdc7f9d1401c23ea868"
+          # Fork code runs in this job; it must not write a cache that trusted runs reuse.
+          enable-cache: false
+
+      - name: Configure pip via JFrog proxy
+        uses: ./.github/actions/configure-jfrog-pypi
+
+      - name: Set up Python 3.10
+        run: |
+          UV_INDEX_URL="$PIP_INDEX_URL" uv venv --python 3.10 --seed "$RUNNER_TEMP/venv"
+          echo "$RUNNER_TEMP/venv/bin" >> "$GITHUB_PATH"
+          echo "VIRTUAL_ENV=$RUNNER_TEMP/venv" >> "$GITHUB_ENV"
+
+      - name: Install build tools
+        run: pip install -r requirements/build.txt
+
+      - name: Check versions and change logs
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: python tools/scripts/build_wheelhouse.py all --dry-run --base "$BASE_SHA" --no-isolation

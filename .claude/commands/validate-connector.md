@@ -65,15 +65,11 @@ Gate: confirm all tests pass and validator drift is resolved.
 
 ---
 
-## Step 3 — Version and Prebuilt Wheel
+## Step 3 — Version
 
-If Step 2 changed any packaged file under `{SRC}/` (`*.py`, `connector_spec.yaml`, `pyproject.toml`), follow "Choose the version" and "Build the prebuilt wheel" in `.claude/skills/build_connector_package/SKILL.md`. A connector that isn't on `master` yet keeps `0.1.0` and only needs the rebuild. Always finish with:
+If Step 2 changed any packaged file under `{SRC}/` (`*.py`, `connector_spec.yaml`, `pyproject.toml`), follow "Choose the version" in `.claude/skills/build_connector_package/SKILL.md`. A connector that isn't on `master` yet keeps `0.1.0`.
 
-```bash
-python tools/scripts/build_wheelhouse.py {source_name} --check --base origin/master
-```
-
-Gate: the check passes, which includes the change log matching the new version. Commit `{SRC}/` (including `version-change-log.md`) and `wheelhouse/{source_name}/` changes together, with the bump in the commit message.
+Gate: `pyproject.toml` has the new version and `version-change-log.md` has a matching entry at the top. Commit `{SRC}/` (including `version-change-log.md`) with the bump in the commit message.
 
 ---
 
@@ -93,7 +89,7 @@ Pass `source_name` with `use_local_source=true`. This is interactive — ask the
 Connector:  {source_name}
 Auth:       ✓ validated
 Tests:      ✓ all passed
-Version:    <x.y.z> (<unchanged | MAJOR | MINOR | PATCH>), wheel ✓ in sync
+Version:    <x.y.z> (<unchanged | MAJOR | MINOR | PATCH>)
 Deployment: <deployed to <pipeline_name> | skipped>
 ```
 

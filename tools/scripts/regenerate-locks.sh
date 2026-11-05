@@ -89,6 +89,9 @@ compile "${REQ_DIR}/pylint.txt" \
     "${REQ_DIR}/_pip.in" \
     --extra dev
 
+# Wheel builds — build-wheelhouse and check-wheelhouse workflows.
+compile "${REQ_DIR}/build.txt" "${REQ_DIR}/_build.in" "${REQ_DIR}/_pip.in"
+
 # Combined source-connector lock — shared across the test-source matrix in
 # .github/workflows/tests.yml. Unions third-party runtime deps AND
 # test-only extras (e.g. `responses`, `azure-identity`) from every
