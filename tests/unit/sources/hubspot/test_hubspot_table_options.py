@@ -343,19 +343,32 @@ def test_association_selection_is_schema_metadata_and_cache_safe(generated):
                 "contacts", "companies", "deals", "tickets"
             }] == expected
 
-        for value in ["contacts,contacts", "contacts, companies", "contacts,", "unknown"]:
+        for value in [
+            "contacts,contacts", "contacts, companies", "contacts,", "unknown", None
+        ]:
+            invalid = {"associations": value}
             with pytest.raises(ValueError, match="associations"):
-                conn.read_table_metadata("calls", {"associations": value})
+                conn.read_table_metadata("calls", invalid)
             with pytest.raises(ValueError, match="associations"):
-                conn.get_table_schema("calls", {"associations": value})
+                conn.get_table_schema("calls", invalid)
             with pytest.raises(ValueError, match="associations"):
-                list(conn.read_table_between_offsets(
-                    "calls", {}, {}, {"associations": value}
-                ))
+                list(conn.read_table_between_offsets("calls", {}, {}, invalid))
             with pytest.raises(ValueError, match="associations"):
-                list(conn.read_table_between_offsets("calls", {}, {}, {
-                    "tableConfigs": json.dumps({"calls": {"associations": value}})
-                }))
+                conn.read_table("calls", {"updatedAt": conn._init_ts}, invalid)
+            with pytest.raises(ValueError, match="associations"):
+                conn.read_table_deletes("calls", {"updatedAt": conn._init_ts}, invalid)
+            if value is not None:
+                envelope = {"tableConfigs": json.dumps({
+                    "calls": {"associations": value}
+                })}
+                with pytest.raises(ValueError, match="associations"):
+                    list(conn.read_table_between_offsets("calls", {}, {}, envelope))
+                with pytest.raises(ValueError, match="associations"):
+                    conn.read_table("calls", {"updatedAt": conn._init_ts}, envelope)
+                with pytest.raises(ValueError, match="associations"):
+                    conn.read_table_deletes(
+                        "calls", {"updatedAt": conn._init_ts}, envelope
+                    )
 
 
 @pytest.mark.parametrize("generated", [False, True])

@@ -2080,6 +2080,11 @@ def register_lakeflow_source(spark):
             self._custom_object_configs = {name: configs[name] for name in custom_types}
             self._object_config = {name: configs[name] for name in self._object_config}
             self._custom_objects = list(custom_types)
+            # A prior optional 403 may have cached standard schemas before the
+            # complete association graph became available. Rebuild every dependent
+            # schema and metadata entry after discovery commits successfully.
+            self._schema_cache.clear()
+            self._metadata_cache.clear()
             return list(self._custom_objects)
 
         def _get_api_object_type(self, table_name: str) -> str:
@@ -2191,6 +2196,8 @@ def register_lakeflow_source(spark):
 
             if is_history_table(table_name):
                 return self._history.get_table_schema()
+            if "associations" in table_options:
+                self._get_associations_for_object(table_name, table_options)
 
             # Cache key includes the property filters — the schema is a function of
             # (table_name, table_options), so cached entries must not leak across
@@ -2252,6 +2259,8 @@ def register_lakeflow_source(spark):
 
             if is_history_table(table_name):
                 return self._history.get_table_metadata()
+            if "associations" in table_options:
+                self._get_associations_for_object(table_name, table_options)
 
             cache_key = self._options_cache_key(table_name, table_options)
             if cache_key in self._metadata_cache:
@@ -2388,9 +2397,12 @@ def register_lakeflow_source(spark):
         ) -> List[str]:
             """Resolve one validated association target list for every read surface."""
             available = list(self._get_object_config(table_name).get("associations", []))
-            raw = (table_options or {}).get("associations")
-            if raw is None:
+            options = table_options or {}
+            if "associations" not in options:
                 return available
+            raw = options["associations"]
+            if not isinstance(raw, str):
+                raise ValueError("associations must be a string")
             if raw == "":
                 return []
             selected = raw.split(",")
@@ -2483,6 +2495,8 @@ def register_lakeflow_source(spark):
 
             if is_history_table(table_name):
                 return self._history.read_table(table_name, start_offset, table_options)
+            if "associations" in table_options:
+                self._get_associations_for_object(table_name, table_options)
 
             start_offset = start_offset or {}
             if (table_name in self._ACTIVITY_BOOTSTRAP_TABLES
@@ -2709,6 +2723,8 @@ def register_lakeflow_source(spark):
                 return iter([]), start
             if table_name not in self.list_tables():
                 raise ValueError(f"Unsupported table: {table_name}")
+            if "associations" in table_options:
+                self._get_associations_for_object(table_name, table_options)
             if not self._get_object_config(table_name).get("supports_deletes", False):
                 return iter([]), start
             upper = self._archive_time(self._init_ts)

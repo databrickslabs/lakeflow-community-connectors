@@ -219,6 +219,38 @@ def test_invalid_custom_schema_fails_instead_of_dropping_associations(schemas):
 
 
 @pytest.mark.parametrize("generated", [False, True])
+def test_successful_discovery_invalidates_schema_cached_after_optional_403(generated):
+    conn = _connector_class(generated)({"access_token": "test-only-token"})
+    schemas = [{
+        "name": "Cars", "objectTypeId": "2-100", "associations": [{
+            "fromObjectTypeId": "0-1", "toObjectTypeId": "2-100",
+        }],
+    }]
+    schema_calls = 0
+
+    def get(url, **_kwargs):
+        nonlocal schema_calls
+        if url.endswith("/schemas"):
+            schema_calls += 1
+            if schema_calls == 1:
+                return mock.Mock(status_code=403)
+            return _Response({"results": schemas})
+        assert "/crm/properties/2026-09/" in url
+        return _Response({"results": []})
+
+    with mock.patch("requests.get", side_effect=get):
+        first = conn.get_table_schema("contacts", {})
+        assert "cars" not in first.fieldNames()
+        assert conn.read_table_metadata("contacts", {})["associations"] == [
+            "companies", "cars"
+        ]
+        refreshed = conn.get_table_schema("contacts", {})
+
+    assert "cars" in refreshed.fieldNames()
+    assert schema_calls == 2
+
+
+@pytest.mark.parametrize("generated", [False, True])
 @pytest.mark.parametrize("incremental", [False, True])
 @pytest.mark.parametrize("table", ["cars", "garages"])
 def test_custom_associations_are_complete_in_snapshot_and_incremental(generated, incremental, table):
