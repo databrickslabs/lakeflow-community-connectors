@@ -4,7 +4,6 @@ from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
 from typing import Dict, Iterator, List, Tuple
 
-import requests
 from pyspark.sql.types import (
     ArrayType,
     BooleanType,
@@ -19,6 +18,9 @@ from pyspark.sql.types import (
 from databricks.labs.community_connector.interface import LakeflowConnect
 from databricks.labs.community_connector.sources.hubspot.hubspot_associations import (
     HubspotAssociations,
+)
+from databricks.labs.community_connector.sources.hubspot.hubspot_http import (
+    HubspotHttpClient,
 )
 
 
@@ -138,6 +140,7 @@ class HubspotLakeflowConnect(LakeflowConnect):
             "associations": [],
             "supports_deletes": False,  # Custom objects don't support archived queries by default
         }
+        self._http = HubspotHttpClient(self.auth_header)
         self._associations = HubspotAssociations(
             self.base_url,
             self._post_association_read,
@@ -148,15 +151,21 @@ class HubspotLakeflowConnect(LakeflowConnect):
         self, kind: str, url: str, body: dict, min_interval: float
     ) -> dict:
         """POST to HubSpot's idempotent association batch-read endpoint."""
-        del kind, min_interval
-        response = requests.post(
-            url, headers=self.auth_header, json=body, timeout=60
+        response = self._http.post(
+            url,
+            body,
+            operation=f"{kind} POST",
+            kind=kind,
+            min_interval=min_interval,
         )
         if response.status_code not in (200, 207):
             raise RuntimeError(
                 f"HubSpot association POST failed (status={response.status_code})"
             )
-        data = response.json()
+        try:
+            data = response.json()
+        except ValueError:
+            raise RuntimeError("Malformed HubSpot association POST JSON") from None
         if not isinstance(data, dict):
             raise RuntimeError("Malformed HubSpot association response")
         return data
@@ -165,16 +174,13 @@ class HubspotLakeflowConnect(LakeflowConnect):
         self, kind: str, url: str, params: dict, min_interval: float
     ) -> dict:
         """GET one association page without exposing response bodies in errors."""
-        del kind, min_interval
-        try:
-            response = requests.get(
-                url,
-                headers=self.auth_header,
-                params=params,
-                timeout=60,
-            )
-        except requests.RequestException:
-            raise RuntimeError("HubSpot association GET request failed") from None
+        response = self._http.get(
+            url,
+            operation="association GET",
+            params=params,
+            kind=kind,
+            min_interval=min_interval,
+        )
         if response.status_code != 200:
             raise RuntimeError(
                 f"HubSpot association GET failed (status={response.status_code})"
@@ -216,14 +222,17 @@ class HubspotLakeflowConnect(LakeflowConnect):
         if self._custom_objects is not None:
             return list(self._custom_objects)
         url = f"{self.base_url}/crm-object-schemas/2026-09/schemas"
-        resp = requests.get(url, headers=self.auth_header, timeout=60)
+        resp = self._http.get(url, operation="schema discovery GET")
         if resp.status_code == 403:
             return []
         if resp.status_code != 200:
             raise RuntimeError(
                 f"HubSpot schema discovery failed: HTTP {resp.status_code}"
             )
-        schemas = resp.json().get("results")
+        try:
+            schemas = resp.json().get("results")
+        except ValueError:
+            raise RuntimeError("Malformed HubSpot schema discovery JSON") from None
         if not isinstance(schemas, list):
             raise RuntimeError("Malformed HubSpot schema discovery results")
 
@@ -594,14 +603,19 @@ class HubspotLakeflowConnect(LakeflowConnect):
         url = f"{self.base_url}/crm/properties/2026-09/{api_type}"
 
         try:
-            resp = requests.get(url, headers=self.auth_header, timeout=60)
+            resp = self._http.get(url, operation="properties GET")
             if resp.status_code != 200:
                 raise RuntimeError(
                     f"HubSpot Properties API error for {object_type}: "
-                    f"{resp.status_code} {resp.text}"
+                    f"status={resp.status_code}"
                 )
 
-            return resp.json()["results"]
+            try:
+                return resp.json()["results"]
+            except (KeyError, TypeError, ValueError):
+                raise RuntimeError(
+                    f"Malformed HubSpot properties response for {object_type}"
+                ) from None
         except Exception as e:
             # Re-raise (don't return an error dict): callers iterate this as a
             # list of property dicts, so a dict here turns a real API error into
@@ -937,13 +951,16 @@ class HubspotLakeflowConnect(LakeflowConnect):
             url += f"&properties={','.join(property_names)}"
         # Associations are read separately so each parent can be fully paged.
 
-        resp = requests.get(url, headers=self.auth_header, timeout=60)
+        resp = self._http.get(url, operation="object-list GET")
         if resp.status_code != 200:
-            raise Exception(
-                f"HubSpot API error for {table_name}: {resp.status_code} {resp.text}"
+            raise RuntimeError(
+                f"HubSpot object-list GET failed (status={resp.status_code})"
             )
 
-        data = resp.json()
+        try:
+            data = resp.json()
+        except ValueError:
+            raise RuntimeError("Malformed HubSpot object-list JSON") from None
         if not isinstance(data, dict) or not isinstance(data.get("results"), list):
             raise RuntimeError("Malformed HubSpot object results")
         if any(key in data for key in ("errors", "numErrors", "category")) or (
@@ -1013,14 +1030,19 @@ class HubspotLakeflowConnect(LakeflowConnect):
 
         api_type = self._get_api_object_type(table_name)
         url = f"{self.base_url}/crm/objects/2026-09/{api_type}/search"
-        resp = requests.post(url, headers=self.auth_header, json=search_body, timeout=60)
+        resp = self._http.post(
+            url, search_body, operation="object-search POST"
+        )
 
         if resp.status_code != 200:
-            raise Exception(
-                f"HubSpot API error for {table_name}: {resp.status_code} {resp.text}"
+            raise RuntimeError(
+                f"HubSpot object-search POST failed (status={resp.status_code})"
             )
 
-        data = resp.json()
+        try:
+            data = resp.json()
+        except ValueError:
+            raise RuntimeError("Malformed HubSpot object-search JSON") from None
         records = data.get("results", [])
         next_after = data.get("paging", {}).get("next", {}).get("after")
 
@@ -1199,14 +1221,14 @@ class HubspotLakeflowConnect(LakeflowConnect):
         """Test the connection to HubSpot API"""
         try:
             url = f"{self.base_url}/crm/objects/2026-09/contacts?limit=1"
-            resp = requests.get(url, headers=self.auth_header, timeout=60)
+            resp = self._http.get(url, operation="connection-test GET")
 
             if resp.status_code == 200:
                 return {"status": "success", "message": "Connection successful"}
             else:
                 return {
                     "status": "error",
-                    "message": f"API error: {resp.status_code} {resp.text}",
+                    "message": f"API error: {resp.status_code}",
                 }
         except Exception as e:
             return {"status": "error", "message": f"Connection failed: {str(e)}"}
