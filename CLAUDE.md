@@ -10,7 +10,7 @@ When developing a connector, only modify files under `src/databricks/labs/commun
 
 Whenever you change a connector's packaged files (`*.py`, `connector_spec.yaml`, `pyproject.toml` under `sources/{source}/`), in the same change:
 
-1. Bump `version` in `sources/{source}/pyproject.toml` using the rules in `CONTRIBUTING.md` (Versioning): MAJOR if any table needs a full refresh or the user must change their configuration, MINOR for new capability, PATCH for fixes. Docs-only edits don't bump.
+1. Bump `version` in `sources/{source}/pyproject.toml` using the rules in `CONTRIBUTING.md` (Versioning): MAJOR if any table needs a full refresh or the user must change their configuration, MINOR for new capability, PATCH for fixes. Docs-only edits don't bump. Add the matching entry at the top of `sources/{source}/version-change-log.md` (format in `CONTRIBUTING.md`, Change log).
 2. Run `python tools/scripts/build_wheelhouse.py {source}` to rebuild `wheelhouse/{source}/`.
 3. Run `python tools/scripts/build_wheelhouse.py {source} --check --base origin/master` and fix anything it reports.
 

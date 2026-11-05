@@ -19,4 +19,5 @@ Follow the instructions and methodology from the **build_connector_package skill
 - **Skill**: build_connector_package (loaded above, at `.claude/skills/build_connector_package/SKILL.md`)
 - **Connector source**: `src/databricks/labs/community_connector/sources/{source_name}/`
 - **Versioning rules**: `CONTRIBUTING.md` (Versioning)
+- **Change log**: `src/databricks/labs/community_connector/sources/{source_name}/version-change-log.md` (format in `CONTRIBUTING.md`, Change log)
 - **Prebuilt wheel**: `wheelhouse/{source_name}/`

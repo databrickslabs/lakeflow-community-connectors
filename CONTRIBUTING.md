@@ -42,7 +42,7 @@ wheelhouse/
 
 In the same PR as the change:
 
-1. Bump `version` in the affected `pyproject.toml` (see [Versioning](#versioning)).
+1. Bump `version` in the affected `pyproject.toml` and add an entry to its `version-change-log.md` (see [Versioning](#versioning) and [Change log](#change-log)).
 2. Rebuild:
 
    ```bash
@@ -105,7 +105,7 @@ Decide by what an **existing pipeline** needs when it picks up the new wheel:
 
 **No bump**: anything that doesn't need a rebuild (see the list above).
 
-Say in the PR description which bump you made and why. For a MAJOR bump, also say what users must do (run a full refresh of table `x`, rename option `y`, re-create the connection).
+Record every bump in the connector's change log (see [Change log](#change-log)), and say in the PR description which bump you made and why.
 
 ### Framework
 
@@ -152,7 +152,7 @@ What counts as the framework:
 
 #### Releasing a framework change
 
-1. Classify the change with the rules above and bump `version` in the root `pyproject.toml`.
+1. Classify the change with the rules above, bump `version` in the root `pyproject.toml`, and add an entry to the root `version-change-log.md`.
 2. Rebuild with `python tools/scripts/build_wheelhouse.py --framework`. It checks every connector's declared range against the new version and fails on a mismatch.
 3. For each connector it reports:
    - after a MINOR or PATCH, the connector pins below the new version: fix its range in the same PR.
@@ -164,3 +164,37 @@ Examples:
 - **PATCH**: fix a retry helper in `libs/utils.py`. Framework `0.1.0` → `0.1.1`; no connector changes.
 - **MINOR**: add an optional mixin with a default. Framework `0.1.1` → `0.2.0`; connectors that adopt it raise their minimum to `>=0.2.0` and bump MINOR.
 - **MAJOR**: make `read_table_metadata()` require a new key. Framework `0.2.0` → `1.0.0`; in the same PR, every connector adds the key, moves its range to `>=1.0.0,<2.0`, and bumps (PATCH, or MAJOR if its tables are affected).
+
+### Change log
+
+Every package keeps a change log next to its `pyproject.toml`: `sources/<source_name>/version-change-log.md` for a connector, the root `version-change-log.md` for the framework. Every version bump adds one entry at the top, so the file lists versions from newest to oldest:
+
+```markdown
+## 1.0.0 — 2026-11-04 - MAJOR
+
+### Changes
+- Page `terms` with `skip`/`top` instead of `nextLink`, which this endpoint doesn't return.
+
+### Compatibility
+- Breaking change affecting the `terms` table: tables ingested with 0.1.0 may be missing records.
+- Other tables retain their existing behavior.
+- Requires framework `lakeflow-community-connectors>=0.1.0`.
+
+### Upgrade instructions
+- Run a full refresh of `terms` after upgrading.
+
+### Rollback
+- Downgrading to 0.1.0 brings back the truncation; prefer a forward fix.
+
+### References
+- PR: <link>
+```
+
+- The heading is `## <version> — <YYYY-MM-DD> - <MAJOR|MINOR|PATCH>`, with the version from `pyproject.toml` and the merge date. A package's first version uses `INITIAL`.
+- **Changes**: what changed, in terms users see.
+- **Compatibility**: which tables are affected and how, which keep their behavior, and the framework range the version requires. A new dependency goes here too.
+- **Upgrade instructions**: what users must do after upgrading: a full refresh of named tables, a renamed option, a re-created connection. Write "No action required." for MINOR and PATCH.
+- **Rollback**: whether downgrading to the previous version is safe, and what it brings back.
+- **References**: the PR, and any issue.
+
+`build_wheelhouse.py --check` fails if the change log is missing, a heading doesn't match the format, the newest entry isn't for the `pyproject.toml` version, or versions don't decrease down the file. Docs-only changes don't bump, so they don't get an entry.
