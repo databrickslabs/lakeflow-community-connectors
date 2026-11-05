@@ -63,7 +63,12 @@ def _reader(generated, init_ts, table="emails"):
 
 
 def _digest(records):
-    members = sorted((str(record["id"]), str(record.get("updatedAt") or "")) for record in records)
+    members = sorted(json.dumps(
+        [str(record["id"]), "updatedAt" in record, record.get("updatedAt")],
+        ensure_ascii=True,
+        sort_keys=True,
+        separators=(",", ":"),
+    ) for record in records)
     payload = json.dumps(members, ensure_ascii=True, separators=(",", ":"))
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
@@ -192,7 +197,9 @@ def test_repeated_bootstrap_cursor_fails_before_checkpoint(generated):
 
 
 @pytest.mark.parametrize("generated", [False, True])
-@pytest.mark.parametrize("field,value", [("version", 2), ("table", "calls")])
+@pytest.mark.parametrize("field,value", [
+    ("version", 2), ("version", True), ("table", "calls"),
+])
 def test_bootstrap_offset_is_versioned_and_table_bound(generated, field, value):
     api = BootstrapAPI()
     state = _state(
@@ -217,6 +224,33 @@ def test_bootstrap_hard_page_limit_fails_before_request(generated):
         with pytest.raises(RuntimeError, match="page limit"):
             conn.read_table("emails", {"activity_bootstrap": state}, {"max_records_per_batch": "1"})
     assert len(api.object_afters) == calls_before
+
+
+@pytest.mark.parametrize("generated", [False, True])
+def test_completed_bootstrap_requires_at_least_one_scanned_page(generated):
+    api = BootstrapAPI()
+    state = _state("emails", UPPER, None, True, [], [], 0)
+    offset = {"activity_bootstrap": state, "updatedAt": UPPER}
+    with patch("requests.get", side_effect=api.get), patch("requests.post", side_effect=api.post):
+        conn, _ = _reader(generated, LATER_INIT)
+        with pytest.raises(RuntimeError, match="pagination|bootstrap|page"):
+            conn.read_table("emails", offset, {"max_records_per_batch": "1"})
+
+
+@pytest.mark.parametrize("generated", [False, True])
+def test_bootstrap_replay_distinguishes_missing_and_empty_version(generated):
+    api = BootstrapAPI()
+    records = [api.parent("1"), api.parent("2")]
+    records[0].pop("updatedAt")
+    api.pages[None] = (records, "opaque-a")
+    with patch("requests.get", side_effect=api.get), patch("requests.post", side_effect=api.post):
+        _, stream = _reader(generated, UPPER)
+        _, end = stream.read({})
+        replay = copy.deepcopy(records)
+        replay[0]["updatedAt"] = ""
+        api.pages[None] = (replay, "opaque-a")
+        with pytest.raises(RuntimeError, match="replay|range|offset"):
+            list(stream.readBetweenOffsets({}, end))
 
 
 @pytest.mark.parametrize("generated", [False, True])

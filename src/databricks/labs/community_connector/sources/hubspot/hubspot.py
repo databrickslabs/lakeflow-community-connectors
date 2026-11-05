@@ -748,10 +748,12 @@ class HubspotLakeflowConnect(LakeflowConnect):
     @staticmethod
     def _activity_range_digest(records: List[Dict]) -> str:
         """Fingerprint the exact identities and versions emitted for replay."""
-        members = sorted(
-            (str(record.get("id")), str(record.get("updatedAt") or ""))
-            for record in records
-        )
+        members = sorted(json.dumps(
+            [str(record.get("id")), "updatedAt" in record, record.get("updatedAt")],
+            ensure_ascii=True,
+            sort_keys=True,
+            separators=(",", ":"),
+        ) for record in records)
         payload = json.dumps(members, ensure_ascii=True, separators=(",", ":"))
         return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
@@ -791,7 +793,8 @@ class HubspotLakeflowConnect(LakeflowConnect):
         }
         if not isinstance(state, dict) or set(state) != required:
             raise RuntimeError("Malformed HubSpot activity bootstrap offset")
-        if state["version"] != self._ACTIVITY_BOOTSTRAP_VERSION:
+        if (isinstance(state["version"], bool) or not isinstance(state["version"], int)
+                or state["version"] != self._ACTIVITY_BOOTSTRAP_VERSION):
             raise RuntimeError("Unsupported HubSpot activity bootstrap offset version")
         if state["table"] != table_name:
             raise RuntimeError("HubSpot activity bootstrap offset belongs to another table")
@@ -826,7 +829,7 @@ class HubspotLakeflowConnect(LakeflowConnect):
                 or pages < len(cursor_hashes) or pages > self._ACTIVITY_BOOTSTRAP_MAX_PAGES):
             raise RuntimeError("Malformed HubSpot activity bootstrap pagination history")
         if complete:
-            if after is not None or offset.get("updatedAt") != upper:
+            if after is not None or pages == 0 or offset.get("updatedAt") != upper:
                 raise RuntimeError("Malformed completed HubSpot activity bootstrap offset")
         elif after is None or "updatedAt" in offset:
             raise RuntimeError("Malformed incomplete HubSpot activity bootstrap offset")

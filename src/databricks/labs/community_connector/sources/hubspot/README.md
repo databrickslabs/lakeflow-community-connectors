@@ -238,8 +238,9 @@ beyond the boundary can be replayed safely as upserts. The versioned offset is
 bound to its table and includes the emitted membership count and digest,
 bounded cursor-history hashes, and a total page count. Exact Spark replays fail
 closed if the same cursor range returns different IDs or versions. Future
-boundaries, oversized cursors, cursor cycles, and scans beyond the hard page
-limit are rejected. The object-list API is not a point-in-time snapshot;
+boundaries and oversized cursors are rejected. Cycles within the recent
+64-cursor history fail immediately; longer cycles terminate at the
+100,000-page hard limit. The object-list API is not a point-in-time snapshot;
 concurrent changes can still move records between pages during a multi-batch
 scan. A keyset/Search bootstrap would be needed to eliminate that residual API
 ordering risk.

@@ -45,8 +45,9 @@ the object-list pass completes, then CDC starts from the frozen boundary.
 The versioned offset is bound to the table and records the emitted row count,
 a deterministic digest of `(id, updatedAt)` membership, a bounded history of
 cursor hashes, and a total page count. Replay must reproduce that exact range
-or fail closed. Future boundaries, oversized cursors, short cursor cycles, and
-scans exceeding 100,000 pages are rejected. Object-list pagination is not a
+or fail closed. Future boundaries and oversized cursors are rejected. Cycles
+within the recent 64-cursor history fail immediately; longer cycles terminate
+at the 100,000-page hard limit. Object-list pagination is not a
 transactional snapshot during concurrent source changes, so records can still
 move between different pages while a multi-microbatch bootstrap is running.
 
