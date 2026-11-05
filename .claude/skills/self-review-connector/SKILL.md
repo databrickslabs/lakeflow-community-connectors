@@ -187,7 +187,7 @@ that weren't hit (`coverage.endpoints_in_spec − coverage.endpoints_hit`).
 
 ---
 
-### Section C — Artifacts (13 checks)
+### Section C — Artifacts (14 checks)
 
 | # | Severity | Artifact | Path | Validation |
 |---|---|---|---|---|
@@ -204,6 +204,7 @@ that weren't hit (`coverage.endpoints_in_spec − coverage.endpoints_hit`).
 | C11 | BLOCKER | Prebuilt wheel in sync | `wheelhouse/{{source_name}}/` | `python tools/scripts/build_wheelhouse.py {{source_name}} --check` exits 0: exactly one wheel, named `lakeflow_community_connectors_{{source_name}}-<version>-py3-none-any.whl` with `<version>` from `pyproject.toml`, built from the current source, and its declared `lakeflow-community-connectors` range includes the framework version. Fail with the remediation the script prints. |
 | C12 | BLOCKER | Version bumped | `src/.../sources/{{source_name}}/pyproject.toml` | `python tools/scripts/build_wheelhouse.py {{source_name}} --check --base origin/master` reports no "bump `version`" error: if the wheel's contents changed since `master`, the version must differ from `master`'s. A connector not on `master` yet passes. |
 | C13 | MAJOR | Bump size matches the change | `git diff origin/master -- src/.../sources/{{source_name}}/` | skip if the version didn't change. Otherwise apply the Versioning rules in `CONTRIBUTING.md`: `warn` if the diff changes a primary key, cursor field, `ingestion_type`, column type, nested struct shape or offset format, makes an optional parameter or table option required, or removes/renames a table, column, connection parameter, table option or auth method, but the bump isn't MAJOR; or adds a table/option/auth method with only a PATCH bump. Cite the line that drives the expected bump. |
+| C14 | BLOCKER | Change log | `src/.../sources/{{source_name}}/version-change-log.md` | `python tools/scripts/build_wheelhouse.py {{source_name}} --check` reports no change-log error: the file exists, every `## ` heading is `## <version> — <YYYY-MM-DD> - <MAJOR\|MINOR\|PATCH\|INITIAL>`, the newest entry is for the `pyproject.toml` version, and versions decrease down the file. If the version changed since `master`, also check the new entry's type matches the bump and, for MAJOR, that Upgrade instructions say what users must do. |
 
 ---
 
