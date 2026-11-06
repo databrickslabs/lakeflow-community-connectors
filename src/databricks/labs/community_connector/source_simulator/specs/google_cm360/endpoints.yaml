@@ -1,0 +1,30 @@
+# Google Campaign Manager 360 Reporting API v5 asynchronous report flow.
+
+endpoints:
+  - path: /dfareporting/v5/userprofiles/{profile_id}
+    method: GET
+    handler: databricks.labs.community_connector.source_simulator.specs.google_cm360.handlers.report_flow:handle_request
+
+  - path: /dfareporting/v5/userprofiles/{profile_id}/dimensionvalues/query
+    method: POST
+    handler: databricks.labs.community_connector.source_simulator.specs.google_cm360.handlers.report_flow:handle_request
+
+  - path: /dfareporting/v5/userprofiles/{profile_id}/reports/compatiblefields/query
+    method: POST
+    handler: databricks.labs.community_connector.source_simulator.specs.google_cm360.handlers.report_flow:handle_request
+
+  - path: /dfareporting/v5/userprofiles/{profile_id}/reports
+    method: POST
+    handler: databricks.labs.community_connector.source_simulator.specs.google_cm360.handlers.report_flow:handle_request
+
+  - path: /dfareporting/v5/userprofiles/{profile_id}/reports/{report_id}/run
+    method: POST
+    handler: databricks.labs.community_connector.source_simulator.specs.google_cm360.handlers.report_flow:handle_request
+
+  - path: /dfareporting/v5/userprofiles/{profile_id}/reports/{report_id}/files/{file_id}
+    method: GET
+    handler: databricks.labs.community_connector.source_simulator.specs.google_cm360.handlers.report_flow:handle_request
+
+  - path: /dfareporting/v5/userprofiles/{profile_id}/reports/{report_id}
+    method: DELETE
+    handler: databricks.labs.community_connector.source_simulator.specs.google_cm360.handlers.report_flow:handle_request
