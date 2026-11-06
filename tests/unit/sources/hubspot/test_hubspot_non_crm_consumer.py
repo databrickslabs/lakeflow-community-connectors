@@ -61,3 +61,47 @@ def test_snapshot_consumer_nested_rows_and_empty_rescan(generated, table):
             assert rows[0][schema.fieldNames().index(key)] is not None
         empty = True
         assert list(reader.read(InputPartition(None))) == []
+
+
+@pytest.mark.parametrize("generated", [False, True])
+def test_membership_batch_reader_lazily_drains_every_page(generated):
+    list_row = {
+        "listId": "list-1", "objectTypeId": "0-1", "processingType": "MANUAL",
+        "processingStatus": "COMPLETE",
+    }
+    membership_calls = 0
+
+    def post(url, **_kwargs):
+        assert url.endswith("/crm/lists/2026-09/all")
+        return Mock(status_code=200, json=lambda: {"results": [list_row]})
+
+    def get(url, **kwargs):
+        nonlocal membership_calls
+        assert url.endswith("/crm/lists/2026-09/list-1/memberships")
+        membership_calls += 1
+        start = (membership_calls - 1) * 100
+        count = 100 if membership_calls < 3 else 5
+        payload = {"results": [
+            {"recordId": str(index)} for index in range(start, start + count)
+        ]}
+        if membership_calls < 3:
+            payload["paging"] = {"next": {"after": f"page-{membership_calls}"}}
+        if membership_calls > 1:
+            assert kwargs["params"]["after"] == f"page-{membership_calls - 1}"
+        return Mock(status_code=200, json=lambda: payload)
+
+    options = {
+        "tableName": "contact_list_memberships", "max_records_per_batch": "1",
+    }
+    conn = _connector_class(generated)({"access_token": "offline"})
+    conn._non_crm._sleep = lambda _: None
+    schema = conn.get_table_schema("contact_list_memberships", options)
+    reader = LakeflowBatchReader(options, schema, conn)
+    with patch("requests.get", side_effect=get), patch("requests.post", side_effect=post):
+        rows = reader.read(InputPartition(None))
+        assert membership_calls == 0
+        first = next(rows)
+        assert first.listId == "list-1" and first.recordId == "0"
+        assert membership_calls == 1
+        assert 1 + sum(1 for _ in rows) == 205
+        assert membership_calls == 3

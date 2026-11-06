@@ -84,8 +84,8 @@ def test_memberships_all_lists_composite_keys_and_full_rescan_removal():
         response(page({"recordId": "20"})), response(page({"recordId": "10"})),
         response(page()), response(page({"recordId": "10"})),
     ]) as get:
-        first = read.read_table("contact_list_memberships", {})
-        second = read.read_table("contact_list_memberships", {})
+        first = list(read.read_table("contact_list_memberships", {}))
+        second = list(read.read_table("contact_list_memberships", {}))
     assert {(r["listId"], r["recordId"]) for r in first} == {
         ("1", "10"), ("1", "20"), ("2", "10"),
     }
@@ -165,7 +165,7 @@ def test_consumer_schemas_and_lossless_fields(table, source):
 def test_empty_valid_snapshots_and_metadata(table):
     read, _, _ = helper(page())
     with patch(NON_CRM_TEST_GET, return_value=response(page())):
-        assert read.read_table(table, {}) == []
+        assert list(read.read_table(table, {})) == []
     metadata = read.read_table_metadata(table)
     assert metadata["ingestion_type"] == "snapshot"
     assert metadata["cursor_field"] is None
@@ -255,7 +255,7 @@ def test_processing_list_cannot_claim_complete_memberships():
     read, _, _ = helper(page(contact_list(processingStatus="PROCESSING")))
     with patch(NON_CRM_TEST_GET) as get:
         with pytest.raises(RuntimeError, match="PROCESSING"):
-            read.read_table("contact_list_memberships", {})
+            list(read.read_table("contact_list_memberships", {}))
     get.assert_not_called()
 
 
@@ -295,7 +295,7 @@ def test_membership_schema_retains_timestamp_and_unknown_payload():
               "membershipTimestamp": "2026-10-28T00:00:00Z",
               "unknown": [1, {"x": True}]}
     with patch(NON_CRM_TEST_GET, return_value=response(page(source))):
-        rows = read.read_table("contact_list_memberships", {})
+        rows = list(read.read_table("contact_list_memberships", {}))
     _make_type_verifier(read.get_table_schema("contact_list_memberships"))(rows[0])
     assert rows[0]["recordId"] == "42"
     assert json.loads(rows[0]["payload"]) == source

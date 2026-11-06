@@ -4,7 +4,9 @@ from unittest.mock import Mock, patch
 from urllib.parse import parse_qs, urlparse
 
 import pytest
+from pyspark.sql.datasource import InputPartition
 
+from databricks.labs.community_connector.sparkpds.lakeflow_datasource import LakeflowBatchReader
 from tests.unit.sources.hubspot.test_hubspot_activity_consumer import ActivityAPI, consumer
 
 
@@ -41,6 +43,29 @@ def test_meetings_default_snapshot_ignores_old_offset_and_cap(generated):
 
 
 @pytest.mark.parametrize("generated", [False, True])
+def test_meeting_batch_reader_lazily_drains_complete_offset_free_snapshot(generated):
+    api = SnapshotAPI()
+    options = {"tableName": "meetings", "max_records_per_batch": "1"}
+    with patch("requests.get", side_effect=api.get), patch(
+        "requests.post", side_effect=api.post
+    ), patch("time.sleep"):
+        conn, schema, _ = consumer("meetings", generated)
+        records, offset = conn.read_table("meetings", {}, options)
+        assert offset == {}
+        assert not isinstance(records, list)
+        assert api.active_calls == 0
+
+        reader = LakeflowBatchReader(options, schema, conn)
+        rows = reader.read(InputPartition(None))
+        assert api.active_calls == 0
+        first = next(rows)
+        assert first.id == "1"
+        assert api.active_calls == 1
+        assert {row.id for row in rows} == {"2"}
+        assert api.active_calls == 2
+
+
+@pytest.mark.parametrize("generated", [False, True])
 @pytest.mark.parametrize("case", ["empty_continuation", "cycle", "malformed_record", "duplicate_id", "archived_record"])
 def test_incomplete_active_snapshot_never_publishes(generated, case):
     api = SnapshotAPI()
@@ -51,14 +76,16 @@ def test_incomplete_active_snapshot_never_publishes(generated, case):
     elif case == "malformed_record":
         api.pages[1]["results"] = [None]
     elif case == "duplicate_id":
-        api.pages[1]["results"][0]["id"] = "1"
+        api.pages[1]["results"].append(copy.deepcopy(api.pages[1]["results"][0]))
     else:
         api.pages[1]["results"][0]["archived"] = True
     with patch("requests.get", side_effect=api.get), patch("requests.post", side_effect=api.post), patch("time.sleep"):
         conn, _, _ = consumer("meetings", generated)
         start = {}
         with pytest.raises(RuntimeError, match="snapshot|pagination"):
-            conn.read_table("meetings", start, {"association_sync_mode": "full_refresh"})
+            list(conn.read_table(
+                "meetings", start, {"association_sync_mode": "full_refresh"}
+            )[0])
         assert start == {}
 
 
@@ -130,7 +157,7 @@ def test_error_envelope_never_becomes_authoritative_snapshot(generated, envelope
         conn, _, _ = consumer("meetings", generated)
         start = {}
         with pytest.raises(RuntimeError, match="snapshot|object.*error|response"):
-            conn.read_table("meetings", start, {})
+            list(conn.read_table("meetings", start, {})[0])
         assert start == {}
 
 
