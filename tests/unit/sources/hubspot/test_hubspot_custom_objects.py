@@ -366,7 +366,7 @@ def test_full_refresh_mode_reconciles_association_removal_without_parent_update(
         second, next_offset = conn.read_table("cars", offset, opts)
         assert list(first)[0]["garages"] == ["10"]
         assert list(second)[0]["garages"] == []
-        assert offset == next_offset == {"updatedAt": stamp}
+        assert offset == next_offset == {}
     assert associations.call_args_list == [mock.call("2-100", "2-200", ["1"])] * 2
 
 

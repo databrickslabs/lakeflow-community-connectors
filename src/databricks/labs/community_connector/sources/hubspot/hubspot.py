@@ -33,6 +33,8 @@ class HubspotLakeflowConnect(LakeflowConnect):
     _ACTIVITY_BOOTSTRAP_VERSION = 1
     _ACTIVITY_BOOTSTRAP_CURSOR_HISTORY = 64
     _ACTIVITY_BOOTSTRAP_MAX_PAGES = 100_000
+    _SNAPSHOT_CURSOR_HISTORY = 64
+    _SNAPSHOT_MAX_PAGES = 100_000
     _MAX_OBJECT_CURSOR_LENGTH = 4096
 
     _STANDARD_OBJECT_TYPES = {
@@ -772,8 +774,7 @@ class HubspotLakeflowConnect(LakeflowConnect):
             start_offset.get("updatedAt") is not None
         )
         if self._uses_snapshot(table_name, table_options):
-            is_incremental = False
-            start_offset = {}
+            return self._read_snapshot(table_name, table_options), {}
 
         return self._read_data(
             table_name,
@@ -781,6 +782,60 @@ class HubspotLakeflowConnect(LakeflowConnect):
             incremental=is_incremental,
             table_options=table_options,
         )
+
+    def _read_snapshot(self, table_name: str, table_options: Dict[str, str]):
+        """Yield complete active-object snapshot pages with bounded state."""
+        metadata = self.read_table_metadata(table_name, table_options)
+        property_names = metadata.get("property_names", [])
+        associations = metadata.get("associations", [])
+
+        def pages():
+            after = None
+            recent_hashes = []
+            recent_set = set()
+            page_count = 0
+            while True:
+                if page_count >= self._SNAPSHOT_MAX_PAGES:
+                    raise RuntimeError("HubSpot snapshot exceeded the page limit")
+                records, next_after = self._fetch_full_refresh_batch(
+                    table_name, property_names, associations, after, archived=False
+                )
+                page_count += 1
+                if not records and next_after is not None:
+                    raise RuntimeError("Empty HubSpot snapshot page has pagination")
+                page_ids = set()
+                for record in records:
+                    if not isinstance(record, dict):
+                        raise RuntimeError("Malformed HubSpot snapshot record")
+                    identity = record.get("id")
+                    if (isinstance(identity, bool)
+                            or not isinstance(identity, (str, int))
+                            or not str(identity).strip()
+                            or record.get("archived", False) is not False):
+                        raise RuntimeError("Malformed HubSpot active snapshot identity")
+                    identity = str(identity)
+                    if identity in page_ids:
+                        raise RuntimeError("Duplicate HubSpot snapshot identity in page")
+                    page_ids.add(identity)
+                if next_after is not None:
+                    cursor_hash = self._activity_cursor_hash(next_after)
+                    if cursor_hash in recent_set:
+                        raise RuntimeError("HubSpot snapshot pagination cursor repeated")
+                    recent_set.add(cursor_hash)
+                    recent_hashes.append(cursor_hash)
+                    if len(recent_hashes) > self._SNAPSHOT_CURSOR_HISTORY:
+                        recent_set.remove(recent_hashes.pop(0))
+                self._hydrate_associations(table_name, records, associations)
+                for record in records:
+                    yield self._transform_single_record(
+                        record, table_name, property_names, associations
+                    )
+                if next_after is None:
+                    return
+                after = next_after
+                time.sleep(0.1)
+
+        return pages()
 
     @staticmethod
     def _activity_range_digest(records: List[Dict]) -> str:

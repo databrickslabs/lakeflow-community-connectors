@@ -142,6 +142,8 @@ def test_five_tables_and_consumer_paths_stay_isolated(generated):
     with mock.patch.object(conn, "list_tables", return_value=list(bodies)), mock.patch.object(
         conn, "_get_object_properties", return_value=properties
     ), mock.patch.object(conn, "_read_data", return_value=([], {})) as read, mock.patch.object(
+        conn, "_read_snapshot", return_value=iter([])
+    ) as snapshot, mock.patch.object(
         conn, "_read_activity_bootstrap", return_value=([], {})
     ) as bootstrap:
         for name in [*bodies, *reversed(bodies)]:
@@ -160,7 +162,7 @@ def test_five_tables_and_consumer_paths_stay_isolated(generated):
                                   _default_get_object_metadata(conn, table_name=name, table_options=options))
             assert agent_metadata["ingestion_type"] == metadata["ingestion_type"]
             if name == "meetings":
-                assert read.call_args.kwargs["table_options"] == configs[name]
+                assert snapshot.call_args.args[1] == configs[name]
             else:
                 assert bootstrap.call_args.args[2] == configs[name]
         # Delete reads must select the calls entry too, not only ignore wrong values.

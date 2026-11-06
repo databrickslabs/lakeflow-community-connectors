@@ -79,6 +79,14 @@ common fields. They do not use `max_records_per_batch` or property filters.
 | `contact_list_memberships` | `listId`, `recordId` | Current memberships of each discovered contact list |
 | `form_submissions` | `formId`, `conversionId` | Submissions for each discovered form |
 
+Meeting and contact-list-membership snapshots stream complete API pages through
+one batch-reader invocation and do not expose a continuation offset. They ignore
+`max_records_per_batch`, because stopping a snapshot early would publish an
+incomplete current set. The connector retains the active page, current list
+identity, and bounded cursor-cycle history rather than collecting the complete
+snapshot in connector memory. A later page failure fails the Spark task, so the
+snapshot consumer does not commit rows from a partial pass.
+
 Private apps need `crm.objects.owners.read` for owners, `forms` for forms and
 submissions, and an appropriate list read scope (`crm.segments.read` or
 `crm.lists.read`) for contact lists and memberships. Pipeline access also depends

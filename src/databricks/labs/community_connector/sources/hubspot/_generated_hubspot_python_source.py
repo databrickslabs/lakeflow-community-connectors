@@ -1005,6 +1005,9 @@ def register_lakeflow_source(spark):
     NON_CRM_MAX_RETRIES = HUBSPOT_MAX_RETRIES
     NON_CRM_TIMEOUT_S = HUBSPOT_REQUEST_TIMEOUT_S
     NON_CRM_MIN_INTERVAL_S = 0.11
+    NON_CRM_CURSOR_HISTORY = 64
+    NON_CRM_MAX_PAGES = 100_000
+    NON_CRM_MAX_CURSOR_BYTES = 4096
     NON_CRM_PIPELINE_TYPES = {
         "0-3", "0-5", "0-27", "0-421", "0-410", "0-136", "0-420",
         "0-123", "0-970", "0-162", "0-115",
@@ -1039,7 +1042,10 @@ def register_lakeflow_source(spark):
         nxt = paging["next"]
         if not isinstance(nxt, dict) or "after" not in nxt:
             raise RuntimeError("Malformed HubSpot non-CRM next page")
-        return _non_crm_id(nxt["after"])
+        cursor = _non_crm_id(nxt["after"])
+        if len(cursor.encode("utf-8")) > NON_CRM_MAX_CURSOR_BYTES:
+            raise RuntimeError("Malformed HubSpot non-CRM identity or cursor")
+        return cursor
 
 
     def _non_crm_with_identity(source, field, identity):
@@ -1129,11 +1135,14 @@ def register_lakeflow_source(spark):
             except ValueError:
                 raise RuntimeError("Malformed HubSpot non-CRM JSON") from None
 
-        def _pages(self, route, params=None, body=None):
+        def _page_batches(self, route, params=None, body=None):
             cursor = None
-            seen = set()
-            rows = []
+            recent_hashes = []
+            recent_set = set()
+            page_count = 0
             while True:
+                if page_count >= NON_CRM_MAX_PAGES:
+                    raise RuntimeError("HubSpot non-CRM snapshot exceeded the page limit")
                 arguments = dict(body if body is not None else (params or {}))
                 if cursor is not None:
                     arguments["after"] = cursor
@@ -1148,13 +1157,58 @@ def register_lakeflow_source(spark):
                     raise RuntimeError("Malformed HubSpot non-CRM result")
                 if data.get("errors") or data.get("status") in {"PENDING", "PROCESSING", "CANCELED"}:
                     raise RuntimeError("Incomplete HubSpot non-CRM page")
-                rows.extend(data["results"])
-                cursor = _non_crm_after(data)
-                if cursor is None:
-                    return rows
-                if cursor in seen:
-                    raise RuntimeError("Repeated or cyclic HubSpot non-CRM cursor")
-                seen.add(cursor)
+                page_count += 1
+                next_cursor = _non_crm_after(data)
+                if next_cursor is not None:
+                    cursor_hash = hashlib.sha256(next_cursor.encode("utf-8")).hexdigest()
+                    if cursor_hash in recent_set:
+                        raise RuntimeError("Repeated or cyclic HubSpot non-CRM cursor")
+                    recent_set.add(cursor_hash)
+                    recent_hashes.append(cursor_hash)
+                    if len(recent_hashes) > NON_CRM_CURSOR_HISTORY:
+                        recent_set.remove(recent_hashes.pop(0))
+                yield data["results"]
+                if next_cursor is None:
+                    return
+                cursor = next_cursor
+
+        def _pages(self, route, params=None, body=None):
+            rows = []
+            for page in self._page_batches(route, params, body):
+                rows.extend(page)
+            return rows
+
+        def _membership_rows(self):
+            inventory_body = {
+                "objectTypeId": "0-1",
+                "processingTypes": ["MANUAL", "DYNAMIC", "SNAPSHOT"],
+                "additionalProperties": [],
+                # Keep only the current list parent while its membership pages drain.
+                "count": 1,
+            }
+            for inventory_page in self._page_batches(
+                "/crm/lists/2026-09/all", body=inventory_body
+            ):
+                for parent_source in inventory_page:
+                    if parent_source.get("objectTypeId") != "0-1":
+                        raise RuntimeError("Non-contact list in HubSpot contact-list inventory")
+                    parent = self._row("contact_lists", parent_source)
+                    if parent.get("processingStatus") == "PROCESSING":
+                        raise RuntimeError("HubSpot list membership is still PROCESSING")
+                    identity = parent["listId"]
+                    route = (
+                        f"/crm/lists/2026-09/{quote(identity, safe='')}/memberships"
+                    )
+                    for membership_page in self._page_batches(route, {"limit": 100}):
+                        seen = set()
+                        for source in membership_page:
+                            source = _non_crm_with_identity(source, "listId", identity)
+                            row = self._row("contact_list_memberships", source)
+                            key = tuple(row[name] for name in NON_CRM_KEYS["contact_list_memberships"])
+                            if key in seen:
+                                raise RuntimeError("Duplicate HubSpot non-CRM identity in page")
+                            seen.add(key)
+                            yield row
 
         def _inventory(self, table):
             if table in {"owners", "forms"}:
@@ -1180,6 +1234,8 @@ def register_lakeflow_source(spark):
 
         def read_table(self, table, table_options=None) -> list[dict]:
             self.read_table_metadata(table)
+            if table == "contact_list_memberships":
+                return self._membership_rows()
             if table in {"owners", "forms", "contact_lists"}:
                 sources = self._inventory(table)
             elif table == "pipelines":
@@ -1774,6 +1830,8 @@ def register_lakeflow_source(spark):
         _ACTIVITY_BOOTSTRAP_VERSION = 1
         _ACTIVITY_BOOTSTRAP_CURSOR_HISTORY = 64
         _ACTIVITY_BOOTSTRAP_MAX_PAGES = 100_000
+        _SNAPSHOT_CURSOR_HISTORY = 64
+        _SNAPSHOT_MAX_PAGES = 100_000
         _MAX_OBJECT_CURSOR_LENGTH = 4096
 
         _STANDARD_OBJECT_TYPES = {
@@ -2513,8 +2571,7 @@ def register_lakeflow_source(spark):
                 start_offset.get("updatedAt") is not None
             )
             if self._uses_snapshot(table_name, table_options):
-                is_incremental = False
-                start_offset = {}
+                return self._read_snapshot(table_name, table_options), {}
 
             return self._read_data(
                 table_name,
@@ -2522,6 +2579,60 @@ def register_lakeflow_source(spark):
                 incremental=is_incremental,
                 table_options=table_options,
             )
+
+        def _read_snapshot(self, table_name: str, table_options: Dict[str, str]):
+            """Yield complete active-object snapshot pages with bounded state."""
+            metadata = self.read_table_metadata(table_name, table_options)
+            property_names = metadata.get("property_names", [])
+            associations = metadata.get("associations", [])
+
+            def pages():
+                after = None
+                recent_hashes = []
+                recent_set = set()
+                page_count = 0
+                while True:
+                    if page_count >= self._SNAPSHOT_MAX_PAGES:
+                        raise RuntimeError("HubSpot snapshot exceeded the page limit")
+                    records, next_after = self._fetch_full_refresh_batch(
+                        table_name, property_names, associations, after, archived=False
+                    )
+                    page_count += 1
+                    if not records and next_after is not None:
+                        raise RuntimeError("Empty HubSpot snapshot page has pagination")
+                    page_ids = set()
+                    for record in records:
+                        if not isinstance(record, dict):
+                            raise RuntimeError("Malformed HubSpot snapshot record")
+                        identity = record.get("id")
+                        if (isinstance(identity, bool)
+                                or not isinstance(identity, (str, int))
+                                or not str(identity).strip()
+                                or record.get("archived", False) is not False):
+                            raise RuntimeError("Malformed HubSpot active snapshot identity")
+                        identity = str(identity)
+                        if identity in page_ids:
+                            raise RuntimeError("Duplicate HubSpot snapshot identity in page")
+                        page_ids.add(identity)
+                    if next_after is not None:
+                        cursor_hash = self._activity_cursor_hash(next_after)
+                        if cursor_hash in recent_set:
+                            raise RuntimeError("HubSpot snapshot pagination cursor repeated")
+                        recent_set.add(cursor_hash)
+                        recent_hashes.append(cursor_hash)
+                        if len(recent_hashes) > self._SNAPSHOT_CURSOR_HISTORY:
+                            recent_set.remove(recent_hashes.pop(0))
+                    self._hydrate_associations(table_name, records, associations)
+                    for record in records:
+                        yield self._transform_single_record(
+                            record, table_name, property_names, associations
+                        )
+                    if next_after is None:
+                        return
+                    after = next_after
+                    time.sleep(0.1)
+
+            return pages()
 
         @staticmethod
         def _activity_range_digest(records: List[Dict]) -> str:

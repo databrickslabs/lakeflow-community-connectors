@@ -97,7 +97,11 @@ def test_nonempty_activity_fields_survive_reader(table, incremental, generated):
         start = {"updatedAt": "2026-01-01T00:00:00.000Z"} if incremental else {}
         rows, end = stream.read(start)
         rows = list(rows)
-    assert len(rows) == 1 and end != start
+    assert len(rows) == 1
+    if table == "meetings":
+        assert end == {}
+    else:
+        assert end != start
     _make_type_verifier(schema)(rows[0])
     properties = rows[0].properties.asDict()
     assert properties["extra_decimal_metric"] == Decimal("42.125")
@@ -125,7 +129,7 @@ def test_unrepresentable_numeric_property_fails_before_checkpoint(generated, num
         conn, _, _ = consumer("meetings", generated)
         start = {"updatedAt": "2026-01-01T00:00:00.000Z"}
         with pytest.raises((ValueError, RuntimeError), match="numeric|decimal|number"):
-            conn.read_table("meetings", start, {})
+            list(conn.read_table("meetings", start, {})[0])
     assert start == {"updatedAt": "2026-01-01T00:00:00.000Z"}
 
 
@@ -148,4 +152,4 @@ def test_excluded_invalid_number_does_not_fail_read(generated):
         conn, _, _ = consumer("meetings", generated)
         rows, end = conn.read_table("meetings", {}, {
             "exclude_properties": "extra_decimal_metric"})
-        assert len(list(rows)) == 1 and end
+        assert len(list(rows)) == 1 and end == {}
