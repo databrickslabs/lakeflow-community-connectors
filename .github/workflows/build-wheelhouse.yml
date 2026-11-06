@@ -1,0 +1,113 @@
+name: Build Wheelhouse
+
+# Rebuilds the prebuilt wheels under wheelhouse/ after connector or framework
+# changes land on master, and opens (or updates) one PR with the result, so
+# contributors only bump `version` and add a change log entry. Check Wheelhouse
+# flags a missing bump on each PR but doesn't block merging; for a change merged
+# without a bump, `--base HEAD` below keeps the published wheel with a warning.
+#
+# GitHub doesn't start workflows for events caused by GITHUB_TOKEN, so the
+# required checks don't run on the bot PR by themselves. A maintainer closes
+# and reopens it to run them, then reviews and merges it.
+#
+# The bot PR only changes wheelhouse/, which is outside the `paths` filter, so
+# merging it doesn't start this workflow again.
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - 'src/databricks/labs/community_connector/**'
+      - 'pyproject.toml'
+      - 'requirements/build.txt'
+      - 'tools/scripts/build_wheelhouse.py'
+      - '.github/workflows/build-wheelhouse.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write       # push the bot branch
+  pull-requests: write  # open or update the bot PR
+  id-token: write       # JFrog OIDC token exchange (see .github/actions/configure-jfrog-pypi)
+
+# One run at a time. Each run rebuilds every wheel from its own commit, so a
+# later run includes everything an earlier one would have built.
+concurrency:
+  group: build-wheelhouse
+  cancel-in-progress: false
+
+env:
+  BOT_BRANCH: bot/update-wheelhouse
+
+jobs:
+  build:
+    runs-on:
+      group: databrickslabs-protected-runner-group
+      labels: linux-ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+
+      # setup-uv instead of actions/setup-python: on runners with no cached Python,
+      # setup-python upgrades pip from pypi.org, which the protected runners can't reach.
+      - name: Setup uv
+        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2  # v10.3.3
+        with:
+          version: "0.11.7"
+          checksum: "6681d691eb7f9c00ac6a3af54252f7ab29ae72f0c8f95bdc7f9d1401c23ea868"
+          enable-cache: false
+
+      - name: Configure pip via JFrog proxy
+        uses: ./.github/actions/configure-jfrog-pypi
+
+      - name: Set up Python 3.10
+        run: |
+          UV_INDEX_URL="$PIP_INDEX_URL" uv venv --python 3.10 --seed "$RUNNER_TEMP/venv"
+          echo "$RUNNER_TEMP/venv/bin" >> "$GITHUB_PATH"
+          echo "VIRTUAL_ENV=$RUNNER_TEMP/venv" >> "$GITHUB_ENV"
+
+      - name: Install build tools
+        run: pip install -r requirements/build.txt
+
+      - name: Build wheels
+        run: python tools/scripts/build_wheelhouse.py all --base HEAD --no-isolation
+
+      - name: Open or update the wheelhouse PR
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          git add -A -- wheelhouse/
+          if git diff --cached --quiet -- wheelhouse/; then
+            echo "wheelhouse/ is up to date. Nothing to do."
+            exit 0
+          fi
+
+          PACKAGES=$(git diff --cached --no-renames --name-only -- wheelhouse/ | cut -d/ -f2 | sort -u | paste -sd, - | sed 's/,/, /g')
+          # --no-renames: a version bump otherwise shows up as a rename, not an added wheel.
+          WHEELS=$(git diff --cached --no-renames --name-only --diff-filter=A -- wheelhouse/ | sed 's|^|- `|; s|$|`|')
+          SHORT_SHA="${GITHUB_SHA::7}"
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -B "$BOT_BRANCH"
+          git commit -q -m "Update prebuilt wheels (${PACKAGES})" \
+            -m "Built by the Build Wheelhouse workflow from master at ${GITHUB_SHA}."
+          git push --force origin "$BOT_BRANCH"
+
+          BODY_FILE="$RUNNER_TEMP/pr-body.md"
+          cat > "$BODY_FILE" <<EOF
+          Rebuilds \`wheelhouse/\` from master at ${SHORT_SHA} for: ${PACKAGES}.
+
+          New wheels:
+          ${WHEELS}
+
+          Opened by the [Build Wheelhouse](${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}) workflow. Each wheel's version comes from its \`pyproject.toml\`.
+
+          **Maintainers:** checks don't start on their own for this PR. Close and reopen it to run them, then review and merge. The managed ingestion wizard serves the new wheels once this is on master.
+          EOF
+
+          if [ "$(gh pr view "$BOT_BRANCH" --json state --jq .state 2>/dev/null)" = "OPEN" ]; then
+            gh pr edit "$BOT_BRANCH" --title "Update prebuilt wheels (${PACKAGES})" --body-file "$BODY_FILE"
+            echo "Updated the open wheelhouse PR."
+          else
+            gh pr create --base master --head "$BOT_BRANCH" \
+              --title "Update prebuilt wheels (${PACKAGES})" --body-file "$BODY_FILE"
+          fi

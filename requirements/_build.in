@@ -1,0 +1,8 @@
+# Packages the wheelhouse CI jobs install to build the prebuilt wheels with
+# `python -m build --no-isolation`: the frontend plus the setuptools and wheel
+# that every pyproject.toml's [build-system] requires. Pinning them here keeps
+# the build backend that produces the published wheels hash-verified.
+# Consumed by tools/scripts/regenerate-locks.sh.
+build
+setuptools>=61.0
+wheel

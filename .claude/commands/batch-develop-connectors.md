@@ -80,22 +80,15 @@ pytest tests/unit/sources/{source_name}/ -v --tb=short
 
 If any test still fails → mark connector failed (record pytest output), do NOT open a PR, continue to next connector.
 
-### Step 6 — Prebuilt Wheel
+### Step 6 — Package
 
-If `{SRC}/pyproject.toml` doesn't exist, create it with the template in `.claude/skills/build_connector_package/SKILL.md` (version `0.1.0`), and also create `{SRC}/version-change-log.md` with a single `0.1.0` `INITIAL` entry (format in `CONTRIBUTING.md`, Change log). Then:
-
-```bash
-python tools/scripts/build_wheelhouse.py {source_name}
-python tools/scripts/build_wheelhouse.py {source_name} --check --base origin/master
-```
-
-If either command fails → mark connector failed (record the error), do NOT open a PR, continue to next connector.
+If `{SRC}/pyproject.toml` doesn't exist, create it with the template in `.claude/skills/build_connector_package/SKILL.md` (version `0.1.0`), and also create `{SRC}/version-change-log.md` with a single `0.1.0` `INITIAL` entry (format in `CONTRIBUTING.md`, Change log).
 
 ### Step 7 — Commit and Open PR
 
 ```bash
 git checkout -b feat/connector-{source_name}
-git add {SRC}/ {TESTS}/ wheelhouse/{source_name}/
+git add {SRC}/ {TESTS}/
 git commit -m "feat({source_name}): add {source_name} connector [needs-live-testing]"
 ```
 
@@ -106,7 +99,7 @@ Open PR via `gh pr create`:
 
 ```
 ## What's included
-- API research doc, implementation, simulator spec, connector spec, documentation, prebuilt wheel (`wheelhouse/{source_name}/`)
+- API research doc, implementation, simulator spec, connector spec, documentation, package (`pyproject.toml`, `version-change-log.md`)
 
 ## Simulate-mode test results
 <N>/<N> passed

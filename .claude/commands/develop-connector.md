@@ -83,27 +83,19 @@ If any test still fails, do NOT open a PR. Report the failures clearly so the de
 
 ---
 
-## Step 6 — Prebuilt Wheel
+## Step 6 — Package
 
-If `{SRC}/pyproject.toml` doesn't exist, create it with the template in `.claude/skills/build_connector_package/SKILL.md` (version `0.1.0`), and also create `{SRC}/version-change-log.md` with a single `0.1.0` `INITIAL` entry (format in `CONTRIBUTING.md`, Change log). Then build and verify the wheel yourself:
-
-```bash
-source .venv/bin/activate
-python tools/scripts/build_wheelhouse.py {source_name}
-python tools/scripts/build_wheelhouse.py {source_name} --check --base origin/master
-```
-
-Verify: `wheelhouse/{source_name}/lakeflow_community_connectors_{source_name}-0.1.0-py3-none-any.whl` exists and is the only file there. If either command fails, report the error and stop.
+If `{SRC}/pyproject.toml` doesn't exist, create it with the template in `.claude/skills/build_connector_package/SKILL.md` (version `0.1.0`), and also create `{SRC}/version-change-log.md` with a single `0.1.0` `INITIAL` entry (format in `CONTRIBUTING.md`, Change log).
 
 ---
 
 ## Step 7 — Commit and Open PR
 
-Commit all files under `SRC`, `TESTS` and `wheelhouse/{source_name}/`:
+Commit all files under `SRC` and `TESTS`:
 
 ```bash
 git checkout -b feat/connector-{source_name}
-git add {SRC}/ {TESTS}/ wheelhouse/{source_name}/
+git add {SRC}/ {TESTS}/
 git commit -m "feat({source_name}): add {source_name} connector [needs-live-testing]"
 ```
 
@@ -119,7 +111,7 @@ Open a GitHub PR using `gh pr create`:
 - Simulator spec: `source_simulator/specs/{source_name}/endpoints.yaml`
 - Connector spec: `{SRC}/connector_spec.yaml`
 - Documentation: `{SRC}/README.md`
-- Prebuilt wheel: `wheelhouse/{source_name}/lakeflow_community_connectors_{source_name}-0.1.0-py3-none-any.whl`
+- Package: `{SRC}/pyproject.toml` (0.1.0) and `{SRC}/version-change-log.md`
 
 ## Simulate-mode test results
 <paste pytest output summary>
@@ -146,5 +138,6 @@ Files:
   src/databricks/labs/community_connector/source_simulator/specs/{source_name}/endpoints.yaml
   {SRC}/connector_spec.yaml
   {SRC}/README.md
-  wheelhouse/{source_name}/lakeflow_community_connectors_{source_name}-0.1.0-py3-none-any.whl
+  {SRC}/pyproject.toml
+  {SRC}/version-change-log.md
 ```

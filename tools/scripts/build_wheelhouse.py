@@ -20,17 +20,25 @@ Usage:
     # Exit 1 instead of writing if any wheel is missing or stale:
     python tools/scripts/build_wheelhouse.py <source_name> --check
 
-    # Also fail if a wheel's contents changed since <ref> without a version bump:
+    # Also fail if a wheel's contents changed since <ref> but its version is one
+    # <ref> already publishes in wheelhouse/:
     python tools/scripts/build_wheelhouse.py <source_name> --check --base origin/master
 
-Every run also checks that the framework version satisfies the
-`lakeflow-community-connectors` range each connector declares: every connector when
-the framework is a target, otherwise only the given connectors. The wizard installs
-the framework wheel next to any connector wheel from the same revision, so a
-mismatch would fail at install time.
+    # PR CI: run every check without writing wheelhouse/. Stale wheels are fine:
+    # the Build Wheelhouse workflow rebuilds them after merge.
+    python tools/scripts/build_wheelhouse.py all --dry-run --base origin/master
 
-It also checks each target's version-change-log.md: the newest entry must be for
+    # Build Wheelhouse after merge: rebuild changed wheels. A wheel whose contents
+    # changed under a version HEAD already publishes is kept, with a warning:
+    python tools/scripts/build_wheelhouse.py all --base HEAD
+
+Every run also checks each target's version-change-log.md: the newest entry must be for
 the version in pyproject.toml, and versions must decrease down the file.
+
+With --check or --dry-run, a missing bump or change log problem is an error; with
+--base as well, only for packages whose source changed since <ref>. When writing, it's
+a warning: the build never replaces a published wheel and doesn't stop the other
+packages from building.
 """
 
 import argparse
@@ -95,45 +103,6 @@ def expected_wheel_name(pyproject_text: str) -> str:
     return f"{name}-{version}-py3-none-any.whl"
 
 
-def framework_requirement(pyproject_text: str) -> Optional[str]:
-    """Return the specifier a connector declares on the framework, e.g. `>=0.1.0,<1.0`."""
-    match = re.search(r'"lakeflow-community-connectors(?![-\w])\s*([^";]*)', pyproject_text)
-    return match.group(1).strip() if match else None
-
-
-def check_framework_compatibility(sources: List[str]) -> List[str]:
-    """Return errors for connectors whose declared framework range excludes the framework."""
-    from packaging.specifiers import InvalidSpecifier, SpecifierSet
-    from packaging.version import Version
-
-    framework_version = Version(
-        read_project_field(pyproject_path(FRAMEWORK).read_text(), "version")
-    )
-    errors = []
-    uncapped = []
-    for source in sources:
-        spec = framework_requirement(pyproject_path(source).read_text())
-        if spec is None:
-            errors.append(f"{source}: doesn't declare a lakeflow-community-connectors dependency")
-            continue
-        try:
-            specifiers = SpecifierSet(spec)
-        except InvalidSpecifier:
-            errors.append(f"{source}: invalid framework range `{spec}`")
-            continue
-        if framework_version not in specifiers:
-            errors.append(
-                f"{source}: requires lakeflow-community-connectors{spec}, but the framework is "
-                f"{framework_version}; update the connector in the same PR or defer the framework "
-                "release (see CONTRIBUTING.md, Versioning)"
-            )
-        if not any(s.operator in ("<", "<=", "==", "~=") for s in specifiers):
-            uncapped.append(source)
-    if uncapped:
-        print("note        no framework upper cap (add `,<{next major}`): " + ", ".join(uncapped))
-    return errors
-
-
 def check_change_log(target: str) -> List[str]:
     """Return errors unless the change log's newest entry matches pyproject.toml."""
     from packaging.version import InvalidVersion, Version
@@ -187,7 +156,7 @@ def comparable_contents(wheel_bytes: bytes) -> Dict[str, bytes]:
     return contents
 
 
-def build_wheel(target: str, outdir: Path) -> Path:
+def build_wheel(target: str, outdir: Path, no_isolation: bool) -> Path:
     cmd = [
         sys.executable,
         "-m",
@@ -197,6 +166,10 @@ def build_wheel(target: str, outdir: Path) -> Path:
         "--outdir",
         str(outdir),
     ]
+    if no_isolation:
+        # CI installs setuptools and wheel from a hash-pinned lock; an isolated
+        # build would fetch whatever versions the index serves.
+        cmd.append("--no-isolation")
     result = subprocess.run(cmd, capture_output=True, text=True, check=False)
     if result.returncode != 0:
         tail = "\n".join(result.stderr.strip().splitlines()[-10:])
@@ -227,38 +200,60 @@ def git_ls(ref: str, directory: Path) -> List[str]:
     return [Path(line).name for line in result.stdout.splitlines() if line.endswith(".whl")]
 
 
+def changed_since(target: str, base: str) -> bool:
+    """Whether the working tree changes `target`'s packaged source relative to `base`."""
+    if target == FRAMEWORK:
+        paths = [
+            "pyproject.toml",
+            "src/databricks/labs/community_connector",
+            ":(exclude)src/databricks/labs/community_connector/sources",
+        ]
+    else:
+        paths = [package_dir(target).relative_to(PROJECT_ROOT).as_posix()]
+    result = subprocess.run(
+        ["git", "diff", "--quiet", base, "--", *paths], cwd=PROJECT_ROOT, check=False
+    )
+    return result.returncode != 0
+
+
 def check_version_bump(target: str, built: Path, base: str) -> Optional[str]:
-    """Return an error if the wheel changed since `base` but the version didn't."""
+    """Return an error if `base` publishes this wheel's version with different contents.
+
+    Compares against the wheel committed at `base`, not its pyproject.toml: after a
+    merge, master can hold a bumped version whose wheel CI hasn't built yet, and
+    adding more code to that unpublished version is fine.
+    """
     base_dir = WHEELHOUSE_DIR / target
-    base_wheels = git_ls(base, base_dir)
-    if len(base_wheels) != 1:
-        return None  # New on this branch; any version is fine.
-    base_bytes = git_show(base, base_dir / base_wheels[0])
+    if git_ls(base, base_dir) != [built.name]:
+        return None  # New connector, or a version `base` doesn't publish.
+    base_bytes = git_show(base, base_dir / built.name)
     if base_bytes is None or comparable_contents(base_bytes) == comparable_contents(
         built.read_bytes()
     ):
         return None
-    base_pyproject = git_show(base, pyproject_path(target))
-    if base_pyproject is None:
-        return None
-    base_version = read_project_field(base_pyproject.decode(), "version")
     version = read_project_field(pyproject_path(target).read_text(), "version")
-    if version == base_version:
-        return (
-            f"{target}: wheel contents changed since {base} but version is still {version}; "
-            f"bump `version` in {pyproject_path(target).relative_to(PROJECT_ROOT)} "
-            "(see CONTRIBUTING.md, Versioning)"
-        )
-    return None
+    return (
+        f"{target}: wheel contents changed since {base} but version is still {version}; "
+        f"bump `version` in {pyproject_path(target).relative_to(PROJECT_ROOT)} "
+        "(see CONTRIBUTING.md, Versioning)"
+    )
 
 
-def process(target: str, check: bool, base: Optional[str]) -> List[str]:
+def warn(message: str) -> None:
+    print(f"WARNING  {message}", file=sys.stderr)
+
+
+def process(target: str, args: argparse.Namespace) -> List[str]:
     """Build `target` and update (or check) its wheelhouse directory. Returns errors."""
     errors = []
+    checking = args.check or args.dry_run
+    # A PR check only flags packages the PR changes: a package merged earlier without a
+    # bump would otherwise flag every later PR.
+    flag = not (checking and args.base) or changed_since(target, args.base)
     dest_dir = WHEELHOUSE_DIR / target
     expected = expected_wheel_name(pyproject_path(target).read_text())
     with tempfile.TemporaryDirectory() as tmp:
-        built = build_wheel(target, Path(tmp))
+        built = build_wheel(target, Path(tmp), args.no_isolation)
         if built.name != expected:
             return [f"{target}: built {built.name}, expected {expected} from pyproject.toml"]
 
@@ -270,14 +265,19 @@ def process(target: str, check: bool, base: Optional[str]) -> List[str]:
             == comparable_contents(built.read_bytes())
         )
 
-        if base:
-            bump_error = check_version_bump(target, built, base)
-            if bump_error:
-                errors.append(bump_error)
+        bump_error = check_version_bump(target, built, args.base) if args.base else None
+        if bump_error and checking and flag:
+            errors.append(bump_error)
 
         if up_to_date:
             print(f"up to date  {target}: {expected}")
-        elif check:
+        elif args.dry_run:
+            print(f"would build {target}: {expected}")
+        elif bump_error:
+            # A merged change without a bump: never replace a published wheel. The change
+            # ships with the connector's next version.
+            warn(f"{bump_error}; keeping the published wheel")
+        elif args.check:
             found = [w.name for w in existing]
             if found == [expected]:
                 problem = f"{expected} doesn't match the current source"
@@ -312,9 +312,22 @@ def main() -> int:
         "--check", action="store_true", help="don't write; exit 1 if any wheel is missing or stale"
     )
     parser.add_argument(
-        "--base", help="git ref to compare against; fail if a wheel changed without a version bump"
+        "--base",
+        help="git ref to compare against; flag a wheel that changed under a version it publishes",
+    )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="run the checks but don't write wheelhouse/ or fail on stale wheels",
+    )
+    parser.add_argument(
+        "--no-isolation",
+        action="store_true",
+        help="build with the installed setuptools and wheel (`python -m build --no-isolation`)",
     )
     args = parser.parse_args()
+    if args.dry_run and args.check:
+        parser.error("--dry-run and --check are mutually exclusive")
 
     targets = list(args.sources)
     if "all" in targets:
@@ -332,13 +345,18 @@ def main() -> int:
     errors = []
     for target in targets:
         try:
-            errors += process(target, args.check, args.base)
+            errors += process(target, args)
         except (RuntimeError, ValueError) as exc:
             errors.append(f"{target}: {exc}")
-    connectors = list_sources() if FRAMEWORK in targets else targets
-    errors += check_framework_compatibility(connectors)
+    checking = args.check or args.dry_run
     for target in targets:
-        errors += check_change_log(target)
+        if checking and args.base and not changed_since(target, args.base):
+            continue
+        for problem in check_change_log(target):
+            if checking:
+                errors.append(problem)
+            else:
+                warn(problem)
     for error in errors:
         print(f"ERROR  {error}", file=sys.stderr)
     return 1 if errors else 0

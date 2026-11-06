@@ -40,33 +40,27 @@ wheelhouse/
 
 ### Updating the wheels
 
-In the same PR as the change:
+CI builds the wheels, so a PR changes only the source: bump `version` in the affected `pyproject.toml` and add an entry to its `version-change-log.md` (see [Versioning](#versioning) and [Change log](#change-log)).
 
-1. Bump `version` in the affected `pyproject.toml` and add an entry to its `version-change-log.md` (see [Versioning](#versioning) and [Change log](#change-log)).
-2. Rebuild:
+The **Check Wheelhouse** workflow runs `build_wheelhouse.py all --dry-run --base <master>` on every PR. It builds each wheel without writing `wheelhouse/` and fails if:
+- a wheel's contents changed but its version is one `master` already publishes
+- a change log has no entry for the `pyproject.toml` version
 
-   ```bash
-   pip install build
-   python tools/scripts/build_wheelhouse.py <source_name>   # a connector
-   python tools/scripts/build_wheelhouse.py --framework     # the framework
-   ```
+It's advisory, not a required check, so a red result doesn't block merging. Leave the version unchanged only when a change can't affect pipelines, such as comments or formatting in a connector's code: after merge, Build Wheelhouse keeps the published wheel for that version, and the change ships with the connector's next bump.
 
-   The script builds with `python -m build`, replaces the old wheel, and keeps the committed file when nothing that affects pipelines changed.
-3. Check the result against `master`:
+After the PR merges, the **Build Wheelhouse** workflow rebuilds every changed wheel from `master` and opens or updates one PR from `bot/update-wheelhouse`. The managed ingestion wizard serves the new wheels once that PR merges. Until then it keeps serving the previous version, so two PRs that merge before the bot PR ship together under the newest version.
 
-   ```bash
-   python tools/scripts/build_wheelhouse.py <source_name> --check --base origin/master
-   ```
+Maintainers: GitHub doesn't start workflows for a PR opened by `GITHUB_TOKEN`, so the required checks don't run on the bot PR by themselves. Close and reopen it to run them, then review and merge it.
 
-   It fails if a wheel is missing or stale, if its contents changed without a version bump, or if a connector's declared framework range excludes the framework version.
+You can still build wheels locally, for example to test one by hand: `python tools/scripts/build_wheelhouse.py <source_name>` writes `wheelhouse/<source_name>/`. Don't commit it: the bot PR does. The script keeps a committed wheel when nothing that affects pipelines changed, so rebuilding unchanged code doesn't churn binaries.
 
-What needs a rebuild:
+What changes a wheel, and so needs a version bump:
 
 - **A connector:** any change to files packaged from `sources/<source_name>/`: `*.py`, `connector_spec.yaml`, `pyproject.toml`.
 - **The framework:** any change under `src/databricks/labs/community_connector/` outside `sources/` (`interface/`, `libs/`, `pipeline/`, `sparkpds/`), or to the root `pyproject.toml`. Every connector wheel depends on it, and it isn't published to PyPI.
-- **No rebuild:** tests, CI, repo docs, docs-only edits to a connector's `README.md` or `<source_name>_api_doc.md`, and the source simulator (`source_simulator/`, test-only). The next code change picks up the docs.
+- **No wheel change:** tests, CI, repo docs, docs-only edits to a connector's `README.md` or `<source_name>_api_doc.md`, and the source simulator (`source_simulator/`, test-only). The next code change picks up the docs.
 
-Reviewers: wheels are binary and don't show up in the diff. Run the `--check --base origin/master` command above on the PR branch to confirm they match the source.
+Reviewers of a bot PR: wheels are binary and don't show up in the diff. To confirm they match the source, check out the bot branch and run `python tools/scripts/build_wheelhouse.py all --check`.
 
 ## Versioning
 
@@ -103,7 +97,7 @@ Decide by what an **existing pipeline** needs when it picks up the new wheel:
 - Performance, logging and error-message improvements, refactors
 - Removing an unused dependency, widening a dependency range, or adding an upper cap such as `lakeflow-community-connectors>=0.1.0,<1.0`
 
-**No bump**: anything that doesn't need a rebuild (see the list above).
+**No bump**: anything that doesn't change a wheel (see the list above).
 
 Record every bump in the connector's change log (see [Change log](#change-log)), and say in the PR description which bump you made and why.
 
@@ -153,11 +147,10 @@ What counts as the framework:
 #### Releasing a framework change
 
 1. Classify the change with the rules above, bump `version` in the root `pyproject.toml`, and add an entry to the root `version-change-log.md`.
-2. Rebuild with `python tools/scripts/build_wheelhouse.py --framework`. It checks every connector's declared range against the new version and fails on a mismatch.
-3. For each connector it reports:
-   - after a MINOR or PATCH, the connector pins below the new version: fix its range in the same PR.
-   - after a MAJOR, verify the connector against the new framework, change its code if needed, raise its cap to the next major (for example `<2.0`), and bump it by its own rules, all in the same PR. If the affected connectors can't all be updated, defer the framework release.
-4. Run `python tools/scripts/build_wheelhouse.py all --check --base origin/master` and confirm it passes.
+2. Check the `lakeflow-community-connectors` range in every connector's `pyproject.toml` against the new version:
+   - after a MINOR or PATCH, a connector whose range excludes the new version pins below it: fix its range in the same PR.
+   - after a MAJOR, verify each connector against the new framework, change its code if needed, raise its cap to the next major (for example `<2.0`), and bump it by its own rules, all in the same PR. If the affected connectors can't all be updated, defer the framework release.
+3. Confirm Check Wheelhouse passes on the PR. Build Wheelhouse publishes the framework and connector wheels together after merge.
 
 Examples:
 
@@ -197,4 +190,4 @@ Every package keeps a change log next to its `pyproject.toml`: `sources/<source_
 - **Rollback**: whether downgrading to the previous version is safe, and what it brings back.
 - **References**: the PR, and any issue.
 
-`build_wheelhouse.py --check` fails if the change log is missing, a heading doesn't match the format, the newest entry isn't for the `pyproject.toml` version, or versions don't decrease down the file. Docs-only changes don't bump, so they don't get an entry.
+Check Wheelhouse flags a PR if the change log is missing, a heading doesn't match the format, the newest entry isn't for the `pyproject.toml` version, or versions don't decrease down the file. Docs-only changes don't bump, so they don't get an entry.
