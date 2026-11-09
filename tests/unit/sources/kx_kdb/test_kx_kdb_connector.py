@@ -137,10 +137,10 @@ def test_connector_normalizes_license_file_path(tmp_path):
     connector = KxKdbLakeflowConnect(
         {
             "hdb_root_path": str(_build_hdb(tmp_path)),
-            "license_volume_path": "/Volumes/main/rkh/rbc_kx/key/kc.lic",
+            "license_volume_path": "/Volumes/main/kx/files/keys/kc.lic",
         }
     )
-    assert connector.runtime_config.license_directory == "/Volumes/main/rkh/rbc_kx/key"
+    assert connector.runtime_config.license_directory == "/Volumes/main/kx/files/keys"
 
 
 # ---------------------------------------------------------------------------

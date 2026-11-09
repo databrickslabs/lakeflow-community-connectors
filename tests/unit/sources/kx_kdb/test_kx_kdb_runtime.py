@@ -100,18 +100,18 @@ def _offline_config(tmp_path, **overrides) -> PyKxRuntimeConfig:
 
 
 def test_normalize_license_directory_accepts_folder_or_file_path():
-    assert normalize_license_directory("/Volumes/main/rkh/rbc_kx/key_kdbx/") == (
-        "/Volumes/main/rkh/rbc_kx/key_kdbx"
+    assert normalize_license_directory("/Volumes/main/kx/files/keys/") == (
+        "/Volumes/main/kx/files/keys"
     )
-    assert normalize_license_directory("/Volumes/main/rkh/rbc_kx/key_kdbx/kc.lic") == (
-        "/Volumes/main/rkh/rbc_kx/key_kdbx"
+    assert normalize_license_directory("/Volumes/main/kx/files/keys/kc.lic") == (
+        "/Volumes/main/kx/files/keys"
     )
 
 
 def test_without_a_bundle_the_runtime_must_be_preinstalled():
-    config = build_runtime_config({"license_volume_path": "/Volumes/main/rkh/rbc_kx/key_kdbx/"})
+    config = build_runtime_config({"license_volume_path": "/Volumes/main/kx/files/keys/"})
 
-    assert config.license_directory == "/Volumes/main/rkh/rbc_kx/key_kdbx"
+    assert config.license_directory == "/Volumes/main/kx/files/keys"
     assert config.uses_offline_bundle is False
     assert config.license_b64 is None
     assert config.offline_bundle_path is None
