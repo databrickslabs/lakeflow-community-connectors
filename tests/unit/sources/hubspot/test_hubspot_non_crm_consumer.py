@@ -105,3 +105,91 @@ def test_membership_batch_reader_lazily_drains_every_page(generated):
         assert membership_calls == 1
         assert 1 + sum(1 for _ in rows) == 205
         assert membership_calls == 3
+
+
+@pytest.mark.parametrize("generated", [False, True])
+def test_membership_snapshot_has_one_shared_page_budget(generated):
+    options = {"tableName": "contact_list_memberships"}
+    conn = _connector_class(generated)({"access_token": "offline"})
+    conn._non_crm._sleep = lambda _: None
+    inventory_calls = 0
+    membership_calls = 0
+
+    def post(_url, **_kwargs):
+        nonlocal inventory_calls
+        inventory_calls += 1
+        return Mock(status_code=200, json=lambda: {
+            "results": [{
+                "listId": str(inventory_calls), "objectTypeId": "0-1",
+                "processingType": "MANUAL", "processingStatus": "COMPLETE",
+            }],
+            "paging": {"next": {"after": f"inventory-{inventory_calls}"}},
+        })
+
+    def get(_url, **_kwargs):
+        nonlocal membership_calls
+        membership_calls += 1
+        return Mock(status_code=200, json=lambda: {
+            "results": [{"recordId": str(membership_calls)}],
+            "paging": {"next": {"after": f"member-{membership_calls}"}},
+        })
+
+    schema = conn.get_table_schema("contact_list_memberships", options)
+    reader = LakeflowBatchReader(options, schema, conn)
+    with patch.object(conn._non_crm, "_MAX_PAGES", 2), patch(
+        "requests.get", side_effect=get
+    ), patch("requests.post", side_effect=post):
+        with pytest.raises(RuntimeError, match="page limit"):
+            list(reader.read(InputPartition(None)))
+    assert inventory_calls + membership_calls == 2
+
+
+@pytest.mark.parametrize("generated", [False, True])
+def test_non_crm_page_state_evicts_old_cursor_hashes(generated):
+    conn = _connector_class(generated)({"access_token": "offline"})
+    read = conn._non_crm
+    assert read._CURSOR_HISTORY == 64
+    read._CURSOR_HISTORY = 2
+    state = read._page_state()
+    calls = 0
+
+    def get(_url, **_kwargs):
+        nonlocal calls
+        calls += 1
+        payload = {"results": [{"id": str(calls)}]}
+        if calls < 4:
+            payload["paging"] = {"next": {"after": f"cursor-{calls}"}}
+        return Mock(status_code=200, json=lambda: payload)
+
+    with patch("requests.get", side_effect=get):
+        assert len(list(read._page_batches("/bounded", state=state))) == 4
+    assert state["pages"] == 4
+    assert len(state["recent_hashes"]) == len(state["recent_set"]) == 2
+
+
+@pytest.mark.parametrize("generated", [False, True])
+def test_membership_snapshot_rejects_duplicate_across_page_boundary(generated):
+    list_row = {
+        "listId": "list-1", "objectTypeId": "0-1", "processingType": "MANUAL",
+        "processingStatus": "COMPLETE",
+    }
+    membership_calls = 0
+
+    def post(_url, **_kwargs):
+        return Mock(status_code=200, json=lambda: {"results": [list_row]})
+
+    def get(_url, **_kwargs):
+        nonlocal membership_calls
+        membership_calls += 1
+        payload = {"results": [{"recordId": "same"}]}
+        if membership_calls == 1:
+            payload["paging"] = {"next": {"after": "next"}}
+        return Mock(status_code=200, json=lambda: payload)
+
+    options = {"tableName": "contact_list_memberships"}
+    conn = _connector_class(generated)({"access_token": "offline"})
+    schema = conn.get_table_schema("contact_list_memberships", options)
+    reader = LakeflowBatchReader(options, schema, conn)
+    with patch("requests.get", side_effect=get), patch("requests.post", side_effect=post):
+        with pytest.raises(RuntimeError, match="across pages"):
+            list(reader.read(InputPartition(None)))

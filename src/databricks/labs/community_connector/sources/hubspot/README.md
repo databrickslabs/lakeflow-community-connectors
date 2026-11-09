@@ -40,7 +40,8 @@ The connection can also be created using the standard Unity Catalog API.
 
 ## Objects Supported
 
-The HubSpot connector supports the following CRM objects with dynamic schema discovery and incremental synchronization:
+The HubSpot connector supports the following CRM objects with dynamic schema
+discovery and incremental or snapshot synchronization:
 
 | Table Name | Primary Key | Cursor Field | Associations |
 |------------|-------------|--------------|--------------|
@@ -50,7 +51,7 @@ The HubSpot connector supports the following CRM objects with dynamic schema dis
 | `tickets` | `id` | `updatedAt` | contacts, companies, deals |
 | `calls` | `id` | `updatedAt` | contacts, companies, deals, tickets |
 | `emails` | `id` | `updatedAt` | contacts, companies, deals, tickets |
-| `meetings` | `id` | `updatedAt` | contacts, companies, deals, tickets |
+| `meetings` | `id` | – | contacts, companies, deals, tickets |
 | `tasks` | `id` | `updatedAt` | contacts, companies, deals, tickets |
 | `notes` | `id` | `updatedAt` | contacts, companies, deals, tickets |
 | `contacts_property_history` | `object_id`, `property`, `timestamp` | `timestamp` | – |
@@ -64,9 +65,10 @@ The HubSpot connector supports the following CRM objects with dynamic schema dis
 ### Resource snapshots
 
 The following tables use complete snapshot ingestion. Each read drains every
-configured partition and page before returning rows. An HTTP error, malformed
-page, incomplete partition discovery, or conflicting duplicate fails the read.
-The downstream snapshot consumer reconciles removals after a successful read.
+configured partition and page in one Spark task. An HTTP error, malformed page,
+incomplete partition discovery, or conflicting duplicate fails that task. The
+downstream snapshot consumer commits rows and reconciles removals only after a
+successful complete task.
 These tables retain all source fields in a JSON `payload` column alongside typed
 common fields. They do not use `max_records_per_batch` or property filters.
 
@@ -82,10 +84,11 @@ common fields. They do not use `max_records_per_batch` or property filters.
 Meeting and contact-list-membership snapshots stream complete API pages through
 one batch-reader invocation and do not expose a continuation offset. They ignore
 `max_records_per_batch`, because stopping a snapshot early would publish an
-incomplete current set. The connector retains the active page, current list
-identity, and bounded cursor-cycle history rather than collecting the complete
-snapshot in connector memory. A later page failure fails the Spark task, so the
-snapshot consumer does not commit rows from a partial pass.
+incomplete current set. The connector retains the active page, previous-page
+identities, current list identity, and bounded cursor-cycle history rather than
+collecting the complete snapshot in connector memory. A later page failure
+fails the Spark task, so the snapshot consumer does not commit rows from a
+partial pass.
 
 Private apps need `crm.objects.owners.read` for owners, `forms` for forms and
 submissions, and an appropriate list read scope (`crm.segments.read` or
@@ -186,7 +189,7 @@ Property-history tables retain their own ingestion strategy.
 
 #### `meetings`
 - **Primary Key**: `id`
-- **Incremental Strategy**: Cursor-based on `updatedAt`
+- **Ingestion Strategy**: Complete active snapshot with no continuation offset
 - **Associations**: contacts, companies, deals, tickets
 - **Schema**: All meeting properties (discovered dynamically) including standard fields like title, start time, end time, location, and all custom properties
 
@@ -277,10 +280,15 @@ removals without archive timestamps or deleted-meeting history. Meeting reads
 remain snapshots when `association_sync_mode=incremental` is supplied.
 
 Active snapshots reject empty pages with continuation, repeated cursors,
-malformed records, and duplicate IDs before returning any rows or offset. A
-successful empty snapshot represents an empty current set. Pagination is not a
-transactional source snapshot: concurrent source changes can still affect what
-a complete enumeration observes. Snapshot reconciliation and mixed-object
+malformed records, and duplicate IDs within a page or across adjacent pages.
+To preserve page-bounded memory, they do not retain IDs from every earlier
+page, so a duplicate separated by one or more complete pages may pass through.
+Earlier pages may already have been yielded inside the Spark task when a later
+page fails, but the failed task does not commit a partial snapshot and no
+continuation offset is exposed. A successful empty snapshot represents an empty
+current set. Pagination is not a transactional source snapshot: concurrent
+source changes can still affect what a complete enumeration observes. Snapshot
+reconciliation and mixed-object
 option isolation require validation through the managed consumer.
 
 **Breaking schema change:** CRM properties with HubSpot type `number` now map

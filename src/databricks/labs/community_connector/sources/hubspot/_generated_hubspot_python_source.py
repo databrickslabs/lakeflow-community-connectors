@@ -1063,6 +1063,9 @@ def register_lakeflow_source(spark):
     class HubspotNonCrm:
         """Read all partitions and pages before returning a snapshot."""
 
+        _MAX_PAGES = NON_CRM_MAX_PAGES
+        _CURSOR_HISTORY = NON_CRM_CURSOR_HISTORY
+
         def __init__(self, base_url, auth_header, custom_types: Callable, post: Callable,
                      sleep: Callable = time.sleep, http=None):
             self.base_url = base_url.rstrip("/")
@@ -1135,13 +1138,15 @@ def register_lakeflow_source(spark):
             except ValueError:
                 raise RuntimeError("Malformed HubSpot non-CRM JSON") from None
 
-        def _page_batches(self, route, params=None, body=None):
+        @staticmethod
+        def _page_state():
+            return {"pages": 0, "recent_hashes": [], "recent_set": set()}
+
+        def _page_batches(self, route, params=None, body=None, state=None):
             cursor = None
-            recent_hashes = []
-            recent_set = set()
-            page_count = 0
+            state = state or self._page_state()
             while True:
-                if page_count >= NON_CRM_MAX_PAGES:
+                if state["pages"] >= self._MAX_PAGES:
                     raise RuntimeError("HubSpot non-CRM snapshot exceeded the page limit")
                 arguments = dict(body if body is not None else (params or {}))
                 if cursor is not None:
@@ -1157,16 +1162,18 @@ def register_lakeflow_source(spark):
                     raise RuntimeError("Malformed HubSpot non-CRM result")
                 if data.get("errors") or data.get("status") in {"PENDING", "PROCESSING", "CANCELED"}:
                     raise RuntimeError("Incomplete HubSpot non-CRM page")
-                page_count += 1
+                state["pages"] += 1
                 next_cursor = _non_crm_after(data)
                 if next_cursor is not None:
-                    cursor_hash = hashlib.sha256(next_cursor.encode("utf-8")).hexdigest()
-                    if cursor_hash in recent_set:
+                    cursor_hash = hashlib.sha256(
+                        f"{route}\0{next_cursor}".encode("utf-8")
+                    ).hexdigest()
+                    if cursor_hash in state["recent_set"]:
                         raise RuntimeError("Repeated or cyclic HubSpot non-CRM cursor")
-                    recent_set.add(cursor_hash)
-                    recent_hashes.append(cursor_hash)
-                    if len(recent_hashes) > NON_CRM_CURSOR_HISTORY:
-                        recent_set.remove(recent_hashes.pop(0))
+                    state["recent_set"].add(cursor_hash)
+                    state["recent_hashes"].append(cursor_hash)
+                    if len(state["recent_hashes"]) > self._CURSOR_HISTORY:
+                        state["recent_set"].remove(state["recent_hashes"].pop(0))
                 yield data["results"]
                 if next_cursor is None:
                     return
@@ -1179,6 +1186,7 @@ def register_lakeflow_source(spark):
             return rows
 
         def _membership_rows(self):
+            state = self._page_state()
             inventory_body = {
                 "objectTypeId": "0-1",
                 "processingTypes": ["MANUAL", "DYNAMIC", "SNAPSHOT"],
@@ -1187,19 +1195,22 @@ def register_lakeflow_source(spark):
                 "count": 1,
             }
             for inventory_page in self._page_batches(
-                "/crm/lists/2026-09/all", body=inventory_body
+                "/crm/lists/2026-09/all", body=inventory_body, state=state
             ):
                 for parent_source in inventory_page:
                     if parent_source.get("objectTypeId") != "0-1":
                         raise RuntimeError("Non-contact list in HubSpot contact-list inventory")
                     parent = self._row("contact_lists", parent_source)
-                    if parent.get("processingStatus") == "PROCESSING":
-                        raise RuntimeError("HubSpot list membership is still PROCESSING")
+                    if parent.get("processingStatus") != "COMPLETE":
+                        raise RuntimeError("HubSpot list membership is not COMPLETE")
                     identity = parent["listId"]
                     route = (
                         f"/crm/lists/2026-09/{quote(identity, safe='')}/memberships"
                     )
-                    for membership_page in self._page_batches(route, {"limit": 100}):
+                    previous_page_keys = set()
+                    for membership_page in self._page_batches(
+                        route, {"limit": 100}, state=state
+                    ):
                         seen = set()
                         for source in membership_page:
                             source = _non_crm_with_identity(source, "listId", identity)
@@ -1208,7 +1219,12 @@ def register_lakeflow_source(spark):
                             if key in seen:
                                 raise RuntimeError("Duplicate HubSpot non-CRM identity in page")
                             seen.add(key)
+                            if key in previous_page_keys:
+                                raise RuntimeError(
+                                    "Duplicate HubSpot non-CRM identity across pages"
+                                )
                             yield row
+                        previous_page_keys = seen
 
         def _inventory(self, table):
             if table in {"owners", "forms"}:
@@ -2590,6 +2606,7 @@ def register_lakeflow_source(spark):
                 after = None
                 recent_hashes = []
                 recent_set = set()
+                previous_page_ids = set()
                 page_count = 0
                 while True:
                     if page_count >= self._SNAPSHOT_MAX_PAGES:
@@ -2614,6 +2631,8 @@ def register_lakeflow_source(spark):
                         if identity in page_ids:
                             raise RuntimeError("Duplicate HubSpot snapshot identity in page")
                         page_ids.add(identity)
+                    if page_ids & previous_page_ids:
+                        raise RuntimeError("Duplicate HubSpot snapshot identity across pages")
                     if next_after is not None:
                         cursor_hash = self._activity_cursor_hash(next_after)
                         if cursor_hash in recent_set:
@@ -2627,6 +2646,7 @@ def register_lakeflow_source(spark):
                         yield self._transform_single_record(
                             record, table_name, property_names, associations
                         )
+                    previous_page_ids = page_ids
                     if next_after is None:
                         return
                     after = next_after
