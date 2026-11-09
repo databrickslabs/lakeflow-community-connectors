@@ -193,3 +193,42 @@ def test_membership_snapshot_rejects_duplicate_across_page_boundary(generated):
     with patch("requests.get", side_effect=get), patch("requests.post", side_effect=post):
         with pytest.raises(RuntimeError, match="across pages"):
             list(reader.read(InputPartition(None)))
+
+
+@pytest.mark.parametrize("generated", [False, True])
+@pytest.mark.parametrize("boundary", ["same_page", "adjacent_pages"])
+def test_membership_snapshot_rejects_duplicate_list_parent(generated, boundary):
+    list_row = {
+        "listId": "list-1", "objectTypeId": "0-1", "processingType": "MANUAL",
+        "processingStatus": "COMPLETE",
+    }
+    inventory_calls = 0
+
+    def post(_url, **_kwargs):
+        nonlocal inventory_calls
+        inventory_calls += 1
+        if boundary == "same_page":
+            payload = {"results": [list_row, list_row]}
+        elif inventory_calls == 1:
+            payload = {
+                "results": [list_row],
+                "paging": {"next": {"after": "next-inventory"}},
+            }
+        else:
+            payload = {"results": [list_row]}
+        return Mock(status_code=200, json=lambda: payload)
+
+    def get(_url, **_kwargs):
+        return Mock(status_code=200, json=lambda: {
+            "results": [{"recordId": "same"}],
+        })
+
+    options = {"tableName": "contact_list_memberships"}
+    conn = _connector_class(generated)({"access_token": "offline"})
+    schema = conn.get_table_schema("contact_list_memberships", options)
+    reader = LakeflowBatchReader(options, schema, conn)
+    with patch("requests.get", side_effect=get), patch(
+        "requests.post", side_effect=post
+    ):
+        with pytest.raises(RuntimeError, match="list identity"):
+            list(reader.read(InputPartition(None)))
