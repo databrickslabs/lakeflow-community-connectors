@@ -214,6 +214,7 @@ class HubspotNonCrm:
 
     def _membership_rows(self):
         state = self._page_state()
+        previous_inventory_ids = set()
         inventory_body = {
             "objectTypeId": "0-1",
             "processingTypes": ["MANUAL", "DYNAMIC", "SNAPSHOT"],
@@ -224,6 +225,8 @@ class HubspotNonCrm:
         for inventory_page in self._page_batches(
             "/crm/lists/2026-09/all", body=inventory_body, state=state
         ):
+            parents = []
+            inventory_ids = set()
             for parent_source in inventory_page:
                 if parent_source.get("objectTypeId") != "0-1":
                     raise RuntimeError("Non-contact list in HubSpot contact-list inventory")
@@ -231,6 +234,13 @@ class HubspotNonCrm:
                 if parent.get("processingStatus") != "COMPLETE":
                     raise RuntimeError("HubSpot list membership is not COMPLETE")
                 identity = parent["listId"]
+                if identity in inventory_ids:
+                    raise RuntimeError("Duplicate HubSpot list identity in page")
+                inventory_ids.add(identity)
+                if identity in previous_inventory_ids:
+                    raise RuntimeError("Duplicate HubSpot list identity across pages")
+                parents.append(identity)
+            for identity in parents:
                 route = (
                     f"/crm/lists/2026-09/{quote(identity, safe='')}/memberships"
                 )
@@ -252,6 +262,7 @@ class HubspotNonCrm:
                             )
                         yield row
                     previous_page_keys = seen
+            previous_inventory_ids = inventory_ids
 
     def _inventory(self, table):
         if table in {"owners", "forms"}:
