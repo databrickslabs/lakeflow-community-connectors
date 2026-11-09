@@ -72,7 +72,7 @@ def test_membership_batch_reader_lazily_drains_every_page(generated):
     membership_calls = 0
 
     def post(url, **_kwargs):
-        assert url.endswith("/crm/lists/2026-09/all")
+        assert url.endswith("/crm/lists/2026-09/search")
         return Mock(status_code=200, json=lambda: {"results": [list_row]})
 
     def get(url, **kwargs):
@@ -168,7 +168,10 @@ def test_non_crm_page_state_evicts_old_cursor_hashes(generated):
 
 
 @pytest.mark.parametrize("generated", [False, True])
-def test_membership_snapshot_rejects_duplicate_across_page_boundary(generated):
+@pytest.mark.parametrize("separated", [False, True])
+def test_membership_snapshot_rejects_duplicate_across_page_boundary(
+    generated, separated
+):
     list_row = {
         "listId": "list-1", "objectTypeId": "0-1", "processingType": "MANUAL",
         "processingStatus": "COMPLETE",
@@ -181,9 +184,13 @@ def test_membership_snapshot_rejects_duplicate_across_page_boundary(generated):
     def get(_url, **_kwargs):
         nonlocal membership_calls
         membership_calls += 1
-        payload = {"results": [{"recordId": "same"}]}
-        if membership_calls == 1:
-            payload["paging"] = {"next": {"after": "next"}}
+        record_id = "other" if separated and membership_calls == 2 else "same"
+        payload = {"results": [{"recordId": record_id}]}
+        final_call = 3 if separated else 2
+        if membership_calls < final_call:
+            payload["paging"] = {
+                "next": {"after": f"next-{membership_calls}"}
+            }
         return Mock(status_code=200, json=lambda: payload)
 
     options = {"tableName": "contact_list_memberships"}
@@ -191,12 +198,14 @@ def test_membership_snapshot_rejects_duplicate_across_page_boundary(generated):
     schema = conn.get_table_schema("contact_list_memberships", options)
     reader = LakeflowBatchReader(options, schema, conn)
     with patch("requests.get", side_effect=get), patch("requests.post", side_effect=post):
-        with pytest.raises(RuntimeError, match="across pages"):
+        with pytest.raises(RuntimeError, match="across snapshot"):
             list(reader.read(InputPartition(None)))
 
 
 @pytest.mark.parametrize("generated", [False, True])
-@pytest.mark.parametrize("boundary", ["same_page", "adjacent_pages"])
+@pytest.mark.parametrize(
+    "boundary", ["same_page", "adjacent_pages", "separated_pages"]
+)
 def test_membership_snapshot_rejects_duplicate_list_parent(generated, boundary):
     list_row = {
         "listId": "list-1", "objectTypeId": "0-1", "processingType": "MANUAL",
@@ -213,6 +222,11 @@ def test_membership_snapshot_rejects_duplicate_list_parent(generated, boundary):
             payload = {
                 "results": [list_row],
                 "paging": {"next": {"after": "next-inventory"}},
+            }
+        elif boundary == "separated_pages" and inventory_calls == 2:
+            payload = {
+                "results": [{**list_row, "listId": "list-2"}],
+                "paging": {"next": {"after": "last-inventory"}},
             }
         else:
             payload = {"results": [list_row]}

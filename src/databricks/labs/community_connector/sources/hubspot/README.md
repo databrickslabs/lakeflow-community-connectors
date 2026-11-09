@@ -280,9 +280,9 @@ removals without archive timestamps or deleted-meeting history. Meeting reads
 remain snapshots when `association_sync_mode=incremental` is supplied.
 
 Active snapshots reject empty pages with continuation, repeated cursors,
-malformed records, and duplicate IDs within a page or across adjacent pages.
-To preserve page-bounded memory, they do not retain IDs from every earlier
-page, so a duplicate separated by one or more complete pages may pass through.
+malformed records, and duplicate IDs. Contact-list membership snapshots use a
+task-local disk-backed uniqueness index, so list parents and composite membership
+keys are checked across the complete snapshot without retaining all IDs in memory.
 Earlier pages may already have been yielded inside the Spark task when a later
 page fails, but the failed task does not commit a partial snapshot and no
 continuation offset is exposed. A successful empty snapshot represents an empty

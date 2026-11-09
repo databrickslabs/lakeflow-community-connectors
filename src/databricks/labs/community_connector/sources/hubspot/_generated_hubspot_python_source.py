@@ -55,6 +55,8 @@ import base64
 import hashlib
 import math
 import requests
+import sqlite3
+import tempfile
 
 
 def register_lakeflow_source(spark):
@@ -1187,7 +1189,6 @@ def register_lakeflow_source(spark):
 
         def _membership_rows(self):
             state = self._page_state()
-            previous_inventory_ids = set()
             inventory_body = {
                 "objectTypeId": "0-1",
                 "processingTypes": ["MANUAL", "DYNAMIC", "SNAPSHOT"],
@@ -1195,47 +1196,63 @@ def register_lakeflow_source(spark):
                 # Keep only the current list parent while its membership pages drain.
                 "count": 1,
             }
-            for inventory_page in self._page_batches(
-                "/crm/lists/2026-09/all", body=inventory_body, state=state
-            ):
-                parents = []
-                inventory_ids = set()
-                for parent_source in inventory_page:
-                    if parent_source.get("objectTypeId") != "0-1":
-                        raise RuntimeError("Non-contact list in HubSpot contact-list inventory")
-                    parent = self._row("contact_lists", parent_source)
-                    if parent.get("processingStatus") != "COMPLETE":
-                        raise RuntimeError("HubSpot list membership is not COMPLETE")
-                    identity = parent["listId"]
-                    if identity in inventory_ids:
-                        raise RuntimeError("Duplicate HubSpot list identity in page")
-                    inventory_ids.add(identity)
-                    if identity in previous_inventory_ids:
-                        raise RuntimeError("Duplicate HubSpot list identity across pages")
-                    parents.append(identity)
-                for identity in parents:
-                    route = (
-                        f"/crm/lists/2026-09/{quote(identity, safe='')}/memberships"
+            with tempfile.TemporaryDirectory(prefix="hubspot-membership-") as directory:
+                seen = sqlite3.connect(f"{directory}/seen.sqlite3")
+                try:
+                    seen.execute("CREATE TABLE parents (list_id TEXT PRIMARY KEY)")
+                    seen.execute(
+                        "CREATE TABLE memberships ("
+                        "list_id TEXT, record_id TEXT, PRIMARY KEY (list_id, record_id))"
                     )
-                    previous_page_keys = set()
-                    for membership_page in self._page_batches(
-                        route, {"limit": 100}, state=state
+                    for inventory_page in self._page_batches(
+                        "/crm/lists/2026-09/search", body=inventory_body, state=state
                     ):
-                        seen = set()
-                        for source in membership_page:
-                            source = _non_crm_with_identity(source, "listId", identity)
-                            row = self._row("contact_list_memberships", source)
-                            key = tuple(row[name] for name in NON_CRM_KEYS["contact_list_memberships"])
-                            if key in seen:
-                                raise RuntimeError("Duplicate HubSpot non-CRM identity in page")
-                            seen.add(key)
-                            if key in previous_page_keys:
+                        parents = []
+                        for parent_source in inventory_page:
+                            if parent_source.get("objectTypeId") != "0-1":
                                 raise RuntimeError(
-                                    "Duplicate HubSpot non-CRM identity across pages"
+                                    "Non-contact list in HubSpot contact-list inventory"
                                 )
-                            yield row
-                        previous_page_keys = seen
-                previous_inventory_ids = inventory_ids
+                            parent = self._row("contact_lists", parent_source)
+                            if parent.get("processingStatus") != "COMPLETE":
+                                raise RuntimeError("HubSpot list membership is not COMPLETE")
+                            identity = parent["listId"]
+                            try:
+                                seen.execute("INSERT INTO parents VALUES (?)", (identity,))
+                            except sqlite3.IntegrityError as err:
+                                raise RuntimeError(
+                                    "Duplicate HubSpot list identity across snapshot"
+                                ) from err
+                            parents.append(identity)
+                        for identity in parents:
+                            route = (
+                                f"/crm/lists/2026-09/{quote(identity, safe='')}/memberships"
+                            )
+                            for membership_page in self._page_batches(
+                                route, {"limit": 100}, state=state
+                            ):
+                                for source in membership_page:
+                                    source = _non_crm_with_identity(
+                                        source, "listId", identity
+                                    )
+                                    row = self._row("contact_list_memberships", source)
+                                    key = tuple(
+                                        row[name]
+                                        for name in NON_CRM_KEYS[
+                                            "contact_list_memberships"
+                                        ]
+                                    )
+                                    try:
+                                        seen.execute(
+                                            "INSERT INTO memberships VALUES (?, ?)", key
+                                        )
+                                    except sqlite3.IntegrityError as err:
+                                        raise RuntimeError(
+                                            "Duplicate HubSpot non-CRM identity across snapshot"
+                                        ) from err
+                                    yield row
+                finally:
+                    seen.close()
 
         def _inventory(self, table):
             if table in {"owners", "forms"}:
@@ -1250,7 +1267,7 @@ def register_lakeflow_source(spark):
                         row.setdefault("archived", archived)
                         rows.append(row)
                 return rows
-            rows = self._pages("/crm/lists/2026-09/all", body={
+            rows = self._pages("/crm/lists/2026-09/search", body={
                 "objectTypeId": "0-1", "processingTypes": ["MANUAL", "DYNAMIC", "SNAPSHOT"],
                 "additionalProperties": [], "count": 500,
             })
