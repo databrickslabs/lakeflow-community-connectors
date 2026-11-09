@@ -69,7 +69,7 @@ def test_lists_post_body_and_body_cursor():
     assert [r["listId"] for r in rows] == ["1", "2"]
     first, second = post.call_args_list
     assert first.args == (
-        "non_crm", "https://example.invalid/crm/lists/2026-09/all",
+        "non_crm", "https://example.invalid/crm/lists/2026-09/search",
         {"objectTypeId": "0-1", "processingTypes": ["MANUAL", "DYNAMIC", "SNAPSHOT"],
          "additionalProperties": [], "count": 500}, 0.11,
     )
