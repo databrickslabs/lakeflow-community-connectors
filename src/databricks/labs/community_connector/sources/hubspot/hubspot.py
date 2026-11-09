@@ -725,6 +725,7 @@ class HubspotLakeflowConnect(LakeflowConnect):
             after = None
             recent_hashes = []
             recent_set = set()
+            previous_page_ids = set()
             page_count = 0
             while True:
                 if page_count >= self._SNAPSHOT_MAX_PAGES:
@@ -759,6 +760,8 @@ class HubspotLakeflowConnect(LakeflowConnect):
                             "Duplicate HubSpot snapshot identity in page"
                         )
                     page_ids.add(identity)
+                if page_ids & previous_page_ids:
+                    raise RuntimeError("Duplicate HubSpot snapshot identity across pages")
                 if next_after is not None:
                     cursor_hash = hashlib.sha256(
                         str(next_after).encode("utf-8")
@@ -786,6 +789,7 @@ class HubspotLakeflowConnect(LakeflowConnect):
                         property_names,
                         numeric_value_mode,
                     )
+                previous_page_ids = page_ids
                 if next_after is None:
                     return
                 after = next_after

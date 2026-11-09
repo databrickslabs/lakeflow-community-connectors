@@ -66,6 +66,49 @@ def test_meeting_batch_reader_lazily_drains_complete_offset_free_snapshot(genera
 
 
 @pytest.mark.parametrize("generated", [False, True])
+def test_meeting_snapshot_bounds_cursor_history_and_total_pages(generated):
+    api = SnapshotAPI()
+    cursors = ["a", "b", "c", "a"]
+
+    def get(url, **kwargs):
+        if urlparse(url).path != "/crm/objects/2026-09/meetings":
+            return api.get(url, **kwargs)
+        index = api.active_calls
+        api.active_calls += 1
+        payload = {
+            "results": [{**api.parent(), "id": str(index)}],
+            "paging": {"next": {"after": cursors[index]}},
+        }
+        return Mock(status_code=200, json=lambda: copy.deepcopy(payload))
+
+    with patch("requests.get", side_effect=get), patch(
+        "requests.post", side_effect=api.post
+    ), patch("time.sleep"):
+        conn, _, _ = consumer("meetings", generated)
+        assert conn._SNAPSHOT_CURSOR_HISTORY == 64
+        conn._SNAPSHOT_CURSOR_HISTORY = 2
+        conn._SNAPSHOT_MAX_PAGES = 4
+        rows, _ = conn.read_table("meetings", {}, {})
+        assert [next(rows)["id"] for _ in range(4)] == ["0", "1", "2", "3"]
+        with pytest.raises(RuntimeError, match="page limit"):
+            next(rows)
+    assert api.active_calls == 4
+
+
+@pytest.mark.parametrize("generated", [False, True])
+def test_meeting_snapshot_rejects_duplicate_across_page_boundary(generated):
+    api = SnapshotAPI()
+    api.pages[1]["results"][0]["id"] = "1"
+    with patch("requests.get", side_effect=api.get), patch(
+        "requests.post", side_effect=api.post
+    ), patch("time.sleep"):
+        conn, schema, _ = consumer("meetings", generated)
+        reader = LakeflowBatchReader({"tableName": "meetings"}, schema, conn)
+        with pytest.raises(RuntimeError, match="across pages"):
+            list(reader.read(InputPartition(None)))
+
+
+@pytest.mark.parametrize("generated", [False, True])
 @pytest.mark.parametrize("case", ["empty_continuation", "cycle", "malformed_record", "duplicate_id", "archived_record"])
 def test_incomplete_active_snapshot_never_publishes(generated, case):
     api = SnapshotAPI()

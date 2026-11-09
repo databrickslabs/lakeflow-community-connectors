@@ -251,10 +251,11 @@ def test_429_retry_after_and_exhaustion():
     assert get.call_count == NON_CRM_MAX_RETRIES + 1
 
 
-def test_processing_list_cannot_claim_complete_memberships():
-    read, _, _ = helper(page(contact_list(processingStatus="PROCESSING")))
+@pytest.mark.parametrize("status", ["PROCESSING", "CANCELED", "UNKNOWN", None])
+def test_incomplete_list_cannot_claim_complete_memberships(status):
+    read, _, _ = helper(page(contact_list(processingStatus=status)))
     with patch(NON_CRM_TEST_GET) as get:
-        with pytest.raises(RuntimeError, match="PROCESSING"):
+        with pytest.raises(RuntimeError, match="COMPLETE"):
             list(read.read_table("contact_list_memberships", {}))
     get.assert_not_called()
 
