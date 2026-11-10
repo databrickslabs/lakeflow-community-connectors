@@ -40,7 +40,10 @@ def test_snapshot_consumer_nested_rows_and_empty_rescan(generated, table):
             assert url.endswith("/marketing/v3/forms"), url
             name = "forms"
         key = "lists" if name == "contact_lists" else "results"
-        return Mock(status_code=200, json=lambda: {key: [] if empty else fixtures[name]})
+        payload = {key: [] if empty else fixtures[name]}
+        if name == "contact_lists":
+            payload.update({"hasMore": False, "offset": 0, "total": len(payload[key])})
+        return Mock(status_code=200, json=lambda: payload)
 
     conn = _connector_class(generated)({"access_token": "offline"})
     conn._non_crm._sleep = lambda _: None
@@ -74,7 +77,9 @@ def test_membership_batch_reader_lazily_drains_every_page(generated):
 
     def post(url, **_kwargs):
         assert url.endswith("/crm/lists/2026-09/search")
-        return Mock(status_code=200, json=lambda: {"lists": [list_row]})
+        return Mock(status_code=200, json=lambda: {
+            "lists": [list_row], "hasMore": False, "offset": 0, "total": 1,
+        })
 
     def get(url, **kwargs):
         nonlocal membership_calls
@@ -124,7 +129,9 @@ def test_membership_snapshot_has_one_shared_page_budget(generated):
                 "listId": str(inventory_calls), "objectTypeId": "0-1",
                 "processingType": "MANUAL", "processingStatus": "COMPLETE",
             }],
-            "paging": {"next": {"after": f"inventory-{inventory_calls}"}},
+            "hasMore": True,
+            "offset": inventory_calls,
+            "total": 100,
         })
 
     def get(_url, **_kwargs):
@@ -180,7 +187,9 @@ def test_membership_snapshot_rejects_duplicate_across_page_boundary(
     membership_calls = 0
 
     def post(_url, **_kwargs):
-        return Mock(status_code=200, json=lambda: {"lists": [list_row]})
+        return Mock(status_code=200, json=lambda: {
+            "lists": [list_row], "hasMore": False, "offset": 0, "total": 1,
+        })
 
     def get(_url, **_kwargs):
         nonlocal membership_calls
@@ -218,19 +227,29 @@ def test_membership_snapshot_rejects_duplicate_list_parent(generated, boundary):
         nonlocal inventory_calls
         inventory_calls += 1
         if boundary == "same_page":
-            payload = {"lists": [list_row, list_row]}
+            payload = {
+                "lists": [list_row, list_row], "hasMore": False,
+                "offset": 0, "total": 2,
+            }
         elif inventory_calls == 1:
             payload = {
                 "lists": [list_row],
-                "paging": {"next": {"after": "next-inventory"}},
+                "hasMore": True,
+                "offset": 1,
+                "total": 3 if boundary == "separated_pages" else 2,
             }
         elif boundary == "separated_pages" and inventory_calls == 2:
             payload = {
                 "lists": [{**list_row, "listId": "list-2"}],
-                "paging": {"next": {"after": "last-inventory"}},
+                "hasMore": True,
+                "offset": 2,
+                "total": 3,
             }
         else:
-            payload = {"lists": [list_row]}
+            payload = {
+                "lists": [list_row], "hasMore": False,
+                "offset": inventory_calls, "total": inventory_calls,
+            }
         return Mock(status_code=200, json=lambda: payload)
 
     def get(_url, **_kwargs):
