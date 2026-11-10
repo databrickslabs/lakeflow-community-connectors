@@ -262,7 +262,7 @@ requests (Airbyte-style) is a possible follow-up.
 | `owners` | `GET /crm/owners/2026-09` | `paging.next.after`, active and archived partitions |
 | `pipelines` | `GET /crm/pipelines/2026-09/{objectTypeId}` | `paging.next.after`, every configured object partition |
 | `forms` | `GET /marketing/v3/forms` | `paging.next.after`, active and archived partitions, `formTypes=all` |
-| `contact_lists` | `POST /crm/lists/2026-09/search` | `paging.next.after` passed as `after` in the next request body |
+| `contact_lists` | `POST /crm/lists/2026-09/search` | `lists` response collection; `paging.next.after` passed as `after` in the next request body |
 | `contact_list_memberships` | `GET /crm/lists/2026-09/{listId}/memberships` | `paging.next.after` for each discovered contact list |
 | `form_submissions` | `GET /form-integrations/v1/submissions/forms/{formId}` | `paging.next.after` for each discovered form |
 

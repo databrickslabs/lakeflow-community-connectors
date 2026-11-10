@@ -167,7 +167,9 @@ class HubspotNonCrm:
     def _page_state():
         return {"pages": 0, "recent_hashes": [], "recent_set": set()}
 
-    def _page_batches(self, route, params=None, body=None, state=None):
+    def _page_batches(
+        self, route, params=None, body=None, state=None, records_key="results"
+    ):
         cursor = None
         state = state or self._page_state()
         while True:
@@ -181,9 +183,9 @@ class HubspotNonCrm:
             else:
                 data = self._post("non_crm", self.base_url + route, arguments,
                                   NON_CRM_MIN_INTERVAL_S)
-            if not isinstance(data, dict) or not isinstance(data.get("results"), list):
+            if not isinstance(data, dict) or not isinstance(data.get(records_key), list):
                 raise RuntimeError("Malformed HubSpot non-CRM results")
-            if any(not isinstance(row, dict) for row in data["results"]):
+            if any(not isinstance(row, dict) for row in data[records_key]):
                 raise RuntimeError("Malformed HubSpot non-CRM result")
             if data.get("errors") or data.get("status") in {"PENDING", "PROCESSING", "CANCELED"}:
                 raise RuntimeError("Incomplete HubSpot non-CRM page")
@@ -199,14 +201,16 @@ class HubspotNonCrm:
                 state["recent_hashes"].append(cursor_hash)
                 if len(state["recent_hashes"]) > self._CURSOR_HISTORY:
                     state["recent_set"].remove(state["recent_hashes"].pop(0))
-            yield data["results"]
+            yield data[records_key]
             if next_cursor is None:
                 return
             cursor = next_cursor
 
-    def _pages(self, route, params=None, body=None):
+    def _pages(self, route, params=None, body=None, records_key="results"):
         rows = []
-        for page in self._page_batches(route, params, body):
+        for page in self._page_batches(
+            route, params, body, records_key=records_key
+        ):
             rows.extend(page)
         return rows
 
@@ -228,7 +232,10 @@ class HubspotNonCrm:
                     "list_id TEXT, record_id TEXT, PRIMARY KEY (list_id, record_id))"
                 )
                 for inventory_page in self._page_batches(
-                    "/crm/lists/2026-09/search", body=inventory_body, state=state
+                    "/crm/lists/2026-09/search",
+                    body=inventory_body,
+                    state=state,
+                    records_key="lists",
                 ):
                     parents = []
                     for parent_source in inventory_page:
@@ -290,10 +297,16 @@ class HubspotNonCrm:
                     row.setdefault("archived", archived)
                     rows.append(row)
             return rows
-        rows = self._pages("/crm/lists/2026-09/search", body={
-            "objectTypeId": "0-1", "processingTypes": ["MANUAL", "DYNAMIC", "SNAPSHOT"],
-            "additionalProperties": [], "count": 500,
-        })
+        rows = self._pages(
+            "/crm/lists/2026-09/search",
+            body={
+                "objectTypeId": "0-1",
+                "processingTypes": ["MANUAL", "DYNAMIC", "SNAPSHOT"],
+                "additionalProperties": [],
+                "count": 500,
+            },
+            records_key="lists",
+        )
         for row in rows:
             if row.get("objectTypeId") != "0-1":
                 raise RuntimeError("Non-contact list in HubSpot contact-list inventory")

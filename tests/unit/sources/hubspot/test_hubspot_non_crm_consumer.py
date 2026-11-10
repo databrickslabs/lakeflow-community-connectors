@@ -39,7 +39,8 @@ def test_snapshot_consumer_nested_rows_and_empty_rescan(generated, table):
         else:
             assert url.endswith("/marketing/v3/forms"), url
             name = "forms"
-        return Mock(status_code=200, json=lambda: {"results": [] if empty else fixtures[name]})
+        key = "lists" if name == "contact_lists" else "results"
+        return Mock(status_code=200, json=lambda: {key: [] if empty else fixtures[name]})
 
     conn = _connector_class(generated)({"access_token": "offline"})
     conn._non_crm._sleep = lambda _: None
@@ -73,7 +74,7 @@ def test_membership_batch_reader_lazily_drains_every_page(generated):
 
     def post(url, **_kwargs):
         assert url.endswith("/crm/lists/2026-09/search")
-        return Mock(status_code=200, json=lambda: {"results": [list_row]})
+        return Mock(status_code=200, json=lambda: {"lists": [list_row]})
 
     def get(url, **kwargs):
         nonlocal membership_calls
@@ -119,7 +120,7 @@ def test_membership_snapshot_has_one_shared_page_budget(generated):
         nonlocal inventory_calls
         inventory_calls += 1
         return Mock(status_code=200, json=lambda: {
-            "results": [{
+            "lists": [{
                 "listId": str(inventory_calls), "objectTypeId": "0-1",
                 "processingType": "MANUAL", "processingStatus": "COMPLETE",
             }],
@@ -179,7 +180,7 @@ def test_membership_snapshot_rejects_duplicate_across_page_boundary(
     membership_calls = 0
 
     def post(_url, **_kwargs):
-        return Mock(status_code=200, json=lambda: {"results": [list_row]})
+        return Mock(status_code=200, json=lambda: {"lists": [list_row]})
 
     def get(_url, **_kwargs):
         nonlocal membership_calls
@@ -217,19 +218,19 @@ def test_membership_snapshot_rejects_duplicate_list_parent(generated, boundary):
         nonlocal inventory_calls
         inventory_calls += 1
         if boundary == "same_page":
-            payload = {"results": [list_row, list_row]}
+            payload = {"lists": [list_row, list_row]}
         elif inventory_calls == 1:
             payload = {
-                "results": [list_row],
+                "lists": [list_row],
                 "paging": {"next": {"after": "next-inventory"}},
             }
         elif boundary == "separated_pages" and inventory_calls == 2:
             payload = {
-                "results": [{**list_row, "listId": "list-2"}],
+                "lists": [{**list_row, "listId": "list-2"}],
                 "paging": {"next": {"after": "last-inventory"}},
             }
         else:
-            payload = {"results": [list_row]}
+            payload = {"lists": [list_row]}
         return Mock(status_code=200, json=lambda: payload)
 
     def get(_url, **_kwargs):
