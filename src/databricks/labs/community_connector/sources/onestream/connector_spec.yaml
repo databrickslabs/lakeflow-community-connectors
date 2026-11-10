@@ -1,0 +1,62 @@
+# OneStream Community Connector Spec
+# This file defines the specification for the connector including
+# connection parameters and allowlist options.
+
+# ============================================================================
+# Connection Parameters
+# These are provided when creating the Unity Catalog connection.
+# ============================================================================
+display_name: OneStream
+connection:
+  parameters:
+    - name: base_url
+      type: string
+      required: true
+      description: >
+        Root URL of the OneStream tenant, e.g. https://<tenant>.onestreamcloud.com.
+        A trailing /OneStreamWeb is stripped automatically.
+
+    - name: application_name
+      type: string
+      required: true
+      description: >
+        OneStream application name exactly as used by the REST API
+        (ApplicationName), e.g. the name shown in the OneStream application list.
+
+    - name: personal_access_token
+      type: string
+      required: true
+      secret: true
+      description: >
+        OneStream personal access token (PAT) created in the Identity & Access
+        Management portal. The token's user needs the Administrator role,
+        which OneStream requires for the SQL data provider endpoint.
+
+    - name: api_version
+      type: string
+      required: false
+      description: >
+        DataProvider API version. Defaults to 5.2.0.
+
+    - name: request_timeout_seconds
+      type: string
+      required: false
+      description: >
+        Per-request HTTP timeout in seconds. Defaults to 900 (cold reads of large
+        partitions can take several minutes).
+
+    - name: page_size
+      type: string
+      required: false
+      description: >
+        Rows per SQL page (default 50000, maximum 200000). Each 50k-row page of
+        cube data is about 42 MB of JSON.
+
+# ============================================================================
+# External Options Allowlist
+# These table-specific options must be included in the externalOptionsAllowList
+# parameter of the UC connection to allow them to be passed through.
+# Use a comma-separated string of option names.
+# If no table-specific options are needed, set to empty string or omit.
+# ============================================================================
+external_options_allowlist: "years,scenarios,entities,include_descendants,cube,refresh_mode,lookback_seconds,hold_in_flight_data_units,in_flight_timeout_seconds,max_data_units_per_batch,max_partitions,page_size"
