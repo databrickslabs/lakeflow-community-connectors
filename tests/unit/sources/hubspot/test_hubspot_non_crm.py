@@ -23,6 +23,13 @@ def page(*rows, after=None):
     return data
 
 
+def list_page(*rows, after=None):
+    data = {"lists": list(rows)}
+    if after is not None:
+        data["paging"] = {"next": {"after": after, "link": "do-not-follow"}}
+    return data
+
+
 def response(data=None, status=200, headers=None):
     value = Mock(status_code=status, headers=headers or {})
     value.json.return_value = data
@@ -64,7 +71,9 @@ def test_partitions_pagination_and_identical_duplicate(table):
 
 
 def test_lists_post_body_and_body_cursor():
-    read, post, _ = helper(page(contact_list(), after="opaque"), page(contact_list("2")))
+    read, post, _ = helper(
+        list_page(contact_list(), after="opaque"), list_page(contact_list("2"))
+    )
     rows = read.read_table("contact_lists", {})
     assert [r["listId"] for r in rows] == ["1", "2"]
     first, second = post.call_args_list
@@ -77,7 +86,7 @@ def test_lists_post_body_and_body_cursor():
 
 
 def test_memberships_all_lists_composite_keys_and_full_rescan_removal():
-    inventory = page(contact_list("1"), contact_list("2"))
+    inventory = list_page(contact_list("1"), contact_list("2"))
     read, post, _ = helper(inventory, inventory)
     with patch(NON_CRM_TEST_GET, side_effect=[
         response(page({"recordId": 10, "membershipTimestamp": "now"}, after="x")),
@@ -149,7 +158,7 @@ def test_pipeline_defaults_overrides_and_nested_lossless_payload():
     ("contact_lists", contact_list(listVersion=3, additionalProperties={"x": "y"})),
 ])
 def test_consumer_schemas_and_lossless_fields(table, source):
-    read, _, _ = helper(page(source))
+    read, _, _ = helper(list_page(source) if table == "contact_lists" else page(source))
     if table == "contact_lists":
         rows = read.read_table(table, {})
     else:
@@ -163,7 +172,9 @@ def test_consumer_schemas_and_lossless_fields(table, source):
 
 @pytest.mark.parametrize("table", HubspotNonCrm.list_tables())
 def test_empty_valid_snapshots_and_metadata(table):
-    read, _, _ = helper(page())
+    read, _, _ = helper(
+        list_page() if table in {"contact_lists", "contact_list_memberships"} else page()
+    )
     with patch(NON_CRM_TEST_GET, return_value=response(page())):
         assert list(read.read_table(table, {})) == []
     metadata = read.read_table_metadata(table)
@@ -211,7 +222,7 @@ def test_malformed_paging(paging):
 
 @pytest.mark.parametrize("cursors", [["a", "a"], ["a", "b", "a"]])
 def test_cursor_cycles(cursors):
-    read, _, _ = helper(*(page(after=c) for c in cursors))
+    read, _, _ = helper(*(list_page(after=c) for c in cursors))
     with pytest.raises(RuntimeError, match="cyclic"):
         read.read_table("contact_lists", {})
 
@@ -253,7 +264,7 @@ def test_429_retry_after_and_exhaustion():
 
 @pytest.mark.parametrize("status", ["PROCESSING", "CANCELED", "UNKNOWN", None])
 def test_incomplete_list_cannot_claim_complete_memberships(status):
-    read, _, _ = helper(page(contact_list(processingStatus=status)))
+    read, _, _ = helper(list_page(contact_list(processingStatus=status)))
     with patch(NON_CRM_TEST_GET) as get:
         with pytest.raises(RuntimeError, match="COMPLETE"):
             list(read.read_table("contact_list_memberships", {}))
@@ -261,16 +272,20 @@ def test_incomplete_list_cannot_claim_complete_memberships(status):
 
 
 def test_post_failure_after_page_and_noncontact_inventory_fail():
-    read, _, _ = helper(page(contact_list(), after="x"), RuntimeError("transport failed"))
+    read, _, _ = helper(
+        list_page(contact_list(), after="x"), RuntimeError("transport failed")
+    )
     with pytest.raises(RuntimeError, match="transport failed"):
         read.read_table("contact_lists", {})
-    read, _, _ = helper(page(contact_list(objectTypeId="0-2")))
+    read, _, _ = helper(list_page(contact_list(objectTypeId="0-2")))
     with pytest.raises(RuntimeError, match="Non-contact"):
         read.read_table("contact_lists", {})
 
 
 def test_conflicting_duplicate_identity_fails():
-    read, _, _ = helper(page(contact_list(name="one"), contact_list(name="two")))
+    read, _, _ = helper(
+        list_page(contact_list(name="one"), contact_list(name="two"))
+    )
     with pytest.raises(RuntimeError, match="Conflicting duplicate"):
         read.read_table("contact_lists", {})
 
@@ -291,7 +306,7 @@ def test_post_missing_results_is_not_empty_snapshot():
 
 
 def test_membership_schema_retains_timestamp_and_unknown_payload():
-    read, _, _ = helper(page(contact_list()))
+    read, _, _ = helper(list_page(contact_list()))
     source = {"recordId": 42, "listId": 1,
               "membershipTimestamp": "2026-10-28T00:00:00Z",
               "unknown": [1, {"x": True}]}
