@@ -23,11 +23,13 @@ def page(*rows, after=None):
     return data
 
 
-def list_page(*rows, after=None):
-    data = {"lists": list(rows)}
-    if after is not None:
-        data["paging"] = {"next": {"after": after, "link": "do-not-follow"}}
-    return data
+def list_page(*rows, offset=0, has_more=False, total=None):
+    return {
+        "lists": list(rows),
+        "offset": offset,
+        "hasMore": has_more,
+        "total": len(rows) if total is None else total,
+    }
 
 
 def response(data=None, status=200, headers=None):
@@ -70,9 +72,10 @@ def test_partitions_pagination_and_identical_duplicate(table):
     assert all(c.kwargs["timeout"] == 60 for c in get.call_args_list)
 
 
-def test_lists_post_body_and_body_cursor():
+def test_lists_post_body_and_body_offset():
     read, post, _ = helper(
-        list_page(contact_list(), after="opaque"), list_page(contact_list("2"))
+        list_page(contact_list(), offset=1, has_more=True, total=2),
+        list_page(contact_list("2"), offset=2, total=2),
     )
     rows = read.read_table("contact_lists", {})
     assert [r["listId"] for r in rows] == ["1", "2"]
@@ -82,7 +85,7 @@ def test_lists_post_body_and_body_cursor():
         {"objectTypeId": "0-1", "processingTypes": ["MANUAL", "DYNAMIC", "SNAPSHOT"],
          "additionalProperties": [], "count": 500}, 0.11,
     )
-    assert second.args[2] == {**first.args[2], "after": "opaque"}
+    assert second.args[2] == {**first.args[2], "offset": 1}
 
 
 def test_memberships_all_lists_composite_keys_and_full_rescan_removal():
@@ -220,10 +223,25 @@ def test_malformed_paging(paging):
             read.read_table("owners", {})
 
 
-@pytest.mark.parametrize("cursors", [["a", "a"], ["a", "b", "a"]])
-def test_cursor_cycles(cursors):
-    read, _, _ = helper(*(list_page(after=c) for c in cursors))
-    with pytest.raises(RuntimeError, match="cyclic"):
+@pytest.mark.parametrize("offsets", [[1, 1], [2, 1]])
+def test_list_offsets_must_advance(offsets):
+    read, _, _ = helper(
+        *(list_page(offset=value, has_more=True, total=3) for value in offsets)
+    )
+    with pytest.raises(RuntimeError, match="offset"):
+        read.read_table("contact_lists", {})
+
+
+@pytest.mark.parametrize("payload", [
+    {"lists": []},
+    {"lists": [], "hasMore": "false", "offset": 0, "total": 0},
+    {"lists": [], "hasMore": False, "offset": True, "total": 0},
+    {"lists": [], "hasMore": False, "offset": 0, "total": -1},
+    {"lists": [], "hasMore": True, "offset": 1, "total": 1},
+])
+def test_malformed_list_offset_paging(payload):
+    read, _, _ = helper(payload)
+    with pytest.raises(RuntimeError, match="offset"):
         read.read_table("contact_lists", {})
 
 
@@ -286,7 +304,8 @@ def test_incomplete_list_cannot_claim_complete_memberships(status):
 
 def test_post_failure_after_page_and_noncontact_inventory_fail():
     read, _, _ = helper(
-        list_page(contact_list(), after="x"), RuntimeError("transport failed")
+        list_page(contact_list(), offset=1, has_more=True, total=2),
+        RuntimeError("transport failed"),
     )
     with pytest.raises(RuntimeError, match="transport failed"):
         read.read_table("contact_lists", {})

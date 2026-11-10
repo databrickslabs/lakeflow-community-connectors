@@ -1145,15 +1145,24 @@ def register_lakeflow_source(spark):
             return {"pages": 0, "recent_hashes": [], "recent_set": set()}
 
         def _page_batches(
-            self, route, params=None, body=None, state=None, records_key="results"
+            self,
+            route,
+            params=None,
+            body=None,
+            state=None,
+            records_key="results",
+            offset_paging=False,
         ):
             cursor = None
+            offset = 0
             state = state or self._page_state()
             while True:
                 if state["pages"] >= self._MAX_PAGES:
                     raise RuntimeError("HubSpot non-CRM snapshot exceeded the page limit")
                 arguments = dict(body if body is not None else (params or {}))
-                if cursor is not None:
+                if offset_paging and offset:
+                    arguments["offset"] = offset
+                elif cursor is not None:
                     arguments["after"] = cursor
                 if body is None:
                     data = self._get(route, arguments)
@@ -1167,8 +1176,30 @@ def register_lakeflow_source(spark):
                 if data.get("errors") or data.get("status") in {"PENDING", "PROCESSING", "CANCELED"}:
                     raise RuntimeError("Incomplete HubSpot non-CRM page")
                 state["pages"] += 1
-                next_cursor = _non_crm_after(data)
-                if next_cursor is not None:
+                if offset_paging:
+                    has_more = data.get("hasMore")
+                    next_offset = data.get("offset")
+                    total = data.get("total")
+                    if (
+                        not isinstance(has_more, bool)
+                        or not isinstance(next_offset, int)
+                        or isinstance(next_offset, bool)
+                        or next_offset < 0
+                        or not isinstance(total, int)
+                        or isinstance(total, bool)
+                        or total < 0
+                    ):
+                        raise RuntimeError("Malformed HubSpot list offset paging")
+                    if has_more and (
+                        not data[records_key] or next_offset <= offset
+                    ):
+                        raise RuntimeError("Non-advancing HubSpot list offset")
+                    next_cursor = None
+                else:
+                    has_more = False
+                    next_offset = 0
+                    next_cursor = _non_crm_after(data)
+                if not offset_paging and next_cursor is not None:
                     cursor_hash = hashlib.sha256(
                         f"{route}\0{next_cursor}".encode("utf-8")
                     ).hexdigest()
@@ -1179,14 +1210,30 @@ def register_lakeflow_source(spark):
                     if len(state["recent_hashes"]) > self._CURSOR_HISTORY:
                         state["recent_set"].remove(state["recent_hashes"].pop(0))
                 yield data[records_key]
+                if offset_paging:
+                    if not has_more:
+                        return
+                    offset = next_offset
+                    continue
                 if next_cursor is None:
                     return
                 cursor = next_cursor
 
-        def _pages(self, route, params=None, body=None, records_key="results"):
+        def _pages(
+            self,
+            route,
+            params=None,
+            body=None,
+            records_key="results",
+            offset_paging=False,
+        ):
             rows = []
             for page in self._page_batches(
-                route, params, body, records_key=records_key
+                route,
+                params,
+                body,
+                records_key=records_key,
+                offset_paging=offset_paging,
             ):
                 rows.extend(page)
             return rows
@@ -1213,6 +1260,7 @@ def register_lakeflow_source(spark):
                         body=inventory_body,
                         state=state,
                         records_key="lists",
+                        offset_paging=True,
                     ):
                         parents = []
                         for parent_source in inventory_page:
@@ -1283,6 +1331,7 @@ def register_lakeflow_source(spark):
                     "count": 500,
                 },
                 records_key="lists",
+                offset_paging=True,
             )
             for row in rows:
                 if row.get("objectTypeId") != "0-1":
