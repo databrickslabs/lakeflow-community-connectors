@@ -186,13 +186,17 @@ class MongodbLakeflowConnect(LakeflowConnect, SupportsNamespaces):
         return self._client
 
     def _collection(self, cfg: _TableConfig):
+        from pymongo import ReadPreference  # pylint: disable=import-outside-toplevel
         from pymongo.read_concern import ReadConcern  # pylint: disable=import-outside-toplevel
 
-        # Majority reads, whatever the connection string says: a snapshot or
-        # lookup must not return a write that a failover can still roll back,
-        # because the change stream would never report its removal.
+        # Majority reads on the primary, whatever the connection string says:
+        # a snapshot or lookup must not return a write that a failover can still
+        # roll back (the change stream would never report its removal), and must
+        # not come from a secondary that lags behind the snapshot's start token
+        # (a document missed there would never be read again).
         return self._get_client()[cfg.database].get_collection(
-            cfg.collection, read_concern=ReadConcern("majority")
+            cfg.collection, read_concern=ReadConcern("majority"),
+            read_preference=ReadPreference.PRIMARY,
         )
 
     @staticmethod

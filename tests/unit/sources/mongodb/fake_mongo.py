@@ -90,6 +90,7 @@ class _Server:
         self.types: dict[tuple[str, str], str] = {}
         self.oplog: list[dict] = []
         self.read_concerns: list = []
+        self.read_preferences: list = []
         self._inc = itertools.count(1)
 
     def token(self, ts: Timestamp, seq: int, high_water: bool = False) -> str:
@@ -243,9 +244,11 @@ class FakeDatabase:
     def __getitem__(self, collection: str) -> FakeCollection:
         return FakeCollection(self._s, self.name, collection)
 
-    def get_collection(self, collection: str, read_concern=None) -> FakeCollection:
+    def get_collection(self, collection: str, read_concern=None,
+                       read_preference=None) -> FakeCollection:
         coll = FakeCollection(self._s, self.name, collection)
         coll.read_concern = read_concern
+        self._s.read_preferences.append(getattr(read_preference, "name", None))
         return coll
 
     def create_collection(self, name: str, viewOn: Optional[str] = None, pipeline=None):  # pylint: disable=invalid-name
