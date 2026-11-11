@@ -1533,7 +1533,8 @@ def register_lakeflow_source(spark):
             self._live_cols: dict[str, set[str]] = {}
             self._du_cache: dict[tuple, tuple[int, list[dict]]] = {}
             self._checked_years: set[tuple] = set()
-            self._checked_page_sizes: set[int] = set()
+            self._cap_checked = False
+            self._row_cap: int | None = None
 
         # ------------------------------------------------------------------
         # LakeflowConnect
@@ -1605,7 +1606,9 @@ def register_lakeflow_source(spark):
             # which have work, and how far back the data-unit fetch must reach.
             stats = self._slice_max_ticks(scope)
             in_scope = set(stats)
-            new_entities = cube_new_entities(state["e"], scope["entity_csv"], self._all_entity_ids)
+            new_entities = cube_new_entities(
+                state["e"], scope["entity_csv"], lambda: self._all_entity_ids(scope["page_size"])
+            )
             target = cube_apply_scope(state, scope["entity_csv"], new_entities, in_scope)
 
             rows = self._slice_rows(scope, state, stats, certify)
@@ -1694,7 +1697,7 @@ def register_lakeflow_source(spark):
             """Columns that exist in this application (OneStream versions differ)."""
             if table not in self._live_cols:
                 where = sql_conj(sql_eq_name("TABLE_SCHEMA", "dbo"), sql_eq_name("TABLE_NAME", table))
-                rows = self._client.run_sql(
+                rows = self._unpaged(
                     sql_select(["COLUMN_NAME"], "[INFORMATION_SCHEMA].[COLUMNS]", where)
                 )
                 self._live_cols[table] = {str(r["COLUMN_NAME"]) for r in rows}
@@ -1725,21 +1728,39 @@ def register_lakeflow_source(spark):
                 self._page_size_for(table_options),
             )
 
-        def _ensure_page_size(self, page_size: int) -> None:
-            """Fail loudly if the server caps result rows below ``page_size``.
+        def _server_row_cap(self) -> int | None:
+            """Rows the server returns per request at most (``None`` = no cap up to the max page).
 
-            Paging stops at the first short page, so a silent server-side row cap
-            would otherwise truncate every read without an error.
+            Measured once per instance with a one-column probe. Paging stops at the
+            first short page and the small planning queries aren't paged, so a silent
+            server-side cap would otherwise truncate reads without an error.
             """
-            if page_size in self._checked_page_sizes:
-                return
-            returned = len(self._client.run_sql(sql_row_probe(page_size)))
-            if returned < page_size:
+            if not self._cap_checked:
+                probe = MAX_PAGE_SIZE + 1
+                returned = len(self._client.run_sql(sql_row_probe(probe)))
+                self._row_cap = returned if returned < probe else None
+                self._cap_checked = True
+            return self._row_cap
+
+        def _ensure_page_size(self, page_size: int) -> None:
+            cap = self._server_row_cap()
+            if cap is not None and page_size > cap:
                 raise OneStreamError(
-                    f"OneStream returned only {returned} rows for a {page_size}-row page; "
-                    f"set the page_size option to {returned} or less"
+                    f"OneStream returned only {cap} rows for a request; "
+                    f"set the page_size option to {cap} or less"
                 )
-            self._checked_page_sizes.add(page_size)
+
+        def _unpaged(self, sql: str) -> list[dict]:
+            """Run a planning query that isn't paged; fail if a server cap could have cut it short."""
+            rows = self._client.run_sql(sql)
+            cap = self._server_row_cap()
+            if cap is not None and len(rows) >= cap:
+                raise OneStreamError(
+                    f"A planning query returned {len(rows)} rows, which reaches the server's "
+                    f"limit of {cap} rows per request, so it may be incomplete. Narrow the scope "
+                    "(years, scenarios, entities) or raise the server limit."
+                )
+            return rows
 
         def _paged(self, columns, source, where, order_by, page_size) -> list[dict]:
             self._ensure_page_size(page_size)
@@ -1771,7 +1792,14 @@ def register_lakeflow_source(spark):
             key = json.dumps(
                 {
                     k: table_options.get(k)
-                    for k in ("years", "scenarios", "entities", "include_descendants", "cube")
+                    for k in (
+                        "years",
+                        "scenarios",
+                        "entities",
+                        "include_descendants",
+                        "cube",
+                        "page_size",
+                    )
                 },
                 sort_keys=True,
             )
@@ -1784,20 +1812,23 @@ def register_lakeflow_source(spark):
                     "cube_data requires the table option 'years' (e.g. '2025,2026' or '2024-2026'). "
                     "Unscoped backfills of a OneStream application can take many hours."
                 )
+            # One page size for every query this table makes, so lowering page_size
+            # (e.g. for a server that caps rows per request) applies everywhere.
+            page_size = self._page_size_for(table_options)
             scenario_ids = self._member_ids(
-                DIM_TYPE_SCENARIO, _csv(table_options.get("scenarios")), "scenarios"
+                DIM_TYPE_SCENARIO, _csv(table_options.get("scenarios")), "scenarios", page_size
             )
             entity_ids = self._member_ids(
-                DIM_TYPE_ENTITY, _csv(table_options.get("entities")), "entities"
+                DIM_TYPE_ENTITY, _csv(table_options.get("entities")), "entities", page_size
             )
             if entity_ids is not None and _bool_option(table_options, "include_descendants", False):
-                entity_ids = self._with_descendants(DIM_TYPE_ENTITY, entity_ids)
+                entity_ids = self._with_descendants(DIM_TYPE_ENTITY, entity_ids, page_size)
             cube_id = None
             cube_name = (table_options.get("cube") or "").strip()
             if cube_name:
                 cubes = {
                     r["Name"]: int(r["CubeId"])
-                    for r in self._client.run_sql(sql_select(["CubeId", "Name"], sql_table_ref("Cube")))
+                    for r in self._unpaged(sql_select(["CubeId", "Name"], sql_table_ref("Cube")))
                 }
                 if cube_name not in cubes:
                     raise ValueError(f"Unknown cube '{cube_name}'. Available: {sorted(cubes)}")
@@ -1809,6 +1840,7 @@ def register_lakeflow_source(spark):
                 "entity_ids": entity_ids,
                 "entity_csv": ALL_ENTITIES if entity_ids is None else cube_entity_csv(entity_ids),
                 "cube_id": cube_id,
+                "page_size": page_size,
             }
             self._verify_time_profile(scope)
             self._scope_cache[key] = scope
@@ -1834,7 +1866,7 @@ def register_lakeflow_source(spark):
                 )
                 seen = {
                     int(r["TimeId"])
-                    for r in self._client.run_sql(
+                    for r in self._unpaged(
                         sql_select(["TimeId"], sql_table_ref(CALC_STATUS_TABLE), where, distinct=True)
                     )
                 }
@@ -1854,7 +1886,9 @@ def register_lakeflow_source(spark):
                     )
                 self._checked_years.add(check)
 
-        def _member_ids(self, dim_type: int, names: list[str], option: str) -> list[int] | None:
+        def _member_ids(
+            self, dim_type: int, names: list[str], option: str, page_size: int
+        ) -> list[int] | None:
             if not names:
                 return None
             rows = self._paged(
@@ -1862,7 +1896,7 @@ def register_lakeflow_source(spark):
                 sql_table_ref("Member"),
                 sql_eq("DimTypeId", dim_type),
                 ["MemberId"],
-                DEFAULT_PAGE_SIZE,
+                page_size,
             )
             by_name: dict[str, set[int]] = defaultdict(set)
             for r in rows:
@@ -1878,13 +1912,13 @@ def register_lakeflow_source(spark):
                 )
             return sorted({next(iter(by_name[n.lower()])) for n in names})
 
-        def _with_descendants(self, dim_type: int, roots: list[int]) -> list[int]:
+        def _with_descendants(self, dim_type: int, roots: list[int], page_size: int) -> list[int]:
             rows = self._paged(
                 ["ParentId", "ChildId"],
                 sql_table_ref("Relationship"),
                 sql_eq("DimTypeId", dim_type),
                 ["ParentId", "ChildId"],
-                DEFAULT_PAGE_SIZE,
+                page_size,
             )
             children: dict[int, list[int]] = defaultdict(list)
             for r in rows:
@@ -1927,13 +1961,13 @@ def register_lakeflow_source(spark):
                 "hold_timeout": int(timeout * TICKS_PER_SECOND),
             }
 
-        def _all_entity_ids(self) -> list[int]:
+        def _all_entity_ids(self, page_size: int) -> list[int]:
             rows = self._paged(
                 ["MemberId"],
                 sql_table_ref("Member"),
                 sql_eq("DimTypeId", DIM_TYPE_ENTITY),
                 ["MemberId"],
-                DEFAULT_PAGE_SIZE,
+                page_size,
             )
             return [int(r["MemberId"]) for r in rows]
 
@@ -1951,7 +1985,7 @@ def register_lakeflow_source(spark):
                 self._scope_where(scope, scope["entity_ids"]),
                 sql_le("TimestampTicks", self._init_ticks),
             )
-            rows = self._client.run_sql(
+            rows = self._unpaged(
                 sql_group_max(SLICE_COLUMNS, "TimestampTicks", sql_table_ref(DU_TIMESTAMP_TABLE), where)
             )
             return {_slice_key(r): int(r["max_value"]) for r in rows}
@@ -1976,7 +2010,11 @@ def register_lakeflow_source(spark):
                 sql_le("TimestampTicks", int(hi)),
             )
             rows = self._paged(
-                columns, sql_table_ref(DU_TIMESTAMP_TABLE), where, DU_TIMESTAMP_ORDER, DEFAULT_PAGE_SIZE
+                columns,
+                sql_table_ref(DU_TIMESTAMP_TABLE),
+                where,
+                DU_TIMESTAMP_ORDER,
+                scope["page_size"],
             )
             self._du_cache[cache_key] = (int(lo), rows)
             return rows
@@ -2077,7 +2115,7 @@ def register_lakeflow_source(spark):
             if year not in self._partition_map:
                 # One scan per year table (~60 s on ~50M rows); the result is small
                 # (about one row per entity), so no paging is needed.
-                rows = self._client.run_sql(
+                rows = self._unpaged(
                     sql_select(["PartitionId", "EntityId"], sql_data_record_table(year), distinct=True)
                 )
                 mapping: dict[int, list[int]] = defaultdict(list)
@@ -2113,7 +2151,7 @@ def register_lakeflow_source(spark):
                 )
                 stamps = {
                     (int(r["ParentId"]), int(r["ConsId"])): int(r["TimestampTicks"])
-                    for r in self._client.run_sql(
+                    for r in self._unpaged(
                         sql_select(
                             ["ParentId", "ConsId", "TimestampTicks"],
                             sql_table_ref(DU_TIMESTAMP_TABLE),

@@ -176,7 +176,7 @@ All options apply to `cube_data`. The metadata tables accept only `page_size`.
 | `in_flight_timeout_seconds` | no | `3600` | After this long, a still-set in-flight flag is treated as stale. Incremental mode only |
 | `max_data_units_per_batch` | no | `5000` | Admission control: approximate number of data units per micro-batch. Incremental mode only. This replaces the framework's usual `max_records_per_batch`: OneStream doesn't expose a data unit's row count without reading it, so batches are bounded by data units (each is read and upserted whole) |
 | `max_partitions` | no | `4` | Parallel read partitions. This bounds the concurrent load on OneStream |
-| `page_size` | no | `50000` | Rows per SQL page for this table, a whole number from `1` to `200000` |
+| `page_size` | no | `50000` | Rows per SQL page for this table, a whole number from `1` to `200000`. Applies to every query the connector makes for the table, including its internal planning queries |
 
 Boolean options accept `true`/`false` (also `1`/`0` and `yes`/`no`). Any other value fails instead of being read as `false`. `lookback_seconds` and `in_flight_timeout_seconds` must be `0` or more.
 
@@ -278,7 +278,8 @@ Run the pipeline once to backfill (`community-connector run_pipeline <PIPELINE_N
 | `Unknown cube '<name>'` | `cube` must match a cube name exactly, including case. The error lists the available cubes |
 | `Option '<name>' must be a whole number` / `must be between` | A numeric table option is malformed or out of range. The connector checks these before sending any request |
 | `not standard monthly periods` | The application uses a non-standard time profile, which `cube_data` doesn't support yet |
-| `OneStream returned only N rows for a M-row page` | The OneStream server caps rows per request. Set `page_size` to `N` or less |
+| `OneStream returned only N rows for a request` | The OneStream server caps rows per request (the connector measures this once per run). Set `page_size` to `N` or less |
+| `A planning query returned N rows, which reaches the server's limit` | A small internal query (e.g. the entity-to-partition map) hit the server's row cap and may be incomplete, so the connector stopped rather than miss data. Narrow `years`/`scenarios`/`entities`, or ask OneStream to raise the limit |
 | `OneStream request failed after 5 attempts` | OneStream was unreachable or kept timing out. Check network access, and raise `request_timeout_seconds` or lower `page_size` and `max_partitions` if the tenant is under load |
 | A run is slow on first touch | Cold OneStream storage. Lower `page_size` or `max_partitions` if the tenant is under load |
 | `hold_in_flight_data_units requires DataUnitCacheTimestamp.IsInCellUpdateLoop` | This OneStream version has no in-flight flag. Leave `hold_in_flight_data_units` off |

@@ -236,6 +236,30 @@ class TestOneStreamConnector(LakeflowConnectTests, SupportsPartitionedStreamTest
         )
         assert len(records) == 48 and 303 in {r["AccountId"] for r in records}
 
+    def test_lowered_page_size_works_under_server_row_cap(self, sim_db):
+        """With a server that caps rows per request, lowering page_size to the cap
+        must make every query work, including the internal planning queries."""
+        sim.set_row_cap(30)
+        opts = self._base_opts(
+            years="2026",
+            scenarios="Actual",
+            entities="SimCorp",
+            include_descendants="true",
+            page_size="30",
+        )
+        records, _ = self._drain(self._connector(), opts)
+        assert len(records) == 108  # 3 entities x 3 accounts x 12 months, all read
+        with pytest.raises(OneStreamError, match="30 or less"):
+            self._connector().read_table("cube_data", {}, dict(opts, page_size="40"))
+
+    def test_planning_query_at_server_cap_fails_loudly(self, sim_db):
+        """An unpaged planning query that reaches the server cap may be truncated."""
+        sim.set_row_cap(9)  # Member has 9 rows, so the member lookup hits the cap
+        with pytest.raises(OneStreamError, match="may be incomplete"):
+            self._connector().read_table(
+                "cube_data", {}, self._base_opts(years="2026", scenarios="Actual", page_size="9")
+            )
+
     def test_server_row_cap_fails_loudly(self, sim_db):
         sim.set_row_cap(30)
         with pytest.raises(OneStreamError, match="only 30 rows"):
