@@ -60,6 +60,7 @@ CLOCK_SKEW_SECONDS = 5
 MIN_LOOKBACK_SECONDS = 60
 SNAPSHOT_SEQUENCE = "0"
 REPLAY_TIMEOUT_SECONDS = 300
+MAX_INCREMENT = 2**32 - 1
 
 # MongoDB server error codes
 CHANGE_STREAM_HISTORY_LOST = 286
@@ -564,7 +565,8 @@ class MongodbLakeflowConnect(LakeflowConnect, SupportsNamespaces):
         if start.get("token"):
             kwargs["resume_after"] = {"_data": start["token"]}
         else:
-            kwargs["start_at_operation_time"] = Timestamp(int(start["start_at"]), 0)
+            kwargs["start_at_operation_time"] = Timestamp(int(start["start_at"]),
+                                                          int(start.get("start_at_inc", 0)))
         if flow == "upsert":
             kwargs["full_document"] = cfg.full_document
         return kwargs
@@ -595,36 +597,54 @@ class MongodbLakeflowConnect(LakeflowConnect, SupportsNamespaces):
                                           idle=True)
         return iter([]), start
 
+    def _readable_from(self, cfg: _TableConfig, ts: Timestamp) -> bool:
+        """Whether a change stream can start at cluster time ``ts``."""
+        import pymongo.errors  # pylint: disable=import-outside-toplevel
+
+        try:
+            with self._collection(cfg).watch(start_at_operation_time=ts,
+                                             pipeline=[{"$match": {"_lakeflow_never": True}}],
+                                             max_await_time_ms=1) as stream:
+                stream.try_next()
+            return True
+        except pymongo.errors.OperationFailure as exc:
+            if exc.code != CHANGE_STREAM_HISTORY_LOST:
+                raise
+            return False
+
     def _oldest_available_start(self, cfg: _TableConfig, start: dict, flow: str) -> dict:
         """The look-back start is older than the oplog: find the oldest start that works.
 
         Jumping to "now" would skip deletes that are still in the oplog, so the
-        oldest readable second is found by bisection between the failed start
-        and now. Fails when the oplog holds less than ``MIN_LOOKBACK_SECONDS``.
+        oldest readable cluster time is found by bisection between the failed
+        start and now: first the second, then the increment within it (the
+        oplog can start in the middle of a second). Fails when the oplog holds
+        less than ``MIN_LOOKBACK_SECONDS``.
         """
-        import pymongo.errors  # pylint: disable=import-outside-toplevel
-
         low, high = int(start["start_at"]), self._now().time
-        # To the second: a coarser bound could start after the snapshot token
-        # on a short oplog and skip deletes that are still there.
         while high - low > 1:
             mid = (low + high) // 2
-            try:
-                with self._collection(cfg).watch(start_at_operation_time=Timestamp(mid, 0),
-                                                 pipeline=[{"$match": {"_lakeflow_never": True}}],
-                                                 max_await_time_ms=1) as stream:
-                    stream.try_next()
+            if self._readable_from(cfg, Timestamp(mid, 0)):
                 high = mid
-            except pymongo.errors.OperationFailure as exc:
-                if exc.code != CHANGE_STREAM_HISTORY_LOST:
-                    raise
+            else:
                 low = mid
-        if self._now().time - high < MIN_LOOKBACK_SECONDS:
+        start_ts = Timestamp(high, 0)
+        # Second `low` failed at increment 0; the oplog may still hold its tail.
+        if self._readable_from(cfg, Timestamp(low, MAX_INCREMENT)):
+            bad, good = 0, MAX_INCREMENT
+            while good - bad > 1:
+                mid = (bad + good) // 2
+                if self._readable_from(cfg, Timestamp(low, mid)):
+                    good = mid
+                else:
+                    bad = mid
+            start_ts = Timestamp(low, good)
+        if self._now().time - start_ts.time < MIN_LOOKBACK_SECONDS:
             raise RuntimeError(
                 f"The oplog of {cfg.namespace} does not reach back even {MIN_LOOKBACK_SECONDS} "
                 f"seconds, so the {flow} flow cannot start without missing changes."
             )
-        return self._offset(cfg, "stream", None, start_at=high)
+        return self._offset(cfg, "stream", None, start_at=start_ts.time, start_at_inc=start_ts.inc)
 
     @staticmethod
     def _raise_if_terminal(cfg: _TableConfig, event: dict) -> None:
