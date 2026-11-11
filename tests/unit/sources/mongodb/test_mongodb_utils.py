@@ -208,7 +208,7 @@ class TestDeleteLookback:
         import pymongo.errors  # pylint: disable=import-outside-toplevel
         from databricks.labs.community_connector.sources.mongodb import mongodb  # pylint: disable=import-outside-toplevel
 
-        oplog_start = 10_000 - 2_700  # the oplog reaches back 45 minutes
+        oplog_start = Timestamp(10_000 - 2_700, 10)  # 45 minutes, from increment 10
         monkeypatch.setattr(mongodb.MongodbLakeflowConnect, "_now",
                             staticmethod(lambda: Timestamp(10_000, 0)))
 
@@ -224,7 +224,7 @@ class TestDeleteLookback:
 
         class _Coll:
             def watch(self, start_at_operation_time=None, **_):
-                if start_at_operation_time.time < oplog_start:
+                if start_at_operation_time < oplog_start:
                     raise pymongo.errors.OperationFailure("lost", code=286)
                 return _Stream()
 
@@ -233,9 +233,9 @@ class TestDeleteLookback:
         cfg = mongodb._TableConfig(conn, "c", {})  # pylint: disable=protected-access
         start = conn._offset(cfg, "stream", None, start_at=10_000 - 3_600, lookback=True)  # pylint: disable=protected-access
         nxt = conn._oldest_available_start(cfg, start, "delete")  # pylint: disable=protected-access
-        assert oplog_start <= nxt["start_at"] <= oplog_start + 1
+        assert (nxt["start_at"], nxt["start_at_inc"]) == (oplog_start.time, oplog_start.inc)
         assert "lookback" not in nxt
 
-        oplog_start = 10_000 - 30
+        oplog_start = Timestamp(10_000 - 30, 0)
         with pytest.raises(RuntimeError, match="does not reach back"):
             conn._oldest_available_start(cfg, start, "delete")  # pylint: disable=protected-access
