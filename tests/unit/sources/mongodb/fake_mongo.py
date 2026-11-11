@@ -247,6 +247,10 @@ class FakeDatabase:
             self._s.data.setdefault((self.name, name), {})
         return self[name]
 
+    def command(self, name: str, collection: str):
+        assert name == "collStats"
+        return {"ns": f"{self.name}.{collection}", "sharded": False}
+
     def list_collections(self, filter=None, authorizedCollections=None, nameOnly=None):  # pylint: disable=redefined-builtin,invalid-name
         del authorizedCollections, nameOnly
         flt = filter or {}

@@ -200,6 +200,16 @@ def test_drop_and_unknown_and_views(fake):
         drive(conn, "c", {"start_mode": "latest"}, start=offset)
 
 
+def test_sharded_collection_is_refused(fake, monkeypatch):
+    uri, db = fake
+    db.create_collection("sharded").insert_one({"_id": 1})
+    from tests.unit.sources.mongodb import fake_mongo  # pylint: disable=import-outside-toplevel
+    monkeypatch.setattr(fake_mongo.FakeDatabase, "command",
+                        lambda self, name, coll: {"sharded": True})
+    with pytest.raises(ValueError, match="sharded collection"):
+        _connector(uri).read_table("sharded", {}, {})
+
+
 def test_collection_alias(fake):
     uri, db = fake
     db.create_collection(MB_COLLECTION).insert_one({"_id": 1, "v": "別名"})
