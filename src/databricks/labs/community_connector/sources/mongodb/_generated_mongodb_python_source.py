@@ -1168,8 +1168,28 @@ def register_lakeflow_source(spark):
                         f"'{cfg.namespace}' is a {found[0].get('type')}; only regular collections "
                         "have a change stream"
                     )
+                self._reject_sharded(cfg)
                 self._known.add(cfg.namespace)
             return cfg
+
+        def _reject_sharded(self, cfg: _TableConfig) -> None:
+            """Sharded collections are not supported yet.
+
+            On a collection sharded by a key other than ``_id``, ``_id`` is only
+            unique per shard, so ``_id`` paging and the ``_id`` primary key could
+            merge different documents.
+            """
+            import pymongo.errors  # pylint: disable=import-outside-toplevel
+
+            try:
+                stats = self._get_client()[cfg.database].command("collStats", cfg.collection)
+            except pymongo.errors.OperationFailure:
+                return  # not allowed to tell; the README states the limitation
+            if stats.get("sharded"):
+                raise ValueError(
+                    f"'{cfg.namespace}' is a sharded collection, which this connector does not "
+                    "support yet (_id is only unique per shard unless _id is the shard key)."
+                )
 
         def get_table_schema(self, table_name: str, table_options: dict[str, str]) -> StructType:
             cfg = self._config(table_name, table_options)
@@ -1405,16 +1425,7 @@ def register_lakeflow_source(spark):
                             reached_end = True
                             break
             except pymongo.errors.OperationFailure as exc:
-                if (exc.code == CHANGE_STREAM_HISTORY_LOST and not start.get("token")
-                        and start.get("lookback")):
-                    return iter([]), self._oldest_available_start(cfg, start, flow)
-                if exc.code in (CHANGE_STREAM_HISTORY_LOST, CHANGE_STREAM_FATAL_ERROR):
-                    raise RuntimeError(
-                        f"The change stream position of {cfg.namespace} ({flow} flow) is no longer in "
-                        "the oplog (the pipeline was stopped longer than the oplog window). Run a full "
-                        "refresh of this table to take a new snapshot, and consider a larger oplog."
-                    ) from exc
-                raise
+                return iter([]), self._stream_failure(cfg, start, flow, exc)
             except (InvalidBSON, UnicodeDecodeError) as exc:
                 raise self._decode_error(cfg, exc) from exc
 
@@ -1432,6 +1443,19 @@ def register_lakeflow_source(spark):
                 return iter(rows), self._offset(cfg, "stream", last_token)
 
             return self._empty_poll(cfg, start, cap_key, drained, pbrt)
+
+        def _stream_failure(self, cfg: _TableConfig, start: dict, flow: str, exc: Exception) -> dict:
+            """Handle a change stream error: a new start for the delete flow, or raise."""
+            code = getattr(exc, "code", None)
+            if code == CHANGE_STREAM_HISTORY_LOST and not start.get("token") and start.get("lookback"):
+                return self._oldest_available_start(cfg, start, flow)
+            if code in (CHANGE_STREAM_HISTORY_LOST, CHANGE_STREAM_FATAL_ERROR):
+                raise RuntimeError(
+                    f"The change stream position of {cfg.namespace} ({flow} flow) is no longer in "
+                    "the oplog (the pipeline was stopped longer than the oplog window). Run a full "
+                    "refresh of this table to take a new snapshot, and consider a larger oplog."
+                ) from exc
+            raise exc
 
         @staticmethod
         def _watch_kwargs(cfg: _TableConfig, start: dict, flow: str,

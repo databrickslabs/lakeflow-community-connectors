@@ -1,6 +1,6 @@
 # Lakeflow MongoDB Community Connector
 
-This connector ingests MongoDB collections into Databricks. Each collection becomes one table: an initial snapshot, then continuous change data capture from the collection's [change stream](https://www.mongodb.com/docs/manual/changeStreams/), including deletes. It works with MongoDB Atlas and self-managed replica sets. End-to-end runs were done on serverless pipelines; classic pipelines run the same reader code. Sharded clusters expose the same change stream API but have not been tested with this connector yet.
+This connector ingests MongoDB collections into Databricks. Each collection becomes one table: an initial snapshot, then continuous change data capture from the collection's [change stream](https://www.mongodb.com/docs/manual/changeStreams/), including deletes. It works with MongoDB Atlas and self-managed replica sets. End-to-end runs were done on serverless pipelines; classic pipelines run the same reader code. Sharded collections are not supported yet: the connector refuses them when it can detect them (`collStats`), because `_id` is only unique per shard unless it is the shard key.
 
 ## Prerequisites
 
@@ -106,6 +106,7 @@ How it stays correct:
 - **Continuous mode latency**: each poll reads the changes up to the time it started; a change made while a poll runs is read by the poll after the next one.
 - **`updateLookup`**: an update row holds the document as it is when the change is read (see Best Practices for post-images).
 - Views, time series collections and `system.*` collections cannot be ingested (no change stream).
+- Sharded collections are not supported yet (see above). Unsharded collections on a sharded cluster have not been tested.
 
 ## Table Configurations
 
