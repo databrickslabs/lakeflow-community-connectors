@@ -20,6 +20,7 @@ from tests.unit.sources.odata._odata_test_helpers import (
     _mock_metadata,
     _mock_nested_metadata,
     _mock_probe_metadata,
+    _patch_sleep,
 )
 
 
@@ -323,11 +324,20 @@ def test_partition_fence_probe_scopes_to_top_level_filter():
     assert offset == {"cursor": "2024-05-01T00:00:00Z"}
 
 
+@pytest.mark.parametrize(
+    "extra",
+    [{}, {"retry_extra_errors": "400"}],
+    ids=["default", "retry_extra_errors_400"],
+)
 @responses.activate
-def test_partition_fence_probe_retries_without_null_guard_on_400():
+def test_partition_fence_probe_retries_without_null_guard_on_400(monkeypatch, extra):
     """A backend that rejects the ``ne null`` comparison (400) gets one
     retry without the null guard, so the hardening never breaks a stream
-    that worked before it existed."""
+    that worked before it existed. That holds under a bare
+    ``retry_extra_errors="400"`` too: the probe opts out of the extra retry,
+    so the 400 still reaches the fallback as an ``HTTPError`` (no backoff)
+    rather than being retried into a ``RuntimeError`` that fails the read."""
+    sleeps = _patch_sleep(monkeypatch)
     _mock_nested_metadata()
     responses.get(
         f"{SERVICE_URL}Parents",
@@ -363,9 +373,10 @@ def test_partition_fence_probe_retries_without_null_guard_on_400():
             )
         ],
     )
-    c = _make()
+    c = _make(extra)
     offset = c.latest_offset("Parents__Children", {"cursor_field": "Name"}, None)
     assert offset == {"cursor": "z"}
+    assert sleeps == []  # the 400 was a verdict, never retried
 
 
 @responses.activate

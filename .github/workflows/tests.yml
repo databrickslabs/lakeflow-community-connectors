@@ -221,12 +221,25 @@ jobs:
           # head from pull_request_target. See the rationale on the checkout
           # step in .github/workflows/pylint.yml.
           allow-unsafe-pr-checkout: true
-      - name: Set up Python ${{ matrix.python-version }}
-        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7.0.0
+      # setup-uv instead of actions/setup-python: on runners with no cached Python,
+      # setup-python upgrades pip from pypi.org, which the protected runners can't reach.
+      - name: Setup uv
+        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2  # v10.3.3
         with:
-          python-version: ${{ matrix.python-version }}
+          version: "0.11.7"
+          checksum: "6681d691eb7f9c00ac6a3af54252f7ab29ae72f0c8f95bdc7f9d1401c23ea868"
+          # Fork code runs in this job; it must not write a cache that trusted runs reuse.
+          enable-cache: false
       - name: Configure pip via JFrog proxy
         uses: ./.github/actions/configure-jfrog-pypi
+      - name: Set up Python ${{ matrix.python-version }}
+        env:
+          PYTHON_VERSION: ${{ matrix.python-version }}
+        run: |
+          # --seed installs pip (fetched through JFrog) so the pip commands below run unchanged.
+          UV_INDEX_URL="$PIP_INDEX_URL" uv venv --python "$PYTHON_VERSION" --seed "$RUNNER_TEMP/venv"
+          echo "$RUNNER_TEMP/venv/bin" >> "$GITHUB_PATH"
+          echo "VIRTUAL_ENV=$RUNNER_TEMP/venv" >> "$GITHUB_ENV"
       - name: Install dependencies
         run: |
           LOCK="requirements/root.txt"
@@ -258,12 +271,25 @@ jobs:
           # head from pull_request_target. See the rationale on the checkout
           # step in .github/workflows/pylint.yml.
           allow-unsafe-pr-checkout: true
-      - name: Set up Python ${{ matrix.python-version }}
-        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7.0.0
+      # setup-uv instead of actions/setup-python: on runners with no cached Python,
+      # setup-python upgrades pip from pypi.org, which the protected runners can't reach.
+      - name: Setup uv
+        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2  # v10.3.3
         with:
-          python-version: ${{ matrix.python-version }}
+          version: "0.11.7"
+          checksum: "6681d691eb7f9c00ac6a3af54252f7ab29ae72f0c8f95bdc7f9d1401c23ea868"
+          # Fork code runs in this job; it must not write a cache that trusted runs reuse.
+          enable-cache: false
       - name: Configure pip via JFrog proxy
         uses: ./.github/actions/configure-jfrog-pypi
+      - name: Set up Python ${{ matrix.python-version }}
+        env:
+          PYTHON_VERSION: ${{ matrix.python-version }}
+        run: |
+          # --seed installs pip (fetched through JFrog) so the pip commands below run unchanged.
+          UV_INDEX_URL="$PIP_INDEX_URL" uv venv --python "$PYTHON_VERSION" --seed "$RUNNER_TEMP/venv"
+          echo "$RUNNER_TEMP/venv/bin" >> "$GITHUB_PATH"
+          echo "VIRTUAL_ENV=$RUNNER_TEMP/venv" >> "$GITHUB_ENV"
       - name: Install dependencies
         run: |
           LOCK="requirements/root.txt"
@@ -295,12 +321,25 @@ jobs:
           # head from pull_request_target. See the rationale on the checkout
           # step in .github/workflows/pylint.yml.
           allow-unsafe-pr-checkout: true
-      - name: Set up Python ${{ matrix.python-version }}
-        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7.0.0
+      # setup-uv instead of actions/setup-python: on runners with no cached Python,
+      # setup-python upgrades pip from pypi.org, which the protected runners can't reach.
+      - name: Setup uv
+        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2  # v10.3.3
         with:
-          python-version: ${{ matrix.python-version }}
+          version: "0.11.7"
+          checksum: "6681d691eb7f9c00ac6a3af54252f7ab29ae72f0c8f95bdc7f9d1401c23ea868"
+          # Fork code runs in this job; it must not write a cache that trusted runs reuse.
+          enable-cache: false
       - name: Configure pip via JFrog proxy
         uses: ./.github/actions/configure-jfrog-pypi
+      - name: Set up Python ${{ matrix.python-version }}
+        env:
+          PYTHON_VERSION: ${{ matrix.python-version }}
+        run: |
+          # --seed installs pip (fetched through JFrog) so the pip commands below run unchanged.
+          UV_INDEX_URL="$PIP_INDEX_URL" uv venv --python "$PYTHON_VERSION" --seed "$RUNNER_TEMP/venv"
+          echo "$RUNNER_TEMP/venv/bin" >> "$GITHUB_PATH"
+          echo "VIRTUAL_ENV=$RUNNER_TEMP/venv" >> "$GITHUB_ENV"
       - name: Install dependencies
         run: |
           LOCK="requirements/root.txt"
@@ -332,12 +371,25 @@ jobs:
           # head from pull_request_target. See the rationale on the checkout
           # step in .github/workflows/pylint.yml.
           allow-unsafe-pr-checkout: true
-      - name: Set up Python ${{ matrix.python-version }}
-        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7.0.0
+      # setup-uv instead of actions/setup-python: on runners with no cached Python,
+      # setup-python upgrades pip from pypi.org, which the protected runners can't reach.
+      - name: Setup uv
+        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2  # v10.3.3
         with:
-          python-version: ${{ matrix.python-version }}
+          version: "0.11.7"
+          checksum: "6681d691eb7f9c00ac6a3af54252f7ab29ae72f0c8f95bdc7f9d1401c23ea868"
+          # Fork code runs in this job; it must not write a cache that trusted runs reuse.
+          enable-cache: false
       - name: Configure pip via JFrog proxy
         uses: ./.github/actions/configure-jfrog-pypi
+      - name: Set up Python ${{ matrix.python-version }}
+        env:
+          PYTHON_VERSION: ${{ matrix.python-version }}
+        run: |
+          # --seed installs pip (fetched through JFrog) so the pip commands below run unchanged.
+          UV_INDEX_URL="$PIP_INDEX_URL" uv venv --python "$PYTHON_VERSION" --seed "$RUNNER_TEMP/venv"
+          echo "$RUNNER_TEMP/venv/bin" >> "$GITHUB_PATH"
+          echo "VIRTUAL_ENV=$RUNNER_TEMP/venv" >> "$GITHUB_ENV"
       - name: Install dependencies
         run: |
           LOCK="requirements/tools.txt"
@@ -371,12 +423,25 @@ jobs:
           # head from pull_request_target. See the rationale on the checkout
           # step in .github/workflows/pylint.yml.
           allow-unsafe-pr-checkout: true
-      - name: Set up Python 3.10
-        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7.0.0
+      # setup-uv instead of actions/setup-python: on runners with no cached Python,
+      # setup-python upgrades pip from pypi.org, which the protected runners can't reach.
+      - name: Setup uv
+        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2  # v10.3.3
         with:
-          python-version: "3.10"
+          version: "0.11.7"
+          checksum: "6681d691eb7f9c00ac6a3af54252f7ab29ae72f0c8f95bdc7f9d1401c23ea868"
+          # Fork code runs in this job; it must not write a cache that trusted runs reuse.
+          enable-cache: false
       - name: Configure pip via JFrog proxy
         uses: ./.github/actions/configure-jfrog-pypi
+      - name: Set up Python 3.10
+        env:
+          PYTHON_VERSION: "3.10"
+        run: |
+          # --seed installs pip (fetched through JFrog) so the pip commands below run unchanged.
+          UV_INDEX_URL="$PIP_INDEX_URL" uv venv --python "$PYTHON_VERSION" --seed "$RUNNER_TEMP/venv"
+          echo "$RUNNER_TEMP/venv/bin" >> "$GITHUB_PATH"
+          echo "VIRTUAL_ENV=$RUNNER_TEMP/venv" >> "$GITHUB_ENV"
       - name: Install dependencies
         env:
           # Read matrix value via env to prevent shell injection from source

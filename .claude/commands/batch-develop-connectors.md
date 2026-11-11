@@ -80,11 +80,22 @@ pytest tests/unit/sources/{source_name}/ -v --tb=short
 
 If any test still fails → mark connector failed (record pytest output), do NOT open a PR, continue to next connector.
 
-### Step 6 — Commit and Open PR
+### Step 6 — Prebuilt Wheel
+
+If `{SRC}/pyproject.toml` doesn't exist, create it with the template in `.claude/skills/build_connector_package/SKILL.md` (version `0.1.0`). Then:
+
+```bash
+python tools/scripts/build_wheelhouse.py {source_name}
+python tools/scripts/build_wheelhouse.py {source_name} --check --base origin/master
+```
+
+If either command fails → mark connector failed (record the error), do NOT open a PR, continue to next connector.
+
+### Step 7 — Commit and Open PR
 
 ```bash
 git checkout -b feat/connector-{source_name}
-git add {SRC}/ {TESTS}/
+git add {SRC}/ {TESTS}/ wheelhouse/{source_name}/
 git commit -m "feat({source_name}): add {source_name} connector [needs-live-testing]"
 ```
 
@@ -95,7 +106,7 @@ Open PR via `gh pr create`:
 
 ```
 ## What's included
-- API research doc, implementation, simulator spec, connector spec, documentation
+- API research doc, implementation, simulator spec, connector spec, documentation, prebuilt wheel (`wheelhouse/{source_name}/`)
 
 ## Simulate-mode test results
 <N>/<N> passed

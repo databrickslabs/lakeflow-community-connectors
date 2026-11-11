@@ -3422,7 +3422,12 @@ def register_lakeflow_source(spark):
                     next_url += f"&$orderby={lp_order}"
                 while next_url:
                     try:
-                        lp_rows, next_url = self._fetch_one_expand_page(next_url, lp_types)
+                        # Probe fetches skip ``retry_extra_errors`` (as do the
+                        # reference and probe-shape fetches below): a 4xx here is
+                        # capability evidence, not a page to retry.
+                        lp_rows, next_url = self._fetch_one_expand_page(
+                            next_url, lp_types, extra_retry=False
+                        )
                     except Exception as exc:  # enumeration fetch failed — no verdict
                         raise _CursorProbePreflightUnavailable(str(exc)) from exc
                     for lp_row in lp_rows:
@@ -3470,7 +3475,8 @@ def register_lakeflow_source(spark):
             # Trusted reference: direct-navigation ordering on the leaf collection.
             try:
                 direct_rows, _ = self._fetch_one_expand_page(
-                    f"{leaf_base}?$orderby={cursor_field} desc&$top=2&$select={cursor_field}"
+                    f"{leaf_base}?$orderby={cursor_field} desc&$top=2&$select={cursor_field}",
+                    extra_retry=False,
                 )
             except Exception as exc:  # reference fetch failed — no verdict either way
                 raise _CursorProbePreflightUnavailable(str(exc)) from exc
@@ -3494,7 +3500,11 @@ def register_lakeflow_source(spark):
                 f"&$expand={leaf_nav}($orderby={cursor_field} desc;$top=1;$select={cursor_field})"
             )
             try:
-                exp_rows, _ = self._fetch_one_expand_page(expand_url)
+                # ``extra_retry=False``: the 400 below IS the verdict. Under a
+                # bare ``retry_extra_errors="400"`` it would otherwise be retried
+                # into a RuntimeError, land in the no-verdict branch, and re-probe
+                # (with a full backoff) every batch.
+                exp_rows, _ = self._fetch_one_expand_page(expand_url, extra_retry=False)
             except requests.HTTPError:  # server REJECTED the nested-$expand probe shape
                 # e.g. Hexagon Smart API 400s on inner $orderby/$top/$select rather
                 # than accepting it (or silently mis-ordering). An immediate
@@ -5304,7 +5314,11 @@ def register_lakeflow_source(spark):
             return None
 
         def _fetch_one_expand_page(
-            self, url: str, edm_types: dict[str, str] | None = None
+            self,
+            url: str,
+            edm_types: dict[str, str] | None = None,
+            *,
+            extra_retry: bool = True,
         ) -> tuple[list[dict], str | None]:
             """One HTTP GET; returns ``(page_rows, next_url)``. Thin wrapper
             over :meth:`_fetch_pages_with_links` that consumes a single
@@ -5336,7 +5350,9 @@ def register_lakeflow_source(spark):
             — and a repeated row is deduped at the destination by ``apply_changes``'
             MERGE on the primary key (a harmless duplicate, vs. the data loss a
             short-page stop causes)."""
-            for page_rows, page_next_url in self._fetch_pages_with_links(url, edm_types):
+            for page_rows, page_next_url in self._fetch_pages_with_links(
+                url, edm_types, extra_retry=extra_retry
+            ):
                 return page_rows, (None if page_next_url == url else page_next_url)
             return [], None
 
@@ -7690,7 +7706,10 @@ def register_lakeflow_source(spark):
 
             def _first_value(extra_filter, use_order_by=order_by):
                 url = self._build_url(top_set, opts, extra_filter=extra_filter, order_by=use_order_by)
-                for row in self._fetch_pages(url):
+                # ``extra_retry=False``: ``_probe_max`` falls back on a 400 (a
+                # backend rejecting ``ne null``); ``retry_extra_errors`` must not
+                # turn that 400 into a RuntimeError the fallback can't catch.
+                for row in self._fetch_pages(url, extra_retry=False):
                     value = row.get(cursor_field)
                     if value is not None:
                         return value
@@ -7830,7 +7849,9 @@ def register_lakeflow_source(spark):
                 extra_filter=extra,
             )
             try:
-                return next(iter(self._fetch_pages(url)), None) is not None
+                # A probe: skip ``retry_extra_errors`` so a rejected ``eq null``
+                # fails open at once instead of after a full backoff each batch.
+                return next(iter(self._fetch_pages(url, extra_retry=False)), None) is not None
             except (requests.RequestException, RuntimeError):
                 return False
 
@@ -8403,6 +8424,98 @@ def register_lakeflow_source(spark):
     # 500/502/504 fall back to pure exponential backoff (Retry-After is
     # rarely emitted on those, and we shouldn't trust it if it is).
     _RETRYABLE_HTTP_STATUSES = frozenset({408, 429, 500, 502, 503, 504})
+
+    # Status codes the connector never lets ``retry_extra_errors`` retry: each
+    # has dedicated non-terminal handling elsewhere that an outer retry would
+    # defeat. 404/410 drive the contained-expand walk's vanished-parent recovery
+    # (``_recover_expand_item`` / ``_is_vanished_error``), which needs them to
+    # surface as an ``HTTPError`` rather than be retried-then-RuntimeError'd.
+    _RETRY_EXTRA_FORBIDDEN_CODES = frozenset({404, 410})
+
+
+    def _parse_retry_extra_errors(raw: str | None) -> list[tuple[int, str | None]]:
+        """Parse the ``retry_extra_errors`` connection option into
+        ``(status_code, signature_or_None)`` rules.
+
+        Some OData services (e.g. Hexagon SCApi under load) intermittently fail a
+        well-formed request with a spurious 4xx that succeeds on replay. This
+        option lets an operator opt specific such errors into the same
+        retry/backoff path the built-in transient statuses use, WITHOUT the
+        connector hard-coding any source-specific signatures. Two forms:
+
+        * **CSV of status codes** — ``"400,403"``: retry any response with one of
+          these statuses, whatever the body.
+        * **JSON** — an array (or single object) of ``{"code": <int>,
+          "signature": <optional substring>}``: retry when the status matches AND
+          (if given) the ``signature`` occurs case-insensitively in the response
+          body. A bare int in the array is a code with no signature. Rules are
+          OR-ed. Example (the two Hexagon 400 shapes, matched narrowly)::
+
+            [{"code": 400, "signature": "context uri"},
+             {"code": 400, "signature": "specified argument was out of the range"}]
+
+        Empty/unset → ``[]`` (no extra retries; 400/403 stay terminal). Codes
+        must be integers in 400–599 and not in
+        :data:`_RETRY_EXTRA_FORBIDDEN_CODES`. Any parse/validation problem raises
+        a ``ValueError`` naming the option, so a typo fails the read up front
+        rather than silently disabling the retry.
+        """
+        raw = (raw or "").strip()
+        if not raw:
+            return []
+
+        def _rule(code, signature) -> tuple[int, str | None]:
+            if isinstance(code, bool) or not isinstance(code, int):
+                raise ValueError(f"Invalid retry_extra_errors: status code {code!r} is not an integer.")
+            if not 400 <= code <= 599 or code in _RETRY_EXTRA_FORBIDDEN_CODES:
+                raise ValueError(
+                    f"Invalid retry_extra_errors: status code {code} is not retryable "
+                    f"(expected 400–599, excluding {sorted(_RETRY_EXTRA_FORBIDDEN_CODES)} "
+                    f"which drive contained-walk vanished-parent recovery)."
+                )
+            if signature is not None and not isinstance(signature, str):
+                raise ValueError(
+                    f"Invalid retry_extra_errors: signature {signature!r} for code "
+                    f"{code} is not a string."
+                )
+            sig = (
+                signature.strip().lower() if isinstance(signature, str) and signature.strip() else None
+            )
+            return code, sig
+
+        rules: list[tuple[int, str | None]] = []
+        if raw[0] in "[{":
+            try:
+                data = json.loads(raw)
+            except ValueError as exc:
+                raise ValueError(f"Invalid retry_extra_errors: not valid JSON ({exc}).") from None
+            entries = data if isinstance(data, list) else [data]
+            for entry in entries:
+                if isinstance(entry, int) and not isinstance(entry, bool):
+                    rules.append(_rule(entry, None))
+                elif isinstance(entry, dict):
+                    rules.append(_rule(entry.get("code"), entry.get("signature")))
+                else:
+                    raise ValueError(
+                        f"Invalid retry_extra_errors: entry {entry!r} is neither a status "
+                        f"code nor a {{'code', 'signature'}} object."
+                    )
+        else:
+            for tok in raw.split(","):
+                tok = tok.strip()
+                if not tok:
+                    continue
+                try:
+                    code = int(tok)
+                except ValueError:
+                    raise ValueError(
+                        f"Invalid retry_extra_errors: {tok!r} is not a status code. Use a "
+                        f"comma-separated list of codes (e.g. '400,403') or a JSON array of "
+                        f"{{'code', 'signature'}} objects."
+                    ) from None
+                rules.append(_rule(code, None))
+        return rules
+
 
     # Cap on manually-followed same-origin redirects per request (redirect-loop
     # guard). Off-origin redirects never count — they raise immediately.
@@ -9170,6 +9283,15 @@ def register_lakeflow_source(spark):
             # than this (some misbehaving servers emit hour-long values).
             self.max_retries = _parse_conn_int(options, "max_retries", "5", 0)
             self.retry_max_delay_seconds = _parse_conn_int(options, "retry_max_delay_seconds", "60", 0)
+            # Operator-configured extra retryable errors, for a source that
+            # spuriously fails a well-formed request under load (e.g. Hexagon
+            # SCApi). Empty by default: only the built-in transient statuses
+            # (408/429/5xx + network) are retried and 400/403 stay terminal. When
+            # set, each matching response joins the same backoff/retry path. See
+            # ``_parse_retry_extra_errors`` for the CSV / JSON forms; the parse is
+            # eager so a typo fails the read up front. 404/410 are rejected there
+            # (they drive contained-walk vanished-parent recovery).
+            self._retry_extra_rules = _parse_retry_extra_errors(options.get("retry_extra_errors"))
             # Per-request diagnostic logging. Off by default — when on,
             # writes one INFO line per HTTP request (URL + status + body
             # snippet) to the module logger. The body snippet is the
@@ -11147,8 +11269,20 @@ def register_lakeflow_source(spark):
                 params.append(f"$orderby={order_by}")
             return "&".join(params)
 
-        def _fetch_pages(self, url: str, edm_types: dict[str, str] | None = None) -> Iterator[dict]:
+        def _fetch_pages(
+            self,
+            url: str,
+            edm_types: dict[str, str] | None = None,
+            *,
+            extra_retry: bool = True,
+        ) -> Iterator[dict]:
             """Walk a collection's pages, yielding raw JSON dicts (no coercion).
+
+            ``extra_retry`` (default on) lets operator-configured
+            ``retry_extra_errors`` apply to these page reads. A capability probe
+            that reads a 4xx as its verdict (e.g. "the server rejects this filter
+            shape") must pass ``extra_retry=False`` so that 4xx still surfaces as
+            an ``HTTPError`` instead of being retried into a ``RuntimeError``.
 
             Thin row-flattening wrapper over :meth:`_fetch_pages_with_links`,
             which handles the pagination strategy (nextlink / keyset / skip /
@@ -11158,7 +11292,7 @@ def register_lakeflow_source(spark):
             ``edm_types`` (the collection's declared property types, when the
             caller has them) types the keyset-seek boundary literals.
             """
-            for page_rows, _ in self._fetch_pages_with_links(url, edm_types):
+            for page_rows, _ in self._fetch_pages_with_links(url, edm_types, extra_retry=extra_retry):
                 yield from page_rows
 
         def _parse_pagination(self, table_options: dict[str, str] | None) -> str:
@@ -11228,7 +11362,11 @@ def register_lakeflow_source(spark):
             return False
 
         def _fetch_pages_with_links(
-            self, url: str, edm_types: dict[str, str] | None = None
+            self,
+            url: str,
+            edm_types: dict[str, str] | None = None,
+            *,
+            extra_retry: bool = True,
         ) -> Iterator[tuple[list[dict], str | None]]:
             """Page-aware fetch: yields ``(page_rows, next_url)`` per response,
             where ``next_url`` resumes the next page (``None`` at the end).
@@ -11252,7 +11390,9 @@ def register_lakeflow_source(spark):
             """
             mode = getattr(self, "_pagination", "nextlink")
             if mode != "nextlink":
-                yield from self._client_paginate_pages(url, mode, edm_types)
+                yield from self._client_paginate_pages(
+                    url, mode, edm_types, extra_retry=extra_retry
+                )
                 return
             session = self._get_session()
             next_url: str | None = url
@@ -11267,7 +11407,7 @@ def register_lakeflow_source(spark):
             while next_url:
                 if self._page_url_cycled(cycle, next_url, "nextlink"):
                     return
-                resp, payload = self._fetch_page_payload(session, next_url)
+                resp, payload = self._fetch_page_payload(session, next_url, extra_retry=extra_retry)
                 raw_items = payload.get("value") or []  # `or`: tolerate a spec-invalid null
                 page_rows = [
                     {k: v for k, v in item.items() if not k.startswith("@odata.")} for item in raw_items
@@ -11359,7 +11499,12 @@ def register_lakeflow_source(spark):
             return ok
 
         def _client_paginate_pages(
-            self, url: str, mode: str, edm_types: dict[str, str] | None = None
+            self,
+            url: str,
+            mode: str,
+            edm_types: dict[str, str] | None = None,
+            *,
+            extra_retry: bool = True,
         ) -> Iterator[tuple[list[dict], str | None]]:
             """Client-driven pagination for servers that don't (always) emit
             ``@odata.nextLink``. Yields ``(page_rows, next_url)`` like
@@ -11432,7 +11577,7 @@ def register_lakeflow_source(spark):
             while cur_url is not None:
                 if self._page_url_cycled(cycle, cur_url, mode):
                     return
-                resp, payload = self._fetch_page_payload(session, cur_url)
+                resp, payload = self._fetch_page_payload(session, cur_url, extra_retry=extra_retry)
                 raw_items = payload.get("value") or []  # `or`: tolerate a spec-invalid null
                 page_rows = [
                     {k: v for k, v in item.items() if not k.startswith("@odata.")} for item in raw_items
@@ -11590,7 +11735,7 @@ def register_lakeflow_source(spark):
             return urljoin(request_url, raw_next)
 
         def _fetch_page_payload(
-            self, session: requests.Session, url: str
+            self, session: requests.Session, url: str, *, extra_retry: bool = True
         ) -> tuple[requests.Response, dict]:
             """GET one page + decode JSON, retrying on truncated/malformed
             response bodies.
@@ -11613,7 +11758,11 @@ def register_lakeflow_source(spark):
             url = _pg_strip_query(url, "__pgbase")
             attempts = self.max_retries + 1
             for attempt in range(attempts):
-                resp = self._http_get(session, url)
+                # The page-read path is where ``retry_extra_errors`` applies;
+                # ``extra_retry`` is threaded down from ``_fetch_pages`` /
+                # ``_fetch_one_expand_page`` so a capability probe that reads a
+                # 4xx as its verdict can switch it off.
+                resp = self._http_get(session, url, extra_retry=extra_retry)
                 _raise_for_status_with_body(resp, url)
                 try:
                     return resp, _decode_json_with_body(resp, url)
@@ -11640,7 +11789,13 @@ def register_lakeflow_source(spark):
             )
 
         def _http_get(
-            self, session: requests.Session, url: str, method: str = "GET", **kwargs: Any
+            self,
+            session: requests.Session,
+            url: str,
+            method: str = "GET",
+            *,
+            extra_retry: bool = False,
+            **kwargs: Any,
         ) -> requests.Response:
             """GET (or other ``method``) with terminal auth handling and transient retries.
 
@@ -11679,7 +11834,9 @@ def register_lakeflow_source(spark):
             attempts = self.max_retries + 1
             for attempt in range(attempts):
                 try:
-                    resp = self._http_get_once(session, url, method=method, **kwargs)
+                    resp = self._http_get_once(
+                        session, url, method=method, extra_retry=extra_retry, **kwargs
+                    )
                 except _TRANSIENT_NETWORK_ERRORS as exc:
                     # Server closed the TCP connection / DNS failed / read
                     # timed out — no HTTP response, so no Retry-After to
@@ -11716,6 +11873,48 @@ def register_lakeflow_source(spark):
                         self.max_retries,
                     )
                     time.sleep(self._retry_after_delay(resp, attempt))
+                    continue
+                # Operator-configured extra retryable errors (``retry_extra_errors``
+                # — off unless set, so this is a no-op by default and the built-in
+                # transient handling above is unchanged). Applied ONLY when the
+                # caller opts in with ``extra_retry=True`` — the plain page-read
+                # path (``_fetch_page_payload``). Every other caller keeps the
+                # primitive's raw contract: the ``$batch`` envelope POST needs its
+                # "too many parts" 400 back to trigger the adaptive shrink, and the
+                # capability probes need a 401/403 raised (not returned) so a
+                # transient auth blip records no verdict. A 401/403 reaches here
+                # only because ``_http_get_once`` returned it under a matching
+                # rule with ``extra_retry`` set. No ``Retry-After`` on these, so
+                # pure exponential backoff; the identical request succeeds on a
+                # later attempt when the failure was a spurious under-load glitch.
+                if extra_retry and self._is_user_retryable(resp):
+                    if attempt >= self.max_retries:
+                        if resp.status_code in (401, 403):
+                            # Preserve the actionable auth remediation for an
+                            # auth error that never cleared (may be a genuine
+                            # permission gap the operator opted to retry).
+                            raise PermissionError(self._no_refresh_auth_error(resp, url))
+                        raise RuntimeError(
+                            f"OData service returned {resp.status_code} for {url!r} "
+                            f"on every attempt ({attempt + 1}). It matched a "
+                            f"'retry_extra_errors' rule (an operator-configured "
+                            f"transient error for a source that flakes under load) "
+                            f"but did not clear within the retry budget. Raise "
+                            f"'max_retries' (current: {self.max_retries}) or reduce "
+                            f"read concurrency via 'num_partitions' if the source "
+                            f"is overloaded; if it never clears, the error is not "
+                            f"actually transient — drop it from 'retry_extra_errors'. "
+                            f"Server response: {_truncate(resp.text, 300)}"
+                        )
+                    _LOG.warning(
+                        "OData %d on %s %s matched retry_extra_errors — retrying (%d/%d)",
+                        resp.status_code,
+                        method,
+                        url,
+                        attempt + 1,
+                        self.max_retries,
+                    )
+                    time.sleep(self._backoff_delay(attempt))
                     continue
                 return resp
             # Defensive: the loop always returns or raises before exiting.
@@ -11836,18 +12035,48 @@ def register_lakeflow_source(spark):
                 f"redirects starting from {url!r} — likely a redirect loop."
             )
 
+        def _is_user_retryable(self, resp: requests.Response) -> bool:
+            """True iff ``resp`` matches an operator-configured
+            ``retry_extra_errors`` rule (status, optionally + body signature).
+            Empty config → always ``False`` (built-in transient handling only)."""
+            if not self._retry_extra_rules:
+                return False
+            body: str | None = None
+            for code, sig in self._retry_extra_rules:
+                if resp.status_code != code:
+                    continue
+                if sig is None:
+                    return True
+                if body is None:
+                    body = (resp.text or "").lower()
+                if sig in body:
+                    return True
+            return False
+
         def _http_get_once(
-            self, session: requests.Session, url: str, method: str = "GET", **kwargs: Any
+            self,
+            session: requests.Session,
+            url: str,
+            method: str = "GET",
+            *,
+            extra_retry: bool = False,
+            **kwargs: Any,
         ) -> requests.Response:
             """One auth-aware request attempt; throttle handling lives in `_http_get`.
 
             Token refresh happens here only for connector-side OAuth
             (``auth_type=oauth2``): a known-expiry token is refreshed
             pre-emptively before the request, and a 401 with a usable grant
-            triggers one re-mint + retry. Every other auth mode — including the
-            UC-injected ``access_token`` path, where the COMMUNITY connection
-            layer owns refresh — treats 401/403 as terminal and surfaces the
-            per-auth-mode remediation."""
+            triggers one re-mint + retry. Otherwise a 401/403 is terminal —
+            including the UC-injected ``access_token`` path, where the COMMUNITY
+            connection layer owns refresh — and surfaces the per-auth-mode
+            remediation, EXCEPT that when the caller passes ``extra_retry=True``
+            (only ``_http_get`` on the page-read path does) a 401/403 matching a
+            ``retry_extra_errors`` rule is returned so its backoff loop can retry
+            it. The capability probes call this directly WITHOUT the flag and
+            rely on the 401/403 raising: they swallow the ``PermissionError`` so
+            a transient auth blip records no ``batch_ok``/``expand_ok``/
+            ``or_filter_ok`` verdict."""
             self._require_same_origin(url)
             if self._should_preemptively_refresh():
                 session.headers["Authorization"] = f"Bearer {self._oauth2_token()}"
@@ -11877,6 +12106,8 @@ def register_lakeflow_source(spark):
                     )
                 return resp
             if resp.status_code in (401, 403):
+                if extra_retry and self._is_user_retryable(resp):
+                    return resp
                 raise PermissionError(self._no_refresh_auth_error(resp, url))
             return resp
 

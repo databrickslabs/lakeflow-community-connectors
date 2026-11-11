@@ -432,7 +432,10 @@ class PartitionMixin(SupportsPartitionedStream):
 
         def _first_value(extra_filter, use_order_by=order_by):
             url = self._build_url(top_set, opts, extra_filter=extra_filter, order_by=use_order_by)
-            for row in self._fetch_pages(url):
+            # ``extra_retry=False``: ``_probe_max`` falls back on a 400 (a
+            # backend rejecting ``ne null``); ``retry_extra_errors`` must not
+            # turn that 400 into a RuntimeError the fallback can't catch.
+            for row in self._fetch_pages(url, extra_retry=False):
                 value = row.get(cursor_field)
                 if value is not None:
                     return value
@@ -572,7 +575,9 @@ class PartitionMixin(SupportsPartitionedStream):
             extra_filter=extra,
         )
         try:
-            return next(iter(self._fetch_pages(url)), None) is not None
+            # A probe: skip ``retry_extra_errors`` so a rejected ``eq null``
+            # fails open at once instead of after a full backoff each batch.
+            return next(iter(self._fetch_pages(url, extra_retry=False)), None) is not None
         except (requests.RequestException, RuntimeError):
             return False
 

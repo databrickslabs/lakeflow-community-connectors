@@ -2361,7 +2361,12 @@ class ContainedNavMixin:
                 next_url += f"&$orderby={lp_order}"
             while next_url:
                 try:
-                    lp_rows, next_url = self._fetch_one_expand_page(next_url, lp_types)
+                    # Probe fetches skip ``retry_extra_errors`` (as do the
+                    # reference and probe-shape fetches below): a 4xx here is
+                    # capability evidence, not a page to retry.
+                    lp_rows, next_url = self._fetch_one_expand_page(
+                        next_url, lp_types, extra_retry=False
+                    )
                 except Exception as exc:  # enumeration fetch failed — no verdict
                     raise _CursorProbePreflightUnavailable(str(exc)) from exc
                 for lp_row in lp_rows:
@@ -2409,7 +2414,8 @@ class ContainedNavMixin:
         # Trusted reference: direct-navigation ordering on the leaf collection.
         try:
             direct_rows, _ = self._fetch_one_expand_page(
-                f"{leaf_base}?$orderby={cursor_field} desc&$top=2&$select={cursor_field}"
+                f"{leaf_base}?$orderby={cursor_field} desc&$top=2&$select={cursor_field}",
+                extra_retry=False,
             )
         except Exception as exc:  # reference fetch failed — no verdict either way
             raise _CursorProbePreflightUnavailable(str(exc)) from exc
@@ -2433,7 +2439,11 @@ class ContainedNavMixin:
             f"&$expand={leaf_nav}($orderby={cursor_field} desc;$top=1;$select={cursor_field})"
         )
         try:
-            exp_rows, _ = self._fetch_one_expand_page(expand_url)
+            # ``extra_retry=False``: the 400 below IS the verdict. Under a
+            # bare ``retry_extra_errors="400"`` it would otherwise be retried
+            # into a RuntimeError, land in the no-verdict branch, and re-probe
+            # (with a full backoff) every batch.
+            exp_rows, _ = self._fetch_one_expand_page(expand_url, extra_retry=False)
         except requests.HTTPError:  # server REJECTED the nested-$expand probe shape
             # e.g. Hexagon Smart API 400s on inner $orderby/$top/$select rather
             # than accepting it (or silently mis-ordering). An immediate
@@ -4243,7 +4253,11 @@ class ContainedNavMixin:
         return None
 
     def _fetch_one_expand_page(
-        self, url: str, edm_types: dict[str, str] | None = None
+        self,
+        url: str,
+        edm_types: dict[str, str] | None = None,
+        *,
+        extra_retry: bool = True,
     ) -> tuple[list[dict], str | None]:
         """One HTTP GET; returns ``(page_rows, next_url)``. Thin wrapper
         over :meth:`_fetch_pages_with_links` that consumes a single
@@ -4275,7 +4289,9 @@ class ContainedNavMixin:
         — and a repeated row is deduped at the destination by ``apply_changes``'
         MERGE on the primary key (a harmless duplicate, vs. the data loss a
         short-page stop causes)."""
-        for page_rows, page_next_url in self._fetch_pages_with_links(url, edm_types):
+        for page_rows, page_next_url in self._fetch_pages_with_links(
+            url, edm_types, extra_retry=extra_retry
+        ):
             return page_rows, (None if page_next_url == url else page_next_url)
         return [], None
 

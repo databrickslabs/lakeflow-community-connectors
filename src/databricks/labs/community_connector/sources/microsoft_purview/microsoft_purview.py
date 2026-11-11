@@ -65,6 +65,7 @@ from databricks.labs.community_connector.sources.microsoft_purview.microsoft_pur
 from databricks.labs.community_connector.sources.microsoft_purview.microsoft_purview_utils import (  # pylint: disable=line-too-long
     next_link_paginate,
     normalize_contacts,
+    skip_top_paginate,
 )
 
 _LOG = logging.getLogger(__name__)
@@ -205,7 +206,8 @@ class MicrosoftPurviewLakeflowConnect(LakeflowConnect):
     ) -> tuple[Iterator[dict], dict]:
         """Read data products incrementally on ``systemData.lastModifiedAt``.
 
-        Paginated by ``skip`` / ``top`` with a ``nextLink`` follow. Optional
+        Paginated by advancing ``skip`` (``top`` = page size); the endpoint
+        returns ``count`` but no ``nextLink`` — see ``skip_top_paginate``. Optional
         ``domain_id`` scopes to a single governance domain.
         """
         params = {"api-version": API_VERSION, "top": str(self._page_size)}
@@ -215,7 +217,7 @@ class MicrosoftPurviewLakeflowConnect(LakeflowConnect):
             params["orderBy"] = table_options["order_by"]
 
         url = f"{self.endpoint}{_CATALOG_BASE}/dataProducts"
-        record_iter = next_link_paginate(self._session, url, params, "data_products")
+        record_iter = skip_top_paginate(self._session, url, params, "data_products")
         return self._incremental_from_iter(
             record_iter, start_offset, transform=self._shape_data_product
         )
@@ -225,7 +227,8 @@ class MicrosoftPurviewLakeflowConnect(LakeflowConnect):
     ) -> tuple[Iterator[dict], dict]:
         """Read glossary terms incrementally on ``systemData.lastModifiedAt``.
 
-        Paginated by ``skip`` / ``top`` with a ``nextLink`` follow. Optional
+        Paginated by advancing ``skip`` (``top`` = page size); the endpoint
+        returns ``count`` but no ``nextLink`` — see ``skip_top_paginate``. Optional
         ``domain_id`` / ``parent_id`` / ``keyword`` narrow the extract.
         """
         params = {"api-version": API_VERSION, "top": str(self._page_size)}
@@ -239,7 +242,7 @@ class MicrosoftPurviewLakeflowConnect(LakeflowConnect):
             params["orderBy"] = table_options["order_by"]
 
         url = f"{self.endpoint}{_CATALOG_BASE}/terms"
-        record_iter = next_link_paginate(self._session, url, params, "terms")
+        record_iter = skip_top_paginate(self._session, url, params, "terms")
         return self._incremental_from_iter(
             record_iter, start_offset, transform=self._shape_term
         )
