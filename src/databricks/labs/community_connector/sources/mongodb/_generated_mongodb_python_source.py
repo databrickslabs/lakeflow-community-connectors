@@ -1002,6 +1002,7 @@ def register_lakeflow_source(spark):
         "max_await_time_ms",
         "delete_lookback_seconds",
         "idle_advance_seconds",
+        "assume_unique_id",
     )
 
 
@@ -1060,6 +1061,7 @@ def register_lakeflow_source(spark):
                 opts.get("delete_lookback_seconds"), DEFAULT_DELETE_LOOKBACK_SECONDS,
                 "delete_lookback_seconds", minimum=0
             )
+            self.assume_unique_id = parse_bool(opts.get("assume_unique_id"), False)
             self.idle_advance = parse_int(
                 opts.get("idle_advance_seconds"), DEFAULT_IDLE_ADVANCE_SECONDS,
                 "idle_advance_seconds", minimum=0
@@ -1185,12 +1187,18 @@ def register_lakeflow_source(spark):
             return cfg
 
         def _reject_sharded(self, cfg: _TableConfig) -> None:
-            """Sharded collections are not supported yet.
+            """Refuse sharded collections unless ``_id`` is declared unique.
 
             On a collection sharded by a key other than ``_id``, ``_id`` is only
             unique per shard, so ``_id`` paging and the ``_id`` primary key could
-            merge different documents.
+            merge different documents. When ``_id`` is unique across the
+            collection (for example generated ObjectIds, or ``_id`` as the shard
+            key), reading through mongos is correct: ``find().sort(_id)`` merges
+            the shards in ``_id`` order and the change stream merges them in
+            cluster-time order. ``assume_unique_id=true`` declares that.
             """
+            if cfg.assume_unique_id:
+                return
             import pymongo.errors  # pylint: disable=import-outside-toplevel
 
             try:
@@ -1199,8 +1207,10 @@ def register_lakeflow_source(spark):
                 return  # not allowed to tell; the README states the limitation
             if stats.get("sharded"):
                 raise ValueError(
-                    f"'{cfg.namespace}' is a sharded collection, which this connector does not "
-                    "support yet (_id is only unique per shard unless _id is the shard key)."
+                    f"'{cfg.namespace}' is a sharded collection. _id is only unique per shard unless "
+                    "it is the shard key, and this connector keys rows by _id. If _id is unique "
+                    "across the collection (for example generated ObjectIds), set the table option "
+                    "assume_unique_id=true and connect through mongos."
                 )
 
         def get_table_schema(self, table_name: str, table_options: dict[str, str]) -> StructType:

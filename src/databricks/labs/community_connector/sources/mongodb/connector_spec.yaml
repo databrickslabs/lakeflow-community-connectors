@@ -99,4 +99,4 @@ connection:
 # Use a comma-separated string of option names.
 # If no table-specific options are needed, set to empty string or omit.
 # ============================================================================
-external_options_allowlist: "database,collection,ingestion_type,start_mode,start_at_operation_time,full_document,document_format,max_records_per_batch,snapshot_batch_size,max_await_time_ms,delete_lookback_seconds,idle_advance_seconds"
+external_options_allowlist: "database,collection,ingestion_type,start_mode,start_at_operation_time,full_document,document_format,max_records_per_batch,snapshot_batch_size,max_await_time_ms,delete_lookback_seconds,idle_advance_seconds,assume_unique_id"
