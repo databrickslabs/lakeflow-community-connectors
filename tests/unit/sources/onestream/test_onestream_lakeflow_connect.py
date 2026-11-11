@@ -104,7 +104,6 @@ class TestOneStreamConnector(LakeflowConnectTests, SupportsPartitionedStreamTest
         "personal_access_token": "simulator-fake-pat",
         "api_version": "5.2.0",
         "request_timeout_seconds": "60",
-        "page_size": "50000",
     }
 
     @classmethod
@@ -303,6 +302,56 @@ class TestOneStreamConnector(LakeflowConnectTests, SupportsPartitionedStreamTest
         _, later, _ = self._late_commit(lookback_seconds="0")
         assert [r for r in later if r["EntityId"] == WEST] == []
 
+    def test_change_without_new_stamp_wins_the_merge(self, sim_db):
+        """A cell that changes while its data unit keeps the same stamp (e.g. the
+        data committed after the stamp became visible) must still reach the target.
+
+        The re-read emits the same ``_du_timestamp_ticks``, so the merge relies on
+        ``_read_sequence`` being strictly greater on the later read.
+        """
+        now = self.connector._init_ticks
+        opts = self._base_opts(years="2026", scenarios="Actual", entities="SimEast")
+        _restamp(2026, ACTUAL, EAST, now - 60 * SEC)  # recent, so a re-read is due later
+        first, offset = self._drain(self._connector(now), opts)
+        sim.execute(
+            "UPDATE dbo.DataRecord2026 SET M1Value = 999999.5 "
+            "WHERE EntityId = ? AND ScenarioId = ? AND AccountId = 300",
+            (EAST, ACTUAL),
+        )
+        later, _ = self._drain(self._connector(now + 1000 * SEC), opts, offset)
+
+        key_cols = self.connector.read_table_metadata("cube_data", opts)["primary_keys"]
+        target: dict = {}
+        for rec in first + later:  # apply like AUTO CDC: update only on a greater sequence
+            key = tuple(rec[c] for c in key_cols)
+            if key not in target or rec["_read_sequence"] > target[key]["_read_sequence"]:
+                target[key] = rec
+        changed = [r for r in target.values() if r["AccountId"] == 300 and r["Period"] == 1]
+        assert changed and all(r["Amount"] == Decimal("999999.5") for r in changed)
+        assert {r["_du_timestamp_ticks"] for r in changed} == {now - 60 * SEC}  # stamp unchanged
+        assert min(r["_read_sequence"] for r in later) > max(r["_read_sequence"] for r in first)
+
+    def test_malformed_numeric_options_fail_before_any_request(self):
+        for key, bad in [
+            ("page_size", "abc"),
+            ("page_size", "0"),
+            ("page_size", "300000"),
+            ("max_partitions", "1.5"),
+            ("max_data_units_per_batch", "-1"),
+            ("lookback_seconds", "soon"),
+            ("in_flight_timeout_seconds", "-5"),
+        ]:
+            with pytest.raises(ValueError, match=key):
+                self.connector.read_table_metadata("cube_data", {"years": "2026", key: bad})
+        with pytest.raises(ValueError, match="page_size"):
+            self.connector.read_table_metadata("members", {"page_size": "abc"})
+
+    @simulate_only
+    def test_unverifiable_time_profile_warns(self, caplog):
+        with caplog.at_level("WARNING"):
+            self._connector()._resolve_scope({"years": "2024"})  # no CalcStatus rows for 2024
+        assert "Cannot verify the time profile for 2024" in caplog.text
+
     # -- in-flight hold-back --------------------------------------------------
 
     def _in_flight_first_pass(self):
@@ -448,10 +497,11 @@ def test_unpivot_emits_twelve_months_including_zero():
         **{f"M{m}Value": Decimal("0") if m == 12 else Decimal(m) for m in range(1, 13)},
         **{f"M{m}Status": 16 if m == 12 else 65 for m in range(1, 13)},
     }
-    out = list(_unpivot(row, 2026, 638713838456789010))
+    out = list(_unpivot(row, 2026, 638713838456789010, 42))
     assert [r["TimeId"] for r in out][:3] == [2026003000, 2026004000, 2026005000]
     assert out[-1]["Amount"] == Decimal("0") and out[-1]["CellStatus"] == 16
     assert out[0]["_du_timestamp_ticks"] == 638713838456789010
+    assert out[0]["_read_sequence"] == 42
 
 
 def test_legacy_offset_requires_full_refresh():

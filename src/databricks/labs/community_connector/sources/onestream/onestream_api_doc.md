@@ -751,7 +751,7 @@ There is **no** SQL Server Change Tracking, **no** CDC (`is_cdc_enabled = 0`), a
 
 | Connector table | Ingestion type | Cursor | Rationale |
 |---|---|---|---|
-| `cube_data` | `cdc` | `_du_timestamp_ticks` (the data unit's `DataUnitCacheTimestamp.TimestampTicks`, attached to each row) | OneStream updates this per-data-unit tick whenever the data unit's data changes (it is the platform's cache-invalidation stamp). **100% of data units present in `DataRecord2026` had a matching row** (matched without PartitionId, since the cache table stores `PartitionId = 0`), and the stamp matched the data unit's last calc end time to within about 1 ms **[Observed]**. On change, the **whole data unit is re-read** and upserted. Deletes: see *Read API → Deletes* |
+| `cube_data` | `cdc` | Change detection: the data unit's `DataUnitCacheTimestamp.TimestampTicks` (tracked in the offsets, exposed as `_du_timestamp_ticks`). Merge sequence: `_read_sequence`, strictly increasing per read | OneStream updates this per-data-unit tick whenever the data unit's data changes (it is the platform's cache-invalidation stamp). **100% of data units present in `DataRecord2026` had a matching row** (matched without PartitionId, since the cache table stores `PartitionId = 0`), and the stamp matched the data unit's last calc end time to within about 1 ms **[Observed]**. On change, the **whole data unit is re-read** and upserted. Deletes: see *Read API → Deletes* |
 | `members`, `member_relationships`, `member_properties`, `dimensions`, `cubes`, `cube_dimensions`, `time_dim_profiles`, `fx_rate_types`, `workflow_profiles`, `calc_status`, `data_unit_timestamps` | `snapshot` | none | small (≤ a few k rows, except `calc_status` at about 2M), with no reliable modified column |
 | `fx_rates` | `snapshot` | none | about 60k rows. `AuditFxRate.AuditTime` could drive cdc later |
 | `journal_headers` | `cdc` | `LastEditedTimestamp` (falls back to `CreatedTimestamp`) | lifecycle timestamps exist (`Created/LastEdited/Submitted/Approved/Rejected/Posted/UnpostedTimestamp`) |
@@ -876,8 +876,9 @@ Connector behavior: retry with exponential backoff (up to 5 attempts) on HTTP 40
 | `AccountId`, `FlowId`, `OriginId`, `ICId`, `UD1Id` … `UD8Id` | LongType | intersection columns of `DataRecord{YYYY}` |
 | `Amount` | DecimalType(28,9) | `M{n}Value` |
 | `CellStatus` | LongType | `M{n}Status` (raw OneStream cell-status flags) |
-| `_du_timestamp_ticks` | LongType | the data unit's `DataUnitCacheTimestamp.TimestampTicks` (the cursor) |
+| `_du_timestamp_ticks` | LongType | the data unit's `DataUnitCacheTimestamp.TimestampTicks` (informational; the offsets track it) |
 | `_du_modified_at` | TimestampType | `_du_timestamp_ticks` converted to UTC |
+| `_read_sequence` | LongType | CDC sequence: the slice's cursor plus its verified watermark at the end of the batch that read the row (+1 for catch-up reads). It is strictly larger on every later read of a data unit and derived only from the offsets, so the latest read wins the merge |
 
 ---
 

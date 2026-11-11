@@ -11,7 +11,7 @@ The connector ingests OneStream (OneStream Software CPM: financial consolidation
   - the **Administrator** role. OneStream requires that role for the SQL data provider endpoint this connector uses. The connector only ever sends read-only `SELECT` statements that it generates itself (see *Security*).
   - the `AccessAsNonInteractiveUser` IAM role, which is required to create and use personal access tokens.
 - A OneStream **personal access token (PAT)** for that user. OneStream does not offer PATs to government-cloud customers.
-- The application must use OneStream's **standard monthly time profile**. The connector checks this and fails with a clear error otherwise (see *Limitations*).
+- The application must use OneStream's **standard monthly time profile**. For each year in scope, the connector reads the period keys in `CalcStatus` and fails with a clear error if any isn't a standard month. A year with no calculated data can't be checked, so the connector logs a warning and assumes the standard profile (see *Limitations*).
 - **Network access**: the Databricks compute that runs the pipeline must be able to reach `https://<tenant>.onestreamcloud.com`. The connector only connects over HTTPS.
 - A Databricks workspace with Unity Catalog, where you can create connections and Lakeflow pipelines.
 
@@ -28,7 +28,6 @@ To configure the connector, provide the following parameters in your connection 
 | `personal_access_token` | string (secret) | yes | OneStream PAT of the connector's service user | `<PAT>` |
 | `api_version` | string | no | DataProvider API version. Default `5.2.0` | `5.2.0` |
 | `request_timeout_seconds` | string | no | Per-request HTTP timeout in seconds. Default `900`, because cold reads of large partitions can take several minutes | `900` |
-| `page_size` | string | no | Rows per SQL page. Default `50000`. Values above `200000` are capped at `200000`. Each table can override it (see *Table Configurations*) | `50000` |
 | `externalOptionsAllowList` | string | yes | Comma-separated list of the table-specific options that the connection passes through to the connector. This connector has table-specific options, so this parameter is required | `years,scenarios,entities,include_descendants,cube,refresh_mode,lookback_seconds,hold_in_flight_data_units,in_flight_timeout_seconds,max_data_units_per_batch,max_partitions,page_size` |
 
 The full list of supported table-specific options for `externalOptionsAllowList` is:
@@ -66,7 +65,7 @@ The connector exposes a static list of nine tables:
 
 | Table | Description | OneStream source | Ingestion type | Primary key | Cursor |
 |---|---|---|---|---|---|
-| `cube_data` | Stored cube cell data (the financial numbers), one row per intersection per month | `DataRecord{YYYY}` + `DataUnitCacheTimestamp` | `cdc` (or `snapshot` with `refresh_mode=snapshot`) | `CubeId, EntityId, ParentId, ConsId, ScenarioId, TimeId, AccountId, FlowId, OriginId, ICId, UD1Id..UD8Id` | `_du_timestamp_ticks` |
+| `cube_data` | Stored cube cell data (the financial numbers), one row per intersection per month | `DataRecord{YYYY}` + `DataUnitCacheTimestamp` | `cdc` (or `snapshot` with `refresh_mode=snapshot`) | `CubeId, EntityId, ParentId, ConsId, ScenarioId, TimeId, AccountId, FlowId, OriginId, ICId, UD1Id..UD8Id` | `_read_sequence` |
 | `dimensions` | Dimension definitions | `Dim` | `snapshot` | `DimTypeId, DimId` | n/a |
 | `members` | Dimension members (entities, scenarios, accounts, flows, UD1–UD8) | `Member` | `snapshot` | `DimTypeId, MemberId` | n/a |
 | `member_relationships` | Parent-child hierarchy edges, with aggregation weight | `Relationship` | `snapshot` | `DimTypeId, ParentId, ChildId` | n/a |
@@ -88,7 +87,7 @@ There is one row per stored intersection **per month** (long format). Columns:
 - time: `TimeId` (OneStream time key, e.g. `2026003000` = 2026M1) and `Period` (1–12)
 - the intersection: `AccountId, FlowId, OriginId, ICId, UD1Id..UD8Id`
 - values: `Amount` (`decimal(28,9)`) and `CellStatus` (OneStream cell status flags)
-- change tracking: `_du_timestamp_ticks` and `_du_modified_at` (UTC)
+- change tracking: `_du_timestamp_ticks` / `_du_modified_at` (UTC), the data unit's OneStream change stamp, and `_read_sequence`, the CDC sequence. `_read_sequence` increases strictly with every read, so the latest read of a data unit always wins the merge, even when OneStream's stamp didn't change (for example, a change that became visible after its stamp)
 
 All 12 months of every stored row are emitted, including zeros, so that a cleared cell overwrites its previous value. Filter `Amount <> 0` downstream if needed.
 
@@ -177,7 +176,7 @@ All options apply to `cube_data`. The metadata tables accept only `page_size`.
 | `in_flight_timeout_seconds` | no | `3600` | After this long, a still-set in-flight flag is treated as stale. Incremental mode only |
 | `max_data_units_per_batch` | no | `5000` | Admission control: approximate number of data units per micro-batch. Incremental mode only. This replaces the framework's usual `max_records_per_batch`: OneStream doesn't expose a data unit's row count without reading it, so batches are bounded by data units (each is read and upserted whole) |
 | `max_partitions` | no | `4` | Parallel read partitions. This bounds the concurrent load on OneStream |
-| `page_size` | no | connection value | Rows per SQL page for this table (capped at `200000`) |
+| `page_size` | no | `50000` | Rows per SQL page for this table, a whole number from `1` to `200000` |
 
 Boolean options accept `true`/`false` (also `1`/`0` and `yes`/`no`). Any other value fails instead of being read as `false`. `lookback_seconds` and `in_flight_timeout_seconds` must be `0` or more.
 
@@ -277,6 +276,7 @@ Run the pipeline once to backfill (`community-connector run_pipeline <PIPELINE_N
 | `unknown member name(s)` | Check the spelling in `scenarios`/`entities` against the `members` table |
 | `member name(s) ... exist in more than one dimension of this type` | The name is used in two dimensions of the same type. Rename one in OneStream, or narrow the scope |
 | `Unknown cube '<name>'` | `cube` must match a cube name exactly, including case. The error lists the available cubes |
+| `Option '<name>' must be a whole number` / `must be between` | A numeric table option is malformed or out of range. The connector checks these before sending any request |
 | `not standard monthly periods` | The application uses a non-standard time profile, which `cube_data` doesn't support yet |
 | `OneStream returned only N rows for a M-row page` | The OneStream server caps rows per request. Set `page_size` to `N` or less |
 | `OneStream request failed after 5 attempts` | OneStream was unreachable or kept timing out. Check network access, and raise `request_timeout_seconds` or lower `page_size` and `max_partitions` if the tenant is under load |

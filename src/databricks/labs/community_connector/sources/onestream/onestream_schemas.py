@@ -255,7 +255,10 @@ DATA_RECORD_SELECT = [
     *[c for m in range(1, 13) for c in (f"M{m}Value", f"M{m}Status")],
 ]
 
-CUBE_DATA_CURSOR = "_du_timestamp_ticks"
+# CDC sequence column: strictly increasing per read, so the latest read of a
+# data unit always wins the merge (even if OneStream's stamp didn't change).
+CUBE_DATA_CURSOR = "_read_sequence"
+DU_STAMP_COLUMN = "_du_timestamp_ticks"
 CUBE_DATA_PRIMARY_KEYS = [
     "CubeId",
     "EntityId",
@@ -272,8 +275,9 @@ CUBE_DATA_SCHEMA = StructType(
     + [
         StructField("Amount", DecimalType(28, 9), False),
         StructField("CellStatus", LongType(), False),
-        StructField(CUBE_DATA_CURSOR, LongType(), False),
+        StructField(DU_STAMP_COLUMN, LongType(), False),
         StructField("_du_modified_at", TimestampType(), True),
+        StructField(CUBE_DATA_CURSOR, LongType(), False),
     ]
 )
 

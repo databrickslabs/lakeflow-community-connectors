@@ -49,6 +49,7 @@ from pyspark.sql.types import (
     VariantVal,
 )
 import base64
+import logging
 import requests
 
 
@@ -1176,7 +1177,10 @@ def register_lakeflow_source(spark):
         *[c for m in range(1, 13) for c in (f"M{m}Value", f"M{m}Status")],
     ]
 
-    CUBE_DATA_CURSOR = "_du_timestamp_ticks"
+    # CDC sequence column: strictly increasing per read, so the latest read of a
+    # data unit always wins the merge (even if OneStream's stamp didn't change).
+    CUBE_DATA_CURSOR = "_read_sequence"
+    DU_STAMP_COLUMN = "_du_timestamp_ticks"
     CUBE_DATA_PRIMARY_KEYS = [
         "CubeId",
         "EntityId",
@@ -1193,8 +1197,9 @@ def register_lakeflow_source(spark):
         + [
             StructField("Amount", DecimalType(28, 9), False),
             StructField("CellStatus", LongType(), False),
-            StructField(CUBE_DATA_CURSOR, LongType(), False),
+            StructField(DU_STAMP_COLUMN, LongType(), False),
             StructField("_du_modified_at", TimestampType(), True),
+            StructField(CUBE_DATA_CURSOR, LongType(), False),
         ]
     )
 
@@ -1434,6 +1439,73 @@ def register_lakeflow_source(spark):
         return sorted(years)
 
 
+    _LOG = logging.getLogger(__name__)
+
+    # Numeric table options and their allowed ranges (validated before any request).
+    _INT_OPTIONS = {
+        "page_size": (1, MAX_PAGE_SIZE),
+        "max_partitions": (1, 64),
+        "max_data_units_per_batch": (1, 1_000_000),
+    }
+    _NUMBER_OPTIONS = {
+        "lookback_seconds": (0, 7 * 86_400),
+        "in_flight_timeout_seconds": (0, 7 * 86_400),
+    }
+
+
+    def _number_option(options: dict, key: str, default: float, lo: float, hi: float) -> float:
+        value = options.get(key)
+        if value is None or str(value).strip() == "":
+            return float(default)
+        try:
+            number = float(str(value).strip())
+        except ValueError:
+            raise ValueError(f"Option '{key}' must be a number, got {value!r}") from None
+        if not lo <= number <= hi:
+            raise ValueError(f"Option '{key}' must be between {lo} and {hi}, got {value!r}")
+        return number
+
+
+    def _int_option(options: dict, key: str, default: int, lo: int, hi: int) -> int:
+        value = options.get(key)
+        if value is None or str(value).strip() == "":
+            return int(default)
+        text = str(value).strip()
+        if not text.isdigit():
+            raise ValueError(f"Option '{key}' must be a whole number, got {value!r}")
+        number = int(text)
+        if not lo <= number <= hi:
+            raise ValueError(f"Option '{key}' must be between {lo} and {hi}, got {value!r}")
+        return number
+
+
+    def _validate_table_options(table_name: str, table_options: dict) -> None:
+        """Fail fast on malformed numeric options, before any request reaches OneStream."""
+        for key, (lo, hi) in _INT_OPTIONS.items():
+            _int_option(table_options, key, lo, lo, hi)
+        if table_name == CUBE_DATA:
+            for key, (lo, hi) in _NUMBER_OPTIONS.items():
+                _number_option(table_options, key, lo, lo, hi)
+
+
+    def _read_sequence(end_state: dict, key: tuple, catch_up: bool) -> int:
+        """Merge sequence for rows of slice ``key`` read in the batch ending at ``end_state``.
+
+        A batch reads a slice only when its cursor ``c`` or verified watermark ``w``
+        grows (see ``cube_batch_ranges``), and neither ever decreases, so ``c + w``
+        is strictly larger on every later read of the slice -- including a
+        confirmation re-read that finds a cell changed under an unchanged
+        data-unit stamp. Catch-up reads add 1 so they win over the slice's previous
+        read, and any later read still exceeds them. Derived from the offset alone,
+        so planning stays deterministic. 0 for batch/snapshot reads, where the
+        sequence is unused.
+        """
+        if not end_state:
+            return 0
+        seq = end_state["c"].get(key, 0) + end_state["w"].get(key, 0)
+        return seq + 1 if catch_up else seq
+
+
     def _slice_key(row: dict) -> tuple:
         return (int(row["YearId"]), int(row["ScenarioId"]), int(row["CubeId"]))
 
@@ -1448,11 +1520,10 @@ def register_lakeflow_source(spark):
                 application_name=options.get("application_name", ""),
                 token=options.get("personal_access_token", ""),
                 api_version=options.get("api_version") or DEFAULT_API_VERSION,
-                timeout_seconds=float(
-                    options.get("request_timeout_seconds") or DEFAULT_TIMEOUT_SECONDS
+                timeout_seconds=_number_option(
+                    options, "request_timeout_seconds", DEFAULT_TIMEOUT_SECONDS, 1, 3600
                 ),
             )
-            self._page_size = self._bounded_page_size(options.get("page_size"))
             # Cap every incremental read at init time so Trigger.AvailableNow terminates.
             self._init_ticks = datetime_to_ticks(datetime.now(timezone.utc))
             # Per-instance caches. A new instance is created per trigger, so these
@@ -1480,6 +1551,7 @@ def register_lakeflow_source(spark):
 
         def read_table_metadata(self, table_name: str, table_options: dict[str, str]) -> dict:
             self._validate_table(table_name)
+            _validate_table_options(table_name, table_options)
             if table_name == CUBE_DATA:
                 if self._cube_data_snapshot_mode(table_options):
                     return {"primary_keys": list(CUBE_DATA_PRIMARY_KEYS), "ingestion_type": "snapshot"}
@@ -1499,7 +1571,8 @@ def register_lakeflow_source(spark):
                 return iter(self._read_snapshot_table(table_name, table_options)), None
 
             if self._cube_data_snapshot_mode(table_options):
-                return self._read_units(self._all_units(table_options), table_options), None
+                units = self._all_units(table_options)
+                return self._read_units(units, table_options), None
 
             start = start_offset or {}
             end = self.latest_offset(table_name, table_options, start)
@@ -1599,7 +1672,7 @@ def register_lakeflow_source(spark):
                 units = self._units_between(table_options, start_offset or {}, end_offset or {})
             if not units:
                 return []
-            n = max(1, int(table_options.get("max_partitions") or DEFAULT_MAX_PARTITIONS))
+            n = _int_option(table_options, "max_partitions", DEFAULT_MAX_PARTITIONS, 1, 64)
             buckets: list[list] = [[] for _ in range(min(n, len(units)))]
             for i, unit in enumerate(units):
                 buckets[i % len(buckets)].append(unit)
@@ -1765,6 +1838,12 @@ def register_lakeflow_source(spark):
                         sql_select(["TimeId"], sql_table_ref(CALC_STATUS_TABLE), where, distinct=True)
                     )
                 }
+                if not seen:
+                    _LOG.warning(
+                        "Cannot verify the time profile for %s: CalcStatus has no period keys "
+                        "for that year (never calculated). Assuming the standard monthly profile.",
+                        year,
+                    )
                 unexpected = sorted(seen - {time_id(year, m) for m in range(1, 13)})
                 if unexpected:
                     raise ValueError(
@@ -1819,12 +1898,16 @@ def register_lakeflow_source(spark):
             return sorted(seen)
 
         def _cube_settings(self, table_options: dict[str, str]) -> dict:
-            lookback = float(table_options.get("lookback_seconds", DEFAULT_LOOKBACK_SECONDS))
-            timeout = float(
-                table_options.get("in_flight_timeout_seconds", DEFAULT_IN_FLIGHT_TIMEOUT_SECONDS)
+            lookback = _number_option(
+                table_options, "lookback_seconds", DEFAULT_LOOKBACK_SECONDS, 0, 7 * 86_400
             )
-            if lookback < 0 or timeout < 0:
-                raise ValueError("lookback_seconds and in_flight_timeout_seconds must be >= 0")
+            timeout = _number_option(
+                table_options,
+                "in_flight_timeout_seconds",
+                DEFAULT_IN_FLIGHT_TIMEOUT_SECONDS,
+                0,
+                7 * 86_400,
+            )
             hold = _bool_option(table_options, "hold_in_flight_data_units", False)
             if hold and DU_IN_FLIGHT_COLUMN not in self._live_columns(DU_TIMESTAMP_TABLE):
                 raise ValueError(
@@ -1833,8 +1916,12 @@ def register_lakeflow_source(spark):
                 )
             return {
                 "lookback": int(lookback * TICKS_PER_SECOND),
-                "max_units": int(
-                    table_options.get("max_data_units_per_batch") or DEFAULT_MAX_DATA_UNITS_PER_BATCH
+                "max_units": _int_option(
+                    table_options,
+                    "max_data_units_per_batch",
+                    DEFAULT_MAX_DATA_UNITS_PER_BATCH,
+                    1,
+                    1_000_000,
                 ),
                 "hold": hold,
                 "hold_timeout": int(timeout * TICKS_PER_SECOND),
@@ -1897,9 +1984,8 @@ def register_lakeflow_source(spark):
         def _all_units(self, table_options: dict[str, str]) -> list:
             """Every data unit in scope (batch reads and refresh_mode=snapshot)."""
             scope = self._resolve_scope(table_options)
-            return self._units_from_rows(
-                self._fetch_du_rows(scope, 0, self._init_ticks, scope["entity_ids"])
-            )
+            rows = self._fetch_du_rows(scope, 0, self._init_ticks, scope["entity_ids"])
+            return self._units_from_rows(rows, {})
 
         def _units_between(self, table_options: dict[str, str], start: dict, end: dict) -> list:
             """Read units for the micro-batch ``start -> end`` (derived from the offsets alone)."""
@@ -1918,10 +2004,11 @@ def register_lakeflow_source(spark):
                 )
                 selected += self._rows_in_ranges(scope, main, entity_ids, e_state, cfg)
             if catch:
-                selected += self._rows_in_ranges(
+                catch_rows = self._rows_in_ranges(
                     scope, catch, sorted(cube_entity_set(catch_entities)), e_state, cfg
                 )
-            return self._units_from_rows(selected)
+                selected += [dict(r, _catch_up=True) for r in catch_rows]
+            return self._units_from_rows(selected, e_state)
 
         def _rows_in_ranges(
             self, scope: dict, ranges: list, entity_ids, e_state: dict, cfg: dict
@@ -1947,19 +2034,23 @@ def register_lakeflow_source(spark):
                 out.append(r)
             return out
 
-        def _units_from_rows(self, rows: list[dict]) -> list:
+        def _units_from_rows(self, rows: list[dict], end_state: dict) -> list:
             """Group data-unit rows into read units.
 
-            A read unit is ``[year, partition_id, cube_id, entity_id, scenario_id, pairs]``
+            A read unit is ``[year, partition_id, cube_id, entity_id, scenario_id, pairs, seq]``
             where ``pairs`` is ``[[parent_id, cons_id, ticks], ...]`` (or ``None`` to read
-            every data unit of that slice when there are very many). An entity stored
+            every data unit of that slice when there are very many) and ``seq`` is the
+            merge sequence for the rows read (see ``_read_sequence``). An entity stored
             in several partitions yields one unit per partition.
             """
             groups: dict[tuple, dict] = defaultdict(dict)
+            seqs: dict[tuple, int] = {}
             for r in rows:
                 key = (int(r["YearId"]), int(r["CubeId"]), int(r["EntityId"]), int(r["ScenarioId"]))
                 pair = (int(r["ParentId"]), int(r["ConsId"]))
                 groups[key][pair] = max(groups[key].get(pair, 0), int(r["TimestampTicks"]))
+                seq = _read_sequence(end_state, _slice_key(r), bool(r.get("_catch_up")))
+                seqs[key] = max(seqs.get(key, 0), seq)
             units = []
             for (year, cube_id, entity_id, scenario_id), pairs in sorted(groups.items()):
                 pair_list = (
@@ -1969,7 +2060,17 @@ def register_lakeflow_source(spark):
                 )
                 # No partition means the data unit is stamped but holds no stored rows.
                 for partition_id in self._partitions_for(year, entity_id):
-                    units.append([year, partition_id, cube_id, entity_id, scenario_id, pair_list])
+                    units.append(
+                        [
+                            year,
+                            partition_id,
+                            cube_id,
+                            entity_id,
+                            scenario_id,
+                            pair_list,
+                            seqs[(year, cube_id, entity_id, scenario_id)],
+                        ]
+                    )
             return units
 
         def _partitions_for(self, year: int, entity_id: int) -> list[int]:
@@ -1993,12 +2094,14 @@ def register_lakeflow_source(spark):
             page_size = self._page_size_for(table_options)
             if units:
                 self._ensure_page_size(page_size)
-            for year, partition_id, cube_id, entity_id, scenario_id, pairs in units:
+            for year, partition_id, cube_id, entity_id, scenario_id, pairs, seq in units:
                 yield from self._read_unit(
-                    year, partition_id, cube_id, entity_id, scenario_id, pairs, page_size
+                    year, partition_id, cube_id, entity_id, scenario_id, pairs, page_size, seq
                 )
 
-        def _read_unit(self, year, partition_id, cube_id, entity_id, scenario_id, pairs, page_size):
+        def _read_unit(
+            self, year, partition_id, cube_id, entity_id, scenario_id, pairs, page_size, seq
+        ):
             if pairs:
                 stamps = {(int(p), int(c)): int(t) for p, c, t in pairs}
             else:
@@ -2041,7 +2144,7 @@ def register_lakeflow_source(spark):
                 )
                 for row in page:
                     ticks = stamps.get((int(row["ParentId"]), int(row["ConsId"])), 0)
-                    yield from _unpivot(row, year, ticks)
+                    yield from _unpivot(row, year, ticks, seq)
                 if len(page) < page_size:
                     return
                 offset += page_size
@@ -2051,16 +2154,8 @@ def register_lakeflow_source(spark):
         # ------------------------------------------------------------------
 
         @staticmethod
-        def _bounded_page_size(value) -> int:
-            size = int(value) if value else DEFAULT_PAGE_SIZE
-            if size < 1:
-                raise ValueError("page_size must be positive")
-            return min(size, MAX_PAGE_SIZE)
-
-        def _page_size_for(self, table_options: dict[str, str]) -> int:
-            if table_options.get("page_size"):
-                return self._bounded_page_size(table_options["page_size"])
-            return self._page_size
+        def _page_size_for(table_options: dict[str, str]) -> int:
+            return _int_option(table_options, "page_size", DEFAULT_PAGE_SIZE, 1, MAX_PAGE_SIZE)
 
         @staticmethod
         def _validate_table(table_name: str) -> None:
@@ -2070,11 +2165,12 @@ def register_lakeflow_source(spark):
                 )
 
 
-    def _unpivot(row: dict, year: int, ticks: int) -> Iterator[dict]:
+    def _unpivot(row: dict, year: int, ticks: int, seq: int) -> Iterator[dict]:
         """One DataRecord row -> 12 monthly records (zeros included, so cleared cells overwrite)."""
         base = {c: row[c] for c in DATA_UNIT_COLUMNS}
         base.update({c: row[c] for c in INTERSECTION_COLUMNS})
-        base[CUBE_DATA_CURSOR] = ticks
+        base[DU_STAMP_COLUMN] = ticks
+        base[CUBE_DATA_CURSOR] = seq
         base["_du_modified_at"] = ticks_to_iso(ticks) if ticks else None
         for month in range(1, 13):
             rec = dict(base)

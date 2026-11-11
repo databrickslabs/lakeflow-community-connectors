@@ -45,13 +45,6 @@ connection:
         Per-request HTTP timeout in seconds. Defaults to 900 (cold reads of large
         partitions can take several minutes).
 
-    - name: page_size
-      type: string
-      required: false
-      description: >
-        Rows per SQL page (default 50000, maximum 200000). Each 50k-row page of
-        cube data is about 42 MB of JSON.
-
 # ============================================================================
 # External Options Allowlist
 # These table-specific options must be included in the externalOptionsAllowList
