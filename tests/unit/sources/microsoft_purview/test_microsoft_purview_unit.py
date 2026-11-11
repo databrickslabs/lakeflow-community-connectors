@@ -623,3 +623,31 @@ class TestTableOptionsToQueryParams:
         params = calls[0]["params"]
         for key in ("domainId", "parentId", "keyword", "orderBy"):
             assert key not in params
+
+
+# --------------------------------------------------------------------------- #
+# Connector version reporting
+# --------------------------------------------------------------------------- #
+
+
+class TestConnectorVersion:
+    def test_constant_matches_pyproject(self):
+        """CONNECTOR_VERSION must equal pyproject.toml's version, so the version a
+        customer finds in copied or merged source is the real one. (Regex, not
+        tomllib, so this runs on Python 3.10.)"""
+        import pathlib
+        import re
+
+        pyproject = pathlib.Path(mp.__file__).with_name("pyproject.toml").read_text()
+        match = re.search(r'^version\s*=\s*"([^"]+)"', pyproject, re.M)
+        assert match, "no version in pyproject.toml"
+        assert mp.CONNECTOR_VERSION == match.group(1)
+
+    def test_version_logged_once_per_process(self, caplog, monkeypatch):
+        monkeypatch.setattr(MicrosoftPurviewLakeflowConnect, "_version_logged", False)
+        with caplog.at_level("INFO", logger=mp.__name__):
+            _connector()
+            _connector()
+        hits = [r for r in caplog.records if mp.CONNECTOR_VERSION in r.getMessage()]
+        assert len(hits) == 1
+        assert "Microsoft Purview connector version" in hits[0].getMessage()
