@@ -228,6 +228,14 @@ def test_sharded_collection_is_refused(fake, monkeypatch):
         _connector(uri).read_table("sharded", {}, {})
 
 
+def test_snapshot_reads_use_majority(fake):
+    uri, db = fake
+    db.create_collection("c").insert_many([{"_id": i} for i in range(3)])
+    drive(_connector(uri), "c", {})
+    server = FakeMongoClient(uri)._s  # pylint: disable=protected-access
+    assert server.read_concerns and set(server.read_concerns) == {"majority"}
+
+
 def test_collection_alias(fake):
     uri, db = fake
     db.create_collection(MB_COLLECTION).insert_one({"_id": 1, "v": "別名"})

@@ -89,6 +89,7 @@ class _Server:
         self.data: dict[tuple[str, str], dict] = {}
         self.types: dict[tuple[str, str], str] = {}
         self.oplog: list[dict] = []
+        self.read_concerns: list = []
         self._inc = itertools.count(1)
 
     def token(self, ts: Timestamp, seq: int, high_water: bool = False) -> str:
@@ -108,6 +109,7 @@ class _Server:
 class FakeCollection:
     def __init__(self, server: _Server, db: str, name: str):
         self._s, self._ns = server, (db, name)
+        self.read_concern = None
 
     @property
     def _docs(self) -> dict:
@@ -161,6 +163,7 @@ class FakeCollection:
 
     # -- reads (used by the connector) --
     def find(self, query: dict):
+        self._s.read_concerns.append(getattr(self.read_concern, "level", None))
         with self._s.lock:
             return _Cursor([d for d in self._docs.values() if _match(d, query)])
 
@@ -239,6 +242,11 @@ class FakeDatabase:
 
     def __getitem__(self, collection: str) -> FakeCollection:
         return FakeCollection(self._s, self.name, collection)
+
+    def get_collection(self, collection: str, read_concern=None) -> FakeCollection:
+        coll = FakeCollection(self._s, self.name, collection)
+        coll.read_concern = read_concern
+        return coll
 
     def create_collection(self, name: str, viewOn: Optional[str] = None, pipeline=None):  # pylint: disable=invalid-name
         del pipeline

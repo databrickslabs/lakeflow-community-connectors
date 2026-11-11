@@ -91,6 +91,7 @@ Set with the `ingestion_type` table option.
 
 How it stays correct:
 
+- Snapshot pages and document lookups use read concern `majority` (whatever the connection string sets), so a write that a failover rolls back is never ingested; change streams only report majority-committed changes.
 - The snapshot pages through the collection by `_id` in BSON sort order, so collections whose `_id` mixes types (ObjectId, strings, numbers) are read completely.
 - The change stream starts from a resume token taken **before** the snapshot began. Changes made during the snapshot are replayed afterwards; because every row carries `_cdc_sequence`, `apply_changes` keeps the newest version whatever order the rows arrive in.
 - Deletes are read by a separate flow. It starts `delete_lookback_seconds` in the past (at most back to the start of the oplog) so that no delete between the snapshot and the start of the delete flow is missed; older deletes have a smaller sequence than the snapshot rows and are ignored.
