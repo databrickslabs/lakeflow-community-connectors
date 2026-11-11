@@ -1,18 +1,19 @@
 """Synthetic Rootly JSON:API pages, including opaque incident cursors."""
 
 import json
+from datetime import datetime
 from urllib.parse import parse_qs, urlencode, urlsplit, urlunsplit
 
 from requests import Response
 
 
 def list_resources(prep, spec, corpus):
-    """Serve only the paging contract; records are synthetic, never live data."""
+    """Serve pagination and incident time windows over synthetic records."""
     parts = urlsplit(prep.url)
     query = {key: values[0] for key, values in parse_qs(parts.query).items()}
     allowed = {"page[number]", "page[size]"}
     if spec.corpus == "incidents":
-        allowed.add("page[after]")
+        allowed.update({"page[after]", "filter[updated_at][gte]", "filter[updated_at][lt]", "sort"})
     if set(query) - allowed:
         raise ValueError("Unexpected Rootly query parameter in simulator")
     size = int(query.get("page[size]", "100"))
@@ -24,6 +25,25 @@ def list_resources(prep, spec, corpus):
     else:
         offset = (int(query.get("page[number]", "1")) - 1) * size
     records = corpus.get(spec.corpus)
+    if spec.corpus == "incidents":
+
+        def timestamp(value):
+            return datetime.fromisoformat(value.replace("Z", "+00:00"))
+
+        since = query.get("filter[updated_at][gte]")
+        until = query.get("filter[updated_at][lt]")
+        records = [
+            row
+            for row in records
+            if (since is None or timestamp(row["attributes"]["updated_at"]) >= timestamp(since))
+            and (until is None or timestamp(row["attributes"]["updated_at"]) < timestamp(until))
+        ]
+        if "sort" in query:
+            if query["sort"] != "updated_at":
+                raise ValueError("Unsupported synthetic Rootly sort")
+            records = sorted(
+                records, key=lambda row: (timestamp(row["attributes"]["updated_at"]), row["id"])
+            )
     page = records[offset : offset + size]
     more = offset + size < len(records)
     current_page = offset // size + 1
@@ -36,7 +56,7 @@ def list_resources(prep, spec, corpus):
     }
     if spec.corpus == "incidents":
         meta["next_cursor"] = f"synthetic-{offset + size}" if more else None
-        if "page[after]" in query:
+        if "page[number]" not in query:
             meta.update(current_page=None, next_page=None, prev_page=None)
 
     def link(number):

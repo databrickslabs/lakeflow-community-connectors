@@ -19,8 +19,14 @@ endpoints:
       "page[size]":
         role: per_page
         default: 100
-        max: 100
+        max: 1000
       "page[after]":
+        role: ignore
+      "filter[updated_at][gte]":
+        role: ignore
+      "filter[updated_at][lt]":
+        role: ignore
+      "sort":
         role: ignore
   - path: /v1/services
     method: GET
@@ -37,7 +43,7 @@ endpoints:
       "page[size]":
         role: per_page
         default: 100
-        max: 100
+        max: 1000
   - path: /v1/users
     method: GET
     corpus: users
@@ -53,7 +59,7 @@ endpoints:
       "page[size]":
         role: per_page
         default: 100
-        max: 100
+        max: 1000
   - path: /v1/teams
     method: GET
     corpus: teams
@@ -69,7 +75,7 @@ endpoints:
       "page[size]":
         role: per_page
         default: 100
-        max: 100
+        max: 1000
   - path: /v1/severities
     method: GET
     corpus: severities
@@ -85,7 +91,7 @@ endpoints:
       "page[size]":
         role: per_page
         default: 100
-        max: 100
+        max: 1000
   - path: /v1/escalation_policies
     method: GET
     corpus: escalation_policies
@@ -101,7 +107,7 @@ endpoints:
       "page[size]":
         role: per_page
         default: 100
-        max: 100
+        max: 1000
   - path: /v1/schedules
     method: GET
     corpus: schedules
@@ -117,4 +123,4 @@ endpoints:
       "page[size]":
         role: per_page
         default: 100
-        max: 100
+        max: 1000

@@ -126,7 +126,16 @@ def generate(openapi_path: Path) -> None:
         "every declared resource field, including nested fields. Undeclared object shapes "
         "are retained as VARIANT. Response-level pagination and included resources "
         "are not rows.\n\n"
-        f"Input SHA256: `{digest}`.\n"
+        f"Input SHA256: `{digest}`.\n\n"
+        "## Relationships and joins\n\n"
+        "See [relationship keys and SQL examples](relationships.md) for joins "
+        "between these tables.\n"
+        "For example, `escalation_policies.attributes.group_ids` contains IDs "
+        "matching `teams.id`.\n"
+        "Rootly calls teams `groups` in relationship fields. These keys are "
+        "already preserved in the\n"
+        "nested schema; a top-level JSON:API `relationships` object is not "
+        "required for each join.\n"
     ]
     for table, row in rows.items():
         fields = []

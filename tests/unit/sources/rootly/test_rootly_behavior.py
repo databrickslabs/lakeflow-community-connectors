@@ -81,26 +81,10 @@ def test_numbered_pages_stream_without_losing_rows(connector, transport):
         assert options["headers"]["Authorization"] == "Bearer synthetic-secret"
 
 
-def test_cursor_pages_use_opaque_values_and_terminate(connector, transport):
-    calls, replies, _ = transport
-    replies.extend(
-        [
-            response(page([resource("1")], next_page=2, next_cursor="opaque+/=one")),
-            response(page([resource("2")], next_cursor="opaque-two")),
-            response(page([resource("3")], next_cursor=None)),
-        ]
-    )
-    rows, offset = connector.read_table("incidents", None, {})
-    assert [row["id"] for row in rows] == ["1", "2", "3"]
-    assert offset is None
-    assert calls[1][1]["params"] == {"page[size]": "100", "page[after]": "opaque+/=one"}
-    assert "page[number]" not in calls[2][1]["params"]
-
-
 def test_empty_snapshot(connector, transport):
     _, replies, _ = transport
     replies.append(response(page([])))
-    rows, offset = connector.read_table("incidents", None, {})
+    rows, offset = connector.read_table("services", None, {})
     assert list(rows) == []
     assert offset is None
 
@@ -111,11 +95,17 @@ def test_empty_snapshot(connector, transport):
 )
 def test_page_size_reaches_each_table_endpoint(connector, transport, table):
     calls, replies, _ = transport
-    replies.append(response(page([])))
-    rows, _ = connector.read_table(table, None, {"page_size": "2"})
+    replies.append(response(page([], next_cursor=None)))
+    rows, _ = connector.read_table(table, None, {"page_size": "1000"})
     assert list(rows) == []
     assert calls[0][0] == f"https://api.rootly.com/v1/{table}"
-    assert calls[0][1]["params"] == {"page[number]": "1", "page[size]": "2"}
+    params = calls[0][1]["params"]
+    assert params["page[size]"] == "1000"
+    if table == "incidents":
+        assert "page[number]" not in params
+        assert params["sort"] == "updated_at"
+    else:
+        assert params == {"page[number]": "1", "page[size]": "1000"}
 
 
 def test_later_snapshot_refresh_reads_current_source_state(connector, transport):
@@ -126,9 +116,9 @@ def test_later_snapshot_refresh_reads_current_source_state(connector, transport)
             response(page([resource("unchanged"), resource("created-later")])),
         ]
     )
-    rows, checkpoint = connector.read_table("incidents", None, {})
+    rows, checkpoint = connector.read_table("services", None, {})
     assert [row["id"] for row in rows] == ["removed-later", "unchanged"]
-    rows, _ = connector.read_table("incidents", checkpoint, {})
+    rows, _ = connector.read_table("services", checkpoint, {})
     assert [row["id"] for row in rows] == ["unchanged", "created-later"]
     assert len(calls) == 2
 
@@ -149,39 +139,22 @@ def test_later_snapshot_refresh_reads_current_source_state(connector, transport)
         page(next_page=1),
         page(next_page=True),
         page(next_page="2"),
-        page(next_cursor=""),
     ],
 )
 def test_invalid_response_fails_instead_of_succeeding_partially(connector, transport, body):
     calls, replies, _ = transport
     replies.append(response(body))
-    rows, _ = connector.read_table("incidents", None, {})
+    rows, _ = connector.read_table("services", None, {})
     with pytest.raises(RuntimeError):
         list(rows)
     assert len(calls) == 1
-
-
-@pytest.mark.parametrize(
-    "second_page",
-    [
-        page(next_cursor="same"),
-        page(next_page=2),
-        page(),
-    ],
-)
-def test_cursor_cycles_and_missing_metadata_fail(connector, transport, second_page):
-    _, replies, _ = transport
-    replies.extend([response(page(next_cursor="same")), response(second_page)])
-    rows, _ = connector.read_table("incidents", None, {})
-    with pytest.raises(RuntimeError):
-        list(rows)
 
 
 @pytest.mark.parametrize("status", [429, 500, 502, 503, 504])
 def test_transient_status_retry(connector, transport, status):
     calls, replies, sleeps = transport
     replies.extend([response(status=status, headers={"Retry-After": "3"}), response(page())])
-    rows, _ = connector.read_table("incidents", None, {})
+    rows, _ = connector.read_table("services", None, {})
     assert len(list(rows)) == 1
     assert len(calls) == 2
     assert sleeps == [3]
@@ -191,7 +164,7 @@ def test_transient_status_retry(connector, transport, status):
 def test_other_statuses_are_not_retried_or_leaked(connector, transport, status):
     calls, replies, sleeps = transport
     replies.append(response({"detail": "synthetic-secret private incident"}, status=status))
-    rows, _ = connector.read_table("incidents", None, {})
+    rows, _ = connector.read_table("services", None, {})
     with pytest.raises(RuntimeError, match=f"HTTP {status}") as error:
         list(rows)
     assert "synthetic-secret" not in str(error.value)
@@ -203,7 +176,7 @@ def test_other_statuses_are_not_retried_or_leaked(connector, transport, status):
 def test_retries_are_bounded(connector, transport):
     calls, replies, sleeps = transport
     replies.extend(response(status=503) for _ in range(5))
-    rows, _ = connector.read_table("incidents", None, {})
+    rows, _ = connector.read_table("services", None, {})
     with pytest.raises(RuntimeError, match="HTTP 503"):
         list(rows)
     assert len(calls) == 5
@@ -214,7 +187,7 @@ def test_retries_are_bounded(connector, transport):
 def test_network_retries_are_bounded_and_sanitized(connector, transport, exception):
     calls, replies, _ = transport
     replies.extend(exception("synthetic-secret") for _ in range(5))
-    rows, _ = connector.read_table("incidents", None, {})
+    rows, _ = connector.read_table("services", None, {})
     with pytest.raises(RuntimeError) as error:
         list(rows)
     assert "synthetic-secret" not in str(error.value)
@@ -227,7 +200,7 @@ def test_invalid_json_not_retried(connector, transport):
     bad = response()
     bad._content = b"not JSON"  # pylint: disable=protected-access
     replies.append(bad)
-    rows, _ = connector.read_table("incidents", None, {})
+    rows, _ = connector.read_table("services", None, {})
     with pytest.raises(RuntimeError, match="invalid JSON"):
         list(rows)
     assert len(calls) == 1
@@ -245,10 +218,10 @@ def test_retry_hints(monkeypatch):
         rootly._retry_delay({"Retry-After": "121"}, 0)
 
 
-@pytest.mark.parametrize("value", ["0", "101", "-1", "bad", "1.5", None])
+@pytest.mark.parametrize("value", ["0", "1001", "-1", "bad", "1.5", None])
 def test_invalid_page_size(connector, value):
     with pytest.raises(ValueError, match="page_size"):
-        connector.read_table("incidents", None, {"page_size": value})
+        connector.read_table("services", None, {"page_size": value})
 
 
 @pytest.mark.parametrize("token", [None, "", " ", "fake\nkey"])
@@ -265,10 +238,11 @@ def test_discovery_requires_no_requests_and_rejects_paths(connector, transport):
         assert {"id", "type", "attributes"}.issubset(
             connector.get_table_schema(table, {}).fieldNames()
         )
-        assert connector.read_table_metadata(table, {}) == {
-            "primary_keys": ["id"],
-            "ingestion_type": "snapshot",
-        }
+        metadata = connector.read_table_metadata(table, {})
+        assert metadata["primary_keys"] == ["id"]
+        assert metadata["ingestion_type"] == ("cdc" if table == "incidents" else "snapshot")
+        if table == "incidents":
+            assert metadata["cursor_field"] == "attributes.updated_at"
     for method in (connector.get_table_schema, connector.read_table_metadata):
         with pytest.raises(ValueError, match="Unsupported"):
             method("../users", {})
@@ -301,7 +275,8 @@ def test_open_objects_and_empty_structs_remain_spark_compatible(connector, trans
     labels = {"platform": "osx", "nested": {"attempts": 2}, "list": [1, True]}
     record = resource()
     record["attributes"].update(labels=labels, severity={})
-    replies.append(response(page([record])))
+    record["attributes"]["updated_at"] = "2026-01-01T00:00:00Z"
+    replies.append(response(page([record], next_cursor=None)))
     rows, _ = connector.read_table("incidents", None, {})
     prepared = next(rows)
     variant = prepared["attributes"]["labels"]

@@ -1,10 +1,12 @@
 # Lakeflow Rootly Community Connector
 
 Ingest Rootly incident and on-call configuration data into Databricks using read-only API requests.
-This initial version supports full refreshes of seven objects. Synthetic tests and sampled live
-Rootly reads passed on November 3, 2026, with all seven simulator endpoints validating cleanly.
-The live run samples five records per table and exercises numbered and incident cursor pagination;
-it does not establish full-account completeness. Databricks pipeline validation is still pending.
+This initial version supports incremental incidents and full refreshes of six configuration objects.
+The November 3, 2026 sampled live run validated the earlier snapshot implementation (five records
+per table), including numbered and incident cursor pagination. On November 11, targeted read-only live checks also passed for incremental incident paging,
+the inclusive update filter, and `page_size=1000` on all seven endpoints. These sampled checks do not
+establish full-account completeness; Databricks pipeline validation remains pending. See the
+[review follow-up validation](../../../../../../tests/unit/sources/rootly/REVIEW_VALIDATION.md).
 
 ## Prerequisites
 
@@ -39,12 +41,13 @@ upstream review, use the code from this branch rather than assuming Rootly appea
 
 ## Supported Objects
 
-Names are case sensitive. All objects use full-refresh (SNAPSHOT) ingestion with primary key `id`.
-There are no incremental cursors, deletion-event streams, or write-back operations.
+Names are case sensitive. All objects use primary key `id`. Incidents use incremental CDC upserts
+ordered by `attributes.updated_at`; the other six objects use full-refresh (SNAPSHOT) ingestion.
+There are no deletion-event streams or write-back operations.
 
 | Object | Data |
 |---|---|
-| `incidents` | Incidents visible to the API key, including status, timing and related metadata |
+| `incidents` | Incidents visible to the API key, including status, timing and related metadata; incremental updates |
 | `services` | Service configuration |
 | `users` | User profiles returned by the users list endpoint |
 | `teams` | Team configuration; the JSON:API resource `type` is `groups` |
@@ -55,7 +58,8 @@ There are no incremental cursors, deletion-event streams, or write-back operatio
 Rows preserve `id`, `type`, nested `attributes`, and any `relationships` declared by the resource
 schema. For example, access incident titles with
 `attributes.title`. The schema includes fields declared in Rootly's public list-response schemas;
-unknown object shapes use VARIANT. See the [complete field reference](schema_reference.md).
+unknown object shapes use VARIANT. See the [complete field reference](schema_reference.md) and
+[relationship keys and SQL join examples](relationships.md), including teams → escalation policies.
 Response-level `links`, `meta`, and `included` are not ingested as rows. No `include` expansion is
 requested. A field absent from an API response becomes null; new fields require a schema update.
 
@@ -76,19 +80,39 @@ These options sit directly under each `table` in the pipeline specification.
 
 | Option | Required | Description |
 |---|---|---|
-| `scd_type` | No | `SCD_TYPE_1` (default) or `SCD_TYPE_2` for snapshot change tracking |
+| `scd_type` | No | `SCD_TYPE_1` (default) or `SCD_TYPE_2` for change tracking |
 | `primary_keys` | No | Override the default primary key `id` |
-| `sequence_by` | No | Column used to order records for SCD Type 2 change tracking |
+| `sequence_by` | No | Ordering column; incidents default to `attributes.updated_at` |
 | `cluster_by` | No | Destination columns for Liquid Clustering |
 
 ### Rootly Options
 
 | Option | Required | Default | Description |
 |---|---|---|---|
-| `page_size` | No | `100` | Integer from 1 through 100; records requested per HTTP page. This is a connector limit, not a claim about the API maximum. |
+| `page_size` | No | `100` | Integer from 1 through 1,000; records requested per HTTP page. Incidents checkpoint after each page, so this also bounds each incident batch. |
 
-`page_size` does not cap the total refresh size. Every refresh reads every visible record of each
-selected object. There are no date-range or incremental options in this version.
+`page_size` does not cap the total run size. The six snapshot tables read every visible record;
+incidents fetch changes since the previous completed window. The default stays at 100 to keep
+individual responses modest; larger values reduce request overhead. Rootly documents a maximum
+of 1,000 for these list APIs in its [pagination overview](https://docs.rootly.com/api-reference/overview).
+
+### Incremental incident behavior
+
+- The first run reads incidents updated before the connector's initialization time (UTC, whole
+  seconds). Later runs use `filter[updated_at][gte]` with the saved watermark and
+  `filter[updated_at][lt]` with the new cutoff, always with `sort=updated_at`.
+- Windows include their lower bound and exclude their upper bound. An incident exactly at the
+  cutoff is fetched on the next run. Opaque `page[after]` cursors handle ties across pages;
+  filters, sort, cutoff and page size stay fixed while resuming a partial window.
+- Each batch reads one page. Its checkpoint stores the window and next cursor; the timestamp
+  watermark advances only after the final page succeeds. A retry can replay rows, which CDC
+  upserts reconcile by `id` and `attributes.updated_at`. The same completed offset ends the run.
+- Incidents deleted in Rootly, newly hidden by permissions, or made visible without an `updated_at`
+  change cannot be reconciled by this feed. Run a full refresh to rebuild from the visible set.
+  The API is not a historical change log or a point-in-time snapshot; it does not preserve every
+  intermediate update. Delayed/backdated source updates can require a full refresh as well.
+- Anyone testing the earlier snapshot-only PR revision must fully refresh/recreate their incident
+  pipeline when adopting this revision; its ingestion mode and checkpoint contract have changed.
 
 ## Data Type Mapping
 
@@ -134,10 +158,9 @@ Set the connection name and selected objects in the main pipeline file:
 
 ### Step 3: Run and Schedule the Pipeline
 
-Start with a small object, compare the result with Rootly, then add other objects. Schedule full
-refreshes at a frequency appropriate to the volume. Pagination is not a point-in-time snapshot:
-concurrent source changes can affect results, particularly with numbered pages. A later refresh
-reconciles the current visible state; this connector does not preserve every intermediate change.
+Start with a small object, compare the result with Rootly, then add other objects. Schedule pipeline
+runs at a frequency appropriate to the volume. Incidents resume incrementally; configuration objects
+refresh in full. Concurrent source changes can affect pagination, particularly numbered pages.
 
 Rootly documents a default read limit of 3,000 requests per minute per key, which may vary by
 configuration. HTTP 429 and transient server/network failures are retried up to five total attempts.
@@ -149,10 +172,10 @@ Server retry hints are honored; delays above 120 seconds fail the refresh so it 
 - **Missing records:** Check the key's organization/team scope and private-incident visibility.
   An empty successful list means no records were visible to that key, not necessarily that none exist.
 - **HTTP 429 or exhausted retries:** Reduce concurrent refreshes or schedule less frequently.
-- **Invalid pagination or response:** The refresh fails rather than accepting a partial snapshot.
+- **Invalid pagination or response:** The read fails rather than advancing an incomplete checkpoint.
   Check for API contract changes and update the connector before retrying.
-- **Large accounts:** Full refreshes may be expensive. Lowering `page_size` reduces each response's
-  size but increases request count; it does not reduce the total number of records read.
+- **Large accounts:** The initial incident load and configuration snapshots can be expensive. Increasing
+  `page_size` (up to 1,000) reduces request count; lowering it reduces response/batch size.
 
 ## References
 

@@ -5,6 +5,13 @@ Generated from the public OpenAPI list-response schemas. This inventory includes
 Input SHA256: `f3b255f4b64ad713dac2b04d43803adeea9081ea4dbf9ff2caa5140c8cd93355`.
 
 
+## Relationships and joins
+
+See [relationship keys and SQL examples](relationships.md) for joins between these tables.
+For example, `escalation_policies.attributes.group_ids` contains IDs matching `teams.id`.
+Rootly calls teams `groups` in relationship fields. These keys are already preserved in the
+nested schema; a top-level JSON:API `relationships` object is not required for each join.
+
 ## incidents
 
 | Field | OpenAPI type |

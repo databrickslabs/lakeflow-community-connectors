@@ -615,7 +615,7 @@
       "closed_at": "uniform-379",
       "cancelled_at": "zulu-667",
       "created_at": "india-970",
-      "updated_at": "echo-964"
+      "updated_at": "2026-01-01T00:00:00.000Z"
     },
     "relationships": {
       "sub_status": {
@@ -1297,7 +1297,7 @@
       "closed_at": "sierra-445",
       "cancelled_at": "charlie-285",
       "created_at": "hotel-614",
-      "updated_at": "mike-397"
+      "updated_at": "2026-01-01T00:00:01.000Z"
     },
     "relationships": {
       "sub_status": {
@@ -1968,7 +1968,7 @@
       "closed_at": "juliet-817",
       "cancelled_at": "echo-709",
       "created_at": "charlie-505",
-      "updated_at": "lima-104"
+      "updated_at": "2026-01-01T00:00:02.000Z"
     },
     "relationships": {
       "sub_status": {
@@ -2764,7 +2764,7 @@
       "closed_at": "xray-534",
       "cancelled_at": "zulu-273",
       "created_at": "quebec-551",
-      "updated_at": "romeo-677"
+      "updated_at": "2026-01-01T00:00:03.000Z"
     },
     "relationships": {
       "sub_status": {
@@ -3386,7 +3386,7 @@
       "closed_at": "romeo-908",
       "cancelled_at": "india-870",
       "created_at": "xray-694",
-      "updated_at": "sierra-567"
+      "updated_at": "2026-01-01T00:00:04.000Z"
     },
     "relationships": {
       "sub_status": {

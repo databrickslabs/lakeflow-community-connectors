@@ -1,6 +1,6 @@
 # Rootly Source API Research
 
-Research date: 2026-11-03. Sources are Rootly's public API overview, the incident list documentation,
+Research dates: 2026-11-03 (schema), 2026-11-11 (pagination and incremental filters). Sources are Rootly's public API overview, the incident list documentation,
 and the published OpenAPI document. No credentials or live customer records were used.
 
 ## Authorization
@@ -53,39 +53,41 @@ attributes or a display/sequential incident number. Keep string IDs as strings, 
 
 ## Ingestion Type
 
-All tables use `snapshot`. Each read streams all pages and returns no incremental offset.
-Full refreshes capture the latest visible mutable resources without treating creation times as
-update cursors. Incidents document `filter[updated_at][gte]` and sorting, but incremental incident
-ingestion and delete tracking are not implemented in this first version. The other selected lists
-do not document an equivalent updated-at filter in the reviewed specification.
+Incidents use `cdc`, primary key `id`, and cursor field `attributes.updated_at`. Each call returns
+one page plus a JSON-serializable checkpoint. The connector fixes a UTC whole-second cutoff at
+initialization and requests half-open windows using `filter[updated_at][gte]` (when a completed
+watermark exists), `filter[updated_at][lt]`, and `sort=updated_at`. The first run has no lower bound.
+Cursors paginate within that fixed window, including when several incidents share an update time.
+The checkpoint retains the lower/upper bounds, page size and opaque next cursor until the window
+is drained, then advances to the upper bound. A completed run returns its input offset unchanged.
+See the README for restart, full-refresh and deletion limitations.
 
-No separate deletion endpoint is used. Snapshot processing reflects the visible set according to
-the pipeline's snapshot/SCD semantics; disappearance can also mean a permission or visibility change.
-Source changes during pagination can cause inconsistencies because the API offers no documented
-point-in-time token for these reads. A subsequent full refresh is required to reconcile changes.
+The other six tables use `snapshot`, streaming every numbered page and returning no offset.
+Their reviewed list contracts do not document equivalent updated-at filters. No delete endpoint
+is used. Snapshot disappearance can mean deletion or a permission/visibility change. Incidents do
+not propagate deletions; a full refresh is necessary to reconcile the current visible set.
 
 ## Read API
 
-Send `page[number]=1` and `page[size]=100` initially (configurable page size 1–100). All selected
-endpoints declare these parameters. Follow integer `meta.next_page` until null. Require advancing
-page numbers; fail if pagination metadata or resource envelopes are malformed.
+The configurable `page_size` is 1–1,000, default 100. The current public overview documents a 1,000
+maximum; none of the seven selected endpoint OpenAPI parameter definitions documents a lower cap.
+This replaces the original connector's conservative 100 cap. The `/v1/alert_events` exception is
+outside this connector's scope.
 
-Incidents also document `page[after]` with opaque `meta.next_cursor`. If a cursor is returned,
-switch to `page[after]`, omit `page[number]`, and follow cursors until `next_cursor` is null.
-Never decode or synthesize production cursors. Repeated cursors and an empty page with a
-continuation fail the refresh. Numbered pagination remains available when no cursor is returned.
-The simulator models these rules from documentation; live pagination compatibility is unverified.
-
-The OpenAPI metadata shape declares `current_page`, `next_page`, `prev_page`, `total_count`, and
-`total_pages`; `next_cursor` is optional. Page fields may be null during cursor pagination.
-The API's maximum accepted page size is not specified in the reviewed OpenAPI parameter schemas;
-100 is a conservative connector cap, not a documented server maximum.
+For the six snapshot tables, send `page[number]=1` and `page[size]`, then follow advancing integer
+`meta.next_page` values until null. Incidents start without `page[number]`, require `meta.next_cursor`,
+and send each opaque continuation as `page[after]`. Every page retains the same filters and sort.
+Do not decode or synthesize production cursors. Missing/invalid cursor metadata, an empty page with
+a continuation, and an immediately repeated cursor fail the incident batch without advancing its
+checkpoint. Incident rows must have timezone-aware `updated_at` values in the requested window
+and in ascending order. Source mutation during pagination can move rows into a later window;
+there is no documented point-in-time snapshot guarantee.
 
 Illustrative synthetic response (abbreviated attributes):
 
 ```json
 {
-  "data": [{"id": "synthetic-incident-1", "type": "incidents", "attributes": {"title": "Synthetic incident"}}],
+  "data": [{"id": "synthetic-incident-1", "type": "incidents", "attributes": {"title": "Synthetic incident", "updated_at": "2026-01-01T00:00:00Z"}}],
   "links": {"self": "https://api.rootly.com/v1/incidents?page[number]=1", "next": null},
   "meta": {"current_page": 1, "next_page": null, "prev_page": null, "total_count": 1, "total_pages": 1, "next_cursor": null}
 }
@@ -118,8 +120,11 @@ all attributes. No automatic enum, timestamp, or ID conversions are performed.
 - [List incidents](https://docs.rootly.com/api-reference/incidents/list-incidents): incident filters and pagination.
 - [Public OpenAPI](https://rootly-heroku.s3.amazonaws.com/swagger/v1/swagger.json): all seven endpoint contracts and schemas.
 
-The docs and OpenAPI agree on the API base, bearer authentication and incident paging parameter
-names. The six non-incident contracts are sourced from the OpenAPI; independent live verification
-is still needed. Synthetic tests cannot confirm actual optional fields, permission behavior, rate
-limit headers, cursor termination or Databricks runtime behavior. Record-mode tests with a scoped
-test account, schema comparison and a Databricks smoke test remain prerequisites for readiness.
+The November 3 sampled live snapshot run covered all seven endpoints (five records each), including
+incident continuations; committed reports are historical evidence for that earlier implementation.
+On November 11, targeted live GET checks passed for the initial incremental page, its cursor
+continuation with unchanged filters/sort, and the inclusive lower updated-at bound. All seven
+endpoints accepted `page[size]=1000`; incidents returned 1,000 rows in one response. These are
+sampled transport/contract checks, not full-account or Databricks pipeline validation. Restart,
+timestamp ties, later updates and future-record termination are covered synthetically. The
+Databricks pipeline smoke test remains pending.
