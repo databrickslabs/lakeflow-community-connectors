@@ -1080,6 +1080,8 @@ def register_lakeflow_source(spark):
             # trigger, per (namespace, flow). See _read_stream.
             self._caps: dict[tuple[str, str], Timestamp] = {}
             self._known: set[str] = set()
+            # Whether the last empty poll of a flow moved the token (see _empty_poll).
+            self._idle_advanced: dict[tuple[str, str], bool] = {}
 
         # The connector is pickled to Python workers: never ship a live client.
         def __getstate__(self):
@@ -1087,6 +1089,7 @@ def register_lakeflow_source(spark):
             state["_client"] = None
             state["_caps"] = {}
             state["_known"] = set()
+            state["_idle_advanced"] = {}
             return state
 
         def __setstate__(self, state):
@@ -1415,6 +1418,7 @@ def register_lakeflow_source(spark):
             if end is not None:
                 return iter(rows), end
             if last_token is not None:
+                self._idle_advanced[cap_key] = False
                 return iter(rows), self._offset(cfg, "stream", last_token)
 
             return self._empty_poll(cfg, start, cap_key, drained, pbrt)
@@ -1448,12 +1452,16 @@ def register_lakeflow_source(spark):
                 # A position given as a time is turned into a token once it is read.
                 return iter([]), self._offset(cfg, "stream", pbrt, at=self._caps[cap_key].time,
                                               idle=True)
-            # On an idle collection, move the stored token forward now and then so
-            # that a long pause does not leave it behind the oplog window. Never
-            # twice in a row: the second empty poll must end Trigger.AvailableNow.
+            # On an idle collection, move the stored token forward every
+            # idle_advance_seconds so that it does not fall behind the oplog window.
+            # Never on two polls in a row of this reader: the poll after an advance
+            # returns the same offset, which ends Trigger.AvailableNow.
             idle_for = self._caps[cap_key].time - start.get("at", 0)
-            if (cfg.idle_advance and not start.get("idle") and pbrt > start["token"]
+            advanced_last_poll = self._idle_advanced.get(cap_key, False)
+            self._idle_advanced[cap_key] = False
+            if (cfg.idle_advance and not advanced_last_poll and pbrt > start["token"]
                     and idle_for >= cfg.idle_advance):
+                self._idle_advanced[cap_key] = True
                 return iter([]), self._offset(cfg, "stream", pbrt, at=self._caps[cap_key].time,
                                               idle=True)
             return iter([]), start
@@ -1462,13 +1470,15 @@ def register_lakeflow_source(spark):
             """The look-back start is older than the oplog: find the oldest start that works.
 
             Jumping to "now" would skip deletes that are still in the oplog, so the
-            oldest readable time is found by bisection between the failed start
-            and now (to within ``MIN_LOOKBACK_SECONDS``).
+            oldest readable second is found by bisection between the failed start
+            and now. Fails when the oplog holds less than ``MIN_LOOKBACK_SECONDS``.
             """
             import pymongo.errors  # pylint: disable=import-outside-toplevel
 
             low, high = int(start["start_at"]), self._now().time
-            while high - low > MIN_LOOKBACK_SECONDS:
+            # To the second: a coarser bound could start after the snapshot token
+            # on a short oplog and skip deletes that are still there.
+            while high - low > 1:
                 mid = (low + high) // 2
                 try:
                     with self._collection(cfg).watch(start_at_operation_time=Timestamp(mid, 0),

@@ -123,6 +123,26 @@ def test_trigger_cap_and_idle(fake):
     assert [r["_id"] for r in rows] == [encode_id(1)]  # the next one reads it
 
 
+def test_idle_token_keeps_advancing_across_triggers(fake, monkeypatch):
+    uri, db = fake
+    db.create_collection("quiet")
+    other = db.create_collection("busy")
+    options = {"start_mode": "latest", "idle_advance_seconds": "60"}
+    clock = [1_000_000]
+    from databricks.labs.community_connector.sources.mongodb import mongodb  # pylint: disable=import-outside-toplevel
+    monkeypatch.setattr(mongodb.MongodbLakeflowConnect, "_now",
+                        staticmethod(lambda: Timestamp(clock[0], 0)))
+    _, offset = _connector(uri).read_table("quiet", {}, options)
+    tokens = [offset["token"]]
+    for _ in range(3):              # three triggers, each a new reader, 2 minutes apart
+        other.insert_one({"x": 1})  # the oplog moves; "quiet" does not
+        clock[0] += 120
+        rows, offset = drive(_connector(uri), "quiet", options, start=offset, max_calls=5)
+        assert not rows
+        tokens.append(offset["token"])
+    assert tokens == sorted(tokens) and len(set(tokens)) == 4
+
+
 def test_replay_between_offsets(fake):
     uri, db = fake
     coll = db.create_collection("log")
