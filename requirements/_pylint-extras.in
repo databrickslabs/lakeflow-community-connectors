@@ -1,3 +1,6 @@
 # Packages installed by the pylint CI job beyond what the root and tools
 # pyproject.toml files declare. Consumed by tools/scripts/regenerate-locks.sh.
 pylint
+# Third-party imports of source connectors that the root package does not
+# declare, so pylint can resolve them (E0401 import-error otherwise).
+pymongo[aws]>=4.9,<5
