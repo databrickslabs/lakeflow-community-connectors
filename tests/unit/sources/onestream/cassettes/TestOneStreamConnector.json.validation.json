@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "generated_at": "2026-11-11T00:01:02.939797Z",
+  "endpoints": [
+    {
+      "method": "POST",
+      "spec_path": "/OneStreamApi/api/DataProvider/GetAdoDataSetForSqlCommand",
+      "sample_url": "https://<tenant>.onestreamcloud.com/OneStreamApi/api/DataProvider/GetAdoDataSetForSqlCommand?api-version=5.2.0",
+      "status": "validated",
+      "calls": 45,
+      "matched": 45,
+      "mismatched": 0,
+      "no_spec": 0,
+      "issues": []
+    }
+  ],
+  "summary": {
+    "endpoints_total": 1,
+    "endpoints_validated": 1,
+    "endpoints_mismatched": 0,
+    "endpoints_missing_spec": 0
+  }
+}

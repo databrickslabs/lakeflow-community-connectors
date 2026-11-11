@@ -8,11 +8,13 @@ generated SQL against a synthetic SQLite copy of the OneStream tables.
 from __future__ import annotations
 
 import json
+import os
 from datetime import datetime, timezone
 from decimal import Decimal
 
 import pytest
 
+from databricks.labs.community_connector.source_simulator import MODE_SIMULATE
 from databricks.labs.community_connector.source_simulator.specs.onestream.handlers import (
     sql_command as sim,
 )
@@ -40,7 +42,12 @@ from databricks.labs.community_connector.sources.onestream.onestream_schemas imp
     time_id,
 )
 from tests.unit.sources.test_partition_suite import SupportsPartitionedStreamTests
-from tests.unit.sources.test_suite import LakeflowConnectTests
+from tests.unit.sources.test_suite import LakeflowConnectTests, _resolve_env_mode_for_simulator
+
+SIMULATE = _resolve_env_mode_for_simulator("onestream") == MODE_SIMULATE
+# Tests that assert exact counts or mutate the database rely on the synthetic
+# simulator corpus, so they are skipped in live/record runs.
+simulate_only = pytest.mark.skipif(not SIMULATE, reason="relies on the synthetic simulator corpus")
 
 SEC = 10_000_000  # .NET ticks per second
 EAST, WEST, NORTH = 101, 102, 103  # synthetic entities (see generate_corpus.py)
@@ -50,6 +57,8 @@ ACTUAL, BUDGET = 200, 201
 @pytest.fixture
 def sim_db():
     """A fresh simulated OneStream DB that a test may mutate; reset afterwards."""
+    if not SIMULATE:
+        pytest.skip("mutates the synthetic simulator database")
     sim.reset_database()
     yield sim
     sim.reset_database()
@@ -93,8 +102,23 @@ class TestOneStreamConnector(LakeflowConnectTests, SupportsPartitionedStreamTest
         "base_url": "https://simulated.onestreamcloud.com",
         "application_name": "SimApp",
         "personal_access_token": "simulator-fake-pat",
+        "api_version": "5.2.0",
+        "request_timeout_seconds": "60",
+        "page_size": "50000",
     }
 
+    @classmethod
+    def _load_table_configs(cls):
+        """Live/record runs need a tenant-specific scope (member names, a small
+        slice): point ONESTREAM_LIVE_TABLE_CONFIG_PATH at a JSON file kept
+        outside the repo. Simulate mode always uses configs/dev_table_config.json."""
+        live_path = os.environ.get("ONESTREAM_LIVE_TABLE_CONFIG_PATH", "").strip()
+        if not SIMULATE and live_path:
+            with open(live_path, encoding="utf-8") as f:
+                return json.load(f)
+        return super()._load_table_configs()
+
+    @simulate_only
     def test_cube_data_incremental_by_data_unit(self):
         opts = dict(self._opts("cube_data"), max_data_units_per_batch="1000")
         records, offset = self.connector.read_table("cube_data", {}, opts)
@@ -128,6 +152,21 @@ class TestOneStreamConnector(LakeflowConnectTests, SupportsPartitionedStreamTest
 
     def _base_opts(self, **extra):
         return {"years": "2025,2026", "max_data_units_per_batch": "2", "page_size": "2", **extra}
+
+    # -- init-time cap (Trigger.AvailableNow termination) ---------------------
+
+    @simulate_only
+    def test_init_time_cap_defers_future_stamps(self):
+        """A stamp later than the run's start is not chased; a later run picks it up.
+
+        The corpus seeds a data unit stamped 2099-01-01 in slice 2026/Actual/cube 0.
+        """
+        future = datetime_to_ticks(datetime(2099, 1, 1, tzinfo=timezone.utc))
+        opts = self._base_opts(years="2026", scenarios="Actual")
+        _, offset = self._drain(self._connector(), opts)
+        assert offset["c|2026|200|0"] < future
+        _, later = self._drain(self._connector(future + SEC), opts, offset)
+        assert later["c|2026|200|0"] == future
 
     # -- scope widening ----------------------------------------------------
 
@@ -232,6 +271,7 @@ class TestOneStreamConnector(LakeflowConnectTests, SupportsPartitionedStreamTest
         with pytest.raises(ValueError, match="more than one"):
             self._connector().read_table("cube_data", {}, self._base_opts(scenarios="Actual"))
 
+    @simulate_only
     def test_invalid_option_values_fail(self):
         with pytest.raises(ValueError, match="refresh_mode"):
             self.connector.read_table("cube_data", {}, self._base_opts(refresh_mode="snapshots"))
@@ -294,6 +334,7 @@ class TestOneStreamConnector(LakeflowConnectTests, SupportsPartitionedStreamTest
         )
         assert EAST in {r["EntityId"] for r in records}
 
+    @simulate_only
     def test_cube_data_scoped_by_names(self):
         opts = dict(
             self._opts("cube_data"),
@@ -318,6 +359,7 @@ class TestOneStreamConnector(LakeflowConnectTests, SupportsPartitionedStreamTest
         with pytest.raises(ValueError, match="years"):
             self.connector.read_table("cube_data", {}, {})
 
+    @simulate_only
     def test_cube_data_snapshot_mode(self):
         opts = dict(self._opts("cube_data"), refresh_mode="snapshot")
         assert self.connector.read_table_metadata("cube_data", opts)["ingestion_type"] == "snapshot"

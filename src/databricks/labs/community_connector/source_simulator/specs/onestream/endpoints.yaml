@@ -5,8 +5,15 @@
 # The request body carries the SQL text, so the declarative param-role pipeline
 # can't model it. The custom handler executes the SQL against an in-memory
 # SQLite database seeded from corpus/onestream_db.json (synthetic data:
-# 3 entities in distinct PartitionIds, 2 scenarios, 2 years, plus one
-# future-stamped data unit that exercises the connector's init-time cap).
+# 3 entities in distinct PartitionIds, 2 scenarios, 2 years).
+#
+# Init-time cap: the declarative ``synthesize_future_records:`` directive
+# doesn't apply to a SQL-in-the-body endpoint, so the equivalent lives in the
+# corpus. generate_corpus.py seeds a data unit stamped 2099-01-01, and
+# test_init_time_cap_defers_future_stamps asserts the connector does not chase
+# it past the run's start time, then picks it up once a later run starts after
+# it. Tests can also mutate the simulated DB (see handlers/sql_command.py) to
+# exercise late commits, in-flight units and scope changes.
 
 endpoints:
   - path: /OneStreamApi/api/DataProvider/GetAdoDataSetForSqlCommand

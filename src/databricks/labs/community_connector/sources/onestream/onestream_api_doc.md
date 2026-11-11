@@ -844,9 +844,9 @@ The output columns of the method commands are **TBD** (they need valid workflow 
 | HTTP 429 observed | none, up to 8 concurrent requests **[Observed]** |
 | Request timeout (gateway) | **None hit at 250 s**: a `WAITFOR DELAY '00:04:10'` call returned 200 after 250.9 s **[Observed]**. The upper bound is TBD. Client timeout `request_timeout_seconds = 900` |
 | Response size | 167 MB (200k rows) succeeded. The upper bound is TBD **[Observed]** |
-| Concurrency | 8 parallel 50k-row reads on warm partitions: about 12 s each, **about 29k rows/s total** (about 2× a single stream) **[Observed]**. **Cold-cache variance**: with 4 parallel first-touch reads of large partitions, 2 requests took **263–266 s** while the other 2 took 6 s. Latency can spike by about 40× on cold data. Default `max_concurrent_requests = 4` (the app servers are shared with interactive finance users). Treat slow responses as normal, not as failures |
+| Concurrency | 8 parallel 50k-row reads on warm partitions: about 12 s each, **about 29k rows/s total** (about 2× a single stream) **[Observed]**. **Cold-cache variance**: with 4 parallel first-touch reads of large partitions, 2 requests took **263–266 s** while the other 2 took 6 s. Latency can spike by about 40× on cold data. The connector defaults to `max_partitions = 4` parallel read partitions (the app servers are shared with interactive finance users). Treat slow responses as normal, not as failures |
 
-Connector behavior: retry with exponential backoff on 429/502/503/504 and connection resets. Do **not** retry HTTP 500 SQL errors (they are deterministic and each one writes to the OneStream Error Log). Back off when latency degrades.
+Connector behavior: retry with exponential backoff (up to 5 attempts) on HTTP 408/429/502/503/504, timeouts and connection errors. Do **not** retry HTTP 500 SQL errors (they are deterministic and each one writes to the OneStream Error Log). Back off when latency degrades.
 
 ---
 
@@ -866,7 +866,18 @@ Connector behavior: retry with exponential backoff on 429/502/503/504 and connec
 | `nvarchar`, `varchar`, `nchar`, `char` | `StringType` | `XmlData` columns hold large XML definitions. They are kept in the metadata tables |
 | `varbinary` | `BinaryType` (base64-decoded) **or excluded** | Exclude by default: attachment tables (`FileContents`, `ReconSupportDoc`) can hold hundreds of GB |
 
-Derived columns the connector adds to `cube_data`: `_du_timestamp_ticks` (LongType, the cursor) and `_du_modified_at` (TimestampType, ticks converted to UTC).
+`cube_data` output schema (long format, one row per stored intersection per month):
+
+| Column | Type | Source |
+|---|---|---|
+| `CubeId`, `EntityId`, `ParentId`, `ConsId`, `ScenarioId`, `YearId` | LongType | data-unit key columns of `DataRecord{YYYY}` |
+| `TimeId` | LongType | derived: `YearId * 1,000,000 + period index * 1,000` (standard monthly profile) |
+| `Period` | LongType | derived: month 1–12, from the `M{n}` column the row was unpivoted from |
+| `AccountId`, `FlowId`, `OriginId`, `ICId`, `UD1Id` … `UD8Id` | LongType | intersection columns of `DataRecord{YYYY}` |
+| `Amount` | DecimalType(28,9) | `M{n}Value` |
+| `CellStatus` | LongType | `M{n}Status` (raw OneStream cell-status flags) |
+| `_du_timestamp_ticks` | LongType | the data unit's `DataUnitCacheTimestamp.TimestampTicks` (the cursor) |
+| `_du_modified_at` | TimestampType | `_du_timestamp_ticks` converted to UTC |
 
 ---
 

@@ -14,7 +14,7 @@ connection:
       required: true
       description: >
         Root URL of the OneStream tenant, e.g. https://<tenant>.onestreamcloud.com.
-        A trailing /OneStreamWeb is stripped automatically.
+        A trailing /OneStreamWeb or /OneStreamApi is stripped automatically.
 
     - name: application_name
       type: string
