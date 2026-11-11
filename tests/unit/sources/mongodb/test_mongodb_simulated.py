@@ -171,6 +171,24 @@ def test_replay_fails_instead_of_returning_a_partial_batch(fake, monkeypatch):
         list(_connector(uri).read_table_range("log", start, bad_end, options))
 
 
+def test_replay_with_history_lost_raises(fake, monkeypatch):
+    import pymongo.errors  # pylint: disable=import-outside-toplevel
+    from tests.unit.sources.mongodb import fake_mongo  # pylint: disable=import-outside-toplevel
+
+    uri, db = fake
+    db.create_collection("c")
+    conn = _connector(uri)
+    start = {"v": 1, "ns": "db.c", "phase": "stream", "token": None, "start_at": 1, "lookback": True}
+    end = {"v": 1, "ns": "db.c", "phase": "stream", "token": "82FFFFFFFF", "at": 0}
+
+    def lost(*_a, **_k):
+        raise pymongo.errors.OperationFailure("history lost", code=286)
+
+    monkeypatch.setattr(fake_mongo.FakeCollection, "watch", lost)
+    with pytest.raises(RuntimeError, match="no longer in the oplog"):
+        list(conn.read_table_range("c", start, end, {}, deletes=True))
+
+
 def test_append_keeps_every_event(fake):
     uri, db = fake
     coll = db.create_collection("log")
