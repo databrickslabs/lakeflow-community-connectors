@@ -1108,7 +1108,14 @@ def register_lakeflow_source(spark):
             return self._client
 
         def _collection(self, cfg: _TableConfig):
-            return self._get_client()[cfg.database][cfg.collection]
+            from pymongo.read_concern import ReadConcern  # pylint: disable=import-outside-toplevel
+
+            # Majority reads, whatever the connection string says: a snapshot or
+            # lookup must not return a write that a failover can still roll back,
+            # because the change stream would never report its removal.
+            return self._get_client()[cfg.database].get_collection(
+                cfg.collection, read_concern=ReadConcern("majority")
+            )
 
         @staticmethod
         def _now() -> Timestamp:
