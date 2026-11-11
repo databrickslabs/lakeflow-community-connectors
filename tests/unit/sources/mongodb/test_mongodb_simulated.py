@@ -156,6 +156,21 @@ def test_replay_between_offsets(fake):
     assert list(_connector(uri).read_table_range("log", start, end, options)) == original
 
 
+def test_replay_fails_instead_of_returning_a_partial_batch(fake, monkeypatch):
+    uri, db = fake
+    coll = db.create_collection("log")
+    options = {"ingestion_type": "append", "start_mode": "latest", "max_records_per_batch": "3"}
+    conn = _connector(uri)
+    _, start = conn.read_table("log", {}, options)
+    coll.insert_many([{"_id": i} for i in range(3)])
+    _, end = conn.read_table("log", start, options)
+    from databricks.labs.community_connector.sources.mongodb import mongodb  # pylint: disable=import-outside-toplevel
+    monkeypatch.setattr(mongodb, "REPLAY_TIMEOUT_SECONDS", 0)
+    bad_end = dict(end, token=end["token"][:-2] + "7F")  # an end the stream never reaches
+    with pytest.raises(RuntimeError, match="did not reach its end offset"):
+        list(_connector(uri).read_table_range("log", start, bad_end, options))
+
+
 def test_append_keeps_every_event(fake):
     uri, db = fake
     coll = db.create_collection("log")

@@ -59,7 +59,7 @@ DEFAULT_IDLE_ADVANCE_SECONDS = 300
 CLOCK_SKEW_SECONDS = 5
 MIN_LOOKBACK_SECONDS = 60
 SNAPSHOT_SEQUENCE = "0"
-REPLAY_MAX_EMPTY_POLLS = 30
+REPLAY_TIMEOUT_SECONDS = 300
 
 # MongoDB server error codes
 CHANGE_STREAM_HISTORY_LOST = 286
@@ -453,22 +453,24 @@ class MongodbLakeflowConnect(LakeflowConnect, SupportsNamespaces):
         last_token: Optional[str] = None
         drained = False
         pbrt: Optional[str] = None
-        empty_polls = 0
+        reached_end = False
+        replay_deadline = time.monotonic() + REPLAY_TIMEOUT_SECONDS
         try:
             with self._collection(cfg).watch(**watch_kwargs) as stream:
                 while end is not None or len(rows) < cfg.max_records:
                     event = stream.try_next()
                     if event is None:
-                        empty_polls += 1
-                        replaying = end is not None and stream.alive
-                        if replaying and empty_polls < REPLAY_MAX_EMPTY_POLLS:
-                            continue  # replay: the events up to `end` exist; keep polling
+                        if end is not None and stream.alive and time.monotonic() < replay_deadline:
+                            # Replay: an empty batch only means the server is still
+                            # scanning; the events up to `end` exist, keep polling.
+                            continue
                         drained = True
                         pbrt = token_data(stream.resume_token)
                         break
                     token = token_data(event["_id"])
                     if end is not None:
                         if token > end["token"]:
+                            reached_end = True  # `end` itself matched no event of this flow
                             break
                     elif event.get("clusterTime") and event["clusterTime"] > cap:
                         break  # newer than this trigger; read it next time
@@ -478,6 +480,7 @@ class MongodbLakeflowConnect(LakeflowConnect, SupportsNamespaces):
                     if row is not None:
                         rows.append(row)
                     if end is not None and token == end["token"]:
+                        reached_end = True
                         break
         except pymongo.errors.OperationFailure as exc:
             if (exc.code == CHANGE_STREAM_HISTORY_LOST and not start.get("token")
@@ -494,6 +497,13 @@ class MongodbLakeflowConnect(LakeflowConnect, SupportsNamespaces):
             raise self._decode_error(cfg, exc) from exc
 
         if end is not None:
+            if not reached_end:
+                # Returning a partial batch would let Spark commit `end` and skip the
+                # rest of it; fail so that the batch is replayed again.
+                raise RuntimeError(
+                    f"Replaying a batch of {cfg.namespace} ({flow} flow) did not reach its end "
+                    f"offset within {REPLAY_TIMEOUT_SECONDS} seconds; the batch will be retried."
+                )
             return iter(rows), end
         if last_token is not None:
             self._idle_advanced[cap_key] = False
