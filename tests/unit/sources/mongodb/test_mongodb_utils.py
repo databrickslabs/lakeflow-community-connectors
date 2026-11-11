@@ -233,7 +233,7 @@ class TestDeleteLookback:
         cfg = mongodb._TableConfig(conn, "c", {})  # pylint: disable=protected-access
         start = conn._offset(cfg, "stream", None, start_at=10_000 - 3_600, lookback=True)  # pylint: disable=protected-access
         nxt = conn._oldest_available_start(cfg, start, "delete")  # pylint: disable=protected-access
-        assert oplog_start <= nxt["start_at"] <= oplog_start + 60
+        assert oplog_start <= nxt["start_at"] <= oplog_start + 1
         assert "lookback" not in nxt
 
         oplog_start = 10_000 - 30
