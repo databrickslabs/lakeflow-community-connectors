@@ -109,10 +109,14 @@ class _TableConfig:  # pylint: disable=too-many-instance-attributes,too-few-publ
         self.ingestion_type = parse_choice(
             opts.get("ingestion_type"), "cdc_with_deletes", "ingestion_type", INGESTION_TYPES
         )
-        self.start_mode = parse_choice(opts.get("start_mode"), "snapshot", "start_mode", START_MODES)
+        self.start_mode = parse_choice(
+            opts.get("start_mode"), "snapshot", "start_mode", START_MODES
+        )
         self.start_at_operation_time = opts.get("start_at_operation_time")
         if self.start_mode == "timestamp" and not self.start_at_operation_time:
-            raise ValueError("start_mode=timestamp requires 'start_at_operation_time' (epoch seconds)")
+            raise ValueError(
+                "start_mode=timestamp requires 'start_at_operation_time' (epoch seconds)"
+            )
         self.full_document = parse_choice(
             opts.get("full_document"), "updateLookup", "full_document", FULL_DOCUMENT_MODES
         )
@@ -120,7 +124,8 @@ class _TableConfig:  # pylint: disable=too-many-instance-attributes,too-few-publ
             opts.get("document_format"), "variant", "document_format", DOCUMENT_FORMATS
         )
         self.max_records = parse_int(
-            opts.get("max_records_per_batch"), DEFAULT_MAX_RECORDS_PER_BATCH, "max_records_per_batch"
+            opts.get("max_records_per_batch"), DEFAULT_MAX_RECORDS_PER_BATCH,
+            "max_records_per_batch"
         )
         self.snapshot_batch_size = parse_int(
             opts.get("snapshot_batch_size"), DEFAULT_SNAPSHOT_BATCH_SIZE, "snapshot_batch_size"
@@ -341,7 +346,8 @@ class MongodbLakeflowConnect(LakeflowConnect, SupportsNamespaces):
     def _initial_offset(self, cfg: _TableConfig, flow: str) -> dict:
         if cfg.start_mode == "timestamp":
             # Resolved by the first stream read (start_at_operation_time).
-            return self._offset(cfg, "stream", None, start_at=int(float(cfg.start_at_operation_time)))
+            start_at = int(float(cfg.start_at_operation_time))
+            return self._offset(cfg, "stream", None, start_at=start_at)
         if flow == "delete":
             # The delete flow is a separate stream that starts slightly after the
             # upsert flow takes its snapshot token. Start it a little in the past:
@@ -351,7 +357,8 @@ class MongodbLakeflowConnect(LakeflowConnect, SupportsNamespaces):
             if cfg.delete_lookback == 0:
                 return self._offset(cfg, "stream", self._current_token(cfg))
             now = self._now()
-            return self._offset(cfg, "stream", None, start_at=max(now.time - cfg.delete_lookback, 1),
+            start_at = max(now.time - cfg.delete_lookback, 1)
+            return self._offset(cfg, "stream", None, start_at=start_at,
                                 lookback=True)
         token = self._current_token(cfg)
         if cfg.start_mode == "latest":
@@ -371,7 +378,8 @@ class MongodbLakeflowConnect(LakeflowConnect, SupportsNamespaces):
         if end is not None:
             # Replay: stop at the last _id of the original page (also for the
             # final page, whose end offset is already in the stream phase).
-            end_id = end.get("last_id") if end.get("phase") == "snapshot" else end.get("snapshot_last_id")
+            end_id = (end.get("last_id") if end.get("phase") == "snapshot"
+                      else end.get("snapshot_last_id"))
             if end_id is None:
                 return iter([]), end
             conditions.append({"$lte": ["$_id", {"$literal": loads(end_id, CANONICAL)}]})
@@ -387,7 +395,8 @@ class MongodbLakeflowConnect(LakeflowConnect, SupportsNamespaces):
             # Snapshot done: stream from the token taken before the snapshot began.
             # The last _id is kept so that a replay of this page can stop there.
             final_id = dumps(docs[-1]["_id"], CANONICAL) if docs else start.get("last_id")
-            return iter(rows), self._offset(cfg, "stream", start["token"], snapshot_last_id=final_id)
+            return iter(rows), self._offset(cfg, "stream", start["token"],
+                                            snapshot_last_id=final_id)
         last_id = dumps(docs[-1]["_id"], CANONICAL)
         return iter(rows), self._offset(cfg, "snapshot", start["token"], last_id=last_id)
 
@@ -435,18 +444,7 @@ class MongodbLakeflowConnect(LakeflowConnect, SupportsNamespaces):
             # Trigger.AvailableNow terminates even under constant writes.
             cap = self._caps[cap_key] = self._now()
 
-        pipeline = [{"$match": {"operationType": {"$in": list(events + TERMINAL_EVENTS)}}}]
-        watch_kwargs: dict[str, Any] = {
-            "pipeline": pipeline,
-            "max_await_time_ms": cfg.max_await_ms,
-            "batch_size": min(cfg.max_records, 1000),
-        }
-        if start.get("token"):
-            watch_kwargs["resume_after"] = {"_data": start["token"]}
-        else:
-            watch_kwargs["start_at_operation_time"] = Timestamp(int(start["start_at"]), 0)
-        if flow == "upsert":
-            watch_kwargs["full_document"] = cfg.full_document
+        watch_kwargs = self._watch_kwargs(cfg, start, flow, events)
 
         rows: list[dict] = []
         last_token: Optional[str] = None
@@ -459,7 +457,8 @@ class MongodbLakeflowConnect(LakeflowConnect, SupportsNamespaces):
                     event = stream.try_next()
                     if event is None:
                         empty_polls += 1
-                        if end is not None and stream.alive and empty_polls < REPLAY_MAX_EMPTY_POLLS:
+                        replaying = end is not None and stream.alive
+                        if replaying and empty_polls < REPLAY_MAX_EMPTY_POLLS:
                             continue  # replay: the events up to `end` exist; keep polling
                         drained = True
                         pbrt = token_data(stream.resume_token)
@@ -496,7 +495,29 @@ class MongodbLakeflowConnect(LakeflowConnect, SupportsNamespaces):
         if last_token is not None:
             return iter(rows), self._offset(cfg, "stream", last_token)
 
-        # Nothing new up to the cap. Move the cap forward for the next trigger
+        return self._empty_poll(cfg, start, cap_key, drained, pbrt)
+
+    @staticmethod
+    def _watch_kwargs(cfg: _TableConfig, start: dict, flow: str,
+                      events: tuple[str, ...]) -> dict[str, Any]:
+        pipeline = [{"$match": {"operationType": {"$in": list(events + TERMINAL_EVENTS)}}}]
+        kwargs: dict[str, Any] = {
+            "pipeline": pipeline,
+            "max_await_time_ms": cfg.max_await_ms,
+            "batch_size": min(cfg.max_records, 1000),
+        }
+        if start.get("token"):
+            kwargs["resume_after"] = {"_data": start["token"]}
+        else:
+            kwargs["start_at_operation_time"] = Timestamp(int(start["start_at"]), 0)
+        if flow == "upsert":
+            kwargs["full_document"] = cfg.full_document
+        return kwargs
+
+    def _empty_poll(self, cfg: _TableConfig, start: dict, cap_key: tuple[str, str],
+                    drained: bool, pbrt: Optional[str]) -> tuple[Iterator[dict], dict]:
+        """No new event up to the cap: decide the offset to report."""
+        # Move the cap forward for the next trigger
         # (continuous mode) and report "no more data" for this one.
         self._caps[cap_key] = self._now()
         if not (drained and pbrt):
