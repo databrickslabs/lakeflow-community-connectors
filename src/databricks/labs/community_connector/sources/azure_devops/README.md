@@ -13,6 +13,7 @@ This documentation describes how to configure and use the **Azure DevOps** Lakef
     - `Graph (read)` - Required if ingesting the `users` table from the Graph Users API.
     - `Project and Team (read)` - Required for the `projects` table.
     - `Work Items (read)` - Required if ingesting work item tables (`workitems`, `workitem_revisions`, `workitem_types`).
+    - `Build (read)` - Required if ingesting pipeline tables (`pipelines`, `builds`, `build_timeline`).
 - **Network access**: The environment running the connector must be able to reach `https://dev.azure.com` and `https://vssps.dev.azure.com` (for the `users` table).
 - **Lakeflow / Databricks environment**: A workspace where you can register a Lakeflow community connector and run ingestion pipelines.
 
@@ -26,7 +27,7 @@ Provide the following **connection-level** options when configuring the connecto
 |------|------|----------|-------------|---------|
 | `organization` | string | yes (shared) | Azure DevOps organization name — the org segment of the Azure DevOps URL. | `my-organization` |
 | `project` | string | no (shared) | Project name or ID. Scopes Git and Work Item operations to this project; if omitted, tables fetch from all projects. | `my-project` |
-| `externalOptionsAllowList` | string | yes | Comma-separated allowed table-specific options: `project,repository_id,pullrequest_id,status_filter,filter,ids` | `project,repository_id,…` |
+| `externalOptionsAllowList` | string | yes | Comma-separated allowed table-specific options: `project,repository_id,pullrequest_id,status_filter,filter,ids,definition_id,build_id,max_records_per_batch` | `project,repository_id,…` |
 
 **Authentication:** the connector declares two `auth_methods` in its spec — pick **one** when creating the connection:
 
@@ -61,6 +62,7 @@ The `service_principal` method uses the spec's `oauth: flow: m2m` block: the tok
        - **Graph (read)** under the Graph section - Required if you plan to ingest the `users` table
        - **Project and Team (read)** under the Project and Team section - Required for the `projects` table
        - **Work Items (read)** under the Work Items section - Required if you plan to ingest work item tables
+       - **Build (read)** under the Build section - Required if you plan to ingest `pipelines`, `builds`, or `build_timeline`
   5. Click **Create** and copy the generated token immediately. Store it securely as you won't be able to see it again.
   6. Use this token as the `personal_access_token` connection option.
 
@@ -80,7 +82,7 @@ A Unity Catalog connection for this connector can be created in two ways via the
    - `organization`: Your Azure DevOps organization name
    - `project`: Your project name or ID (optional)
    - `personal_access_token`: Your PAT for authentication
-   - `externalOptionsAllowList`: Set to `project,repository_id,pullrequest_id,status_filter,filter,ids` to enable table-specific options
+   - `externalOptionsAllowList`: Set to `project,repository_id,pullrequest_id,status_filter,filter,ids,definition_id,build_id,max_records_per_batch` to enable table-specific options
 
 The connection can also be created using the standard Unity Catalog API.
 
@@ -111,6 +113,9 @@ The Azure DevOps connector exposes a **static list** of 14 tables:
 - `workitems` - Work items (tasks, bugs, user stories, features, epics)
 - `workitem_revisions` - Historical changes to work items
 - `workitem_types` - Work item type definitions and fields
+- `pipelines` - Pipeline definitions
+- `builds` - Completed pipeline runs (builds)
+- `build_timeline` - Stages, jobs, and steps (tasks) of each completed pipeline run
 
 ### Object summary, primary keys, and ingestion mode
 
@@ -132,6 +137,9 @@ The connector defines the ingestion mode and primary key for each table:
 | `workitems`             | Work items (tasks, bugs, user stories, etc.)           | `cdc`          | `id`                                             | `rev`                       |
 | `workitem_revisions`    | Historical changes to work items                       | `append`       | `id`, `rev`                                      | n/a                         |
 | `workitem_types`        | Work item type definitions and fields                  | `snapshot`     | `referenceName`, `project_name`                  | n/a                         |
+| `pipelines`             | Pipeline definitions                                   | `snapshot`     | `id`, `project_name`                             | n/a                         |
+| `builds`                | Completed pipeline runs                                | `append`       | `id`                                             | `finishTime`                |
+| `build_timeline`        | Stages, jobs, and steps of each completed pipeline run | `append`       | `build_id`, `id`                                 | `build_finish_time`         |
 
 ### Required and optional table options
 
@@ -153,6 +161,11 @@ Each table has different configuration requirements:
 | `workitems`             | None             | `project`, `ids` | Optional `ids` for specific work items; omit to fetch all work items via WIQL |
 | `workitem_revisions`    | None             | `project`        | Fetches all revisions incrementally; project auto-discovery supported |
 | `workitem_types`        | None             | `project`        | Fetches all type definitions; project auto-discovery supported |
+| `pipelines`             | None             | `project`        | Project auto-discovery supported; projects without Pipelines are skipped |
+| `builds`                | None             | `project`, `definition_id`, `max_records_per_batch` | Only **completed** builds are ingested (their finish time is final). `definition_id` restricts to one pipeline (the `id` from `pipelines`) |
+| `build_timeline`        | None             | `project`, `definition_id`, `build_id`, `max_records_per_batch` | `build_id` (requires a project) reads one build's steps only. Otherwise reads steps of all newly completed builds. `max_records_per_batch` caps the number of **builds** read per batch. Builds whose timeline has been deleted by retention are skipped |
+
+**Pipeline steps**: `build_timeline` holds one row per timeline record. `type` is `Stage`, `Phase`, `Job`, `Task` (a pipeline step), or `Checkpoint`; `parentId` links each row to its parent, so steps nest under jobs and jobs under stages. Join to `builds` on `build_id = builds.id`.
 
 **Important Notes**:
 
@@ -281,6 +294,30 @@ All table schemas preserve the nested JSON structure from the Azure DevOps API r
 - **Schema**: `fields` (array of field definition structs), `states` (array of state structs)
 - **URLs**: `url`
 - **Connector-derived**: `organization`, `project_name`
+
+#### `pipelines` table (7 fields)
+- **Identity**: `id` (long integer), `name`, `folder`, `revision`
+- **URLs**: `url`
+- **Connector-derived**: `organization`, `project_name`
+
+#### `builds` table (26 fields)
+- **Identity**: `id` (long integer), `buildNumber`
+- **Outcome**: `status`, `result` (succeeded/failed/partiallySucceeded/canceled)
+- **Timestamps**: `queueTime`, `startTime`, `finishTime`, `lastChangedDate`
+- **Source**: `sourceBranch`, `sourceVersion`, `reason`, `repository` (struct)
+- **Pipeline**: `definition` (struct with the pipeline `id`, `name`, `path`), `queue` (struct)
+- **People**: `requestedFor`, `requestedBy`, `lastChangedBy` (identity structs)
+- **Other**: `priority`, `keepForever`, `retainedByRelease`, `tags`, `parameters` (JSON string), `uri`, `url`
+- **Connector-derived**: `organization`, `project_name`
+
+#### `build_timeline` table (26 fields)
+- **Identity**: `id` (GUID string), `parentId`, `identifier`, `order`
+- **Kind**: `type` (Stage/Phase/Job/Task/Checkpoint), `name`
+- **Outcome**: `state` (pending/inProgress/completed), `result`, `resultCode`, `errorCount`, `warningCount`, `issues` (array of type/category/message structs)
+- **Timing**: `startTime`, `finishTime`, `lastModified`, `percentComplete`, `attempt`, `changeId`
+- **Execution**: `task` (struct with the task `id`, `name`, `version`), `log` (struct pointing to the step's log), `workerName`
+- **URLs**: `url`
+- **Connector-derived**: `build_id`, `build_finish_time`, `organization`, `project_name`
 
 **Common patterns across all tables**:
 - All connector-derived fields (`organization`, `project_name`, `repository_id`, `pullrequest_id` where applicable) are non-nullable strings or integers.
@@ -518,6 +555,23 @@ In your pipeline code (e.g., `ingestion_pipeline.py` or a similar entrypoint), c
 }
 ```
 
+#### Example 11: Ingest pipelines, builds, and pipeline steps
+
+```json
+{
+  "pipeline_spec": {
+    "connection_name": "azure_devops_connection",
+    "object": [
+      {"table": {"source_table": "pipelines", "table_options": {"project": "MyProject"}}},
+      {"table": {"source_table": "builds", "table_options": {"project": "MyProject"}}},
+      {"table": {"source_table": "build_timeline", "table_options": {"project": "MyProject", "max_records_per_batch": "100"}}}
+    ]
+  }
+}
+```
+
+Add `"definition_id": "<pipeline id>"` to restrict `builds` and `build_timeline` to a single pipeline.
+
 ### Step 3: Run Your Pipeline
 
 Execute your Lakeflow pipeline using the standard Lakeflow workflow. The connector will authenticate with Azure DevOps using the provided PAT and fetch data according to your configuration.
@@ -535,6 +589,7 @@ Execute your Lakeflow pipeline using the standard Lakeflow workflow. The connect
    - Users table requires `Graph (read)`
    - Projects table requires `Project and Team (read)`
    - Work item tables require `Work Items (read)`
+   - Pipeline tables (`pipelines`, `builds`, `build_timeline`) require `Build (read)`
 3. **Incorrect organization/project**: The organization or project name in the connection parameters may be wrong.
 
 **Solution**:

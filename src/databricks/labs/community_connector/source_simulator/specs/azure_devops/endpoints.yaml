@@ -150,3 +150,35 @@ endpoints:
           count: 0
           isLastBatch: true
           nextLink: null
+
+  - path: /{organization}/{project}/_apis/pipelines
+    method: GET
+    corpus: pipelines
+    response:
+      pagination_style: none
+      wrapper:
+        records_key: value
+        extras: {count: 0}
+
+  - path: /{organization}/{project}/_apis/build/builds
+    method: GET
+    corpus: builds
+    response:
+      pagination_style: none
+      wrapper:
+        records_key: value
+        extras: {count: 0}
+
+  - path: /{organization}/{project}/_apis/build/builds/{build_id}/timeline
+    method: GET
+    corpus: build_timeline
+    response:
+      pagination_style: none
+      wrapper:
+        records_key: records
+        extras:
+          id: "00000000-0000-0000-0000-000000000000"
+          changeId: 1
+          lastChangedBy: "00000000-0000-0000-0000-000000000000"
+          lastChangedOn: "2024-01-01T00:00:00Z"
+          url: "https://example.invalid/timeline"

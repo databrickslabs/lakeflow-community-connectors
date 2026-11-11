@@ -28,7 +28,7 @@ connection:
           description: >
             Personal Access Token for the Azure DevOps Services REST API.
             Required scopes: Code (read), Graph (read), Project and Team
-            (read), Work Items (read).
+            (read), Work Items (read), Build (read).
 
     - name: service_principal
       description: >
@@ -99,4 +99,4 @@ connection:
 # parameter of the UC connection to allow them to be passed through.
 # Use a comma-separated string of option names.
 # ============================================================================
-external_options_allowlist: "project,repository_id,pullrequest_id,status_filter,filter,ids"
+external_options_allowlist: "project,repository_id,pullrequest_id,status_filter,filter,ids,definition_id,build_id,max_records_per_batch"
