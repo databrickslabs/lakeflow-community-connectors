@@ -218,14 +218,16 @@ def test_drop_and_unknown_and_views(fake):
         drive(conn, "c", {"start_mode": "latest"}, start=offset)
 
 
-def test_sharded_collection_is_refused(fake, monkeypatch):
+def test_sharded_collection_needs_assume_unique_id(fake, monkeypatch):
     uri, db = fake
     db.create_collection("sharded").insert_one({"_id": 1})
     from tests.unit.sources.mongodb import fake_mongo  # pylint: disable=import-outside-toplevel
     monkeypatch.setattr(fake_mongo.FakeDatabase, "command",
                         lambda self, name, coll: {"sharded": True})
-    with pytest.raises(ValueError, match="sharded collection"):
+    with pytest.raises(ValueError, match="assume_unique_id=true"):
         _connector(uri).read_table("sharded", {}, {})
+    rows, _ = drive(_connector(uri), "sharded", {"assume_unique_id": "true"})
+    assert [r["_id"] for r in rows] == [encode_id(1)]
 
 
 def test_snapshot_reads_use_majority_on_the_primary(fake):

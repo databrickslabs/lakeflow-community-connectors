@@ -1,6 +1,6 @@
 # Lakeflow MongoDB Community Connector
 
-This connector ingests MongoDB collections into Databricks. Each collection becomes one table: an initial snapshot, then continuous change data capture from the collection's [change stream](https://www.mongodb.com/docs/manual/changeStreams/), including deletes. It works with MongoDB Atlas and self-managed replica sets. End-to-end runs were done on serverless pipelines; classic pipelines run the same reader code. Sharded collections are not supported yet: the connector refuses them when it can detect them (`collStats`), because `_id` is only unique per shard unless it is the shard key.
+This connector ingests MongoDB collections into Databricks. Each collection becomes one table: an initial snapshot, then continuous change data capture from the collection's [change stream](https://www.mongodb.com/docs/manual/changeStreams/), including deletes. It works with MongoDB Atlas and self-managed replica sets. End-to-end runs were done on serverless pipelines; classic pipelines run the same reader code. Sharded collections are read only when `_id` is declared unique across the collection (`assume_unique_id=true`, see [Limitations](#limitations)); otherwise the connector refuses them when it can detect them (`collStats`).
 
 ## Prerequisites
 
@@ -28,7 +28,7 @@ This connector ingests MongoDB collections into Databricks. Each collection beco
 | `databricks_client_secret` | string (secret) | No | OAuth secret of that service principal. | |
 | `aws_refresh_margin_seconds` | string | No | Request new AWS keys this many seconds before they expire. Default `600`. | `600` |
 | `unicode_decode_error_handler` | string | No | `strict` (default) fails on strings that are not valid UTF-8; `replace` ingests them with U+FFFD. | `strict` |
-| `externalOptionsAllowList` | string | Yes | Must be set to the full list of table options below. | `database,collection,ingestion_type,start_mode,start_at_operation_time,full_document,document_format,max_records_per_batch,snapshot_batch_size,max_await_time_ms,delete_lookback_seconds,idle_advance_seconds` |
+| `externalOptionsAllowList` | string | Yes | Must be set to the full list of table options below. | `database,collection,ingestion_type,start_mode,start_at_operation_time,full_document,document_format,max_records_per_batch,snapshot_batch_size,max_await_time_ms,delete_lookback_seconds,idle_advance_seconds,assume_unique_id` |
 
 ### Authentication
 
@@ -56,7 +56,7 @@ A Unity Catalog connection for this connector can be created in two ways via the
 
 1. Follow the Lakeflow Community Connector UI flow from the "Add Data" page.
 2. Select any existing Lakeflow Community Connector connection for this source or create a new one.
-3. Set `externalOptionsAllowList` to `database,collection,ingestion_type,start_mode,start_at_operation_time,full_document,document_format,max_records_per_batch,snapshot_batch_size,max_await_time_ms,delete_lookback_seconds,idle_advance_seconds`.
+3. Set `externalOptionsAllowList` to `database,collection,ingestion_type,start_mode,start_at_operation_time,full_document,document_format,max_records_per_batch,snapshot_batch_size,max_await_time_ms,delete_lookback_seconds,idle_advance_seconds,assume_unique_id`.
 
 The connection can also be created using the standard Unity Catalog API.
 
@@ -108,7 +108,7 @@ How it stays correct:
 - **Continuous mode latency**: each poll reads the changes up to the time it started; a change made while a poll runs is read by the poll after the next one.
 - **`updateLookup`**: an update row holds the document as it is when the change is read (see Best Practices for post-images).
 - Views, time series collections and `system.*` collections cannot be ingested (no change stream).
-- Sharded collections are not supported yet (see above). Unsharded collections on a sharded cluster have not been tested.
+- **Sharded collections**: rows are keyed by `_id`, but on a collection sharded by another key MongoDB only guarantees `_id` to be unique per shard. The connector therefore refuses sharded collections (detected with `collStats`) unless the table option `assume_unique_id=true` declares that `_id` is unique across the collection, for example when `_id` is the shard key, or when every `_id` is a driver-generated ObjectId (unique in practice, not enforced across shards). Connect through mongos: the snapshot query then merges the shards in `_id` order and the change stream merges them in cluster-time order. Sharded clusters have not been tested with this connector yet.
 
 ## Table Configurations
 
@@ -148,6 +148,7 @@ These are set directly under each `table` object in the pipeline spec:
 | `max_await_time_ms` | `1000` | How long one change stream poll waits for new events. |
 | `delete_lookback_seconds` | `86400` | How far back the delete flow starts on its first run. When the oplog is shorter, it starts at the oldest point the oplog still holds. |
 | `idle_advance_seconds` | `300` | How often the resume token of a quiet collection is moved forward. `0` disables it. |
+| `assume_unique_id` | `false` | Declare that `_id` is unique across a sharded collection (see [Limitations](#limitations)). Without it, sharded collections are refused. |
 
 ## Data Type Mapping
 
