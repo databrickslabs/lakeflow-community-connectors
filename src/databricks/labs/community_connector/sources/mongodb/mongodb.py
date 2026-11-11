@@ -503,7 +503,7 @@ class MongodbLakeflowConnect(LakeflowConnect, SupportsNamespaces):
                         reached_end = True
                         break
         except pymongo.errors.OperationFailure as exc:
-            return iter([]), self._stream_failure(cfg, start, flow, exc)
+            return iter([]), self._stream_failure(cfg, start, flow, exc, replay=end is not None)
         except (InvalidBSON, UnicodeDecodeError) as exc:
             raise self._decode_error(cfg, exc) from exc
 
@@ -522,10 +522,16 @@ class MongodbLakeflowConnect(LakeflowConnect, SupportsNamespaces):
 
         return self._empty_poll(cfg, start, cap_key, drained, pbrt)
 
-    def _stream_failure(self, cfg: _TableConfig, start: dict, flow: str, exc: Exception) -> dict:
-        """Handle a change stream error: a new start for the delete flow, or raise."""
+    def _stream_failure(self, cfg: _TableConfig, start: dict, flow: str, exc: Exception,
+                        replay: bool = False) -> dict:
+        """Handle a change stream error: a new start for the delete flow, or raise.
+
+        A replay never moves its start: that would return an empty batch that
+        Spark could commit, dropping the events of the original batch.
+        """
         code = getattr(exc, "code", None)
-        if code == CHANGE_STREAM_HISTORY_LOST and not start.get("token") and start.get("lookback"):
+        if (code == CHANGE_STREAM_HISTORY_LOST and not replay and not start.get("token")
+                and start.get("lookback")):
             return self._oldest_available_start(cfg, start, flow)
         if code in (CHANGE_STREAM_HISTORY_LOST, CHANGE_STREAM_FATAL_ERROR):
             raise RuntimeError(
