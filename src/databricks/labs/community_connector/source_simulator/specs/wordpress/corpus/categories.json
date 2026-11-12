@@ -1,0 +1,82 @@
+[
+  {
+    "id": 1000,
+    "count": 74099,
+    "description": "echo-451",
+    "link": "zulu-131",
+    "name": "hotel-348",
+    "slug": "whiskey-993",
+    "taxonomy": "tango-213",
+    "parent": 31891
+  },
+  {
+    "id": 1001,
+    "count": 36804,
+    "description": "quebec-734",
+    "link": "mike-610",
+    "name": "tango-731",
+    "slug": "alpha-364",
+    "taxonomy": "lima-756",
+    "parent": 90348
+  },
+  {
+    "id": 1002,
+    "count": 32233,
+    "description": "november-960",
+    "link": "delta-374",
+    "name": "papa-189",
+    "slug": "november-503",
+    "taxonomy": "yankee-624",
+    "parent": 63890
+  },
+  {
+    "id": 1003,
+    "count": 81763,
+    "description": "xray-858",
+    "link": "uniform-649",
+    "name": "yankee-804",
+    "slug": "lima-697",
+    "taxonomy": "alpha-565",
+    "parent": 49397
+  },
+  {
+    "id": 1004,
+    "count": 92108,
+    "description": "xray-925",
+    "link": "zulu-441",
+    "name": "romeo-234",
+    "slug": "papa-525",
+    "taxonomy": "papa-928",
+    "parent": 71655
+  },
+  {
+    "id": 1005,
+    "count": 23883,
+    "description": "victor-350",
+    "link": "juliet-723",
+    "name": "delta-536",
+    "slug": "lima-411",
+    "taxonomy": "romeo-729",
+    "parent": 34649
+  },
+  {
+    "id": 1006,
+    "count": 91201,
+    "description": "tango-444",
+    "link": "echo-830",
+    "name": "charlie-151",
+    "slug": "uniform-510",
+    "taxonomy": "mike-969",
+    "parent": 74273
+  },
+  {
+    "id": 1007,
+    "count": 12716,
+    "description": "quebec-550",
+    "link": "papa-889",
+    "name": "whiskey-571",
+    "slug": "juliet-990",
+    "taxonomy": "charlie-564",
+    "parent": 73022
+  }
+]
