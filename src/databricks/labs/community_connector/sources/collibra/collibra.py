@@ -64,6 +64,16 @@ _LOG = logging.getLogger(__name__)
 DEFAULT_MAX_RECORDS_PER_BATCH = 5000
 
 
+def _split_ids(value: str) -> list[str]:
+    """Split a comma-separated option into a list.
+
+    Collibra expects multi-value query params repeated (``typePublicIds=A&typePublicIds=B``);
+    ``requests`` encodes a list that way. A raw comma string is treated as one bracketed id
+    and rejected (400 attTypeNotFoundPublicId).
+    """
+    return [v.strip() for v in str(value).split(",") if v.strip()]
+
+
 class CollibraLakeflowConnect(LakeflowConnect):
     """LakeflowConnect implementation for Collibra Core REST API v2."""
 
@@ -257,7 +267,7 @@ class CollibraLakeflowConnect(LakeflowConnect):
         if table_options.get("asset_id"):
             base_params["assetId"] = table_options["asset_id"]
         if table_options.get("type_public_ids"):
-            base_params["typePublicIds"] = table_options["type_public_ids"]
+            base_params["typePublicIds"] = _split_ids(table_options["type_public_ids"])
 
         record_iter = cursor_paginate(
             self._session,
@@ -285,11 +295,11 @@ class CollibraLakeflowConnect(LakeflowConnect):
             "includeInherited": "true",
         }
         if table_options.get("resource_ids"):
-            base_params["resourceIds"] = table_options["resource_ids"]
+            base_params["resourceIds"] = _split_ids(table_options["resource_ids"])
         if table_options.get("role_ids"):
             # needs-live-testing: role UUIDs for Data Owner / Data Steward /
             # SME are environment-specific; pass them through when supplied.
-            base_params["roleIds"] = table_options["role_ids"]
+            base_params["roleIds"] = _split_ids(table_options["role_ids"])
 
         record_iter = offset_paginate(
             self._session,
