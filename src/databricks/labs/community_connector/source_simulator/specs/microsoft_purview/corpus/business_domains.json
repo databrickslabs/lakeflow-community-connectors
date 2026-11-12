@@ -1,0 +1,257 @@
+[
+  {
+    "id": "bravo-78-pk0",
+    "name": "kilo-198",
+    "description": "oscar-593",
+    "parentId": "golf-428",
+    "status": "charlie-737",
+    "type": "foxtrot-640",
+    "isRestricted": false,
+    "thumbnail": {
+      "color": "yankee-671"
+    },
+    "domains": [
+      {
+        "name": "whiskey-415",
+        "friendlyName": "sierra-140",
+        "relatedCollections": [
+          {
+            "name": "november-303",
+            "friendlyName": "xray-162",
+            "parentCollection": {
+              "refName": "quebec-627",
+              "type": "oscar-808"
+            }
+          },
+          {
+            "name": "victor-136",
+            "friendlyName": "foxtrot-684",
+            "parentCollection": {
+              "refName": "mike-903",
+              "type": "foxtrot-183"
+            }
+          }
+        ]
+      }
+    ],
+    "managedAttributes": [
+      {
+        "name": "quebec-597",
+        "value": "foxtrot-389",
+        "isRequired": false
+      },
+      {
+        "name": "quebec-233",
+        "value": "lima-972",
+        "isRequired": false
+      }
+    ],
+    "systemData": {
+      "createdAt": "romeo-442",
+      "createdBy": "zulu-758",
+      "lastModifiedAt": "delta-165",
+      "lastModifiedBy": "zulu-836",
+      "expiredAt": "victor-992",
+      "expiredBy": "sierra-609",
+      "provisioningState": "delta-227"
+    },
+    "purview_tenant_id": "bravo-835"
+  },
+  {
+    "id": "hotel-93-pk1",
+    "name": "uniform-824",
+    "description": "whiskey-780",
+    "parentId": "papa-828",
+    "status": "papa-576",
+    "type": "kilo-574",
+    "isRestricted": false,
+    "thumbnail": {
+      "color": "whiskey-937"
+    },
+    "domains": [],
+    "managedAttributes": [
+      {
+        "name": "victor-538",
+        "value": "xray-433",
+        "isRequired": true
+      },
+      {
+        "name": "bravo-177",
+        "value": "tango-431",
+        "isRequired": true
+      }
+    ],
+    "systemData": {
+      "createdAt": "zulu-174",
+      "createdBy": "romeo-164",
+      "lastModifiedAt": "quebec-130",
+      "lastModifiedBy": "quebec-595",
+      "expiredAt": "kilo-201",
+      "expiredBy": "oscar-100",
+      "provisioningState": "victor-214"
+    },
+    "purview_tenant_id": "sierra-849"
+  },
+  {
+    "id": "oscar-72-pk2",
+    "name": "foxtrot-923",
+    "description": "charlie-469",
+    "parentId": "kilo-726",
+    "status": "yankee-790",
+    "type": "india-834",
+    "isRestricted": false,
+    "thumbnail": {
+      "color": "juliet-766"
+    },
+    "domains": [],
+    "managedAttributes": [
+      {
+        "name": "hotel-686",
+        "value": "india-332",
+        "isRequired": false
+      },
+      {
+        "name": "oscar-495",
+        "value": "quebec-201",
+        "isRequired": false
+      }
+    ],
+    "systemData": {
+      "createdAt": "quebec-890",
+      "createdBy": "tango-808",
+      "lastModifiedAt": "kilo-895",
+      "lastModifiedBy": "juliet-478",
+      "expiredAt": "juliet-720",
+      "expiredBy": "echo-745",
+      "provisioningState": "uniform-772"
+    },
+    "purview_tenant_id": "charlie-488"
+  },
+  {
+    "id": "alpha-47-pk3",
+    "name": "echo-519",
+    "description": "india-703",
+    "parentId": "uniform-965",
+    "status": "uniform-156",
+    "type": "india-186",
+    "isRestricted": false,
+    "thumbnail": {
+      "color": "lima-617"
+    },
+    "domains": [
+      {
+        "name": "oscar-924",
+        "friendlyName": "papa-377",
+        "relatedCollections": [
+          {
+            "name": "zulu-160",
+            "friendlyName": "india-556",
+            "parentCollection": {
+              "refName": "hotel-560",
+              "type": "romeo-162"
+            }
+          }
+        ]
+      }
+    ],
+    "managedAttributes": [
+      {
+        "name": "hotel-342",
+        "value": "india-392",
+        "isRequired": false
+      }
+    ],
+    "systemData": {
+      "createdAt": "uniform-380",
+      "createdBy": "romeo-903",
+      "lastModifiedAt": "papa-931",
+      "lastModifiedBy": "bravo-519",
+      "expiredAt": "uniform-932",
+      "expiredBy": "zulu-280",
+      "provisioningState": "tango-631"
+    },
+    "purview_tenant_id": "foxtrot-228"
+  },
+  {
+    "id": "foxtrot--pk4",
+    "name": "foxtrot-457",
+    "description": "juliet-136",
+    "parentId": "kilo-753",
+    "status": "xray-628",
+    "type": "romeo-711",
+    "isRestricted": false,
+    "thumbnail": {
+      "color": "bravo-411"
+    },
+    "domains": [],
+    "managedAttributes": [],
+    "systemData": {
+      "createdAt": "echo-838",
+      "createdBy": "yankee-160",
+      "lastModifiedAt": "november-900",
+      "lastModifiedBy": "lima-512",
+      "expiredAt": "november-670",
+      "expiredBy": "oscar-961",
+      "provisioningState": "india-114"
+    },
+    "purview_tenant_id": "yankee-475"
+  },
+  {
+    "id": "alpha-52-pk5",
+    "name": "mike-712",
+    "description": "november-199",
+    "parentId": "tango-506",
+    "status": "alpha-861",
+    "type": "alpha-220",
+    "isRestricted": false,
+    "thumbnail": {
+      "color": "golf-411"
+    },
+    "domains": [
+      {
+        "name": "victor-276",
+        "friendlyName": "delta-354",
+        "relatedCollections": [
+          {
+            "name": "whiskey-365",
+            "friendlyName": "juliet-251",
+            "parentCollection": {
+              "refName": "lima-704",
+              "type": "alpha-695"
+            }
+          },
+          {
+            "name": "mike-546",
+            "friendlyName": "yankee-613",
+            "parentCollection": {
+              "refName": "alpha-996",
+              "type": "kilo-769"
+            }
+          }
+        ]
+      }
+    ],
+    "managedAttributes": [
+      {
+        "name": "alpha-457",
+        "value": "yankee-274",
+        "isRequired": true
+      },
+      {
+        "name": "bravo-344",
+        "value": "golf-227",
+        "isRequired": true
+      }
+    ],
+    "systemData": {
+      "createdAt": "kilo-886",
+      "createdBy": "zulu-769",
+      "lastModifiedAt": "yankee-720",
+      "lastModifiedBy": "alpha-319",
+      "expiredAt": "romeo-842",
+      "expiredBy": "november-307",
+      "provisioningState": "oscar-500"
+    },
+    "purview_tenant_id": "victor-598"
+  }
+]

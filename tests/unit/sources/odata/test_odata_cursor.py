@@ -25,6 +25,7 @@ from tests.unit.sources.odata._odata_test_helpers import (
     _mock_metadata,
     _mock_nested_metadata,
     _mock_probe_metadata,
+    _patch_sleep,
     _probe_filter_floor,
     _probe_mids_callback,
     _skip_probe_preflight,
@@ -2076,13 +2077,22 @@ def test_cursor_probe_strict_raises_despite_cached_pass():
         )
 
 
+@pytest.mark.parametrize(
+    "extra",
+    [{}, {"retry_extra_errors": "400"}],
+    ids=["default", "retry_extra_errors_400"],
+)
 @responses.activate
-def test_cursor_probe_auto_cascades_when_server_rejects_expand_probe():
+def test_cursor_probe_auto_cascades_when_server_rejects_expand_probe(monkeypatch, extra):
     """A server that REJECTS the nested-``$expand`` probe with an HTTP error
     (not a silent mis-order — e.g. Hexagon Smart API 400s on inner-``$expand``
     options) must make ``auto`` **cascade**, not raise: the preflight returns
     ``(False, False)`` and records a definitive ``cursor_probe_ok=False`` instead
-    of letting the raw HTTP error escape and fail the read."""
+    of letting the raw HTTP error escape and fail the read. Under a bare
+    ``retry_extra_errors="400"`` the verdict must still be recorded at once:
+    retried into a RuntimeError it would record nothing and re-probe (with a
+    full backoff) every batch."""
+    sleeps = _patch_sleep(monkeypatch)
     _mock_probe_metadata()
     responses.get(f"{SERVICE_URL}Roots", json={"value": [{"Id": 1}]})
     responses.add_callback(
@@ -2097,11 +2107,12 @@ def test_cursor_probe_auto_cascades_when_server_rejects_expand_probe():
             ]
         },
     )
-    c = _make()
+    c = _make(extra)
     assert c._verify_cursor_probe_support(
         ["Roots", "Mids", "Leaves"], None, {}, "RecordLastModified", strict=False
     ) == (False, False)
     assert c._cached_capability("cursor_probe_ok", table_name="Roots__Mids__Leaves") is False
+    assert sleeps == []  # the 400 was a verdict, never retried
 
 
 @responses.activate

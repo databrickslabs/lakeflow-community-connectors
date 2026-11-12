@@ -1,13 +1,13 @@
 ---
 name: build_connector_package
-description: Create a pyproject.toml for a source connector and build it as an independent Python package.
+description: Create a pyproject.toml for a source connector, bump its version, and build its prebuilt wheel into wheelhouse/.
 disable-model-invocation: true
 ---
 
 # Build Source Project
 
 ## Goal
-Create a `pyproject.toml` for **{{source_name}}** connector that can be built and distributed as an independent Python package, then build it using the standard Python build process.
+Create a `pyproject.toml` for **{{source_name}}** connector that can be built and distributed as an independent Python package, bump its version when it changes, and build its prebuilt wheel into `wheelhouse/{{source_name}}/`.
 
 ## Prerequisites
 - The source connector implementation must already exist under `src/databricks/labs/community_connector/sources/{{source_name}}/`
@@ -58,6 +58,49 @@ packages = ["databricks.labs.community_connector.sources.{{source_name}}"]
 
 2. **Package Naming**: Use `lakeflow-community-connectors-{{source_name}}` format (with hyphens, not underscores)
 
+3. **Version**: a new connector starts at `0.1.0`. For an existing connector, never reset or hand-pick the version: bump it as described below.
+
+## Choose the version
+
+Skip this section for a new connector. Otherwise, compare the change with `master` and bump `version` in `src/databricks/labs/community_connector/sources/{{source_name}}/pyproject.toml` once, by the largest change. The full rules and examples are in `CONTRIBUTING.md` (Versioning).
+
+1. For every table the change touches, decide what an existing pipeline needs after upgrading:
+   - **full refresh**: primary key, cursor, ingestion type, column type, nested struct shape, value meaning or offset format changed, or past data must be repaired
+   - **user action**: a table, column, connection parameter, table option or auth method was renamed or removed, an optional parameter or option became required, or a runtime requirement went past what supported runtimes provide
+   - **nothing**
+2. Pick the bump:
+   - **MAJOR** (`x.y.z` → `x+1.0.0`) if any table needs a full refresh or user action
+   - **MINOR** (`x.y.z` → `x.y+1.0`) if nothing is needed and the change adds capability (table, nullable column, optional parameter, auth method, new dependency)
+   - **PATCH** (`x.y.z` → `x.y.z+1`) for fixes, performance, logging and refactors
+   - **No bump** if only tests, `README.md` or `{{source_name}}_api_doc.md` changed. Stop here: don't rebuild.
+3. If `master` already has a higher version than your branch's base, bump from `master`'s version.
+4. Record the bump in the commit message and PR description: `{{source_name}} 0.1.0 → 0.2.0 (MINOR): add the cohorts table`. For MAJOR, also list what users must do, per table.
+
+If the change also touches framework code (outside `sources/`), bump the root `pyproject.toml` by the framework rules in `CONTRIBUTING.md` (Versioning → Framework: MAJOR if any connector must change, MINOR for new capability, PATCH for fixes; `source_simulator/` changes don't bump) and rebuild with `--framework`. The new framework version must satisfy every connector's `lakeflow-community-connectors` range: if the script reports a mismatch, update those connectors in the same change (raise the cap and bump each one) or don't release the framework change.
+
+## Build the prebuilt wheel (required)
+
+The managed ingestion wizard installs `wheelhouse/_framework/` and `wheelhouse/{{source_name}}/`, so rebuild in the same change as the code and the version bump:
+
+```bash
+# One-time, in the venv that runs the command
+pip install build
+
+python tools/scripts/build_wheelhouse.py {{source_name}}
+# wheelhouse/{{source_name}}/lakeflow_community_connectors_{{source_name}}-<version>-py3-none-any.whl
+
+# Only if framework code changed:
+python tools/scripts/build_wheelhouse.py --framework
+```
+
+Then verify against `master`. Fix anything it reports and re-run until it passes:
+
+```bash
+python tools/scripts/build_wheelhouse.py {{source_name}} --check --base origin/master
+```
+
+It fails if the directory doesn't hold exactly one wheel matching the `pyproject.toml` version, if the wheel is stale, or if the wheel's contents changed without a version bump. Commit `wheelhouse/{{source_name}}/` (and `wheelhouse/_framework/` if rebuilt) together with the source change.
+
 ## Build + upload via the CLI (recommended)
 
 `community-connector upload` wraps the build step and pushes the wheel to a UC
@@ -74,7 +117,7 @@ To skip the build step and upload a pre-built wheel:
 ```bash
 community-connector upload {{source_name}} \
   --volume-path /Volumes/<catalog>/<schema>/community_connector/packages \
-  --wheel dist/{{source_name}}/lakeflow_community_connectors_{{source_name}}-0.1.0-py3-none-any.whl
+  --wheel wheelhouse/{{source_name}}/lakeflow_community_connectors_{{source_name}}-<version>-py3-none-any.whl
 ```
 
 The CLI sanity-checks the built wheel against
@@ -83,7 +126,7 @@ a misconfigured `pyproject.toml` is caught before it reaches the volume.
 
 ## Build-only commands (no upload)
 
-Use these only when you need a local wheel artifact without uploading.
+Use these only when you need a local wheel artifact outside `wheelhouse/`, for example to test it by hand.
 `python -m build` runs setuptools inside a PEP 517 isolated environment, so a
 per-connector `.venv` is not needed — install `build` once into whichever venv
 runs the command.
@@ -98,7 +141,7 @@ python -m build --wheel \
   --outdir dist/{{source_name}}
 
 # Result:
-# dist/{{source_name}}/lakeflow_community_connectors_{{source_name}}-0.1.0-py3-none-any.whl
+# dist/{{source_name}}/lakeflow_community_connectors_{{source_name}}-<version>-py3-none-any.whl
 ```
 
 ## Verification
@@ -106,7 +149,7 @@ python -m build --wheel \
 After building, list the wheel contents:
 
 ```bash
-unzip -l dist/{{source_name}}/*.whl
+unzip -l wheelhouse/{{source_name}}/*.whl
 ```
 
 The wheel must contain files under:
