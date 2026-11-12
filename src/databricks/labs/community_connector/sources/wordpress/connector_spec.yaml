@@ -1,0 +1,42 @@
+# WordPress Community Connector Spec
+# This file defines the specification for the connector including
+# connection parameters and allowlist options.
+
+# ============================================================================
+# Connection Parameters
+# These are provided when creating the Unity Catalog connection.
+# ============================================================================
+display_name: WordPress
+connection:
+  parameters:
+    - name: base_url
+      type: string
+      required: true
+      description: >
+        The WordPress site root URL (e.g., https://example.com).
+        The connector appends /wp-json/wp/v2/ for REST API access.
+
+    - name: username
+      type: string
+      required: true
+      description: >
+        WordPress user's username for authentication.
+        The user must have at least read capability.
+
+    - name: application_password
+      type: string
+      required: true
+      secret: true
+      description: >
+        Application Password generated in WordPress admin panel
+        (Users → Profile → Application Passwords section).
+        The connector uses this with HTTP Basic Auth over HTTPS.
+        Format: space-separated string (e.g., xxxx xxxx xxxx xxxx xxxx xxxx).
+
+# ============================================================================
+# External Options Allowlist
+# These table-specific options must be included in the externalOptionsAllowList
+# parameter of the UC connection to allow them to be passed through.
+# Use a comma-separated string of option names.
+# ============================================================================
+external_options_allowlist: "per_page,start_timestamp,num_partitions,window_seconds,lookback_seconds"
