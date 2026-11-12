@@ -651,3 +651,51 @@ class TestConnectorVersion:
         hits = [r for r in caplog.records if mp.CONNECTOR_VERSION in r.getMessage()]
         assert len(hits) == 1
         assert "Microsoft Purview connector version" in hits[0].getMessage()
+
+
+# --------------------------------------------------------------------------- #
+# Empty objects in struct-typed fields
+# --------------------------------------------------------------------------- #
+
+
+class TestEmptyStructsBecomeNone:
+    """Purview returns ``additionalProperties: {}`` on a data product with no
+    data assets. The framework rejects an empty dict for a StructType, which
+    aborted a whole managed pipeline, so the shapers turn ``{}`` into None."""
+
+    def test_data_product_with_empty_additional_properties_converts(self):
+        from databricks.labs.community_connector.libs.utils import parse_value
+        from databricks.labs.community_connector.sources.microsoft_purview.microsoft_purview_schemas import (  # noqa: E501
+            TABLE_SCHEMAS,
+        )
+
+        raw = {
+            "id": "dp-1",
+            "name": "no assets yet",
+            "additionalProperties": {},
+            "systemData": {"lastModifiedAt": "2026-11-11T17:55:26Z"},
+        }
+        rec = _connector()._shape_data_product(raw)
+        assert rec["additionalProperties"] is None
+        # The exact conversion that failed on the managed pipeline must succeed.
+        row = parse_value(rec, TABLE_SCHEMAS["data_products"])
+        assert row["additionalProperties"] is None
+
+    def test_non_empty_struct_is_kept(self):
+        raw = {"id": "dp-2", "additionalProperties": {"assetCount": 3}, "systemData": {}}
+        rec = _connector()._shape_data_product(raw)
+        assert rec["additionalProperties"] == {"assetCount": 3}
+        assert rec["systemData"] is None  # empty nested struct also normalized
+
+    def test_helper_handles_nested_structs_and_arrays(self):
+        from pyspark.sql.types import ArrayType, StringType, StructField, StructType
+
+        inner = StructType([StructField("a", StringType())])
+        schema = StructType([
+            StructField("s", StructType([StructField("child", inner)])),
+            StructField("arr", ArrayType(inner)),
+            StructField("plain", StringType()),
+        ])
+        rec = {"s": {"child": {}}, "arr": [{}, {"a": "x"}], "plain": ""}
+        out = mp_utils.empty_structs_to_none(rec, schema)
+        assert out == {"s": {"child": None}, "arr": [None, {"a": "x"}], "plain": ""}

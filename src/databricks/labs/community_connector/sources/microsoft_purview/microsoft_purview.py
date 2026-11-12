@@ -63,6 +63,7 @@ from databricks.labs.community_connector.sources.microsoft_purview.microsoft_pur
     TABLE_SCHEMAS,
 )
 from databricks.labs.community_connector.sources.microsoft_purview.microsoft_purview_utils import (  # pylint: disable=line-too-long
+    empty_structs_to_none,
     next_link_paginate,
     normalize_contacts,
     skip_top_paginate,
@@ -360,7 +361,7 @@ class MicrosoftPurviewLakeflowConnect(LakeflowConnect):
     def _shape_business_domain(self, raw: dict[str, Any]) -> dict[str, Any]:
         rec = dict(raw)
         rec["purview_tenant_id"] = self.tenant_id
-        return rec
+        return empty_structs_to_none(rec, TABLE_SCHEMAS["business_domains"])
 
     def _shape_data_product(self, raw: dict[str, Any]) -> dict[str, Any]:
         rec = dict(raw)
@@ -368,7 +369,7 @@ class MicrosoftPurviewLakeflowConnect(LakeflowConnect):
         # Promote the nested cursor to a top-level column for cdc sequence_by.
         rec["last_modified_at"] = self._record_cursor(raw)
         rec["purview_tenant_id"] = self.tenant_id
-        return rec
+        return empty_structs_to_none(rec, TABLE_SCHEMAS["data_products"])
 
     def _shape_term(self, raw: dict[str, Any]) -> dict[str, Any]:
         rec = dict(raw)
@@ -376,7 +377,7 @@ class MicrosoftPurviewLakeflowConnect(LakeflowConnect):
         # Promote the nested cursor to a top-level column for cdc sequence_by.
         rec["last_modified_at"] = self._record_cursor(raw)
         rec["purview_tenant_id"] = self.tenant_id
-        return rec
+        return empty_structs_to_none(rec, TABLE_SCHEMAS["terms"])
 
     # ------------------------------------------------------------------ #
     # Helpers
