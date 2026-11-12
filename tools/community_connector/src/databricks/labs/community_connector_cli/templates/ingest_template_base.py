@@ -20,10 +20,14 @@ source_name = "{SOURCE_NAME}"
 #         ├── destination_catalog (optional): Target catalog (defaults to pipeline's default)
 #         ├── destination_schema (optional): Target schema (defaults to pipeline's default)
 #         ├── destination_table (optional): Target table name (defaults to source_table)
-#         └── table_configuration (optional)
+#         ├── connector_options (optional): Source-specific options
+#         │   └── community_connector_options
+#         │       └── options: Per-connector options from the source's README
+#         │                     (e.g. "owner"/"repo" for GitHub). These go HERE,
+#         │                     NOT under table_configuration.
+#         └── table_configuration (optional): Ingestion controls only
 #             ├── scd_type (optional): "SCD_TYPE_1" (default), "SCD_TYPE_2", or "APPEND_ONLY"
-#             ├── primary_keys (optional): List of columns to override connector's default keys
-#             └── (other options): See source connector's README
+#             └── primary_keys (optional): List of columns to override connector's default keys
 # =============================================================================
 pipeline_spec = {PIPELINE_SPEC}
 
