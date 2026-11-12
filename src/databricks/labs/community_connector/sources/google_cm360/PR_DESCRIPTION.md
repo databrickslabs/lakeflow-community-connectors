@@ -8,10 +8,11 @@
 
 ## Validation
 
-- Offline Python 3.10 source suite and upstream Pylint flags.
-- Generated-source consistency and framework/source wheel builds.
-- Source/package credential and customer-identifier scans.
-- Fresh authenticated source validation and E2E Databricks ingestion are still outstanding. Please apply `needs-live-testing` while that evidence is missing.
+- Current offline source suite on Python 3.12.13: 256 passed, two unsupported-capability skips. Existing Python 3.10 source and Spark-reader-wrapper review evidence is retained for the unchanged implementation.
+- Generated-source consistency, framework/source wheel builds, and source/package credential and customer-identifier scans.
+- Standalone connector wheel and source distribution include the upstream LICENSE and NOTICE; their contents are verified against the repository originals.
+- Existing managed Databricks runs cover campaign performance, daily reach, placement performance and period reach using earlier connector builds. These are supporting live evidence; they do not establish an exact-artifact managed-runtime test of this PR.
+- A current record-mode validation report and an exact-public-artifact managed-runtime run have not been established. Retain `needs-live-testing` until maintainers accept the mapped existing evidence or specify a remaining validation requirement. Maintainer-authorized CI remains outstanding.
 
 ## Support Boundaries
 
