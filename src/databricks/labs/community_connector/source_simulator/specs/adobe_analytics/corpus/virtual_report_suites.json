@@ -1,0 +1,27 @@
+[
+  {
+    "id": "vrs_examplersid",
+    "name": "Example Virtual Report Suite",
+    "parentRsid": "examplersid",
+    "timezoneZoneinfo": "America/Los_Angeles",
+    "description": "Example virtual report suite for simulator tests",
+    "currency": "USD",
+    "segmentList": [
+      "s000000000_000000000000000000000001"
+    ],
+    "modified": "2024-03-01T12:00:00Z"
+  },
+  {
+    "id": "vrs_examplersid2",
+    "name": "Example Virtual Report Suite 2",
+    "parentRsid": "examplersid",
+    "description": "Example virtual report suite without its own time zone",
+    "segmentList": [
+      {
+        "id": "s000000000_000000000000000000000002",
+        "name": "Example segment 2"
+      }
+    ],
+    "modified": "2024-03-02T12:00:00Z"
+  }
+]

@@ -1,0 +1,48 @@
+{
+  "dimensions": {
+    "rsid": "examplersid"
+  },
+  "metrics": {
+    "rsid": "examplersid"
+  },
+  "segments": {},
+  "calculated_metrics": {
+    "include_type": "all"
+  },
+  "date_ranges": {},
+  "report_daily_trended": {
+    "rsid": "examplersid",
+    "metrics": "metrics/visits,metrics/pageviews,metrics/visitors"
+  },
+  "report_hourly_trended": {
+    "rsid": "examplersid",
+    "metrics": "metrics/visits",
+    "granularity": "hour"
+  },
+  "report_weekly_trended": {
+    "rsid": "examplersid",
+    "metrics": "metrics/visits,metrics/visitors",
+    "granularity": "week",
+    "lookback_days": "7"
+  },
+  "report_monthly_trended": {
+    "rsid": "examplersid",
+    "metrics": "metrics/pageviews",
+    "granularity": "month"
+  },
+  "report_daily_by_evar1_segmented": {
+    "rsid": "examplersid",
+    "metrics": "metrics/visits,cm000000000_000000000000000000000001",
+    "dimension": "variables/evar1",
+    "segment_ids": "s000000000_000000000000000000000001",
+    "lookback_days": "2",
+    "max_records_per_batch": "30"
+  },
+  "report_vrs_daily_by_page": {
+    "rsid": "vrs_examplersid",
+    "metrics": "[\"metrics/pageviews\", \"metrics/visits\"]",
+    "dimension": "variables/page",
+    "nones_behavior": "exclude",
+    "delete_stale_rows": "false"
+  }
+}

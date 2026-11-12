@@ -1,0 +1,118 @@
+# Adobe Analytics 2.0 API.
+#
+# Two hosts (only the path is matched):
+# * https://ims-na1.adobelogin.com/ims/token/v3 — OAuth client-credentials token
+# * https://analytics.adobe.io — /discovery/me and /api/{global_company_id}/...
+#
+# The paged list endpoints use a 0-based ``page`` parameter, which the built-in
+# page_number style (1-based) cannot model. They are therefore served as one
+# page in Adobe's {content, lastPage} envelope with lastPage: true; the
+# connector stops paging on lastPage.
+#
+# /dimensions and /metrics return a bare JSON array. ``rsid`` is ignored: the
+# connector stamps each record with the rsid it requested.
+
+endpoints:
+  - path: /ims/token/v3
+    method: POST
+    handler: databricks.labs.community_connector.source_simulator.specs.adobe_analytics.handlers.api:serve_token
+
+  - path: /discovery/me
+    method: GET
+    handler: databricks.labs.community_connector.source_simulator.specs.adobe_analytics.handlers.api:serve_discovery
+
+  - path: /api/{global_company_id}/reportsuites/collections/suites
+    method: GET
+    corpus: report_suites
+    params:
+      limit: {role: ignore}
+      page: {role: ignore}
+      rsids: {role: ignore}
+      expansion: {role: ignore}
+    response:
+      pagination_style: none
+      wrapper:
+        records_key: content
+        extras: {lastPage: true, firstPage: true, number: 0}
+
+  - path: /api/{global_company_id}/reportsuites/virtualreportsuites
+    method: GET
+    corpus: virtual_report_suites
+    params:
+      limit: {role: ignore}
+      page: {role: ignore}
+      expansion: {role: ignore}
+    response:
+      pagination_style: none
+      wrapper:
+        records_key: content
+        extras: {lastPage: true, firstPage: true, number: 0}
+
+  - path: /api/{global_company_id}/dimensions
+    method: GET
+    corpus: dimensions
+    params:
+      rsid: {role: ignore}
+      expansion: {role: ignore}
+    response: {pagination_style: none}
+
+  - path: /api/{global_company_id}/metrics
+    method: GET
+    corpus: metrics
+    params:
+      rsid: {role: ignore}
+      expansion: {role: ignore}
+    response: {pagination_style: none}
+
+  - path: /api/{global_company_id}/segments
+    method: GET
+    corpus: segments
+    params:
+      limit: {role: ignore}
+      page: {role: ignore}
+      expansion: {role: ignore}
+      includeType: {role: ignore}
+      sortProperty: {role: ignore}
+      sortDirection: {role: ignore}
+    response:
+      pagination_style: none
+      wrapper:
+        records_key: content
+        extras: {lastPage: true, firstPage: true, number: 0}
+
+  - path: /api/{global_company_id}/calculatedmetrics
+    method: GET
+    corpus: calculated_metrics
+    params:
+      limit: {role: ignore}
+      page: {role: ignore}
+      expansion: {role: ignore}
+      includeType: {role: ignore}
+      sortProperty: {role: ignore}
+      sortDirection: {role: ignore}
+    response:
+      pagination_style: none
+      wrapper:
+        records_key: content
+        extras: {lastPage: true, firstPage: true, number: 0}
+
+  - path: /api/{global_company_id}/dateranges
+    method: GET
+    corpus: date_ranges
+    params:
+      limit: {role: ignore}
+      page: {role: ignore}
+      expansion: {role: ignore}
+      includeType: {role: ignore}
+    response:
+      pagination_style: none
+      wrapper:
+        records_key: content
+        extras: {lastPage: true, firstPage: true, number: 0}
+
+  # Report bodies decide the response shape (dimension, metrics, dateRange),
+  # so a handler builds the rows. Report tables are user-defined and have no
+  # corpus file.
+  - path: /api/{global_company_id}/reports
+    method: POST
+    handler: databricks.labs.community_connector.source_simulator.specs.adobe_analytics.handlers.api:serve_reports

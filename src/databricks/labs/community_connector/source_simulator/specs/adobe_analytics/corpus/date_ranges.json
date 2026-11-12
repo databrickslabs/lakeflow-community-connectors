@@ -1,0 +1,50 @@
+[
+  {
+    "id": "dr000000000_000000000000000000000001",
+    "name": "Example last full month",
+    "description": "Example date range",
+    "definition": "cm-1-month/cm",
+    "owner": {
+      "id": 100001
+    },
+    "companyId": 200001,
+    "imsOrgId": "000000000000000000000000@AdobeOrg",
+    "template": false,
+    "curatedItem": false,
+    "systemUserOwned": false,
+    "approved": true,
+    "favorite": false,
+    "modified": "2024-02-05T10:00:00Z",
+    "createDate": "2024-01-21T09:00:00Z",
+    "disabledDate": "2025-01-01T00:00:00Z",
+    "tags": [
+      {
+        "id": 1,
+        "name": "Example tag"
+      }
+    ],
+    "shares": [
+      {
+        "shareToId": 300001,
+        "shareToType": "group"
+      }
+    ],
+    "usageSummary": {
+      "projects": 0
+    },
+    "alternateVariableNames": [
+      "example_last_month"
+    ]
+  },
+  {
+    "id": "dr000000000_000000000000000000000002",
+    "name": "Example last 7 days",
+    "definition": "cd-7d/cd",
+    "owner": {
+      "id": 100002
+    },
+    "companyId": 200001,
+    "template": true,
+    "modified": "2024-02-06T10:00:00Z"
+  }
+]
