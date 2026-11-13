@@ -1,0 +1,203 @@
+[
+  {
+    "id": "whiskey--pk0",
+    "parentId": "victor-962",
+    "currentOperation": null,
+    "details": null,
+    "previousAttempts": [],
+    "refName": "echo-844",
+    "type": "zulu-899",
+    "name": "romeo-131",
+    "identifier": "echo-844",
+    "order": 38658,
+    "state": "romeo-658",
+    "result": "delta-974",
+    "resultCode": "echo-820",
+    "startTime": "kilo-563",
+    "finishTime": "foxtrot-557",
+    "lastModified": "delta-785",
+    "changeId": 23004,
+    "percentComplete": 52607,
+    "workerName": "charlie-117",
+    "attempt": 24506,
+    "errorCount": 57823,
+    "warningCount": 54124,
+    "task": {
+      "id": "victor-388",
+      "name": "charlie-647",
+      "version": "quebec-418"
+    },
+    "log": {
+      "id": 44890,
+      "type": "oscar-375",
+      "url": "zulu-280"
+    },
+    "issues": [],
+    "url": "kilo-287",
+    "build_id": 1000,
+    "build_finish_time": "2024-01-01T00:00:00Z",
+    "organization": "mike-197",
+    "project_name": "echo-365"
+  },
+  {
+    "id": "hotel-61-pk1",
+    "parentId": "juliet-360",
+    "type": "echo-732",
+    "name": "hotel-886",
+    "identifier": "alpha-286",
+    "order": 70055,
+    "state": "alpha-499",
+    "result": "golf-285",
+    "resultCode": "uniform-336",
+    "startTime": "quebec-220",
+    "finishTime": "alpha-950",
+    "lastModified": "oscar-256",
+    "changeId": 77846,
+    "percentComplete": 12326,
+    "workerName": "bravo-532",
+    "attempt": 11880,
+    "errorCount": 12823,
+    "warningCount": 48415,
+    "task": {
+      "id": "hotel-253",
+      "name": "zulu-724",
+      "version": "sierra-937"
+    },
+    "log": {
+      "id": 62426,
+      "type": "uniform-424",
+      "url": "charlie-225"
+    },
+    "issues": [
+      {
+        "type": "juliet-867",
+        "category": "yankee-356",
+        "message": "zulu-251"
+      },
+      {
+        "type": "quebec-873",
+        "category": "zulu-472",
+        "message": "kilo-124"
+      }
+    ],
+    "url": "india-192",
+    "build_id": 1001,
+    "build_finish_time": "2024-01-01T01:00:00Z",
+    "organization": "papa-619",
+    "project_name": "echo-368"
+  },
+  {
+    "id": "delta-15-pk2",
+    "parentId": "uniform-817",
+    "type": "november-970",
+    "name": "xray-560",
+    "identifier": "bravo-349",
+    "order": 71522,
+    "state": "hotel-645",
+    "result": "delta-818",
+    "resultCode": "november-425",
+    "startTime": "foxtrot-345",
+    "finishTime": "zulu-436",
+    "lastModified": "papa-865",
+    "changeId": 40052,
+    "percentComplete": 3605,
+    "workerName": "victor-869",
+    "attempt": 12716,
+    "errorCount": 8295,
+    "warningCount": 40454,
+    "task": {
+      "id": "sierra-564",
+      "name": "victor-429",
+      "version": "mike-375"
+    },
+    "log": {
+      "id": 34016,
+      "type": "delta-102",
+      "url": "quebec-552"
+    },
+    "issues": [],
+    "url": "golf-419",
+    "build_id": 1002,
+    "build_finish_time": "2024-01-01T02:00:00Z",
+    "organization": "juliet-800",
+    "project_name": "quebec-861"
+  },
+  {
+    "id": "foxtrot--pk3",
+    "parentId": "papa-210",
+    "type": "romeo-168",
+    "name": "quebec-286",
+    "identifier": "foxtrot-131",
+    "order": 76872,
+    "state": "alpha-348",
+    "result": "kilo-405",
+    "resultCode": "uniform-378",
+    "startTime": "echo-890",
+    "finishTime": "golf-820",
+    "lastModified": "echo-827",
+    "changeId": 58927,
+    "percentComplete": 91641,
+    "workerName": "charlie-505",
+    "attempt": 10992,
+    "errorCount": 29735,
+    "warningCount": 86192,
+    "task": {
+      "id": "delta-748",
+      "name": "papa-302",
+      "version": "tango-339"
+    },
+    "log": {
+      "id": 73671,
+      "type": "india-457",
+      "url": "mike-500"
+    },
+    "issues": [],
+    "url": "zulu-540",
+    "build_id": 1003,
+    "build_finish_time": "2024-01-01T03:00:00Z",
+    "organization": "india-771",
+    "project_name": "quebec-756"
+  },
+  {
+    "id": "november-pk4",
+    "parentId": "quebec-146",
+    "type": "november-968",
+    "name": "hotel-881",
+    "identifier": "echo-161",
+    "order": 82296,
+    "state": "romeo-506",
+    "result": "juliet-440",
+    "resultCode": "mike-291",
+    "startTime": "echo-119",
+    "finishTime": "foxtrot-608",
+    "lastModified": "golf-145",
+    "changeId": 23146,
+    "percentComplete": 56180,
+    "workerName": "lima-396",
+    "attempt": 2212,
+    "errorCount": 95573,
+    "warningCount": 47715,
+    "task": {
+      "id": "sierra-599",
+      "name": "xray-185",
+      "version": "echo-494"
+    },
+    "log": {
+      "id": 56357,
+      "type": "romeo-107",
+      "url": "quebec-959"
+    },
+    "issues": [
+      {
+        "type": "romeo-866",
+        "category": "oscar-943",
+        "message": "echo-923"
+      }
+    ],
+    "url": "sierra-415",
+    "build_id": 1004,
+    "build_finish_time": "2024-01-01T04:00:00Z",
+    "organization": "victor-379",
+    "project_name": "hotel-468"
+  }
+]

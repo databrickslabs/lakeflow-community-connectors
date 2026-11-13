@@ -4,11 +4,12 @@ This module contains helper functions for API interaction, project/repo
 resolution, and the PR auto-discovery pattern used across multiple tables.
 """
 
+import re
 import time
+from datetime import datetime, timezone
 from typing import Any, Callable
 
 import requests
-
 
 RETRIABLE_STATUS_CODES = {429, 500, 502, 503, 504}
 MAX_RETRIES = 5
@@ -128,6 +129,63 @@ def fetch_prs(
         {"api-version": "7.1", "searchCriteria.status": "all"},
         "pullrequests",
     )
+
+
+class ApiError(RuntimeError):
+    """Non-200 API response, keeping the HTTP status for callers."""
+
+    def __init__(self, message: str, status_code: int) -> None:
+        super().__init__(message)
+        self.status_code = status_code
+
+
+def api_get_list_paged(
+    session: requests.Session,
+    url: str,
+    params: dict[str, str],
+    label: str,
+) -> list[dict]:
+    """GET a list endpoint that paginates via the continuation-token header.
+
+    Build and pipeline endpoints return the next-page token in the
+    ``x-ms-continuationtoken`` response header; it is passed back as the
+    ``continuationToken`` query parameter until the header is absent.
+    """
+    items: list[dict] = []
+    page_params = dict(params)
+    while True:
+        response = request_with_retry(session, url, page_params)
+        if response.status_code != 200:
+            raise ApiError(
+                f"Azure DevOps API error for {label}: "
+                f"{response.status_code} {response.text}",
+                response.status_code,
+            )
+        items.extend(response.json().get("value", []))
+        token = response.headers.get("x-ms-continuationtoken")
+        if not token:
+            return items
+        page_params["continuationToken"] = token
+
+
+def parse_ts(value: str) -> datetime:
+    """Parse an Azure DevOps ISO 8601 timestamp into an aware datetime.
+
+    ADO emits up to 7 fractional digits and a trailing ``Z``, neither of
+    which ``datetime.fromisoformat`` accepts on Python < 3.11. Comparing
+    parsed values avoids lexicographic errors between e.g. ``...00Z`` and
+    ``...00.5Z``.
+    """
+    text = value.strip()
+    if text.endswith("Z"):
+        text = text[:-1] + "+00:00"
+    match = re.match(r"^(.*?)\.(\d+)(.*)$", text)
+    if match:
+        text = f"{match.group(1)}.{(match.group(2) + '000000')[:6]}{match.group(3)}"
+    dt = datetime.fromisoformat(text)
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt
 
 
 def nullify_empty(record: dict, *keys: str) -> None:

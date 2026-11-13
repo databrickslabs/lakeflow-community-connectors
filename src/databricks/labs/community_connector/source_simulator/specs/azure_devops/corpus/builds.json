@@ -1,0 +1,323 @@
+[
+  {
+    "id": 1000,
+    "buildNumber": "victor-884",
+    "_links": {"self": {"href": "https://example.invalid/builds/1000"}},
+    "appendCommitMessageToRunName": true,
+    "buildNumberRevision": 1,
+    "logs": {"id": 1, "type": "Container", "url": "https://example.invalid/logs"},
+    "orchestrationPlan": {"planId": "00000000-0000-0000-0000-000000000000"},
+    "status": "victor-900",
+    "result": "kilo-582",
+    "queueTime": "lima-455",
+    "startTime": "lima-487",
+    "finishTime": "2024-01-01T00:00:00Z",
+    "reason": "xray-636",
+    "priority": "yankee-820",
+    "sourceBranch": "lima-542",
+    "sourceVersion": "november-759",
+    "definition": {
+      "id": 68359,
+      "name": "delta-359",
+      "path": "hotel-524",
+      "type": "charlie-743",
+      "revision": 81674,
+      "url": "sierra-310"
+    },
+    "repository": {
+      "id": "quebec-581",
+      "type": "foxtrot-316",
+      "name": "alpha-563",
+      "url": "lima-170"
+    },
+    "queue": {
+      "id": 63219,
+      "name": "juliet-690"
+    },
+    "requestedFor": {
+      "id": "november-721",
+      "displayName": "india-523",
+      "uniqueName": "juliet-514",
+      "url": "india-344",
+      "imageUrl": "foxtrot-748"
+    },
+    "requestedBy": {
+      "id": "juliet-917",
+      "displayName": "foxtrot-299",
+      "uniqueName": "golf-134",
+      "url": "india-763",
+      "imageUrl": "charlie-293"
+    },
+    "lastChangedBy": {
+      "id": "golf-854",
+      "displayName": "lima-836",
+      "uniqueName": "papa-824",
+      "url": "sierra-461",
+      "imageUrl": "kilo-758"
+    },
+    "lastChangedDate": "romeo-139",
+    "keepForever": true,
+    "retainedByRelease": false,
+    "tags": [
+      "xray-367"
+    ],
+    "parameters": "kilo-157",
+    "uri": "lima-694",
+    "url": "juliet-705",
+    "organization": "xray-907",
+    "project_name": "zulu-332"
+  },
+  {
+    "id": 1001,
+    "buildNumber": "hotel-270",
+    "status": "mike-827",
+    "result": "golf-755",
+    "queueTime": "tango-452",
+    "startTime": "alpha-702",
+    "finishTime": "2024-01-01T01:00:00Z",
+    "reason": "echo-518",
+    "priority": "foxtrot-558",
+    "sourceBranch": "quebec-272",
+    "sourceVersion": "kilo-547",
+    "definition": {
+      "id": 17037,
+      "name": "mike-378",
+      "path": "papa-783",
+      "type": "xray-290",
+      "revision": 36281,
+      "url": "india-149"
+    },
+    "repository": {
+      "id": "zulu-619",
+      "type": "foxtrot-692",
+      "name": "sierra-537",
+      "url": "bravo-157"
+    },
+    "queue": {
+      "id": 84274,
+      "name": "whiskey-371"
+    },
+    "requestedFor": {
+      "id": "india-117",
+      "displayName": "zulu-686",
+      "uniqueName": "tango-256",
+      "url": "quebec-759",
+      "imageUrl": "whiskey-669"
+    },
+    "requestedBy": {
+      "id": "yankee-623",
+      "displayName": "foxtrot-963",
+      "uniqueName": "november-651",
+      "url": "papa-684",
+      "imageUrl": "juliet-722"
+    },
+    "lastChangedBy": {
+      "id": "papa-349",
+      "displayName": "quebec-261",
+      "uniqueName": "romeo-240",
+      "url": "lima-272",
+      "imageUrl": "golf-733"
+    },
+    "lastChangedDate": "golf-114",
+    "keepForever": true,
+    "retainedByRelease": false,
+    "tags": [
+      "charlie-983",
+      "foxtrot-292"
+    ],
+    "parameters": "romeo-435",
+    "uri": "echo-291",
+    "url": "foxtrot-421",
+    "organization": "uniform-495",
+    "project_name": "xray-235"
+  },
+  {
+    "id": 1002,
+    "buildNumber": "hotel-714",
+    "status": "foxtrot-868",
+    "result": "mike-241",
+    "queueTime": "hotel-555",
+    "startTime": "zulu-387",
+    "finishTime": "2024-01-01T02:00:00Z",
+    "reason": "golf-201",
+    "priority": "bravo-898",
+    "sourceBranch": "papa-895",
+    "sourceVersion": "november-557",
+    "definition": {
+      "id": 32142,
+      "name": "juliet-754",
+      "path": "echo-577",
+      "type": "tango-551",
+      "revision": 68873,
+      "url": "lima-557"
+    },
+    "repository": {
+      "id": "tango-452",
+      "type": "charlie-411",
+      "name": "xray-951",
+      "url": "tango-736"
+    },
+    "queue": {
+      "id": 38599,
+      "name": "whiskey-130"
+    },
+    "requestedFor": {
+      "id": "lima-227",
+      "displayName": "hotel-198",
+      "uniqueName": "india-396",
+      "url": "papa-210",
+      "imageUrl": "delta-438"
+    },
+    "requestedBy": {
+      "id": "charlie-997",
+      "displayName": "sierra-613",
+      "uniqueName": "victor-127",
+      "url": "golf-955",
+      "imageUrl": "papa-916"
+    },
+    "lastChangedBy": {
+      "id": "delta-963",
+      "displayName": "delta-226",
+      "uniqueName": "foxtrot-951",
+      "url": "yankee-330",
+      "imageUrl": "bravo-440"
+    },
+    "lastChangedDate": "whiskey-695",
+    "keepForever": false,
+    "retainedByRelease": false,
+    "tags": [
+      "kilo-757"
+    ],
+    "parameters": "delta-909",
+    "uri": "whiskey-987",
+    "url": "bravo-486",
+    "organization": "victor-525",
+    "project_name": "juliet-153"
+  },
+  {
+    "id": 1003,
+    "buildNumber": "victor-527",
+    "status": "tango-295",
+    "result": "mike-327",
+    "queueTime": "bravo-991",
+    "startTime": "foxtrot-993",
+    "finishTime": "2024-01-01T03:00:00Z",
+    "reason": "lima-301",
+    "priority": "quebec-632",
+    "sourceBranch": "victor-987",
+    "sourceVersion": "xray-390",
+    "definition": {
+      "id": 62501,
+      "name": "india-430",
+      "path": "mike-282",
+      "type": "delta-308",
+      "revision": 20559,
+      "url": "oscar-887"
+    },
+    "repository": {
+      "id": "bravo-663",
+      "type": "whiskey-707",
+      "name": "sierra-218",
+      "url": "mike-772"
+    },
+    "queue": {
+      "id": 93641,
+      "name": "uniform-227"
+    },
+    "requestedFor": {
+      "id": "uniform-121",
+      "displayName": "echo-637",
+      "uniqueName": "zulu-742",
+      "url": "papa-312",
+      "imageUrl": "alpha-538"
+    },
+    "requestedBy": {
+      "id": "sierra-749",
+      "displayName": "india-974",
+      "uniqueName": "zulu-720",
+      "url": "kilo-171",
+      "imageUrl": "zulu-317"
+    },
+    "lastChangedBy": {
+      "id": "echo-797",
+      "displayName": "november-772",
+      "uniqueName": "mike-579",
+      "url": "victor-191",
+      "imageUrl": "quebec-384"
+    },
+    "lastChangedDate": "whiskey-927",
+    "keepForever": true,
+    "retainedByRelease": false,
+    "tags": [
+      "papa-486"
+    ],
+    "parameters": "kilo-263",
+    "uri": "hotel-144",
+    "url": "india-472",
+    "organization": "whiskey-211",
+    "project_name": "zulu-631"
+  },
+  {
+    "id": 1004,
+    "buildNumber": "xray-374",
+    "status": "november-549",
+    "result": "kilo-747",
+    "queueTime": "victor-366",
+    "startTime": "lima-132",
+    "finishTime": "2024-01-01T04:00:00Z",
+    "reason": "lima-502",
+    "priority": "whiskey-954",
+    "sourceBranch": "kilo-119",
+    "sourceVersion": "mike-851",
+    "definition": {
+      "id": 15273,
+      "name": "whiskey-814",
+      "path": "alpha-878",
+      "type": "november-500",
+      "revision": 77470,
+      "url": "echo-904"
+    },
+    "repository": {
+      "id": "golf-791",
+      "type": "kilo-592",
+      "name": "quebec-426",
+      "url": "hotel-526"
+    },
+    "queue": {
+      "id": 44656,
+      "name": "golf-825"
+    },
+    "requestedFor": {
+      "id": "alpha-441",
+      "displayName": "yankee-497",
+      "uniqueName": "tango-952",
+      "url": "mike-591",
+      "imageUrl": "uniform-522"
+    },
+    "requestedBy": {
+      "id": "november-827",
+      "displayName": "quebec-515",
+      "uniqueName": "foxtrot-411",
+      "url": "juliet-577",
+      "imageUrl": "victor-777"
+    },
+    "lastChangedBy": {
+      "id": "yankee-809",
+      "displayName": "quebec-908",
+      "uniqueName": "kilo-926",
+      "url": "whiskey-330",
+      "imageUrl": "quebec-822"
+    },
+    "lastChangedDate": "tango-296",
+    "keepForever": false,
+    "retainedByRelease": false,
+    "tags": [
+      "delta-239"
+    ],
+    "parameters": "oscar-128",
+    "uri": "charlie-993",
+    "url": "hotel-525",
+    "organization": "hotel-806",
+    "project_name": "kilo-895"
+  }
+]

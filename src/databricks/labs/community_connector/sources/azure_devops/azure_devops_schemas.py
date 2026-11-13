@@ -162,6 +162,57 @@ ICON_STRUCT = StructType(
     ]
 )
 
+BUILD_DEFINITION_STRUCT = StructType(
+    [
+        StructField("id", LongType(), True),
+        StructField("name", StringType(), True),
+        StructField("path", StringType(), True),
+        StructField("type", StringType(), True),
+        StructField("revision", LongType(), True),
+        StructField("url", StringType(), True),
+    ]
+)
+
+BUILD_REPOSITORY_STRUCT = StructType(
+    [
+        StructField("id", StringType(), True),
+        StructField("type", StringType(), True),
+        StructField("name", StringType(), True),
+        StructField("url", StringType(), True),
+    ]
+)
+
+BUILD_QUEUE_STRUCT = StructType(
+    [
+        StructField("id", LongType(), True),
+        StructField("name", StringType(), True),
+    ]
+)
+
+BUILD_LOG_STRUCT = StructType(
+    [
+        StructField("id", LongType(), True),
+        StructField("type", StringType(), True),
+        StructField("url", StringType(), True),
+    ]
+)
+
+TIMELINE_TASK_STRUCT = StructType(
+    [
+        StructField("id", StringType(), True),
+        StructField("name", StringType(), True),
+        StructField("version", StringType(), True),
+    ]
+)
+
+TIMELINE_ISSUE_STRUCT = StructType(
+    [
+        StructField("type", StringType(), True),
+        StructField("category", StringType(), True),
+        StructField("message", StringType(), True),
+    ]
+)
+
 
 # =============================================================================
 # Table Schemas
@@ -396,6 +447,79 @@ TABLE_SCHEMAS: dict[str, StructType] = {
             StructField("project_name", StringType(), False),
         ]
     ),
+    "pipelines": StructType(
+        [
+            StructField("id", LongType(), False),
+            StructField("name", StringType(), True),
+            StructField("folder", StringType(), True),
+            StructField("revision", LongType(), True),
+            StructField("url", StringType(), True),
+            StructField("organization", StringType(), False),
+            StructField("project_name", StringType(), False),
+        ]
+    ),
+    "builds": StructType(
+        [
+            StructField("id", LongType(), False),
+            StructField("buildNumber", StringType(), True),
+            StructField("status", StringType(), True),
+            StructField("result", StringType(), True),
+            StructField("queueTime", StringType(), True),
+            StructField("startTime", StringType(), True),
+            StructField("finishTime", StringType(), True),
+            StructField("reason", StringType(), True),
+            StructField("priority", StringType(), True),
+            StructField("sourceBranch", StringType(), True),
+            StructField("sourceVersion", StringType(), True),
+            StructField("definition", BUILD_DEFINITION_STRUCT, True),
+            StructField("repository", BUILD_REPOSITORY_STRUCT, True),
+            StructField("queue", BUILD_QUEUE_STRUCT, True),
+            StructField("requestedFor", IDENTITY_STRUCT, True),
+            StructField("requestedBy", IDENTITY_STRUCT, True),
+            StructField("lastChangedBy", IDENTITY_STRUCT, True),
+            StructField("lastChangedDate", StringType(), True),
+            StructField("keepForever", BooleanType(), True),
+            StructField("retainedByRelease", BooleanType(), True),
+            StructField("tags", ArrayType(StringType()), True),
+            StructField("parameters", StringType(), True),
+            StructField("uri", StringType(), True),
+            StructField("url", StringType(), True),
+            StructField("organization", StringType(), False),
+            StructField("project_name", StringType(), False),
+        ]
+    ),
+    "build_timeline": StructType(
+        [
+            StructField("id", StringType(), False),
+            StructField("parentId", StringType(), True),
+            StructField("type", StringType(), True),
+            StructField("name", StringType(), True),
+            StructField("identifier", StringType(), True),
+            StructField("order", LongType(), True),
+            StructField("state", StringType(), True),
+            StructField("result", StringType(), True),
+            StructField("resultCode", StringType(), True),
+            StructField("startTime", StringType(), True),
+            StructField("finishTime", StringType(), True),
+            StructField("lastModified", StringType(), True),
+            StructField("changeId", LongType(), True),
+            StructField("percentComplete", LongType(), True),
+            StructField("workerName", StringType(), True),
+            StructField("attempt", LongType(), True),
+            StructField("errorCount", LongType(), True),
+            StructField("warningCount", LongType(), True),
+            StructField("task", TIMELINE_TASK_STRUCT, True),
+            StructField("log", BUILD_LOG_STRUCT, True),
+            StructField(
+                "issues", ArrayType(TIMELINE_ISSUE_STRUCT), True
+            ),
+            StructField("url", StringType(), True),
+            StructField("build_id", LongType(), False),
+            StructField("build_finish_time", StringType(), True),
+            StructField("organization", StringType(), False),
+            StructField("project_name", StringType(), False),
+        ]
+    ),
 }
 
 
@@ -464,6 +588,20 @@ TABLE_METADATA: dict[str, dict] = {
     "workitem_types": {
         "primary_keys": ["referenceName", "project_name"],
         "ingestion_type": "snapshot",
+    },
+    "pipelines": {
+        "primary_keys": ["id", "project_name"],
+        "ingestion_type": "snapshot",
+    },
+    "builds": {
+        "primary_keys": ["id"],
+        "ingestion_type": "append",
+        "cursor_field": "finishTime",
+    },
+    "build_timeline": {
+        "primary_keys": ["build_id", "id"],
+        "ingestion_type": "append",
+        "cursor_field": "build_finish_time",
     },
 }
 

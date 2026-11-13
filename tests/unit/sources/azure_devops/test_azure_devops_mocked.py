@@ -519,3 +519,231 @@ def test_for_all_repos_propagates_non_runtime_error(conn):
 
     with pytest.raises(AttributeError):
         conn._for_all_repos({}, {}, buggy_reader)
+
+
+# ---------------------------------------------------------------------------
+# builds / build_timeline — pipeline runs and steps
+# ---------------------------------------------------------------------------
+
+
+def _build(build_id, finish):
+    return {"id": build_id, "status": "completed", "finishTime": finish}
+
+
+def test_builds_pages_by_continuation_header_and_drops_boundary(conn):
+    """Header-token pagination is followed; the inclusive ``minTime``
+    boundary build is dropped so append tables don't duplicate it."""
+    conn._session.get.side_effect = [
+        _response(
+            json_body={"value": [_build(1, "2024-01-01T10:00:00.1234567Z")]},
+            headers={"x-ms-continuationtoken": "tok"},
+        ),
+        _response(json_body={"value": [_build(2, "2024-01-01T11:00:00Z")]}),
+    ]
+    start = {"watermarks": {"proj1": "2024-01-01T10:00:00.1234567Z"}}
+
+    records, end = conn._read_builds(start, {})
+
+    assert [r["id"] for r in records] == [2]
+    assert end == {"watermarks": {"proj1": "2024-01-01T11:00:00Z"}}
+    assert conn._session.get.call_args_list[0].kwargs["params"]["minTime"]
+    assert (
+        conn._session.get.call_args_list[1].kwargs["params"]["continuationToken"]
+        == "tok"
+    )
+
+
+def test_builds_no_new_data_returns_start_offset(conn):
+    """Termination contract: nothing new ⇒ end_offset == start_offset."""
+    conn._session.get.return_value = _response(json_body={"value": []})
+    start = {"watermarks": {"proj1": "2024-01-01T10:00:00Z"}}
+
+    records, end = conn._read_builds(start, {})
+
+    assert list(records) == []
+    assert end == start
+
+
+def test_builds_cap_keeps_builds_tied_on_finish_time(conn):
+    """max_records_per_batch must not split builds sharing a finishTime."""
+    conn._session.get.return_value = _response(
+        json_body={
+            "value": [
+                _build(1, "2024-01-01T10:00:00Z"),
+                _build(2, "2024-01-01T11:00:00Z"),
+                _build(3, "2024-01-01T11:00:00Z"),
+                _build(4, "2024-01-01T12:00:00Z"),
+            ]
+        }
+    )
+
+    records, end = conn._read_builds({}, {"max_records_per_batch": "2"})
+
+    assert [r["id"] for r in records] == [1, 2, 3]
+    assert end["watermarks"]["proj1"] == "2024-01-01T11:00:00Z"
+
+
+def test_build_timeline_emits_steps_and_skips_404(conn):
+    """Each timeline record is tagged with its build; a retention-deleted
+    timeline (404) yields no rows instead of failing the batch."""
+    conn._session.get.side_effect = [
+        _response(
+            json_body={"value": [
+                _build(1, "2024-01-01T10:00:00Z"),
+                _build(2, "2024-01-01T11:00:00Z"),
+            ]}
+        ),
+        _response(
+            json_body={"records": [
+                {"id": "a", "type": "Stage", "name": "Build"},
+                {"id": "b", "type": "Task", "name": "Run tests", "task": {}},
+            ]}
+        ),
+        _response(status_code=404),
+    ]
+
+    rows, end = conn._read_build_timeline({}, {})
+    rows = list(rows)
+
+    assert [(r["build_id"], r["id"]) for r in rows] == [(1, "a"), (1, "b")]
+    assert rows[1]["task"] is None
+    assert rows[0]["build_finish_time"] == "2024-01-01T10:00:00Z"
+    assert end == {"watermarks": {"proj1": "2024-01-01T11:00:00Z"}}
+
+
+def test_build_timeline_raises_on_server_error(conn, monkeypatch):
+    """Non-404 failures must surface so steps aren't silently dropped."""
+    monkeypatch.setattr("time.sleep", lambda _s: None)
+    conn._session.get.side_effect = [
+        _response(json_body={"value": [_build(1, "2024-01-01T10:00:00Z")]}),
+        *[_response(status_code=500) for _ in range(5)],
+    ]
+
+    with pytest.raises(RuntimeError, match="build_timeline"):
+        conn._read_build_timeline({}, {})
+
+
+def test_build_timeline_single_build_keeps_offset_stable(conn):
+    conn._session.get.return_value = _response(
+        json_body={"records": [{"id": "a", "type": "Job"}]}
+    )
+
+    rows, end = conn._read_build_timeline({}, {"build_id": "42"})
+
+    assert [r["build_id"] for r in rows] == [42]
+    assert end == {}
+
+
+def test_pipelines_and_builds_raise_on_auth_error(conn):
+    """401/403 must surface, not be skipped like a missing (404) project."""
+    conn._session.get.return_value = _response(status_code=401)
+
+    with pytest.raises(RuntimeError, match="401"):
+        conn._read_pipelines({}, {})
+    with pytest.raises(RuntimeError, match="401"):
+        conn._read_builds({}, {})
+
+
+def test_pipelines_skips_project_without_pipelines(conn):
+    conn._session.get.return_value = _response(status_code=404)
+
+    records, _ = conn._read_pipelines({}, {})
+
+    assert list(records) == []
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        "2024-01-01T10:00:00Z",
+        "2024-01-01T10:00:00.5Z",
+        "2024-01-01T10:00:00.32373+00:00",
+        "2024-01-01T10:00:00.1234567Z",
+    ],
+)
+def test_parse_ts_handles_any_fraction_length(value):
+    """ADO emits 0-7 fractional digits; Python 3.10 accepts only 3 or 6."""
+    from databricks.labs.community_connector.sources.azure_devops.azure_devops_utils import (
+        parse_ts,
+    )
+
+    assert parse_ts(value).year == 2024
+    assert parse_ts("2024-01-01T10:00:00.5Z") > parse_ts("2024-01-01T10:00:00Z")
+
+
+def test_build_timeline_all_204_returns_start_offset(conn):
+    """A build that never ran returns 204 No Content (no JSON body). With
+    nothing to emit, the offset must not advance past an empty batch."""
+    conn._session.get.side_effect = [
+        _response(json_body={"value": [_build(1, "2024-01-01T10:00:00Z")]}),
+        _response(status_code=204),
+        _response(json_body={"value": []}),
+    ]
+
+    rows, end = conn._read_build_timeline({}, {})
+
+    assert list(rows) == []
+    assert end == {}
+
+
+def test_build_timeline_advances_past_empty_batches_to_find_rows(conn):
+    """With a cap of 1 build, an all-204 batch is skipped and the next
+    batch's rows are returned with the advanced offset."""
+    conn._session.get.side_effect = [
+        _response(json_body={"value": [
+            _build(1, "2024-01-01T10:00:00Z"),
+            _build(2, "2024-01-01T11:00:00Z"),
+        ]}),
+        _response(status_code=204),
+        _response(json_body={"value": [_build(2, "2024-01-01T11:00:00Z")]}),
+        _response(json_body={"records": [{"id": "a", "type": "Stage"}]}),
+    ]
+
+    rows, end = conn._read_build_timeline(
+        {}, {"max_records_per_batch": "1"}
+    )
+
+    assert [(r["build_id"], r["id"]) for r in rows] == [(2, "a")]
+    assert end == {"watermarks": {"proj1": "2024-01-01T11:00:00Z"}}
+
+
+def test_builds_are_capped_at_connector_init_time(conn):
+    """Builds finishing after the connector started wait for the next run."""
+    future = "2999-01-01T00:00:00Z"
+    conn._session.get.return_value = _response(
+        json_body={"value": [_build(1, "2024-01-01T10:00:00Z"), _build(2, future)]}
+    )
+
+    records, end = conn._read_builds({}, {})
+
+    assert [r["id"] for r in records] == [1]
+    assert end == {"watermarks": {"proj1": "2024-01-01T10:00:00Z"}}
+    assert conn._session.get.call_args.kwargs["params"]["maxTime"]
+
+
+def test_workitems_bulk_fetch_omits_unreadable_items(conn):
+    """Null entries (deleted/unreadable IDs) are skipped, not fatal."""
+    conn._session.get.return_value = _response(
+        json_body={"value": [None, {"id": 2, "rev": 1, "fields": {}}]}
+    )
+
+    records, _ = conn._fetch_workitems_by_ids("proj1", ["1", "2"])
+
+    assert [r["id"] for r in records] == [2]
+    assert conn._session.get.call_args.kwargs["params"]["$errorPolicy"] == "omit"
+
+
+def test_workitems_bulk_fetch_bisects_on_404(conn):
+    """One unreadable ID (404 for the batch) must not drop the others."""
+
+    def fake_get(url, params=None, **kwargs):
+        ids = params["ids"].split(",")
+        if "1" in ids:
+            return _response(status_code=404)
+        return _response(json_body={"value": [{"id": int(i), "fields": {}} for i in ids]})
+
+    conn._session.get.side_effect = fake_get
+
+    records, _ = conn._fetch_workitems_by_ids("proj1", ["1", "2", "3", "4"])
+
+    assert sorted(r["id"] for r in records) == [2, 3, 4]
