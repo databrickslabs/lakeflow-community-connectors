@@ -1,0 +1,47 @@
+[
+  {
+    "username": "juliet-768",
+    "user_id": 1000,
+    "event": "lima-840-pk0",
+    "ip_address": "charlie-509",
+    "access": "victor-269",
+    "time": "2024-01--pk0",
+    "egnyte_domain": "lima-861"
+  },
+  {
+    "username": "juliet-378",
+    "user_id": 1001,
+    "event": "sierra-2-pk1",
+    "ip_address": "charlie-652",
+    "access": "delta-420",
+    "time": "2024-01--pk1",
+    "egnyte_domain": "kilo-324"
+  },
+  {
+    "username": "xray-856",
+    "user_id": 1002,
+    "event": "xray-180-pk2",
+    "ip_address": "yankee-584",
+    "access": "alpha-587",
+    "time": "2024-01--pk2",
+    "egnyte_domain": "hotel-246"
+  },
+  {
+    "username": "alpha-688",
+    "user_id": 1003,
+    "event": "xray-560-pk3",
+    "ip_address": "oscar-544",
+    "access": "yankee-539",
+    "time": "2024-01--pk3",
+    "egnyte_domain": "victor-351"
+  },
+  {
+    "username": "november-806",
+    "user_id": 1004,
+    "event": "quebec-7-pk4",
+    "ip_address": "uniform-597",
+    "access": "delta-809",
+    "time": "2024-01--pk4",
+    "egnyte_domain": "echo-872"
+  }
+]

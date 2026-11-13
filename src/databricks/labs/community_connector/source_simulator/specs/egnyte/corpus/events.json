@@ -1,0 +1,92 @@
+[
+  {
+    "id": 1000,
+    "timestamp": "2024-01-10T11:55:42Z",
+    "action_source": "victor-637",
+    "actor": 84796,
+    "type": "india-597",
+    "action": "kilo-571",
+    "data": {
+      "target_path": "alpha-491",
+      "target_id": "echo-778",
+      "target_group_id": "charlie-480",
+      "source_path": "uniform-595",
+      "source_id": "papa-640",
+      "source_group_id": "alpha-821",
+      "is_folder": true
+    },
+    "egnyte_domain": "romeo-694"
+  },
+  {
+    "id": 1001,
+    "timestamp": "2024-01-02T07:28:09Z",
+    "action_source": "papa-508",
+    "actor": 68077,
+    "type": "yankee-745",
+    "action": "zulu-316",
+    "data": {
+      "target_path": "lima-352",
+      "target_id": "alpha-966",
+      "target_group_id": "sierra-538",
+      "source_path": "hotel-362",
+      "source_id": "echo-366",
+      "source_group_id": "kilo-734",
+      "is_folder": false
+    },
+    "egnyte_domain": "echo-685"
+  },
+  {
+    "id": 1002,
+    "timestamp": "2024-01-12T06:42:02Z",
+    "action_source": "zulu-727",
+    "actor": 31827,
+    "type": "quebec-405",
+    "action": "foxtrot-552",
+    "data": {
+      "target_path": "tango-879",
+      "target_id": "delta-852",
+      "target_group_id": "whiskey-417",
+      "source_path": "bravo-973",
+      "source_id": "november-780",
+      "source_group_id": "mike-375",
+      "is_folder": true
+    },
+    "egnyte_domain": "victor-429"
+  },
+  {
+    "id": 1003,
+    "timestamp": "2024-01-11T13:52:38Z",
+    "action_source": "delta-817",
+    "actor": 51392,
+    "type": "india-468",
+    "action": "uniform-415",
+    "data": {
+      "target_path": "sierra-213",
+      "target_id": "victor-751",
+      "target_group_id": "golf-580",
+      "source_path": "november-488",
+      "source_id": "november-869",
+      "source_group_id": "foxtrot-273",
+      "is_folder": false
+    },
+    "egnyte_domain": "charlie-566"
+  },
+  {
+    "id": 1004,
+    "timestamp": "2024-01-31T16:36:03Z",
+    "action_source": "foxtrot-763",
+    "actor": 2342,
+    "type": "echo-556",
+    "action": "whiskey-174",
+    "data": {
+      "target_path": "quebec-978",
+      "target_id": "alpha-420",
+      "target_group_id": "lima-920",
+      "source_path": "juliet-803",
+      "source_id": "sierra-639",
+      "source_group_id": "alpha-771",
+      "is_folder": false
+    },
+    "egnyte_domain": "mike-803"
+  }
+]
