@@ -1,0 +1,56 @@
+[
+  {
+    "id": "sierra-401-sc0",
+    "createdAt": "2024-02-04T07:20:11Z",
+    "updatedAt": "2024-02-04T07:20:11Z",
+    "change": -2,
+    "action": "taken",
+    "partType": {
+      "id": "lima-572-pk0",
+      "partNumber": "PN-4471",
+      "externalReference": "ERP-4471",
+      "name": "hydraulic seal kit"
+    },
+    "storageAsset": {
+      "id": "hotel-220-as0",
+      "assetNumber": "AS-0001",
+      "assetType": "warehouse"
+    }
+  },
+  {
+    "id": "tango-985-sc1",
+    "createdAt": "2024-02-04T08:05:47Z",
+    "updatedAt": "2024-02-04T08:41:02Z",
+    "change": 1,
+    "action": "reserved",
+    "partType": {
+      "id": "india-79-pk1",
+      "partNumber": "PN-9902",
+      "externalReference": null,
+      "name": "drive belt"
+    },
+    "storageAsset": {
+      "id": "hotel-220-as0",
+      "assetNumber": "AS-0001",
+      "assetType": "warehouse"
+    }
+  },
+  {
+    "id": "victor-118-sc2",
+    "createdAt": "2024-02-05T06:52:30Z",
+    "updatedAt": "2024-02-05T06:52:30Z",
+    "change": 3,
+    "action": "planned",
+    "partType": {
+      "id": "juliet-3-pk2",
+      "partNumber": "PN-3310",
+      "externalReference": "ERP-3310",
+      "name": "filter cartridge"
+    },
+    "storageAsset": {
+      "id": "mike-733-as1",
+      "assetNumber": "AS-0002",
+      "assetType": "service van"
+    }
+  }
+]

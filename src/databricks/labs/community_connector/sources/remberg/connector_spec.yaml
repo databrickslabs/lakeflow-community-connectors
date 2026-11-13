@@ -52,9 +52,20 @@ connection:
 #                             Default 1000 (the server maximum; server
 #                             default would be 20).
 #   - max_records_per_batch   Opt-in per-microbatch cap on emitted rows from
-#                             CDC tables, applied at page granularity. The
+#                             CDC tables, applied at page granularity (at
+#                             parent granularity for the fan-out tables). The
 #                             bounded updatedAt range stays pinned in the
 #                             offset while split across microbatches.
 #                             Default: drain the range in one microbatch.
+#   - full_parent_scan        Fan-out tables only (work_order_times,
+#                             work_order_stock_changes, part_inventories,
+#                             part_stock_changes, ticket_conversations).
+#                             When true, drops the range's lower bound so
+#                             every parent record is revisited instead of
+#                             only those changed since the cursor. Use for
+#                             backfills, or if editing a sub-resource turns
+#                             out not to bump its parent's updatedAt.
+#                             Costs one request per parent per run.
+#                             Default: false.
 # ============================================================================
-external_options_allowlist: "start_timestamp,lookback_seconds,limit,max_records_per_batch"
+external_options_allowlist: "start_timestamp,lookback_seconds,limit,max_records_per_batch,full_parent_scan"

@@ -1,0 +1,71 @@
+# Example pipeline spec for the remberg connector.
+#
+# Deploy with the community-connector CLI (managed ingestion builds the
+# connector wheels from the local source tree, so a working branch is what
+# actually runs):
+#
+#   community-connector create_connection remberg remberg_conn \
+#     -o '{"api_key": "<key>"}' \
+#     --spec ./src/databricks/labs/community_connector/sources/remberg/connector_spec.yaml
+#
+#   community-connector create_pipeline remberg remberg_test \
+#     -ps ./src/databricks/labs/community_connector/sources/remberg/remberg_pipeline_spec.yaml \
+#     -c <catalog> -t <schema>
+#
+# Pass the local --spec on create_connection: it is what puts this
+# connector's options (including full_parent_scan) into the connection's
+# externalOptionsAllowList. Fetching the spec from the upstream repo instead
+# would reject any option not yet merged there.
+
+# NOTE on `limit`: the connector's built-in default is 1000 (the documented
+# server maximum), but live testing showed most remberg endpoints fail or time
+# out at that size and need something far smaller. Set it explicitly per table
+# until the code default is lowered.
+
+connection_name: remberg_conn
+objects:
+  # ---- flat tables: cheap, one request per page ----
+  - table:
+      source_table: work_orders
+      table_configuration:
+        # Bound the very first sync. Without this the first run backfills the
+        # whole tenant — fine for the flat tables, but the fan-out tables
+        # below inherit this parent range, and there each parent record costs
+        # a request. Widen it once you have seen a run complete.
+        start_timestamp: "2026-08-01T00:00:00.000Z"
+        limit: "20"
+        max_records_per_batch: "10000"
+
+  - table:
+      source_table: asset_status_signals
+      table_configuration:
+        # Cursor is createdAt (the only bound this endpoint offers), so
+        # resolutions of already-ingested signals are not picked up
+        # incrementally — full-refresh this table if resolution state matters.
+        start_timestamp: "2026-08-01T00:00:00.000Z"
+        limit: "20"
+        max_records_per_batch: "10000"
+
+  # ---- fan-out table: one request per parent in the range ----
+  # Start with just this one. Add work_order_stock_changes, part_inventories,
+  # part_stock_changes and ticket_conversations once a run completes cleanly
+  # and the row counts look right.
+  - table:
+      source_table: work_order_times
+      table_configuration:
+        start_timestamp: "2026-08-01T00:00:00.000Z"
+        # For a fan-out table `limit` sizes BOTH the parent listing and the
+        # child endpoint's own pagination. A small value means more parent
+        # pages, but per-parent requests dominate the cost either way.
+        limit: "20"
+        max_records_per_batch: "10000"
+        # Uncomment to revisit every parent each run instead of only those
+        # changed since the cursor. Needed if editing a time entry turns out
+        # NOT to bump its work order's updatedAt — verify that before
+        # trusting the incremental default.
+        # full_parent_scan: "true"
+        #
+        # Uncomment to cap rows per microbatch during a large backfill. The
+        # split lands on a parent boundary, so a work order's time entries
+        # are never torn across two batches.
+        # max_records_per_batch: "50000"
