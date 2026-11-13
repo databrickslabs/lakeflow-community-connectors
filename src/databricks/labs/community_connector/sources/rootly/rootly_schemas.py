@@ -4,6 +4,7 @@ Source: https://rootly-heroku.s3.amazonaws.com/swagger/v1/swagger.json
 Input SHA256: f3b255f4b64ad713dac2b04d43803adeea9081ea4dbf9ff2caa5140c8cd93355
 Regenerator: tests/unit/sources/rootly/generate_schemas.py
 Open-ended objects use VariantType; strings (including dates) remain strings.
+incidents.updated_at is attributes.updated_at in fixed-width UTC, used as the cursor.
 """
 
 from pyspark.sql.types import (
@@ -600,6 +601,7 @@ INCIDENTS_SCHEMA = StructType(
     [
         StructField("id", StringType(), True),
         StructField("type", StringType(), True),
+        StructField("updated_at", StringType(), True),
         StructField("attributes", INCIDENTS_ATTRIBUTES_SCHEMA, True),
     ]
 )

@@ -78,6 +78,15 @@ def generate(openapi_path: Path) -> None:
             "application/vnd.api+json"
         ]["schema"]
         rows[table] = resolve(schema)["properties"]["data"]["items"]
+    # Ingestion sequences by a top-level column. The connector writes the incident
+    # cursor there in UTC, so declare it next to id and type.
+    incident = rows["incidents"]["properties"]
+    cursor = {"updated_at": incident["attributes"]["properties"]["updated_at"]}
+    rows["incidents"]["properties"] = {
+        **{key: incident[key] for key in ("id", "type")},
+        **cursor,
+        **{key: value for key, value in incident.items() if key not in ("id", "type")},
+    }
     entries = [f'    "{table}": {expression(row, table)},' for table, row in rows.items()]
     imports = [
         "ArrayType",
@@ -97,6 +106,7 @@ def generate(openapi_path: Path) -> None:
         f"Input SHA256: {digest}\n"
         "Regenerator: tests/unit/sources/rootly/generate_schemas.py\n"
         "Open-ended objects use VariantType; strings (including dates) remain strings.\n"
+        "incidents.updated_at is attributes.updated_at in fixed-width UTC, used as the cursor.\n"
         '"""\n\n'
         "from pyspark.sql.types import (\n"
         + "".join(f"    {name},\n" for name in sorted(imports))
@@ -125,7 +135,8 @@ def generate(openapi_path: Path) -> None:
         "Generated from the public OpenAPI list-response schemas. This inventory includes "
         "every declared resource field, including nested fields. Undeclared object shapes "
         "are retained as VARIANT. Response-level pagination and included resources "
-        "are not rows.\n\n"
+        "are not rows. `incidents.updated_at` is `attributes.updated_at` in fixed-width "
+        "UTC, added by the connector as the ingestion cursor.\n\n"
         f"Input SHA256: `{digest}`.\n\n"
         "## Relationships and joins\n\n"
         "See [relationship keys and SQL examples](relationships.md) for joins "

@@ -242,7 +242,8 @@ def test_discovery_requires_no_requests_and_rejects_paths(connector, transport):
         assert metadata["primary_keys"] == ["id"]
         assert metadata["ingestion_type"] == ("cdc" if table == "incidents" else "snapshot")
         if table == "incidents":
-            assert metadata["cursor_field"] == "attributes.updated_at"
+            assert metadata["cursor_field"] == "updated_at"
+            assert "updated_at" in connector.get_table_schema(table, {}).fieldNames()
     for method in (connector.get_table_schema, connector.read_table_metadata):
         with pytest.raises(ValueError, match="Unsupported"):
             method("../users", {})
@@ -279,6 +280,8 @@ def test_open_objects_and_empty_structs_remain_spark_compatible(connector, trans
     replies.append(response(page([record], next_cursor=None)))
     rows, _ = connector.read_table("incidents", None, {})
     prepared = next(rows)
+    assert prepared["attributes"]["updated_at"] == "2026-01-01T00:00:00Z"
+    assert prepared["updated_at"] == "2026-01-01T00:00:00.000000+00:00"
     variant = prepared["attributes"]["labels"]
     assert isinstance(variant, VariantVal)
     assert variant.toPython() == labels

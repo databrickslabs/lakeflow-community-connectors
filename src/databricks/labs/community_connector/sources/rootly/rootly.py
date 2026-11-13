@@ -49,7 +49,7 @@ class RootlyLakeflowConnect(LakeflowConnect):
         if table_name == "incidents":
             return {
                 "primary_keys": ["id"],
-                "cursor_field": "attributes.updated_at",
+                "cursor_field": "updated_at",
                 "ingestion_type": "cdc",
             }
         return {"primary_keys": ["id"], "ingestion_type": "snapshot"}
@@ -112,6 +112,9 @@ class RootlyLakeflowConnect(LakeflowConnect):
         if next_cursor is None and meta.get("next_page") is not None:
             raise RuntimeError("Rootly cursor pagination metadata is inconsistent")
         previous = _timestamp(since) if since is not None else None
+        # Ingestion sequences by a top-level string column. Rootly may report any UTC
+        # offset, so write the cursor as fixed-width UTC, which sorts chronologically.
+        cursors = []
         for row in rows:
             updated = _timestamp(row["attributes"].get("updated_at"))
             if (previous is not None and updated < previous) or updated >= _timestamp(until):
@@ -119,6 +122,7 @@ class RootlyLakeflowConnect(LakeflowConnect):
                     "Rootly incidents are outside the requested order or time window"
                 )
             previous = updated
+            cursors.append(updated.isoformat(timespec="microseconds"))
         if next_cursor is not None:
             end_offset = {
                 "updated_through": since,
@@ -128,7 +132,10 @@ class RootlyLakeflowConnect(LakeflowConnect):
             }
         else:
             end_offset = {"updated_through": until}
-        return (_prepare_row(row, TABLE_SCHEMAS["incidents"]) for row in rows), end_offset
+        return (
+            _prepare_row({**row, "updated_at": cursor}, TABLE_SCHEMAS["incidents"])
+            for row, cursor in zip(rows, cursors)
+        ), end_offset
 
     def _validate_table(self, table_name: str) -> None:
         if table_name not in TABLE_SCHEMAS:

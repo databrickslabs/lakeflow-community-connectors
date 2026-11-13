@@ -38,6 +38,20 @@ def read(connector, offset=None, size="2"):
     return list(rows), end
 
 
+def test_cursor_column_sorts_chronologically_across_utc_offsets(connector, transport):
+    _, replies, _ = transport
+    connector._init_time = CUTOFF
+    # 08:30Z then 09:10Z: the raw strings sort in the opposite order.
+    raw = ["2026-11-01T01:30:00.000-07:00", "2026-11-01T01:10:00.5-08:00"]
+    replies.append(response(page([incident("a", raw[0]), incident("b", raw[1])], next_cursor=None)))
+    rows, _ = read(connector)
+    assert [row["attributes"]["updated_at"] for row in rows] == raw
+    assert [row["updated_at"] for row in rows] == [
+        "2026-11-01T08:30:00.000000+00:00",
+        "2026-11-01T09:10:00.500000+00:00",
+    ]
+
+
 def test_equal_timestamps_cross_pages_and_resume_on_new_instance(connector, transport):
     calls, replies, _ = transport
     connector._init_time = CUTOFF

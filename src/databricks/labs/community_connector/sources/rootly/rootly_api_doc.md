@@ -53,7 +53,8 @@ attributes or a display/sequential incident number. Keep string IDs as strings, 
 
 ## Ingestion Type
 
-Incidents use `cdc`, primary key `id`, and cursor field `attributes.updated_at`. Each call returns
+Incidents use `cdc`, primary key `id`, and cursor field `updated_at` (a top-level copy of
+`attributes.updated_at` in fixed-width UTC, so string ordering is chronological). Each call returns
 one page plus a JSON-serializable checkpoint. The connector fixes a UTC whole-second cutoff at
 initialization and requests half-open windows using `filter[updated_at][gte]` (when a completed
 watermark exists), `filter[updated_at][lt]`, and `sort=updated_at`. The first run has no lower bound.

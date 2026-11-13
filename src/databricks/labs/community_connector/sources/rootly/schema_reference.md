@@ -1,6 +1,6 @@
 # Rootly schema field reference
 
-Generated from the public OpenAPI list-response schemas. This inventory includes every declared resource field, including nested fields. Undeclared object shapes are retained as VARIANT. Response-level pagination and included resources are not rows.
+Generated from the public OpenAPI list-response schemas. This inventory includes every declared resource field, including nested fields. Undeclared object shapes are retained as VARIANT. Response-level pagination and included resources are not rows. `incidents.updated_at` is `attributes.updated_at` in fixed-width UTC, added by the connector as the ingestion cursor.
 
 Input SHA256: `f3b255f4b64ad713dac2b04d43803adeea9081ea4dbf9ff2caa5140c8cd93355`.
 
@@ -18,6 +18,7 @@ nested schema; a top-level JSON:API `relationships` object is not required for e
 |---|---|
 | `id` | string |
 | `type` | string |
+| `updated_at` | string |
 | `attributes` | object |
 | `attributes.id` | string |
 | `attributes.sequential_id` | integer |

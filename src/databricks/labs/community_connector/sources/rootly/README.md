@@ -42,7 +42,8 @@ upstream review, use the code from this branch rather than assuming Rootly appea
 ## Supported Objects
 
 Names are case sensitive. All objects use primary key `id`. Incidents use incremental CDC upserts
-ordered by `attributes.updated_at`; the other six objects use full-refresh (SNAPSHOT) ingestion.
+ordered by top-level `updated_at` (`attributes.updated_at` in UTC); the other six objects use
+full-refresh (SNAPSHOT) ingestion.
 There are no deletion-event streams or write-back operations.
 
 | Object | Data |
@@ -82,7 +83,7 @@ These options sit directly under each `table` in the pipeline specification.
 |---|---|---|
 | `scd_type` | No | `SCD_TYPE_1` (default) or `SCD_TYPE_2` for change tracking |
 | `primary_keys` | No | Override the default primary key `id` |
-| `sequence_by` | No | Ordering column; incidents default to `attributes.updated_at` |
+| `sequence_by` | No | Ordering column; incidents default to `updated_at` |
 | `cluster_by` | No | Destination columns for Liquid Clustering |
 
 ### Rootly Options
@@ -106,7 +107,7 @@ of 1,000 for these list APIs in its [pagination overview](https://docs.rootly.co
   filters, sort, cutoff and page size stay fixed while resuming a partial window.
 - Each batch reads one page. Its checkpoint stores the window and next cursor; the timestamp
   watermark advances only after the final page succeeds. A retry can replay rows, which CDC
-  upserts reconcile by `id` and `attributes.updated_at`. The same completed offset ends the run.
+  upserts reconcile by `id` and `updated_at`. The same completed offset ends the run.
 - Incidents deleted in Rootly, newly hidden by permissions, or made visible without an `updated_at`
   change cannot be reconciled by this feed. Run a full refresh to rebuild from the visible set.
   The API is not a historical change log or a point-in-time snapshot; it does not preserve every
