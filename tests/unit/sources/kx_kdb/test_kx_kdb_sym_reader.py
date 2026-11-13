@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import time
+from pathlib import Path
 
 import pytest
 
@@ -16,6 +17,10 @@ from databricks.labs.community_connector.sources.kx_kdb.sym_reader import (
 )
 
 _CONFIG = PyKxRuntimeConfig(license_directory="/tmp/lic")
+
+# Files written by KDB-X 5.0 (2026.01.22) through PyKX 4.0.0b5: ``hdb`` by
+# ``.Q.dpft`` (sym parted), ``vectors`` by ``set`` (``zipped`` gzip-compressed).
+_Q_FILES = Path(__file__).parent / "q_files"
 
 
 @pytest.fixture(autouse=True)
@@ -251,9 +256,13 @@ def _q_symbol_list(names):
     return b"\xff\x01\x0b\x00\x00\x00\x00\x00" + b"".join(n.encode() + b"\0" for n in names)
 
 
-def _q_vector(type_code, width, rows, attr=0):
-    """Bytes q writes for an uncompressed fixed-width vector of ``rows`` elements."""
-    return b"\xfe\x20" + bytes([type_code, attr]) + bytes(12) + bytes(width * rows)
+def _q_vector(type_code, width, rows, attr=0, stored=0):
+    """Bytes of an uncompressed fixed-width vector of ``rows`` elements.
+
+    ``stored`` is the element count written in header bytes 8-15.
+    """
+    header = b"\xfe\x20" + bytes([type_code, attr]) + bytes(4) + stored.to_bytes(8, "little")
+    return header + bytes(width * rows)
 
 
 def _q_enum(rows):
@@ -313,6 +322,47 @@ def test_probe_skips_attributed_and_truncated_columns(tmp_path):
     )
 
     assert _probe(tmp_path).row_count == 5
+
+
+def test_probe_accepts_a_count_stored_in_the_header(tmp_path):
+    _q_partition(tmp_path, {"time": _q_vector(12, 8, 5, stored=5)})
+
+    assert _probe(tmp_path).row_count == 5
+
+
+def test_probe_skips_a_stored_count_that_disagrees_with_the_file_size(tmp_path):
+    alone, mixed = tmp_path / "alone", tmp_path / "mixed"
+    alone.mkdir()
+    mixed.mkdir()
+    _q_partition(alone, {"time": _q_vector(12, 8, 5, stored=4)})
+    _q_partition(mixed, {"a": _q_vector(7, 8, 5, stored=6), "b": _q_vector(9, 8, 5)})
+
+    assert _probe(alone) is None
+    assert _probe(mixed).row_count == 5
+
+
+def test_probe_reads_a_partition_written_by_q():
+    shape = probe_partition_shape(
+        hdb_root_path=str(_Q_FILES / "hdb"), kdb_table_name="fxt", date_partition="2024.01.01"
+    )
+
+    assert (shape.present, shape.complete, shape.row_count, shape.missing_columns) == (
+        True,
+        True,
+        5,
+        (),
+    )
+
+
+@pytest.mark.parametrize(
+    ("name", "rows"), [("plain_long", 5), ("plain_empty", 0), ("zipped", None)]
+)
+def test_probe_reads_vectors_written_by_q(tmp_path, name, rows):
+    _q_partition(tmp_path, {"c": (_Q_FILES / "vectors" / name).read_bytes()})
+
+    shape = _probe(tmp_path)
+
+    assert (shape.row_count if shape else None) == rows
 
 
 def test_probe_defers_to_q_when_no_column_is_fixed_width(tmp_path):

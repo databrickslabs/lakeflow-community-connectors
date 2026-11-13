@@ -78,6 +78,10 @@ def _incomplete(reason="has no .d file"):
     return PartitionShape(present=True, complete=False, reason=reason)
 
 
+def _recent():
+    return PartitionShape(present=True, complete=False, recent=True, reason="changed recently")
+
+
 def _ranges(date, total, size):
     return [
         {
@@ -250,13 +254,31 @@ def test_only_the_newest_date_counts_every_column_but_every_date_checks_age(monk
 
 def test_a_recently_modified_older_date_waits_instead_of_failing(monkeypatch, tmp_path):
     connector = _connector(_build_hdb(tmp_path))
-    _Shapes(
-        monkeypatch,
-        **{"2024_01_02": PartitionShape(present=True, complete=False, recent=True, reason="new")},
-    )
+    _Shapes(monkeypatch, **{"2024_01_02": _recent()})
 
     options = {"min_partition_age_minutes": "30"}
     assert connector.latest_offset("trades", options) == {"date_partition": "2024.01.01"}
+
+
+def test_a_recent_first_date_keeps_the_offset_instead_of_failing(monkeypatch, tmp_path):
+    connector = _connector(_build_hdb(tmp_path))
+    _Shapes(monkeypatch, **{"2024_01_02": _recent()})
+    start = {"date_partition": "2024.01.01"}
+
+    assert connector.latest_offset("trades", {"min_partition_age_minutes": "30"}, start) == start
+
+
+def test_a_recent_date_is_checked_again_and_admitted_once_it_settles(monkeypatch, tmp_path):
+    connector = _connector(_build_hdb(tmp_path))
+    shapes = _Shapes(monkeypatch, **{"2024_01_02": _recent()})
+    options = {"min_partition_age_minutes": "30"}
+    first = connector.latest_offset("trades", options)
+
+    shapes.by_date["2024.01.02"] = _complete(3)
+
+    assert connector.latest_offset("trades", options, first) == {"date_partition": "2024.01.03"}
+    probed = [call["date_partition"] for call in shapes.calls]
+    assert probed.count("2024.01.02") == 2
 
 
 def test_minimum_age_is_validated_even_when_the_newest_date_is_excluded(tmp_path):

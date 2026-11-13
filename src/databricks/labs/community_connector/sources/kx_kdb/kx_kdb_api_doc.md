@@ -125,7 +125,8 @@ without the caps.
 The driver checks each date once. Older dates are read from their file
 headers on several threads: `.d` is a plain q symbol list, and the row count
 comes from the size of the first uncompressed, unattributed fixed-width
-column. Dates in another layout (for example compressed columns) and the
+column. When that column's header also stores a count (bytes 8-15), the two
+must agree. Dates in another layout (for example compressed columns) and the
 table's newest date, whose columns are all counted, are checked with q.
 `get_partitions()` then splits each admitted date into contiguous row ranges
 of at most `max_rows_per_task` rows:

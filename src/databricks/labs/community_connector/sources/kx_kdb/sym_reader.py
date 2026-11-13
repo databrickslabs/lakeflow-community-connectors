@@ -56,7 +56,9 @@ _SYMBOL_LIST_MAGIC = b"\xff\x01\x0b\x00"
 _SYMBOL_LIST_HEADER_BYTES = 8
 _MAX_SYMBOL_LIST_BYTES = 1 << 20
 # Layout that q writes for an uncompressed, unattributed fixed-width vector: a
-# 16-byte header (magic, type, then zeros) followed by the elements.
+# 16-byte header (magic, type, attribute, 4 zero bytes, then the element count
+# as a little-endian int64, or zero when the count is left to the file size)
+# followed by the elements.
 _SIMPLE_VECTOR_MAGIC = b"\xfe\x20"
 _SIMPLE_VECTOR_HEADER_BYTES = 16
 _Q_TYPE_WIDTHS = {
@@ -360,14 +362,18 @@ def _simple_vector_length(path: str, entry: os.DirEntry) -> int | None:
     if (
         len(header) < _SIMPLE_VECTOR_HEADER_BYTES
         or not header.startswith(_SIMPLE_VECTOR_MAGIC)
-        or any(header[3:])
+        or any(header[3:8])
     ):
         return None
     width = _Q_TYPE_WIDTHS.get(header[2])
     payload = size - _SIMPLE_VECTOR_HEADER_BYTES
     if width is None or payload < 0 or payload % width:
         return None
-    return payload // width
+    length = payload // width
+    stored = int.from_bytes(header[8:16], "little")
+    if stored not in (0, length):
+        return None
+    return length
 
 
 def _chunk_slices(row_count: int, chunk_size: int) -> Iterator[tuple[int, int]]:
