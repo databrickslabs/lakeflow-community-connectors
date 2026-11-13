@@ -1,0 +1,38 @@
+[
+  {
+    "id": "31115110",
+    "name": "Test work history report",
+    "description": "Synthetic report for the simulator",
+    "createdBy": "9900099",
+    "configuration": {
+      "columns": [],
+      "filters": []
+    },
+    "type": "standard",
+    "modificationDate": "2024-05-01T10:00:00",
+    "creationDate": "2024-01-01T10:00:00",
+    "folderId": 9901,
+    "modifiedBy": "9900099",
+    "isScheduled": false,
+    "isComparable": false,
+    "scheduleStatus": "none"
+  },
+  {
+    "id": "9900002",
+    "name": "Test headcount report",
+    "description": "",
+    "createdBy": "9900099",
+    "configuration": {
+      "columns": [],
+      "filters": []
+    },
+    "type": "standard",
+    "modificationDate": "2024-06-01T10:00:00",
+    "creationDate": "2024-02-01T10:00:00",
+    "folderId": 9901,
+    "modifiedBy": "9900099",
+    "isScheduled": true,
+    "isComparable": true,
+    "scheduleStatus": "active"
+  }
+]
