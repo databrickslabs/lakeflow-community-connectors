@@ -1,0 +1,15 @@
+{
+  "version": 1,
+  "endpoints": [
+    {
+      "method": "POST",
+      "url": "https://<tenant>.onestreamcloud.com/OneStreamApi/api/DataProvider/GetAdoDataSetForSqlCommand",
+      "count": 45,
+      "param_shapes": [
+        [
+          "api-version"
+        ]
+      ]
+    }
+  ]
+}

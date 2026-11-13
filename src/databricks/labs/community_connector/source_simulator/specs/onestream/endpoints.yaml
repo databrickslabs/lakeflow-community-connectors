@@ -1,0 +1,21 @@
+# OneStream REST API (OneStreamApi) -- DataProvider SQL command.
+#
+# The connector issues every read as generated, read-only T-SQL through
+#   POST {base_url}/OneStreamApi/api/DataProvider/GetAdoDataSetForSqlCommand?api-version=5.2.0
+# The request body carries the SQL text, so the declarative param-role pipeline
+# can't model it. The custom handler executes the SQL against an in-memory
+# SQLite database seeded from corpus/onestream_db.json (synthetic data:
+# 3 entities in distinct PartitionIds, 2 scenarios, 2 years).
+#
+# Init-time cap: the declarative ``synthesize_future_records:`` directive
+# doesn't apply to a SQL-in-the-body endpoint, so the equivalent lives in the
+# corpus. generate_corpus.py seeds a data unit stamped 2099-01-01, and
+# test_init_time_cap_defers_future_stamps asserts the connector does not chase
+# it past the run's start time, then picks it up once a later run starts after
+# it. Tests can also mutate the simulated DB (see handlers/sql_command.py) to
+# exercise late commits, in-flight units and scope changes.
+
+endpoints:
+  - path: /OneStreamApi/api/DataProvider/GetAdoDataSetForSqlCommand
+    method: POST
+    handler: databricks.labs.community_connector.source_simulator.specs.onestream.handlers.sql_command:serve_sql_command
