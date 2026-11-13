@@ -563,9 +563,19 @@ class LakeflowConnectTests:
                 )
             try:
                 schema = self.connector.get_table_schema(table, self._opts(table))
-                if not self._field_in_schema(cf, schema):
+                # Managed ingestion validates sequence_by against top-level column names
+                # only, so a nested path (e.g. 'attributes.updated_at') fails at pipeline
+                # analysis with SEQUENCE_BY_COLUMN_NOT_FOUND.
+                if cf not in schema.fieldNames():
+                    nested_hint = (
+                        f"  '{cf}' looks like a nested path; promote it to a top-level "
+                        "column in get_table_schema() and every record.\n"
+                        if self._field_in_schema(cf, schema)
+                        else ""
+                    )
                     return (
-                        f"[{table}] cursor_field '{cf}' not in schema {schema.fieldNames()}.\n"
+                        f"[{table}] cursor_field '{cf}' is not a top-level column of "
+                        f"schema {schema.fieldNames()}.\n{nested_hint}"
                         "  Fix: Add it to get_table_schema() or choose a different cursor_field."
                     )
             except Exception:

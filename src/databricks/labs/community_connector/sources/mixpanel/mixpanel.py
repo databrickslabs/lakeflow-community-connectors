@@ -148,6 +148,8 @@ class MixpanelLakeflowConnect(LakeflowConnect):
         return {
             "event": event.get("event"),
             "$insert_id": insert_id,
+            # Top-level copy of properties.time: managed ingestion requires a top-level cursor.
+            "time": properties.get("time"),
             "properties": {
                 **standard_props,
                 "custom_properties": custom_props
@@ -165,6 +167,8 @@ class MixpanelLakeflowConnect(LakeflowConnect):
         
         return {
             "$distinct_id": profile.get("$distinct_id"),
+            # Top-level copy of $properties.$last_seen: managed ingestion requires a top-level cursor.
+            "$last_seen": properties.get("$last_seen"),
             "$properties": {
                 **standard_props,
                 "custom_properties": custom_props
@@ -201,6 +205,7 @@ class MixpanelLakeflowConnect(LakeflowConnect):
             "events": StructType([
                 StructField("event", StringType()),
                 StructField("$insert_id", StringType()),
+                StructField("time", LongType()),
                 StructField("properties", StructType([
                     StructField("time", LongType()),
                     StructField("distinct_id", StringType()),
@@ -244,6 +249,7 @@ class MixpanelLakeflowConnect(LakeflowConnect):
             ]),
             "engage": StructType([
                 StructField("$distinct_id", StringType()),
+                StructField("$last_seen", StringType()),
                 StructField("$properties", StructType([
                     StructField("$first_name", StringType()),
                     StructField("$last_name", StringType()),
@@ -290,7 +296,7 @@ class MixpanelLakeflowConnect(LakeflowConnect):
         metadata = {
             "events": {
                 "primary_keys": ["$insert_id"],
-                "cursor_field": "properties.time",
+                "cursor_field": "time",
                 "ingestion_type": "cdc"
             },
             "cohorts": {
@@ -305,7 +311,7 @@ class MixpanelLakeflowConnect(LakeflowConnect):
             },
             "engage": {
                 "primary_keys": ["$distinct_id"],
-                "cursor_field": "$properties.$last_seen",
+                "cursor_field": "$last_seen",
                 "ingestion_type": "cdc"
             }
         }
