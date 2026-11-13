@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 400">
+  <title>Campaign reporting</title>
+  <!-- Neutral reporting icon: bar chart with a trend line. No third-party marks. -->
+  <rect x="20" y="20" width="360" height="360" rx="72" fill="#2E3A48"/>
+  <rect x="88" y="232" width="52" height="88" rx="10" fill="#8FA3B8"/>
+  <rect x="174" y="176" width="52" height="144" rx="10" fill="#B9C7D6"/>
+  <rect x="260" y="120" width="52" height="200" rx="10" fill="#E4EBF2"/>
+  <polyline points="96,184 182,128 238,150 312,82" fill="none" stroke="#F2A541" stroke-width="16" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="312" cy="82" r="16" fill="#F2A541"/>
+</svg>
