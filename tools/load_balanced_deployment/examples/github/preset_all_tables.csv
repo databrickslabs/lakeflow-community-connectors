@@ -1,0 +1,13 @@
+source_table,category,table_configuration_json
+issues,all,{}
+pull_requests,all,{}
+comments,all,{}
+commits,all,{}
+reviews,all,{}
+repositories,all,{}
+users,all,{}
+organizations,all,{}
+teams,all,{}
+assignees,all,{}
+collaborators,all,{}
+branches,all,{}

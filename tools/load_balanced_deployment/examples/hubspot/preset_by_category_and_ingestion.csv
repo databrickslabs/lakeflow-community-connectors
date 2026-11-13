@@ -1,0 +1,11 @@
+source_table,category,table_configuration_json
+contacts,crm_objects_cdc,{}
+companies,crm_objects_cdc,{}
+deals,crm_objects_cdc,{}
+tickets,crm_objects_cdc,{}
+calls,engagement_cdc,{}
+emails,engagement_cdc,{}
+meetings,engagement_cdc,{}
+tasks,engagement_cdc,{}
+notes,engagement_cdc,{}
+deal_split,crm_objects_cdc,{}
