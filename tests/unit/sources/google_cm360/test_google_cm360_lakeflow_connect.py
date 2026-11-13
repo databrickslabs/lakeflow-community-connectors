@@ -16,10 +16,11 @@ from databricks.labs.community_connector.sources.google_cm360 import (
 from databricks.labs.community_connector.sources.google_cm360 import (
     google_cm360 as google_cm360_module,
 )
+from tests.unit.sources.test_partition_suite import SupportsPartitionedStreamTests
 from tests.unit.sources.test_suite import LakeflowConnectTests
 
 
-class TestGoogleCm360Connector(LakeflowConnectTests):
+class TestGoogleCm360Connector(LakeflowConnectTests, SupportsPartitionedStreamTests):
     connector_class = GoogleCm360LakeflowConnect
     simulator_source = "google_cm360"
     sample_records = 6
@@ -42,13 +43,31 @@ class TestGoogleCm360Connector(LakeflowConnectTests):
             )
         return kwargs
 
-    def _tables(self):
-        # The shared simulator models the four public report flows. The
-        # resumable period-reach table has its own focused bridge tests.
-        tables = super()._tables()
-        if not self._live_mode():
-            return [table for table in tables if table != "reach_report_period_incremental"]
-        return tables
+    # reach_report_period_incremental is the only partitioned table and is
+    # streaming-only by design: a batch read has no checkpoint to resume from,
+    # so get_partitions without offsets is rejected. The streaming half of the
+    # shared partition suite (latest_offset, offset ranges, round trip) runs.
+    _STREAMING_ONLY = "reach_report_period_incremental supports partitioned streaming only"
+
+    def test_get_partitions(self):
+        pytest.skip(self._STREAMING_ONLY)
+
+    def test_get_partitions_stable(self):
+        pytest.skip(self._STREAMING_ONLY)
+
+    def test_partition_descriptors_serializable(self):
+        pytest.skip(self._STREAMING_ONLY)
+
+    def test_read_partition(self):
+        pytest.skip(self._STREAMING_ONLY)
+
+    def test_batch_read_of_streaming_only_table_is_rejected(self):
+        table = "reach_report_period_incremental"
+        options = self._load_table_configs()[table]
+        with pytest.raises(ValueError):
+            self.connector.get_partitions(table, options)
+        with pytest.raises(google_cm360_module.Cm360ConfigurationError, match="streaming"):
+            self.connector.read_table(table, None, options)
 
     @classmethod
     def _load_table_configs(cls):
@@ -62,6 +81,12 @@ class TestGoogleCm360Connector(LakeflowConnectTests):
             },
             "ad_report_placement_daily": {"sync_start_date": "2026-08-20"},
             "reach_report_period": {
+                "sync_start_date": "2026-08-20",
+                "sync_end_date": "2026-08-23",
+                "delivery_country_codes": '["US"]',
+                "reporting_timezone": "UTC",
+            },
+            "reach_report_period_incremental": {
                 "sync_start_date": "2026-08-20",
                 "sync_end_date": "2026-08-23",
                 "delivery_country_codes": '["US"]',
@@ -99,10 +124,7 @@ class TestGoogleCm360Connector(LakeflowConnectTests):
         return self._record_replay_patch.corpus.tables.setdefault("_state", {})
 
     def test_shared_harness_includes_period_snapshot(self):
-        assert "reach_report_period" in self._tables()
-        assert set(self._tables()) | {"reach_report_period_incremental"} == set(
-            self.connector.list_tables()
-        )
+        assert set(self._tables()) == set(self.connector.list_tables())
 
     def _period_options(self):
         return {

@@ -118,7 +118,7 @@ The `reach_report_period` snapshot has a fixed 45-minute cooperative execution d
 
 ### Resumable Period Reach
 
-`reach_report_period_incremental` is an opt-in alternative to the snapshot for cutoffs that need several shorter pipeline updates. It uses the same native period bounds and reach values. `report_file_last_modified_at` sequences SCD type 1 upserts. Load it into its own destination; do not migrate an existing snapshot table in place.
+`reach_report_period_incremental` is an opt-in alternative to the snapshot for cutoffs that need several shorter pipeline updates. It uses the same native period bounds and reach values. `report_file_last_modified_at` sequences SCD type 1 upserts. Load it into its own destination; do not migrate an existing snapshot table in place. It works only as a streaming table in a pipeline; one-off batch reads are rejected.
 
 The first batch checkpoints the cutoff's campaign membership and exact-period groups and returns no rows. Later batches export whole groups in order, at most ten groups or 30 minutes of source work per query. A failed interval returns no rows and replays in full; previously committed intervals remain. The 30-minute limit stops new intervals from starting but does not shrink one already running. If a single interval cannot finish within one query's budget, each later update retries the same interval and fails again; narrow `advertiser_ids` so each interval has less work. A later pipeline update resumes the checkpoint with credentials resolved by Unity Catalog; the connector does not refresh tokens itself.
 
