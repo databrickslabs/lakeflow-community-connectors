@@ -1,0 +1,47 @@
+[
+  {
+    "id": 1000,
+    "transaction": 69233,
+    "start_date": "2024-01-01",
+    "end_date": "2024-01-02",
+    "home_amount": 321.7,
+    "local_amount": 868.77,
+    "modified": "2024-01-08T23:34:27Z"
+  },
+  {
+    "id": 1001,
+    "transaction": 34858,
+    "start_date": "2024-01-08",
+    "end_date": "2024-01-09",
+    "home_amount": 878.92,
+    "local_amount": 115.22,
+    "modified": "2024-01-02T08:39:00Z"
+  },
+  {
+    "id": 1002,
+    "transaction": 28828,
+    "start_date": "2024-01-15",
+    "end_date": "2024-01-16",
+    "home_amount": 28.66,
+    "local_amount": 988.44,
+    "modified": "2024-01-02T12:02:28Z"
+  },
+  {
+    "id": 1003,
+    "transaction": 81246,
+    "start_date": "2024-01-22",
+    "end_date": "2024-01-23",
+    "home_amount": 408.39,
+    "local_amount": 665.27,
+    "modified": "2024-01-21T18:27:02Z"
+  },
+  {
+    "id": 1004,
+    "transaction": 33781,
+    "start_date": "2024-01-29",
+    "end_date": "2024-01-30",
+    "home_amount": 176.22,
+    "local_amount": 607.63,
+    "modified": "2024-01-04T04:34:40Z"
+  }
+]
