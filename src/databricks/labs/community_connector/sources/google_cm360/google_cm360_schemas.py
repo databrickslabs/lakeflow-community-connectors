@@ -261,3 +261,13 @@ REACH_REPORT_PERIOD_METADATA = {
     "primary_keys": ["profile_id", "delivery_country", "advertiser_id", "campaign_id"],
     "ingestion_type": "snapshot",
 }
+
+REACH_REPORT_PERIOD_INCREMENTAL_SCHEMA = StructType([
+    *REACH_REPORT_PERIOD_SCHEMA.fields,
+    StructField("snapshot_campaign_count", LongType(), False),
+])
+REACH_REPORT_PERIOD_INCREMENTAL_METADATA = {
+    "primary_keys": [*REACH_REPORT_PERIOD_METADATA["primary_keys"], "source_cutoff_date"],
+    "cursor_field": "report_file_last_modified_at",
+    "ingestion_type": "cdc",
+}

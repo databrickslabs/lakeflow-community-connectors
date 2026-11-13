@@ -382,7 +382,7 @@ def _render_period_csv(corpus, report: dict) -> str:
         and (
             report["date"] <= record["delivery_date"] <= report["end_date"]
             if metadata
-            else record["campaign_id"] == report["campaign_id"]
+            else record["campaign_id"] in report["campaign_ids"]
         )
     ]
     buffer = io.StringIO(newline="")
@@ -428,14 +428,11 @@ def _insert_report(prep: PreparedRequest, state: dict) -> Response:
         "date": body[criteria_name]["dateRange"]["startDate"],
         "end_date": body[criteria_name]["dateRange"]["endDate"],
         "period_kind": _period_kind(body),
-        "campaign_id": next(
-            (
-                item["id"]
-                for item in body[criteria_name].get("dimensionFilters", [])
-                if item.get("dimensionName") == "campaign"
-            ),
-            None,
-        ),
+        "campaign_ids": [
+            item["id"]
+            for item in body[criteria_name].get("dimensionFilters", [])
+            if item.get("dimensionName") == "campaign"
+        ],
         "delivery_country": delivery_country,
         "type": report_type,
         "placement": placement,
@@ -457,7 +454,7 @@ def _file_response(prep: PreparedRequest, corpus, state: dict, path: str, query:
         if report["period_kind"]:
             csv_text = _render_period_csv(corpus, report)
             if (
-                report["campaign_id"] == state.get("truncate_campaign_id")
+                state.get("truncate_campaign_id") in report["campaign_ids"]
                 and report["period_kind"] == "reach"
             ):
                 csv_text = csv_text.split("Grand Total:", 1)[0]
