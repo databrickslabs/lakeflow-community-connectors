@@ -66,6 +66,7 @@ _HTTP_TIMEOUT_SECONDS = 30
 _MAX_RETRY_DELAY_SECONDS = 30.0
 _MAX_FILE_POLLS = 60
 _SNAPSHOT_TIMEOUT_SECONDS = 2700
+_CLEANUP_TIMEOUT_SECONDS = 30
 _CSV_FOOTER_LABELS = {"Grand Total:", "Grand Total", "Report Time:", "Report Time"}
 _ISO_DATE_PATTERN = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}")
 _INTEGER_PATTERN = re.compile(r"[0-9]+")
@@ -269,7 +270,7 @@ def _snapshot_timeout(deadline: float | None) -> float:
         return _HTTP_TIMEOUT_SECONDS
     remaining = deadline - time.monotonic()
     if remaining <= 0:
-        raise Cm360SnapshotTimeout("CM360 snapshot execution deadline reached (2700 seconds)")
+        raise Cm360SnapshotTimeout("CM360 snapshot execution deadline reached")
     return min(_HTTP_TIMEOUT_SECONDS, remaining)
 
 
@@ -1366,10 +1367,20 @@ class GoogleCm360LakeflowConnect(PeriodReachStreamMixin, LakeflowConnect):
                 field_specs=fields,
             )
         finally:
-            try:
-                self._client.delete_report(report_id)
-            except Exception:  # pylint: disable=broad-exception-caught
-                logger.warning("CM360 period temporary report cleanup failed")
+            self._delete_period_report(report_id)
+
+    def _delete_period_report(self, report_id: str) -> None:
+        """Delete with its own short budget so an expired deadline cannot orphan it."""
+        client = self._client
+        saved_deadline = client._snapshot_deadline
+        if saved_deadline is not None:
+            client._snapshot_deadline = time.monotonic() + _CLEANUP_TIMEOUT_SECONDS
+        try:
+            client.delete_report(report_id)
+        except Exception:  # pylint: disable=broad-exception-caught
+            logger.warning("CM360 period temporary report cleanup failed")
+        finally:
+            client._snapshot_deadline = saved_deadline
 
     def _period_campaigns(self, options: ReadOptions) -> list[dict]:
         logger.info("CM360 period metadata step=profile")

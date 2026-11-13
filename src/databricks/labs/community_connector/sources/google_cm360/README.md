@@ -110,7 +110,7 @@ Both period tables also include:
 | `coverage_status` | `COMPLETE`, `UNPROVEN_START`, `WINDOW_LIMIT`, `START_AFTER_CUTOFF`, or `NOT_REFRESHED` (incremental table only). |
 | `snapshot_campaign_count` | `reach_report_period_incremental` only: non-null BIGINT expected size of the cutoff's frozen campaign cohort. |
 
-Period snapshots discover campaigns with delivery between the metadata anchor and cutoff. The anchor does not replace the native campaign start. A campaign with no delivery in that discovery window is absent. Campaign spans above 92 inclusive days return `WINDOW_LIMIT` and NULL reach; unknown starts return `UNPROVEN_START` and NULL reach. The connector does not construct cumulative reach by adding daily values. It materializes the entire snapshot before returning any rows, so a late campaign failure fails the snapshot.
+Period snapshots discover campaigns with delivery between the metadata anchor and cutoff. The anchor does not replace the native campaign start. A campaign with no delivery in that discovery window is absent. Campaign spans above 92 inclusive days return `WINDOW_LIMIT` and NULL reach; unknown starts return `UNPROVEN_START` and NULL reach; campaigns starting after the cutoff return `START_AFTER_CUTOFF` and NULL reach. The connector does not construct cumulative reach by adding daily values. It materializes the entire snapshot before returning any rows, so a late campaign failure fails the snapshot.
 
 Campaigns with identical exact period bounds share one native REACH export that keeps the campaign and country dimensions; each campaign's returned reach is copied unchanged. Different periods use separate reports, and exports run one at a time. Duplicate or unexpected campaign rows reject the whole result.
 
@@ -118,9 +118,9 @@ The `reach_report_period` snapshot has a fixed 45-minute cooperative execution d
 
 ### Resumable Period Reach
 
-`reach_report_period_incremental` is an opt-in alternative to the snapshot for cutoffs that need several shorter pipeline updates. Validation status: it has run in managed development pipelines, including resume across updates; a complete native-value comparison at full scale has not been established, so compare a cutoff with CM360 before relying on it. It uses the same native period bounds and reach values. `report_file_last_modified_at` sequences SCD type 1 upserts. Load it into its own destination; do not migrate an existing snapshot table in place.
+`reach_report_period_incremental` is an opt-in alternative to the snapshot for cutoffs that need several shorter pipeline updates. It uses the same native period bounds and reach values. `report_file_last_modified_at` sequences SCD type 1 upserts. Load it into its own destination; do not migrate an existing snapshot table in place.
 
-The first batch checkpoints the cutoff's campaign membership and exact-period groups and returns no rows. Later batches export whole groups in order, at most ten groups or 30 minutes of source work per query. A failed interval returns no rows and replays in full; previously committed intervals remain. A later pipeline update resumes the checkpoint with credentials resolved by Unity Catalog; the connector does not refresh tokens itself.
+The first batch checkpoints the cutoff's campaign membership and exact-period groups and returns no rows. Later batches export whole groups in order, at most ten groups or 30 minutes of source work per query. A failed interval returns no rows and replays in full; previously committed intervals remain. The 30-minute limit stops new intervals from starting but does not shrink one already running. If a single interval cannot finish within one query's budget, each later update retries the same interval and fails again; narrow `advertiser_ids` so each interval has less work. A later pipeline update resumes the checkpoint with credentials resolved by Unity Catalog; the connector does not refresh tokens itself.
 
 Supply explicit `sync_start_date`, `sync_end_date`, `reporting_timezone` and one delivery country, and keep them fixed until the cutoff finishes. A completed cutoff is a no-op; a later `sync_end_date` starts a new cohort. Empty discovery, duplicate keys, incompatible checkpoints and checkpoint manifests over 1 MiB fail without resetting progress.
 
@@ -242,7 +242,7 @@ Run the bounded sample and compare its rows and totals with a report from the sa
 - **Country filter:** Only single `US`, `DE` or `CH` filters are implemented. An accepted country option does not constrain placement rows.
 - **Period coverage:** Check `coverage_status`, the metadata discovery window and the source cutoff. NULL reach is different from zero and from the source's `-` marker.
 - **Retries and quotas:** HTTP 429 and selected 5xx responses use up to five attempts with capped delays. File polling is bounded to 60 calls. Transport exceptions fail the current read. A later run retries from the last committed checkpoint.
-- **Period timeouts:** `Cm360SnapshotTimeout` means the snapshot used its 45-minute budget. Narrow the advertiser or country scope, or use `reach_report_period_incremental`.
+- **Period timeouts:** For `reach_report_period`, `Cm360SnapshotTimeout` means the snapshot used its 45-minute budget; narrow the advertiser scope or use `reach_report_period_incremental`. For `reach_report_period_incremental`, `Cm360SnapshotTimeout` or `TimeoutError` means an interval exceeded the query's 30-minute budget; it is retried on the next update, and repeated failures need a narrower advertiser scope. Temporary reports are still deleted after a timeout.
 - **Large exports:** CSV responses and parsed rows are held in memory. The batch target does not split a large day or a period snapshot into smaller allocations.
 
 ## References

@@ -179,7 +179,8 @@ check is cooperative: it cannot interrupt runtime scheduling, CPU work or a
 socket that keeps streaming. No rows are returned after the deadline
 (`Cm360SnapshotTimeout`). HTTP 401 raises `Cm360AuthenticationError`
 immediately. Both inherit `Cm360ApiError` and carry the snapshot phase. Cleanup
-failures are sanitized and cannot mask the primary failure.
+runs with its own 30-second budget, so a temporary report is still deleted after
+the deadline; cleanup failures are sanitized and cannot mask the primary failure.
 
 ### Resumable Period Reach
 
@@ -187,7 +188,10 @@ failures are sanitized and cannot mask the primary failure.
 the snapshot but checkpoints them. The first batch stores campaign membership
 and exact-period groups (manifest limit 1 MiB) and returns no rows. Each later
 query exports whole groups serially, at most 10 groups or 1800 seconds of source
-work. A failed interval returns no rows and replays in full. Settings must stay
+work. The budget stops new intervals from starting but does not shrink a running
+one, so an interval that cannot finish within one query's budget fails on every
+update (`Cm360SnapshotTimeout` or `TimeoutError`). A failed interval returns no
+rows and replays in full. Settings must stay
 fixed until a cutoff completes; incompatible checkpoints fail without resetting
 progress. A completed cutoff is a no-op.
 
