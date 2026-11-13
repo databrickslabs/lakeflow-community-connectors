@@ -1,0 +1,1211 @@
+import requests
+import base64
+from datetime import datetime, timedelta
+from typing import Iterator, Any
+
+from pyspark.sql.types import (
+    StructType,
+    StructField,
+    LongType,
+    StringType,
+    BooleanType,
+    ArrayType,
+    DecimalType,
+)
+
+
+class LakeflowConnect:
+    def __init__(self, options: dict[str, str]) -> None:
+        """
+        Initialize the Freshservice connector with connection-level options.
+
+        Expected options:
+            - api_key: Freshservice API Key for authentication
+            - domain: Freshservice subdomain (e.g., 'yourcompany' for yourcompany.freshservice.com)
+        """
+        api_key = options.get("api_key")
+        domain = options.get("domain")
+
+        if not api_key:
+            raise ValueError("Freshservice connector requires 'api_key' in options")
+        if not domain:
+            raise ValueError("Freshservice connector requires 'domain' in options")
+
+        # Build base URL
+        self.base_url = f"https://{domain}.freshservice.com/api/v2"
+
+        # Configure a session with Basic Authentication
+        # Username: API key, Password: X (as per Freshservice API documentation)
+        self._session = requests.Session()
+        auth_string = f"{api_key}:X"
+        encoded_auth = base64.b64encode(auth_string.encode()).decode()
+        self._session.headers.update(
+            {
+                "Authorization": f"Basic {encoded_auth}",
+                "Content-Type": "application/json",
+            }
+        )
+
+    def list_tables(self) -> list[str]:
+        """
+        List names of all tables supported by this connector.
+        """
+        return [
+            "tickets",
+            "problems",
+            "changes",
+            "releases",
+            "agents",
+            "requesters",
+            "locations",
+            "products",
+            "vendors",
+            "assets",
+            "asset_types",
+            "purchase_orders",
+            "software",
+            "service_catalog",
+            "requested_items",
+            "conversations",
+        ]
+
+    def get_table_schema(
+        self, table_name: str, table_options: dict[str, str]
+    ) -> StructType:
+        """
+        Fetch the schema of a table.
+
+        The schema is static and derived from the Freshservice API documentation.
+        """
+        if table_name not in self.list_tables():
+            raise ValueError(f"Unsupported table: {table_name!r}")
+
+        # Nested address struct used across multiple tables
+        address_struct = StructType(
+            [
+                StructField("line1", StringType(), True),
+                StructField("line2", StringType(), True),
+                StructField("city", StringType(), True),
+                StructField("state", StringType(), True),
+                StructField("country", StringType(), True),
+                StructField("zipcode", StringType(), True),
+            ]
+        )
+
+        if table_name == "tickets":
+            return StructType(
+                [
+                    StructField("id", LongType(), False),
+                    StructField("created_at", StringType(), True),
+                    StructField("updated_at", StringType(), True),
+                    StructField("subject", StringType(), True),
+                    StructField("description", StringType(), True),
+                    StructField("description_text", StringType(), True),
+                    StructField("priority", LongType(), True),
+                    StructField("status", LongType(), True),
+                    StructField("source", LongType(), True),
+                    StructField("ticket_type", StringType(), True),
+                    StructField("due_by", StringType(), True),
+                    StructField("fr_due_by", StringType(), True),
+                    StructField("is_escalated", BooleanType(), True),
+                    StructField("requester_id", LongType(), True),
+                    StructField("responder_id", LongType(), True),
+                    StructField("email", StringType(), True),
+                    StructField("cc_emails", ArrayType(StringType(), True), True),
+                    StructField("fwd_emails", ArrayType(StringType(), True), True),
+                    StructField("spam", BooleanType(), True),
+                    StructField("deleted", BooleanType(), True),
+                    StructField("to_emails", ArrayType(StringType(), True), True),
+                    StructField("department_id", LongType(), True),
+                    StructField("group_id", LongType(), True),
+                    StructField("category", StringType(), True),
+                    StructField("sub_category", StringType(), True),
+                    StructField("item_category", StringType(), True),
+                    StructField("tags", ArrayType(StringType(), True), True),
+                    StructField(
+                        "custom_fields", StringType(), True
+                    ),  # Dynamic fields stored as JSON string
+                    StructField("attachments", ArrayType(StringType(), True), True),
+                    StructField("nr_due_by", StringType(), True),
+                    StructField("nr_escalated", BooleanType(), True),
+                    StructField("urgency", LongType(), True),
+                    StructField("impact", LongType(), True),
+                    StructField("association_type", StringType(), True),
+                    StructField("associated_tickets_count", LongType(), True),
+                    StructField("workspace_id", LongType(), True),
+                ]
+            )
+
+        if table_name == "problems":
+            return StructType(
+                [
+                    StructField("id", LongType(), False),
+                    StructField("created_at", StringType(), True),
+                    StructField("updated_at", StringType(), True),
+                    StructField("agent_id", LongType(), True),
+                    StructField("description", StringType(), True),
+                    StructField("description_text", StringType(), True),
+                    StructField("requester_id", LongType(), True),
+                    StructField("subject", StringType(), True),
+                    StructField("due_by", StringType(), True),
+                    StructField("priority", LongType(), True),
+                    StructField("status", LongType(), True),
+                    StructField("impact", LongType(), True),
+                    StructField("known_error", BooleanType(), True),
+                    StructField("department_id", LongType(), True),
+                    StructField("group_id", LongType(), True),
+                    StructField("category", StringType(), True),
+                    StructField("sub_category", StringType(), True),
+                    StructField("item_category", StringType(), True),
+                    StructField("custom_fields", StringType(), True),
+                    StructField("tags", ArrayType(StringType(), True), True),
+                    StructField("analysis_fields", StringType(), True),
+                    StructField("assets", ArrayType(StringType(), True), True),
+                    StructField("workspace_id", LongType(), True),
+                ]
+            )
+
+        if table_name == "changes":
+            return StructType(
+                [
+                    StructField("id", LongType(), False),
+                    StructField("created_at", StringType(), True),
+                    StructField("updated_at", StringType(), True),
+                    StructField("agent_id", LongType(), True),
+                    StructField("description", StringType(), True),
+                    StructField("description_text", StringType(), True),
+                    StructField("requester_id", LongType(), True),
+                    StructField("subject", StringType(), True),
+                    StructField("group_id", LongType(), True),
+                    StructField("priority", LongType(), True),
+                    StructField("impact", LongType(), True),
+                    StructField("status", LongType(), True),
+                    StructField("risk", LongType(), True),
+                    StructField("change_type", LongType(), True),
+                    StructField("approval_status", LongType(), True),
+                    StructField("planned_start_date", StringType(), True),
+                    StructField("planned_end_date", StringType(), True),
+                    StructField("department_id", LongType(), True),
+                    StructField("category", StringType(), True),
+                    StructField("sub_category", StringType(), True),
+                    StructField("item_category", StringType(), True),
+                    StructField("custom_fields", StringType(), True),
+                    StructField("planning_fields", StringType(), True),
+                    StructField("tags", ArrayType(StringType(), True), True),
+                    StructField("assets", ArrayType(StringType(), True), True),
+                    StructField("workspace_id", LongType(), True),
+                ]
+            )
+
+        if table_name == "releases":
+            return StructType(
+                [
+                    StructField("id", LongType(), False),
+                    StructField("created_at", StringType(), True),
+                    StructField("updated_at", StringType(), True),
+                    StructField("agent_id", LongType(), True),
+                    StructField("group_id", LongType(), True),
+                    StructField("priority", LongType(), True),
+                    StructField("status", LongType(), True),
+                    StructField("release_type", LongType(), True),
+                    StructField("subject", StringType(), True),
+                    StructField("description", StringType(), True),
+                    StructField("description_text", StringType(), True),
+                    StructField("planned_start_date", StringType(), True),
+                    StructField("planned_end_date", StringType(), True),
+                    StructField("work_start_date", StringType(), True),
+                    StructField("work_end_date", StringType(), True),
+                    StructField("department_id", LongType(), True),
+                    StructField("category", StringType(), True),
+                    StructField("sub_category", StringType(), True),
+                    StructField("item_category", StringType(), True),
+                    StructField("custom_fields", StringType(), True),
+                    StructField("planning_fields", StringType(), True),
+                    StructField("tags", ArrayType(StringType(), True), True),
+                    StructField("assets", ArrayType(StringType(), True), True),
+                    StructField("workspace_id", LongType(), True),
+                ]
+            )
+
+        if table_name == "agents":
+            return StructType(
+                [
+                    StructField("id", LongType(), False),
+                    StructField("created_at", StringType(), True),
+                    StructField("updated_at", StringType(), True),
+                    StructField("first_name", StringType(), True),
+                    StructField("last_name", StringType(), True),
+                    StructField("occasional", BooleanType(), True),
+                    StructField("job_title", StringType(), True),
+                    StructField("email", StringType(), True),
+                    StructField("work_phone_number", StringType(), True),
+                    StructField("mobile_phone_number", StringType(), True),
+                    StructField("department_ids", ArrayType(LongType(), True), True),
+                    StructField(
+                        "can_see_all_tickets_from_associated_departments",
+                        BooleanType(),
+                        True,
+                    ),
+                    StructField("reporting_manager_id", LongType(), True),
+                    StructField("address", StringType(), True),
+                    StructField("time_zone", StringType(), True),
+                    StructField("time_format", StringType(), True),
+                    StructField("language", StringType(), True),
+                    StructField("location_id", LongType(), True),
+                    StructField("background_information", StringType(), True),
+                    StructField("scoreboard_level_id", LongType(), True),
+                    StructField("member_of", ArrayType(LongType(), True), True),
+                    StructField("observer_of", ArrayType(LongType(), True), True),
+                    StructField("roles", StringType(), True),
+                    StructField("signature", StringType(), True),
+                    StructField("custom_fields", StringType(), True),
+                    StructField("active", BooleanType(), True),
+                    StructField("has_logged_in", BooleanType(), True),
+                    StructField("workspace_id", LongType(), True),
+                ]
+            )
+
+        if table_name == "requesters":
+            return StructType(
+                [
+                    StructField("id", LongType(), False),
+                    StructField("created_at", StringType(), True),
+                    StructField("updated_at", StringType(), True),
+                    StructField("first_name", StringType(), True),
+                    StructField("last_name", StringType(), True),
+                    StructField("job_title", StringType(), True),
+                    StructField("primary_email", StringType(), True),
+                    StructField(
+                        "secondary_emails", ArrayType(StringType(), True), True
+                    ),
+                    StructField("work_phone_number", StringType(), True),
+                    StructField("mobile_phone_number", StringType(), True),
+                    StructField("department_ids", ArrayType(LongType(), True), True),
+                    StructField(
+                        "can_see_all_tickets_from_associated_departments",
+                        BooleanType(),
+                        True,
+                    ),
+                    StructField("reporting_manager_id", LongType(), True),
+                    StructField("address", StringType(), True),
+                    StructField("time_zone", StringType(), True),
+                    StructField("time_format", StringType(), True),
+                    StructField("language", StringType(), True),
+                    StructField("location_id", LongType(), True),
+                    StructField("background_information", StringType(), True),
+                    StructField("custom_fields", StringType(), True),
+                    StructField("is_agent", BooleanType(), True),
+                    StructField("has_logged_in", BooleanType(), True),
+                    StructField("active", BooleanType(), True),
+                    StructField("workspace_id", LongType(), True),
+                ]
+            )
+
+        if table_name == "asset_types":
+            return StructType(
+                [
+                    StructField("id", LongType(), False),
+                    StructField("name", StringType(), True),
+                    StructField("description", StringType(), True),
+                    StructField("parent_asset_type_id", LongType(), True),
+                    StructField("visible", BooleanType(), True),
+                    StructField("created_at", StringType(), True),
+                    StructField("updated_at", StringType(), True),
+                ]
+            )
+
+        if table_name == "service_catalog":
+            return StructType(
+                [
+                    StructField("id", LongType(), False),
+                    StructField("created_at", StringType(), True),
+                    StructField("updated_at", StringType(), True),
+                    StructField("name", StringType(), True),
+                    StructField("delivery_time", LongType(), True),
+                    StructField("display_id", LongType(), True),
+                    StructField("category_id", LongType(), True),
+                    StructField("product_id", LongType(), True),
+                    StructField("quantity", LongType(), True),
+                    StructField("deleted", BooleanType(), True),
+                    StructField("icon_name", StringType(), True),
+                    StructField("group_visibility", LongType(), True),
+                    StructField("item_type", LongType(), True),
+                    StructField("ci_type_id", LongType(), True),
+                    StructField("product_provider", StringType(), True),
+                    StructField("delivery_time_type", StringType(), True),
+                    StructField("botified", BooleanType(), True),
+                    StructField("visibility", LongType(), True),
+                    StructField("allow_attachments", BooleanType(), True),
+                    StructField("allow_quantity", BooleanType(), True),
+                    StructField("is_bundle", BooleanType(), True),
+                    StructField("create_child", BooleanType(), True),
+                    StructField("description", StringType(), True),
+                    StructField("short_description", StringType(), True),
+                ]
+            )
+
+        if table_name == "conversations":
+            return StructType(
+                [
+                    StructField("id", LongType(), False),
+                    StructField("ticket_id", LongType(), False),
+                    StructField("created_at", StringType(), True),
+                    StructField("updated_at", StringType(), True),
+                    StructField("body", StringType(), True),
+                    StructField("body_text", StringType(), True),
+                    StructField("incoming", BooleanType(), True),
+                    StructField("private", BooleanType(), True),
+                    StructField("user_id", LongType(), True),
+                    StructField("support_email", StringType(), True),
+                    StructField("to_emails", ArrayType(StringType(), True), True),
+                    StructField("from_email", StringType(), True),
+                    StructField("cc_emails", ArrayType(StringType(), True), True),
+                    StructField("bcc_emails", ArrayType(StringType(), True), True),
+                    StructField("attachments", ArrayType(StringType(), True), True),
+                ]
+            )
+
+        if table_name == "locations":
+            return StructType(
+                [
+                    StructField("id", LongType(), False),
+                    StructField("created_at", StringType(), True),
+                    StructField("updated_at", StringType(), True),
+                    StructField("name", StringType(), True),
+                    StructField("parent_location_id", LongType(), True),
+                    StructField("primary_contact_id", LongType(), True),
+                    StructField("address", address_struct, True),
+                    StructField("contact_name", StringType(), True),
+                    StructField("email", StringType(), True),
+                    StructField("phone", StringType(), True),
+                ]
+            )
+
+        if table_name == "products":
+            return StructType(
+                [
+                    StructField("id", LongType(), False),
+                    StructField("created_at", StringType(), True),
+                    StructField("updated_at", StringType(), True),
+                    StructField("name", StringType(), True),
+                    StructField("asset_type_id", LongType(), True),
+                    StructField("manufacturer", StringType(), True),
+                    StructField("status", StringType(), True),
+                    StructField("mode_of_procurement", StringType(), True),
+                    StructField("depreciation_type_id", LongType(), True),
+                    StructField("description", StringType(), True),
+                    StructField("description_text", StringType(), True),
+                ]
+            )
+
+        if table_name == "vendors":
+            return StructType(
+                [
+                    StructField("id", LongType(), False),
+                    StructField("created_at", StringType(), True),
+                    StructField("updated_at", StringType(), True),
+                    StructField("name", StringType(), True),
+                    StructField("description", StringType(), True),
+                    StructField("description_text", StringType(), True),
+                    StructField("primary_contact_id", LongType(), True),
+                    StructField("address", address_struct, True),
+                    StructField("contact_name", StringType(), True),
+                    StructField("email", StringType(), True),
+                    StructField("mobile", StringType(), True),
+                    StructField("phone", StringType(), True),
+                ]
+            )
+
+        if table_name == "assets":
+            return StructType(
+                [
+                    StructField("id", LongType(), False),
+                    StructField("display_id", LongType(), True),
+                    StructField("name", StringType(), True),
+                    StructField("description", StringType(), True),
+                    StructField("asset_type_id", LongType(), True),
+                    StructField("asset_tag", StringType(), True),
+                    StructField("impact", StringType(), True),
+                    StructField("usage_type", StringType(), True),
+                    StructField("asset_state", StringType(), True),
+                    StructField("user_id", LongType(), True),
+                    StructField("location_id", LongType(), True),
+                    StructField("department_id", LongType(), True),
+                    StructField("agent_id", LongType(), True),
+                    StructField("group_id", LongType(), True),
+                    StructField("assigned_on", StringType(), True),
+                    StructField("created_at", StringType(), True),
+                    StructField("updated_at", StringType(), True),
+                    StructField("author_type", StringType(), True),
+                    StructField("end_of_life", StringType(), True),
+                    StructField("discovery_enabled", BooleanType(), True),
+                    StructField("type_fields", StringType(), True),
+                ]
+            )
+
+        if table_name == "purchase_orders":
+            return StructType(
+                [
+                    StructField("id", LongType(), False),
+                    StructField("created_at", StringType(), True),
+                    StructField("updated_at", StringType(), True),
+                    StructField("vendor_id", LongType(), True),
+                    StructField("name", StringType(), True),
+                    StructField("po_number", StringType(), True),
+                    StructField("vendor_details", StringType(), True),
+                    StructField("expected_delivery_date", StringType(), True),
+                    StructField("created_by", LongType(), True),
+                    StructField("status", StringType(), True),
+                    StructField("shipping_address", StringType(), True),
+                    StructField("billing_same_as_shipping", BooleanType(), True),
+                    StructField("billing_address", StringType(), True),
+                    StructField("currency_code", StringType(), True),
+                    StructField("conversion_rate", DecimalType(10, 2), True),
+                    StructField("department_id", LongType(), True),
+                    StructField("discount_percentage", DecimalType(10, 2), True),
+                    StructField("tax_percentage", DecimalType(10, 2), True),
+                    StructField("shipping_cost", DecimalType(10, 2), True),
+                    StructField("custom_fields", StringType(), True),
+                    StructField("purchase_items", StringType(), True),
+                ]
+            )
+
+        if table_name == "software":
+            return StructType(
+                [
+                    StructField("id", LongType(), False),
+                    StructField("user_count", LongType(), True),
+                    StructField("installation_count", LongType(), True),
+                    StructField("created_at", StringType(), True),
+                    StructField("updated_at", StringType(), True),
+                    StructField("application_type", StringType(), True),
+                    StructField("name", StringType(), True),
+                    StructField("description", StringType(), True),
+                    StructField("notes", StringType(), True),
+                    StructField("publisher_id", LongType(), True),
+                    StructField("managed_by_id", LongType(), True),
+                    StructField("category", StringType(), True),
+                    StructField("status", StringType(), True),
+                ]
+            )
+
+        if table_name == "satisfaction_survey_responses":
+            return StructType(
+                [
+                    StructField("id", LongType(), False),
+                    StructField("created_at", StringType(), True),
+                    StructField("updated_at", StringType(), True),
+                    StructField("ticket_id", LongType(), True),
+                    StructField("user_id", LongType(), True),
+                    StructField("ratings", StringType(), True),
+                    StructField("feedback", StringType(), True),
+                    StructField("survey_type", StringType(), True),
+                ]
+            )
+
+        if table_name == "requested_items":
+            return StructType(
+                [
+                    StructField("id", LongType(), False),
+                    StructField("ticket_id", LongType(), False),
+                    StructField("created_at", StringType(), True),
+                    StructField("updated_at", StringType(), True),
+                    StructField("service_item_id", LongType(), True),
+                    StructField("quantity", LongType(), True),
+                    StructField("stage", LongType(), True),
+                    StructField("loaned", BooleanType(), True),
+                    StructField("cost_per_request", DecimalType(10, 2), True),
+                    StructField("remarks", StringType(), True),
+                    StructField("delivery_time", StringType(), True),
+                    StructField("is_parent", BooleanType(), True),
+                    StructField("custom_fields", StringType(), True),
+                    StructField("fulfilled_at", StringType(), True),
+                    StructField("cancelled_at", StringType(), True),
+                    StructField("fulfillment_notes", StringType(), True),
+                ]
+            )
+
+        raise ValueError(f"Unsupported table: {table_name!r}")
+
+    def read_table_metadata(
+        self, table_name: str, table_options: dict[str, str]
+    ) -> dict:
+        """
+        Fetch metadata for the given table.
+        """
+        if table_name not in self.list_tables():
+            raise ValueError(f"Unsupported table: {table_name!r}")
+
+        # CDC tables (incremental with updated_at cursor)
+        if table_name in ["tickets", "problems", "changes", "releases"]:
+            return {
+                "primary_keys": ["id"],
+                "cursor_field": "updated_at",
+                "ingestion_type": "cdc",
+            }
+
+        # Snapshot tables
+        if table_name in [
+            "agents",
+            "requesters",
+            "locations",
+            "products",
+            "vendors",
+            "assets",
+            "asset_types",
+            "purchase_orders",
+            "software",
+            "service_catalog",
+            "requested_items",
+            "conversations",
+        ]:
+            return {
+                "primary_keys": ["id"],
+                "ingestion_type": "snapshot",
+            }
+
+        raise ValueError(f"Unsupported table: {table_name!r}")
+
+    def read_table(
+        self, table_name: str, start_offset: dict, table_options: dict[str, str]
+    ) -> (Iterator[dict], dict):
+        """
+        Read records from a table and return raw JSON-like dictionaries.
+        """
+        if table_name not in self.list_tables():
+            raise ValueError(f"Unsupported table: {table_name!r}")
+
+        # Route to appropriate read handler
+        if table_name == "tickets":
+            return self._read_tickets(start_offset, table_options)
+        if table_name == "problems":
+            return self._read_problems(start_offset, table_options)
+        if table_name == "changes":
+            return self._read_changes(start_offset, table_options)
+        if table_name == "releases":
+            return self._read_releases(start_offset, table_options)
+        if table_name == "agents":
+            return self._read_agents(start_offset, table_options)
+        if table_name == "requesters":
+            return self._read_requesters(start_offset, table_options)
+        if table_name == "locations":
+            return self._read_locations(start_offset, table_options)
+        if table_name == "products":
+            return self._read_products(start_offset, table_options)
+        if table_name == "vendors":
+            return self._read_vendors(start_offset, table_options)
+        if table_name == "assets":
+            return self._read_assets(start_offset, table_options)
+        if table_name == "asset_types":
+            return self._read_asset_types(start_offset, table_options)
+        if table_name == "purchase_orders":
+            return self._read_purchase_orders(start_offset, table_options)
+        if table_name == "software":
+            return self._read_software(start_offset, table_options)
+        if table_name == "service_catalog":
+            return self._read_service_catalog(start_offset, table_options)
+        if table_name == "requested_items":
+            return self._read_requested_items(start_offset, table_options)
+        if table_name == "conversations":
+            return self._read_conversations(start_offset, table_options)
+
+        raise ValueError(f"Unsupported table: {table_name!r}")
+
+    def _read_tickets(
+        self, start_offset: dict, table_options: dict[str, str]
+    ) -> (Iterator[dict], dict):
+        """
+        Read the tickets table (CDC).
+
+        Endpoint: GET /api/v2/tickets
+        Supports incremental sync with updated_since parameter.
+        Supports include parameter for additional related data.
+        """
+        return self._read_cdc_table(
+            endpoint="/tickets",
+            resource_key="tickets",
+            start_offset=start_offset,
+            table_options=table_options,
+        )
+
+    def _read_problems(
+        self, start_offset: dict, table_options: dict[str, str]
+    ) -> (Iterator[dict], dict):
+        """
+        Read the problems table (CDC).
+
+        Endpoint: GET /api/v2/problems
+        """
+        return self._read_cdc_table(
+            endpoint="/problems",
+            resource_key="problems",
+            start_offset=start_offset,
+            table_options=table_options,
+        )
+
+    def _read_changes(
+        self, start_offset: dict, table_options: dict[str, str]
+    ) -> (Iterator[dict], dict):
+        """
+        Read the changes table (CDC).
+
+        Endpoint: GET /api/v2/changes
+        """
+        return self._read_cdc_table(
+            endpoint="/changes",
+            resource_key="changes",
+            start_offset=start_offset,
+            table_options=table_options,
+        )
+
+    def _read_releases(
+        self, start_offset: dict, table_options: dict[str, str]
+    ) -> (Iterator[dict], dict):
+        """
+        Read the releases table (CDC).
+
+        Endpoint: GET /api/v2/releases
+        """
+        return self._read_cdc_table(
+            endpoint="/releases",
+            resource_key="releases",
+            start_offset=start_offset,
+            table_options=table_options,
+        )
+
+    def _read_agents(
+        self, start_offset: dict, table_options: dict[str, str]
+    ) -> (Iterator[dict], dict):
+        """
+        Read the agents table (Snapshot).
+
+        Endpoint: GET /api/v2/agents
+        """
+        return self._read_snapshot_table(
+            endpoint="/agents",
+            resource_key="agents",
+            table_options=table_options,
+        )
+
+    def _read_requesters(
+        self, start_offset: dict, table_options: dict[str, str]
+    ) -> (Iterator[dict], dict):
+        """
+        Read the requesters table (Snapshot).
+
+        Endpoint: GET /api/v2/requesters
+        """
+        return self._read_snapshot_table(
+            endpoint="/requesters",
+            resource_key="requesters",
+            table_options=table_options,
+        )
+
+    def _read_locations(
+        self, start_offset: dict, table_options: dict[str, str]
+    ) -> (Iterator[dict], dict):
+        """
+        Read the locations table (Snapshot).
+
+        Endpoint: GET /api/v2/locations
+        """
+        return self._read_snapshot_table(
+            endpoint="/locations",
+            resource_key="locations",
+            table_options=table_options,
+        )
+
+    def _read_products(
+        self, start_offset: dict, table_options: dict[str, str]
+    ) -> (Iterator[dict], dict):
+        """
+        Read the products table (Snapshot).
+
+        Endpoint: GET /api/v2/products
+        """
+        return self._read_snapshot_table(
+            endpoint="/products",
+            resource_key="products",
+            table_options=table_options,
+        )
+
+    def _read_vendors(
+        self, start_offset: dict, table_options: dict[str, str]
+    ) -> (Iterator[dict], dict):
+        """
+        Read the vendors table (Snapshot).
+
+        Endpoint: GET /api/v2/vendors
+        """
+        return self._read_snapshot_table(
+            endpoint="/vendors",
+            resource_key="vendors",
+            table_options=table_options,
+        )
+
+    def _read_assets(
+        self, start_offset: dict, table_options: dict[str, str]
+    ) -> (Iterator[dict], dict):
+        """
+        Read the assets table (Snapshot).
+
+        Endpoint: GET /api/v2/assets
+        """
+        return self._read_snapshot_table(
+            endpoint="/assets",
+            resource_key="assets",
+            table_options=table_options,
+        )
+
+    def _read_purchase_orders(
+        self, start_offset: dict, table_options: dict[str, str]
+    ) -> (Iterator[dict], dict):
+        """
+        Read the purchase_orders table (Snapshot).
+
+        Endpoint: GET /api/v2/purchase_orders
+        """
+        return self._read_snapshot_table(
+            endpoint="/purchase_orders",
+            resource_key="purchase_orders",
+            table_options=table_options,
+        )
+
+    def _read_software(
+        self, start_offset: dict, table_options: dict[str, str]
+    ) -> (Iterator[dict], dict):
+        """
+        Read the software table (Snapshot).
+
+        Endpoint: GET /api/v2/applications
+        """
+        return self._read_snapshot_table(
+            endpoint="/applications",
+            resource_key="applications",
+            table_options=table_options,
+        )
+
+    def _read_asset_types(
+        self, start_offset: dict, table_options: dict[str, str]
+    ) -> (Iterator[dict], dict):
+        """
+        Read the asset_types table (Snapshot).
+
+        Endpoint: GET /api/v2/asset_types
+        """
+        return self._read_snapshot_table(
+            endpoint="/asset_types",
+            resource_key="asset_types",
+            table_options=table_options,
+        )
+
+    def _read_service_catalog(
+        self, start_offset: dict, table_options: dict[str, str]
+    ) -> (Iterator[dict], dict):
+        """
+        Read the service_catalog table (Snapshot).
+
+        Endpoint: GET /api/v2/service_catalog/items
+        """
+        return self._read_snapshot_table(
+            endpoint="/service_catalog/items",
+            resource_key="service_items",
+            table_options=table_options,
+        )
+
+    def _read_requested_items(
+        self, start_offset: dict, table_options: dict[str, str]
+    ) -> (Iterator[dict], dict):
+        """
+        Read the requested_items table (Snapshot).
+
+        This is a nested resource under service request tickets.
+        We need to first list all service request tickets, then fetch requested items for each.
+
+        Endpoint pattern: GET /api/v2/tickets/{ticket_id}/requested_items
+        """
+        try:
+            per_page = int(table_options.get("per_page", 100))
+        except (TypeError, ValueError):
+            per_page = 100
+        per_page = max(1, min(per_page, 100))
+
+        try:
+            max_pages_per_batch = int(table_options.get("max_pages_per_batch", 50))
+        except (TypeError, ValueError):
+            max_pages_per_batch = 50
+
+        records: list[dict[str, Any]] = []
+
+        # First, get all service request tickets
+        # Service requests have ticket_type = "Service Request"
+        page = 1
+        pages_fetched = 0
+
+        while pages_fetched < max_pages_per_batch:
+            url = f"{self.base_url}/tickets"
+            params = {"page": page, "per_page": per_page}
+
+            response = self._session.get(url, params=params, timeout=30)
+            if response.status_code != 200:
+                raise RuntimeError(
+                    f"Freshservice API error for tickets: {response.status_code} {response.text}"
+                )
+
+            data = response.json()
+            tickets = data.get("tickets", [])
+
+            if not tickets:
+                break
+
+            # Filter for service request tickets and fetch their requested items
+            for ticket in tickets:
+                ticket_id = ticket.get("id")
+                ticket_type = ticket.get("ticket_type")
+
+                # Only fetch requested items for service request tickets
+                if ticket_type == "Service Request" and ticket_id:
+                    items = self._fetch_requested_items_for_ticket(
+                        ticket_id, per_page, max_pages_per_batch
+                    )
+                    for item in items:
+                        item["ticket_id"] = ticket_id
+                        records.append(item)
+
+            # Check for pagination via Link header
+            link_header = response.headers.get("Link", "")
+            if not self._has_next_page(link_header):
+                break
+
+            page += 1
+            pages_fetched += 1
+
+        return iter(records), {}
+
+    def _read_conversations(
+        self, start_offset: dict, table_options: dict[str, str]
+    ) -> (Iterator[dict], dict):
+        """
+        Read the conversations table (Snapshot).
+
+        This is a nested resource under tickets.
+        We need to first list all tickets, then fetch conversations for each.
+
+        Endpoint pattern: GET /api/v2/tickets/{ticket_id}/conversations
+        """
+        try:
+            per_page = int(table_options.get("per_page", 100))
+        except (TypeError, ValueError):
+            per_page = 100
+        per_page = max(1, min(per_page, 100))
+
+        try:
+            max_pages_per_batch = int(table_options.get("max_pages_per_batch", 50))
+        except (TypeError, ValueError):
+            max_pages_per_batch = 50
+
+        records: list[dict[str, Any]] = []
+
+        # First, get all tickets
+        page = 1
+        pages_fetched = 0
+
+        while pages_fetched < max_pages_per_batch:
+            url = f"{self.base_url}/tickets"
+            params = {"page": page, "per_page": per_page}
+
+            response = self._session.get(url, params=params, timeout=30)
+            if response.status_code != 200:
+                raise RuntimeError(
+                    f"Freshservice API error for tickets: {response.status_code} {response.text}"
+                )
+
+            data = response.json()
+            tickets = data.get("tickets", [])
+
+            if not tickets:
+                break
+
+            # Fetch conversations for each ticket
+            for ticket in tickets:
+                ticket_id = ticket.get("id")
+                if ticket_id:
+                    conversations = self._fetch_conversations_for_ticket(
+                        ticket_id, per_page, max_pages_per_batch
+                    )
+                    for conversation in conversations:
+                        conversation["ticket_id"] = ticket_id
+                        records.append(conversation)
+
+            # Check for pagination via Link header
+            link_header = response.headers.get("Link", "")
+            if not self._has_next_page(link_header):
+                break
+
+            page += 1
+            pages_fetched += 1
+
+        return iter(records), {}
+
+    def _fetch_requested_items_for_ticket(
+        self, ticket_id: int, per_page: int, max_pages: int
+    ) -> list[dict]:
+        """
+        Fetch all requested items for a specific ticket.
+        """
+        items = []
+        page = 1
+        pages_fetched = 0
+
+        while pages_fetched < max_pages:
+            url = f"{self.base_url}/tickets/{ticket_id}/requested_items"
+            params = {"page": page, "per_page": per_page}
+
+            response = self._session.get(url, params=params, timeout=30)
+            if response.status_code == 404:
+                # No requested items for this ticket
+                break
+            if response.status_code != 200:
+                raise RuntimeError(
+                    f"Freshservice API error for requested_items (ticket {ticket_id}): "
+                    f"{response.status_code} {response.text}"
+                )
+
+            data = response.json()
+            requested_items = data.get("requested_items", [])
+
+            if not requested_items:
+                break
+
+            items.extend(requested_items)
+
+            # Check for pagination
+            link_header = response.headers.get("Link", "")
+            if not self._has_next_page(link_header):
+                break
+
+            page += 1
+            pages_fetched += 1
+
+        return items
+
+    def _fetch_conversations_for_ticket(
+        self, ticket_id: int, per_page: int, max_pages: int
+    ) -> list[dict]:
+        """
+        Fetch all conversations for a specific ticket.
+        """
+        conversations = []
+        page = 1
+        pages_fetched = 0
+
+        while pages_fetched < max_pages:
+            url = f"{self.base_url}/tickets/{ticket_id}/conversations"
+            params = {"page": page, "per_page": per_page}
+
+            response = self._session.get(url, params=params, timeout=30)
+            if response.status_code == 404:
+                # No conversations for this ticket
+                break
+            if response.status_code != 200:
+                raise RuntimeError(
+                    f"Freshservice API error for conversations (ticket {ticket_id}): "
+                    f"{response.status_code} {response.text}"
+                )
+
+            data = response.json()
+            ticket_conversations = data.get("conversations", [])
+
+            if not ticket_conversations:
+                break
+
+            conversations.extend(ticket_conversations)
+
+            # Check for pagination
+            link_header = response.headers.get("Link", "")
+            if not self._has_next_page(link_header):
+                break
+
+            page += 1
+            pages_fetched += 1
+
+        return conversations
+
+    def _read_cdc_table(
+        self,
+        endpoint: str,
+        resource_key: str,
+        start_offset: dict,
+        table_options: dict[str, str],
+    ) -> (Iterator[dict], dict):
+        """
+        Generic CDC table reader for tables that support incremental sync.
+
+        Uses updated_since parameter for incremental reads and handles pagination.
+        """
+        try:
+            per_page = int(table_options.get("per_page", 100))
+        except (TypeError, ValueError):
+            per_page = 100
+        per_page = max(1, min(per_page, 100))
+
+        try:
+            max_pages_per_batch = int(table_options.get("max_pages_per_batch", 50))
+        except (TypeError, ValueError):
+            max_pages_per_batch = 50
+
+        try:
+            lookback_seconds = int(table_options.get("lookback_seconds", 300))
+        except (TypeError, ValueError):
+            lookback_seconds = 300
+
+        # Determine the starting cursor (ISO 8601 string)
+        cursor = None
+        if start_offset and isinstance(start_offset, dict):
+            cursor = start_offset.get("cursor")
+        if not cursor:
+            cursor = table_options.get("start_date")
+
+        # Build request
+        url = f"{self.base_url}{endpoint}"
+        params = {"per_page": per_page, "page": 1}
+
+        if cursor:
+            params["updated_since"] = cursor
+
+        # Add include parameter if specified in table_options
+        include_param = table_options.get("include")
+        if include_param:
+            params["include"] = include_param
+
+        records: list[dict[str, Any]] = []
+        max_updated_at: str | None = None
+
+        page = 1
+        pages_fetched = 0
+
+        while pages_fetched < max_pages_per_batch:
+            params["page"] = page
+            response = self._session.get(url, params=params, timeout=30)
+
+            if response.status_code != 200:
+                raise RuntimeError(
+                    f"Freshservice API error for {endpoint}: {response.status_code} {response.text}"
+                )
+
+            data = response.json()
+            items = data.get(resource_key, [])
+
+            if not items:
+                break
+
+            for item in items:
+                records.append(item)
+
+                updated_at = item.get("updated_at")
+                if isinstance(updated_at, str):
+                    if max_updated_at is None or updated_at > max_updated_at:
+                        max_updated_at = updated_at
+
+            # Check for pagination via Link header
+            link_header = response.headers.get("Link", "")
+            if not self._has_next_page(link_header):
+                break
+
+            page += 1
+            pages_fetched += 1
+
+        # Compute next cursor with lookback window
+        next_cursor = cursor
+        if max_updated_at:
+            try:
+                # Parse ISO 8601 timestamp
+                dt = datetime.fromisoformat(max_updated_at.replace("Z", "+00:00"))
+                dt_with_lookback = dt - timedelta(seconds=lookback_seconds)
+                next_cursor = dt_with_lookback.strftime("%Y-%m-%dT%H:%M:%SZ")
+            except Exception:
+                # Fallback: reuse the raw max_updated_at
+                next_cursor = max_updated_at
+
+        # If no new records and we had a previous offset, return same offset
+        if not records and start_offset:
+            next_offset = start_offset
+        else:
+            next_offset = {"cursor": next_cursor} if next_cursor else {}
+
+        return iter(records), next_offset
+
+    def _read_snapshot_table(
+        self,
+        endpoint: str,
+        resource_key: str,
+        table_options: dict[str, str],
+    ) -> (Iterator[dict], dict):
+        """
+        Generic snapshot table reader for tables that don't support incremental sync.
+
+        Reads all records using page-based pagination.
+        """
+        try:
+            per_page = int(table_options.get("per_page", 100))
+        except (TypeError, ValueError):
+            per_page = 100
+        per_page = max(1, min(per_page, 100))
+
+        try:
+            max_pages_per_batch = int(table_options.get("max_pages_per_batch", 50))
+        except (TypeError, ValueError):
+            max_pages_per_batch = 50
+
+        url = f"{self.base_url}{endpoint}"
+        params = {"per_page": per_page, "page": 1}
+
+        records: list[dict[str, Any]] = []
+        page = 1
+        pages_fetched = 0
+
+        while pages_fetched < max_pages_per_batch:
+            params["page"] = page
+            response = self._session.get(url, params=params, timeout=30)
+
+            if response.status_code != 200:
+                raise RuntimeError(
+                    f"Freshservice API error for {endpoint}: {response.status_code} {response.text}"
+                )
+
+            data = response.json()
+            items = data.get(resource_key, [])
+
+            if not items:
+                break
+
+            records.extend(items)
+
+            # Check for pagination via Link header
+            link_header = response.headers.get("Link", "")
+            if not self._has_next_page(link_header):
+                break
+
+            page += 1
+            pages_fetched += 1
+
+        # Snapshot tables have no cursor
+        return iter(records), {}
+
+    @staticmethod
+    def _has_next_page(link_header: str | None) -> bool:
+        """
+        Check if the Link header indicates there's a next page.
+
+        Freshservice Link header format:
+        <url>; rel="next", <url>; rel="prev", <url>; rel="first", <url>; rel="last"
+        """
+        if not link_header:
+            return False
+
+        parts = link_header.split(",")
+        for part in parts:
+            if 'rel="next"' in part:
+                return True
+        return False
+
