@@ -1,0 +1,50 @@
+[
+  {
+    "symbol": "whiskey--pk0",
+    "prices": [
+      {
+        "currency": "whiskey-717",
+        "value": "charlie-773",
+        "lastUpdatedAt": "oscar-110"
+      }
+    ],
+    "error": "charlie-383"
+  },
+  {
+    "symbol": "victor-5-pk1",
+    "prices": [],
+    "error": "delta-939"
+  },
+  {
+    "symbol": "zulu-572-pk2",
+    "prices": [
+      {
+        "currency": "hotel-917",
+        "value": "lima-754",
+        "lastUpdatedAt": "oscar-629"
+      }
+    ],
+    "error": "zulu-487"
+  },
+  {
+    "symbol": "lima-901-pk3",
+    "prices": [],
+    "error": "lima-352"
+  },
+  {
+    "symbol": "charlie--pk4",
+    "prices": [
+      {
+        "currency": "victor-307",
+        "value": "golf-325",
+        "lastUpdatedAt": "sierra-839"
+      },
+      {
+        "currency": "zulu-493",
+        "value": "yankee-888",
+        "lastUpdatedAt": "echo-447"
+      }
+    ],
+    "error": "india-755"
+  }
+]
