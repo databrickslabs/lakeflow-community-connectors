@@ -65,6 +65,10 @@ def _resolve_env_mode_for_simulator(simulator_source: Optional[str]) -> str:
     return get_mode()
 
 
+class _DrainError(Exception):
+    """A structural problem with a read_* result, reported verbatim by the checks."""
+
+
 class LakeflowConnectTests:
     """Base test class for LakeflowConnect connectors.
 
@@ -672,7 +676,7 @@ class LakeflowConnectTests:
         if errors:
             pytest.fail("\n\n".join(errors))
 
-    def _validate_termination(self, table: str) -> Optional[str]:  # pylint: disable=too-many-return-statements,too-many-branches
+    def _validate_termination(self, table: str) -> Optional[str]:
         """Loop read_table feeding the offset back until two consecutive
         calls return the same offset. Returns error string or None.
 
@@ -681,30 +685,11 @@ class LakeflowConnectTests:
         are otherwise opaque to the framework — this helper does not
         impose any ordering on them.
         """
-        offset: Any = {}
         prev_json: Optional[str] = None
-        max_iter = self.read_termination_max_iterations
-
-        for i in range(max_iter):
-            result = self.connector.read_table(table, offset, self._opts(table))
-            if not isinstance(result, tuple) or len(result) != 2:
-                return (
-                    f"[{table}] read_table call {i + 1} returned "
-                    f"{type(result).__name__}, expected 2-tuple.\n"
-                    "  Fix: read_table() must return (iterator, offset_dict)."
-                )
-            iterator, offset = result
-            self._consume(iterator)
-
-            if offset is not None and not isinstance(offset, dict):
-                return (
-                    f"[{table}] Offset must be dict or None, got "
-                    f"{type(offset).__name__}."
-                )
-
-            if i == 0:
-                ingestion_type = self._ingestion_type(table)
-                if offset is None:
+        try:
+            for i, _start_json, _records, offset, end_json in self._drain(table):
+                if i == 0 and offset is None:
+                    ingestion_type = self._ingestion_type(table)
                     if ingestion_type != "snapshot":
                         return (
                             f"[{table}] Offset is None but ingestion_type is "
@@ -713,25 +698,269 @@ class LakeflowConnectTests:
                             "dict for non-snapshot tables."
                         )
                     return None  # Snapshot — nothing else to test.
-
-            try:
-                cur_json = json.dumps(offset, sort_keys=True)
-            except (TypeError, ValueError) as e:
-                return (
-                    f"[{table}] Offset not JSON-serializable: {e}\n"
-                    "  Fix: Use only strings/numbers/booleans/None in the offset dict."
-                )
-
-            if prev_json is not None and cur_json == prev_json:
-                return None  # Converged.
-            prev_json = cur_json
-
+                if prev_json is not None and end_json == prev_json:
+                    return None  # Converged.
+                prev_json = end_json
+        except _DrainError as e:
+            return str(e)
         return (
-            f"[{table}] read_table did not converge in {max_iter} iterations "
+            f"[{table}] read_table did not converge in "
+            f"{self.read_termination_max_iterations} iterations "
             f"(last offset: {prev_json}).\n"
             "  Fix: read_table() must eventually return the same offset it "
             "was given. Trigger.AvailableNow termination depends on this."
         )
+
+    def _drain(self, table: str, read_fn: Optional[Callable] = None, consume_all: bool = False):
+        """Shared drain loop for the termination, offset-advance and
+        completeness checks.
+
+        Calls ``read_fn`` (default ``read_table``) repeatedly, feeding each
+        returned offset back as the next start offset, and yields
+        ``(index, start_json, records, offset, end_json)`` per call. Stops
+        when an end offset repeats the previous call's end offset
+        (Trigger.AvailableNow convergence) or after
+        ``read_termination_max_iterations`` calls.
+
+        Offsets are serialized strictly (``json.dumps(sort_keys=True)``, no
+        ``default=``): a non-JSON-serializable offset is a real bug and raises
+        ``_DrainError``, as does a result that isn't ``(iterator, offset)``
+        or an offset that isn't a dict or None. Only ``sample_records``
+        records per call are consumed unless ``consume_all``.
+        """
+        read_fn = read_fn or self.connector.read_table
+        name = getattr(read_fn, "__name__", "read_table")
+        offset: Any = {}
+        start_json = json.dumps(offset, sort_keys=True)
+        prev_end: Optional[str] = None
+        for i in range(self.read_termination_max_iterations):
+            result = read_fn(table, offset, self._opts(table))
+            if not isinstance(result, tuple) or len(result) != 2:
+                raise _DrainError(
+                    f"[{table}] {name} call {i + 1} returned "
+                    f"{type(result).__name__}, expected 2-tuple.\n"
+                    f"  Fix: {name}() must return (iterator, offset_dict)."
+                )
+            iterator, offset = result
+            records = self._consume(iterator, max_records=10**9 if consume_all else None)
+            if offset is not None and not isinstance(offset, dict):
+                raise _DrainError(
+                    f"[{table}] Offset must be dict or None, got {type(offset).__name__}."
+                )
+            try:
+                end_json = json.dumps(offset, sort_keys=True)
+            except (TypeError, ValueError) as e:
+                raise _DrainError(
+                    f"[{table}] Offset not JSON-serializable: {e}\n"
+                    "  Fix: Use only strings/numbers/booleans/None in the offset dict."
+                ) from e
+            yield i, start_json, records, offset, end_json
+            if prev_end is not None and end_json == prev_end:
+                return
+            prev_end = end_json
+            start_json = end_json
+
+    def _run_with_exemptions(
+        self, tables: List[str], exempt: frozenset, attr: str, check: str, validate: Callable
+    ) -> List[str]:
+        """Run ``validate`` on every table, treating ``exempt`` entries like a
+        strict xfail: an exempt table must still fail (so a fixed connector
+        is told to drop its entry), and every exempt name must be a real
+        table (so a typo can't silently disable the check)."""
+        errors: List[str] = []
+        unknown = sorted(set(exempt) - set(self._tables()))
+        if unknown:
+            errors.append(
+                f"{attr} lists tables that list_tables() doesn't return: {unknown}.\n"
+                f"  Fix: correct or remove those entries from {attr}."
+            )
+        for table in tables:
+            try:
+                err = validate(table)
+            except _DrainError as e:
+                err = str(e)
+            except Exception as e:  # pylint: disable=broad-except
+                err = f"[{table}] {check} error: {e}"
+            if table in exempt:
+                if not err:
+                    errors.append(
+                        f"[{table}] is listed in {attr} but now passes {check}.\n"
+                        f"  Fix: remove it from {attr} and tick it off the tracking issue."
+                    )
+            elif err:
+                errors.append(err)
+        return errors
+
+    # ------------------------------------------------------------------
+    # test_read_offset_advances_with_records  (per-table, collected)
+    # ------------------------------------------------------------------
+
+    def test_read_offset_advances_with_records(self):
+        """A non-empty batch must return an offset different from the one given.
+
+        Spark's ``SimpleDataSourceStreamReader`` rejects a microbatch that
+        returns records without advancing the end offset
+        (``SIMPLE_STREAM_READER_OFFSET_DID_NOT_ADVANCE``), which aborts the
+        pipeline. ``test_read_terminates`` only checks that offsets eventually
+        converge, so a connector that re-emits boundary records at an
+        unchanged offset passes it and then fails on a real managed run.
+
+        Delete flows use the same reader (``read_table_deletes``), so
+        ``cdc_with_deletes`` tables are checked through both read functions.
+        Incremental tables only (snapshot tables are read in batch and may
+        return the same offset every time). Simulate mode only, so live runs
+        don't repeat the API calls ``test_read_terminates`` already makes.
+        """
+        if _resolve_env_mode_for_simulator(self.simulator_source) != MODE_SIMULATE:
+            pytest.skip("Offset-advance check only enforced in simulate mode")
+        tables = [
+            t for t in self._non_partitioned_tables()
+            if self._ingestion_type(t) != "snapshot"
+        ]
+        if not tables:
+            pytest.skip("No non-partitioned incremental tables to check")
+        errors = self._run_with_exemptions(
+            tables, self.offset_advance_exempt_tables,
+            "offset_advance_exempt_tables", "the offset-advance check",
+            self._validate_offset_advances,
+        )
+        if errors:
+            pytest.fail("\n\n".join(errors))
+
+    def _validate_offset_advances(self, table: str) -> Optional[str]:
+        """Flag the first call that returns records while leaving the offset
+        unchanged, through read_table and (for cdc_with_deletes) read_table_deletes."""
+        read_fns = [self.connector.read_table]
+        if self._ingestion_type(table) == "cdc_with_deletes" and hasattr(
+            self.connector, "read_table_deletes"
+        ):
+            read_fns.append(self.connector.read_table_deletes)
+        for read_fn in read_fns:
+            for i, start_json, records, _offset, end_json in self._drain(table, read_fn):
+                if records and end_json == start_json:
+                    return (
+                        f"[{table}] {read_fn.__name__} call {i + 1} returned records but "
+                        f"did not advance the offset (offset stayed {end_json}).\n"
+                        "  Fix: a non-empty batch must return an end offset different "
+                        "from the start offset; Spark's SimpleDataSourceStreamReader "
+                        "aborts with SIMPLE_STREAM_READER_OFFSET_DID_NOT_ADVANCE. "
+                        "Typical cause: an inclusive (>=) cursor boundary re-emitting "
+                        "the boundary record."
+                    )
+        return None
+
+    # ------------------------------------------------------------------
+    # test_read_drains_full_corpus  (per-table, collected)
+    # ------------------------------------------------------------------
+
+    # Tables exempt from ``test_read_offset_advances_with_records``. Use only
+    # for a known, tracked violation pending a connector fix (each entry should
+    # reference its issue). Exempt tables still run and must still fail: one
+    # that passes is reported so its entry gets removed.
+    offset_advance_exempt_tables: frozenset = frozenset()
+
+    # Tables exempt from ``test_read_drains_full_corpus``: those whose
+    # ``corpus/<table>.json`` is intentionally not 1:1 with the rows a full
+    # drain returns, or that are pending a fix. Same strict-xfail rule as above.
+    completeness_exempt_tables: frozenset = frozenset()
+
+    def test_read_drains_full_corpus(self):
+        """Draining read_table returns every record in the table's corpus.
+
+        Catches silent truncation: a connector that stops paginating early
+        (e.g. it follows a continuation link the API never returns) still
+        passes the other read tests, because they only sample a few records.
+        Here, ``read_table`` is drained until the offset converges and the
+        primary keys returned must cover every key in ``corpus/<table>.json``.
+        Comparing keys, not counts, means extra rows (such as synthesized
+        future records) can't hide a missing page, and duplicate keys in the
+        corpus can't fail a correct connector. When the connector derives key
+        fields that aren't in the raw corpus (so keys can't be compared), it
+        falls back to comparing distinct counts.
+
+        Simulate mode only, and only for tables whose corpus file is named
+        after the table. An empty drain is skipped: the default read doesn't
+        draw from that corpus (child tables, date windows, ...).
+        """
+        if _resolve_env_mode_for_simulator(self.simulator_source) != MODE_SIMULATE:
+            pytest.skip("Completeness check only enforced in simulate mode")
+        corpus_dir = self._simulator_corpus_dir()
+        if corpus_dir is None:
+            pytest.skip("No simulator corpus")
+        tables = [
+            t for t in self._non_partitioned_tables()
+            if (corpus_dir / f"{t}.json").exists()
+        ]
+        if not tables:
+            pytest.skip("No tables with a matching corpus/<table>.json")
+        errors = self._run_with_exemptions(
+            tables, self.completeness_exempt_tables,
+            "completeness_exempt_tables", "the completeness check",
+            lambda t: self._validate_full_drain(t, corpus_dir / f"{t}.json"),
+        )
+        if errors:
+            pytest.fail("\n\n".join(errors))
+
+    def _validate_full_drain(self, table: str, corpus_path: Path) -> Optional[str]:
+        with open(corpus_path, encoding="utf-8") as fh:
+            corpus = json.load(fh)
+        if not isinstance(corpus, list) or not corpus:
+            return None
+        meta = self.connector.read_table_metadata(table, self._opts(table)) or {}
+        pks = meta.get("primary_keys") or []
+
+        def _as_dict(rec):
+            return rec if isinstance(rec, dict) else rec.asDict(recursive=True)
+
+        def _norm(value):
+            # str() so 1 and "1" compare equal; structured values by content.
+            if isinstance(value, (dict, list)):
+                return json.dumps(value, sort_keys=True, default=str)
+            return str(value)
+
+        def _key(row):
+            if pks:
+                return tuple(_norm(row.get(k)) for k in pks)
+            return json.dumps(row, sort_keys=True, default=str)
+
+        seen = set()
+        for _i, _start, records, _offset, _end in self._drain(table, consume_all=True):
+            seen.update(_key(_as_dict(r)) for r in records)
+        if not seen:
+            return None  # empty drain: the default read doesn't use this corpus
+
+        keyable = bool(pks) and all(
+            isinstance(r, dict) and all(k in r for k in pks) for r in corpus
+        )
+        expected = {_key(r) for r in corpus} if keyable else set()
+        if expected and expected & seen:
+            missing = expected - seen
+            if not missing:
+                return None
+            sample = sorted(missing)[:3]
+            return (
+                f"[{table}] Draining read_table returned {len(expected) - len(missing)} "
+                f"of the {len(expected)} distinct keys in corpus/{table}.json "
+                f"(missing e.g. {sample}).\n"
+                "  Fix: the connector is dropping records, most often by stopping "
+                "pagination early (e.g. following a continuation link the API "
+                "doesn't return). If the gap is intentional (default filter, shared "
+                "corpus file), add the table to completeness_exempt_tables with a "
+                "comment explaining why."
+            )
+        # Keys not comparable (connector derives/renames key fields): fall back
+        # to distinct counts, de-duplicating the corpus by content.
+        distinct_corpus = len({json.dumps(r, sort_keys=True, default=str) for r in corpus})
+        if len(seen) < distinct_corpus:
+            return (
+                f"[{table}] Draining read_table returned {len(seen)} distinct records, "
+                f"but corpus/{table}.json has {distinct_corpus} distinct records "
+                "(keys not directly comparable, so counts were compared).\n"
+                "  Fix: the connector is likely dropping records (e.g. stopping "
+                "pagination early). If the gap is intentional, add the table to "
+                "completeness_exempt_tables with a comment explaining why."
+            )
+        return None
 
     # ------------------------------------------------------------------
     # test_every_column_populated_by_at_least_one_record  (per-table, collected)
