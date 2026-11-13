@@ -1,0 +1,34 @@
+{
+  "resourceType": "CapabilityStatement",
+  "id": "simulator",
+  "text": {
+    "status": "generated",
+    "div": "<div xmlns=\"http://www.w3.org/1999/xhtml\">FHIR simulator</div>"
+  },
+  "name": "RestServer",
+  "status": "active",
+  "date": "2026-11-02T00:00:00Z",
+  "publisher": "Lakeflow community connectors simulator",
+  "copyright": "n/a",
+  "kind": "instance",
+  "instantiates": [],
+  "software": {
+    "name": "FHIR simulator"
+  },
+  "implementation": {
+    "description": "Simulated FHIR R4 server",
+    "url": "https://simulator-fhir.example.com/baseR4"
+  },
+  "fhirVersion": "4.0.1",
+  "format": [
+    "application/fhir+json"
+  ],
+  "patchFormat": [
+    "application/json-patch+json"
+  ],
+  "rest": [
+    {
+      "mode": "server"
+    }
+  ]
+}

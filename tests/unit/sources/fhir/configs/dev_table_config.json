@@ -1,16 +1,58 @@
 {
-  "Patient": {"page_size": "5", "max_records_per_batch": "5"},
-  "Observation": {"page_size": "5", "max_records_per_batch": "5"},
-  "Condition": {"page_size": "5", "max_records_per_batch": "5"},
-  "Encounter": {"page_size": "5", "max_records_per_batch": "5"},
-  "Procedure": {"page_size": "5", "max_records_per_batch": "5"},
-  "MedicationRequest": {"page_size": "5", "max_records_per_batch": "5"},
-  "DiagnosticReport": {"page_size": "5", "max_records_per_batch": "5"},
-  "AllergyIntolerance": {"page_size": "5", "max_records_per_batch": "5"},
-  "Immunization": {"page_size": "5", "max_records_per_batch": "5"},
-  "Coverage": {"page_size": "5", "max_records_per_batch": "5"},
-  "CarePlan": {"page_size": "5", "max_records_per_batch": "5"},
-  "Goal": {"page_size": "5", "max_records_per_batch": "5"},
-  "Device": {"page_size": "5", "max_records_per_batch": "5"},
-  "DocumentReference": {"page_size": "5", "max_records_per_batch": "5"}
+  "Patient": {
+    "page_size": "500",
+    "max_records_per_batch": "5000"
+  },
+  "Observation": {
+    "page_size": "500",
+    "max_records_per_batch": "5000"
+  },
+  "Condition": {
+    "page_size": "500",
+    "max_records_per_batch": "5000"
+  },
+  "Encounter": {
+    "page_size": "500",
+    "max_records_per_batch": "5000"
+  },
+  "Procedure": {
+    "page_size": "500",
+    "max_records_per_batch": "5000"
+  },
+  "MedicationRequest": {
+    "page_size": "500",
+    "max_records_per_batch": "5000"
+  },
+  "DiagnosticReport": {
+    "page_size": "500",
+    "max_records_per_batch": "5000"
+  },
+  "AllergyIntolerance": {
+    "page_size": "500",
+    "max_records_per_batch": "5000"
+  },
+  "Immunization": {
+    "page_size": "500",
+    "max_records_per_batch": "5000"
+  },
+  "Coverage": {
+    "page_size": "500",
+    "max_records_per_batch": "5000"
+  },
+  "CarePlan": {
+    "page_size": "500",
+    "max_records_per_batch": "5000"
+  },
+  "Goal": {
+    "page_size": "500",
+    "max_records_per_batch": "5000"
+  },
+  "Device": {
+    "page_size": "500",
+    "max_records_per_batch": "5000"
+  },
+  "DocumentReference": {
+    "page_size": "500",
+    "max_records_per_batch": "5000"
+  }
 }

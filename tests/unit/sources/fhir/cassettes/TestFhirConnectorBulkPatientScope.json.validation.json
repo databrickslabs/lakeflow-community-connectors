@@ -1,0 +1,67 @@
+{
+  "version": 1,
+  "generated_at": "2026-11-02T01:20:51.134928Z",
+  "endpoints": [
+    {
+      "method": "DELETE",
+      "spec_path": "/baseR4/$export-poll-status",
+      "sample_url": "https://hapi.fhir.org/baseR4/$export-poll-status?_jobId=7151cba9-42da-4739-b88b-12280aac20bc",
+      "status": "validated",
+      "calls": 2,
+      "matched": 2,
+      "mismatched": 0,
+      "no_spec": 0,
+      "issues": []
+    },
+    {
+      "method": "GET",
+      "spec_path": "/baseR4/$export-poll-status",
+      "sample_url": "https://hapi.fhir.org/baseR4/$export-poll-status?_jobId=7151cba9-42da-4739-b88b-12280aac20bc",
+      "status": "validated",
+      "calls": 4,
+      "matched": 4,
+      "mismatched": 0,
+      "no_spec": 0,
+      "issues": []
+    },
+    {
+      "method": "GET",
+      "spec_path": "/baseR4/Binary/{file_id}",
+      "sample_url": "https://hapi.fhir.org/baseR4/Binary/m10vlFfMMSq7fC5U6yyWzThx8qNhxYrL",
+      "status": "validated",
+      "calls": 2,
+      "matched": 2,
+      "mismatched": 0,
+      "no_spec": 0,
+      "issues": []
+    },
+    {
+      "method": "GET",
+      "spec_path": "/baseR4/Patient/$export",
+      "sample_url": "https://hapi.fhir.org/baseR4/Patient/$export?_type=Goal",
+      "status": "validated",
+      "calls": 2,
+      "matched": 2,
+      "mismatched": 0,
+      "no_spec": 0,
+      "issues": []
+    },
+    {
+      "method": "GET",
+      "spec_path": "/baseR4/metadata",
+      "sample_url": "https://hapi.fhir.org/baseR4/metadata",
+      "status": "validated",
+      "calls": 1,
+      "matched": 1,
+      "mismatched": 0,
+      "no_spec": 0,
+      "issues": []
+    }
+  ],
+  "summary": {
+    "endpoints_total": 5,
+    "endpoints_validated": 5,
+    "endpoints_mismatched": 0,
+    "endpoints_missing_spec": 0
+  }
+}
