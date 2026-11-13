@@ -1,0 +1,32 @@
+# Linear — single-endpoint GraphQL API.
+#
+# Every read is a POST to https://api.linear.app/graphql whose query,
+# variables, and Relay-style cursor pagination live entirely in the JSON
+# request body. That shape doesn't fit the declarative param-role pipeline
+# (which keys off URL query params), so the endpoint uses a custom handler.
+#
+# The handler (handlers/graphql.py::serve_graphql):
+#   * routes to the issues / projects corpus by GraphQL root field,
+#   * re-nests connection fields (labels / members / teams /
+#     projectMilestones) into the GraphQL `{ "nodes": [...] }` envelope so the
+#     connector's flatten step round-trips (the corpus is stored flattened,
+#     generated from the connector StructTypes),
+#   * sorts ascending by updatedAt and applies the `updatedAt: { gte }`
+#     incremental filter,
+#   * paginates via an opaque Relay cursor (pageInfo.endCursor / hasNextPage).
+#
+# Termination: the connector caps reads at its init-time snapshot and the
+# corpus is finite, so `read_table` converges to end_offset == start_offset
+# without any future-record synthesis.
+#
+# The OAuth token endpoint is only exercised when the connector is configured
+# with OAuth credentials (no personal API key); it returns a stub token.
+
+endpoints:
+  - path: /graphql
+    method: POST
+    handler: databricks.labs.community_connector.source_simulator.specs.linear.handlers.graphql:serve_graphql
+
+  - path: /oauth/token
+    method: POST
+    handler: databricks.labs.community_connector.source_simulator.specs.linear.handlers.graphql:serve_oauth_token

@@ -1,0 +1,62 @@
+# Linear Community Connector Spec
+# This file defines the specification for the Linear connector including
+# connection parameters and allowlist options.
+
+# ============================================================================
+# Connection Parameters
+# The Linear connector supports two authentication methods:
+# 1. Personal API Key (recommended for simple use cases)
+# 2. OAuth 2.0 with refresh token (recommended for applications)
+# ============================================================================
+connection:
+  auth_methods:
+    - name: api_key
+      description: >
+        Authenticate using a personal API key. This is the simplest method
+        and is suitable for personal scripts and small-scale integrations.
+        Generate a personal API key from your Linear workspace settings.
+      parameters:
+        - name: personal_api_key
+          type: string
+          required: true
+          description: >
+            Personal API key for Linear authentication. Obtain this from your
+            Linear workspace at Settings → API → Personal API keys. This key
+            is sent verbatim with no Bearer prefix.
+
+    - name: oauth
+      description: >
+        Authenticate using OAuth 2.0 with a refresh token. This method is
+        suitable for applications and integrations that need to act on behalf
+        of a workspace. Requires client credentials obtained from your Linear
+        OAuth application.
+      parameters:
+        - name: client_id
+          type: string
+          required: true
+          description: >
+            OAuth client ID for your Linear application. Obtain this from your
+            Linear workspace at Settings → Integrations → OAuth applications.
+
+        - name: client_secret
+          type: string
+          required: true
+          description: >
+            OAuth client secret for your Linear application. Keep this secret
+            and secure. Obtain this from your Linear workspace at Settings →
+            Integrations → OAuth applications.
+
+        - name: refresh_token
+          type: string
+          required: true
+          description: >
+            OAuth refresh token for accessing Linear on behalf of a user or
+            workspace. This is obtained through the OAuth authorization flow.
+
+# ============================================================================
+# External Options Allowlist
+# These table-specific options control pagination and incremental sync behavior
+# for read operations. They must be included in the UC connection's
+# externalOptionsAllowList parameter.
+# ============================================================================
+external_options_allowlist: "max_records_per_batch,page_size,lookback_seconds"
