@@ -1,0 +1,89 @@
+{
+  "version": 1,
+  "generated_at": "2026-11-03T20:51:34.185727Z",
+  "endpoints": [
+    {
+      "method": "GET",
+      "spec_path": "/v1/escalation_policies",
+      "sample_url": "https://api.rootly.com/v1/escalation_policies?page%5Bsize%5D=2&page%5Bnumber%5D=1",
+      "status": "validated",
+      "calls": 6,
+      "matched": 6,
+      "mismatched": 0,
+      "no_spec": 0,
+      "issues": []
+    },
+    {
+      "method": "GET",
+      "spec_path": "/v1/incidents",
+      "sample_url": "https://api.rootly.com/v1/incidents?page%5Bsize%5D=2&page%5Bnumber%5D=1",
+      "status": "validated",
+      "calls": 6,
+      "matched": 6,
+      "mismatched": 0,
+      "no_spec": 0,
+      "issues": []
+    },
+    {
+      "method": "GET",
+      "spec_path": "/v1/schedules",
+      "sample_url": "https://api.rootly.com/v1/schedules?page%5Bsize%5D=2&page%5Bnumber%5D=1",
+      "status": "validated",
+      "calls": 6,
+      "matched": 6,
+      "mismatched": 0,
+      "no_spec": 0,
+      "issues": []
+    },
+    {
+      "method": "GET",
+      "spec_path": "/v1/services",
+      "sample_url": "https://api.rootly.com/v1/services?page%5Bsize%5D=2&page%5Bnumber%5D=1",
+      "status": "validated",
+      "calls": 6,
+      "matched": 6,
+      "mismatched": 0,
+      "no_spec": 0,
+      "issues": []
+    },
+    {
+      "method": "GET",
+      "spec_path": "/v1/severities",
+      "sample_url": "https://api.rootly.com/v1/severities?page%5Bsize%5D=2&page%5Bnumber%5D=1",
+      "status": "validated",
+      "calls": 6,
+      "matched": 6,
+      "mismatched": 0,
+      "no_spec": 0,
+      "issues": []
+    },
+    {
+      "method": "GET",
+      "spec_path": "/v1/teams",
+      "sample_url": "https://api.rootly.com/v1/teams?page%5Bsize%5D=2&page%5Bnumber%5D=1",
+      "status": "validated",
+      "calls": 6,
+      "matched": 6,
+      "mismatched": 0,
+      "no_spec": 0,
+      "issues": []
+    },
+    {
+      "method": "GET",
+      "spec_path": "/v1/users",
+      "sample_url": "https://api.rootly.com/v1/users?page%5Bsize%5D=2&page%5Bnumber%5D=1",
+      "status": "validated",
+      "calls": 6,
+      "matched": 6,
+      "mismatched": 0,
+      "no_spec": 0,
+      "issues": []
+    }
+  ],
+  "summary": {
+    "endpoints_total": 7,
+    "endpoints_validated": 7,
+    "endpoints_mismatched": 0,
+    "endpoints_missing_spec": 0
+  }
+}
