@@ -12,8 +12,9 @@ Design notes:
     * ``systemData.createdAt`` / ``systemData.lastModifiedAt`` /
       ``systemData.expiredAt`` are ISO-8601 UTC date-time **strings** in this
       API (not epoch ms like the older Atlas Data Map surface). They are kept
-      as ``StringType``; the incremental cursor sorts them lexicographically
-      (ISO-8601 UTC strings are lexicographically ordered).
+      as ``StringType``; the incremental cursor parses them to datetimes before
+      comparing (Purview's ``Z`` / 7-digit spelling doesn't string-compare
+      reliably against other ISO-8601 spellings).
     * Nested objects (``systemData``, ``contacts``, ``thumbnail``,
       ``additionalProperties``) are kept as ``StructType`` — never ``MapType``.
     * Repeated objects (``contacts.owner``, ``termsOfUse``, ``domains``,
