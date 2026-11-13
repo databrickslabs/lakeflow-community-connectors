@@ -1,0 +1,122 @@
+# Power BI REST API (semantic models / datasets).
+#
+# Connector flow:
+#   1. POST https://login.microsoftonline.com/{tenant_id}/oauth2/v2.0/token
+#      → Entra ID client-credentials exchange; stubbed by a handler.
+#   2. Tenant-wide Admin list endpoints (/admin/groups, /admin/datasets) —
+#      OData $top/$skip paging over a `value` array.  The connector falls back
+#      to the membership-scoped /groups forms on 401/403, so both are modelled.
+#   3. The async metadata Scanner API (getInfo → scanStatus → scanResult).
+#      Handler-backed: the handshake returns a scan ID and a status rather than
+#      records, and scanResult is one nested tree that feeds three flat tables.
+#   4. GET /groups/{groupId}/datasets/{datasetId}/refreshes — per-dataset
+#      fan-out, `value` array, $top only (the API has no since/until filter,
+#      so the connector bounds the window client-side against its init time).
+#   5. POST /groups/{groupId}/datasets/{datasetId}/executeQueries — the opt-in
+#      user-supplied DAX table. Handler-backed; returns a fixed result set.
+
+endpoints:
+  # ---- Entra ID client-credentials token ----
+  - path: "/{tenant_id}/oauth2/v2.0/token"
+    method: POST
+    handler: databricks.labs.community_connector.source_simulator.specs.power_bi_semantic_model.handlers.scanner:oauth_token
+
+  # ---- workspaces ----
+  #
+  # Admin variant: $top is mandatory (1-5000) and $skip pages past it.
+  - path: "/v1.0/myorg/admin/groups"
+    method: GET
+    corpus: workspaces
+    response:
+      pagination_style: offset_limit
+      wrapper:
+        records_key: value
+    params:
+      "$top":    {role: limit, default: 1000, max: 5000}
+      "$skip":   {role: offset}
+      # OData filter expressions (e.g. "state eq 'Active'") are passed through
+      # verbatim by the connector; the simulator accepts and ignores them.
+      "$filter": {role: ignore}
+      "$expand": {role: ignore}
+
+  # Membership-scoped fallback, used when the service principal has not been
+  # enabled for the Admin APIs.
+  - path: "/v1.0/myorg/groups"
+    method: GET
+    corpus: workspaces
+    response:
+      pagination_style: offset_limit
+      wrapper:
+        records_key: value
+    params:
+      "$top":    {role: limit, default: 1000, max: 5000}
+      "$skip":   {role: offset}
+      "$filter": {role: ignore}
+
+  # ---- datasets (semantic models) ----
+  - path: "/v1.0/myorg/admin/datasets"
+    method: GET
+    corpus: datasets
+    response:
+      pagination_style: offset_limit
+      wrapper:
+        records_key: value
+    params:
+      "$top":    {role: limit, default: 1000, max: 5000}
+      "$skip":   {role: offset}
+      "$filter": {role: ignore}
+      "$expand": {role: ignore}
+
+  # Per-workspace fallback. No documented paging — single page of `value`.
+  - path: "/v1.0/myorg/groups/{groupId}/datasets"
+    method: GET
+    corpus: datasets
+    response:
+      pagination_style: none
+      wrapper:
+        records_key: value
+
+  # ---- metadata scanner (dataset_tables / dataset_columns / dataset_measures) ----
+  #
+  # All three handler-backed; see handlers/scanner.py for why the declarative
+  # pipeline can't express this workflow.
+  - path: "/v1.0/myorg/admin/workspaces/getInfo"
+    method: POST
+    handler: databricks.labs.community_connector.source_simulator.specs.power_bi_semantic_model.handlers.scanner:post_workspace_info
+
+  - path: "/v1.0/myorg/admin/workspaces/scanStatus/{scanId}"
+    method: GET
+    handler: databricks.labs.community_connector.source_simulator.specs.power_bi_semantic_model.handlers.scanner:get_scan_status
+
+  - path: "/v1.0/myorg/admin/workspaces/scanResult/{scanId}"
+    method: GET
+    handler: databricks.labs.community_connector.source_simulator.specs.power_bi_semantic_model.handlers.scanner:get_scan_result
+
+  # ---- refresh history ----
+  #
+  # The connector caps its returned cursor at its init time, so future-dated
+  # records must be excluded by its own client-side `until` bound. Synthesising
+  # a few lets the simulate-mode termination test detect an uncapped connector.
+  - path: "/v1.0/myorg/groups/{groupId}/datasets/{datasetId}/refreshes"
+    method: GET
+    corpus: dataset_refresh_history
+    response:
+      pagination_style: offset_limit
+      default_sort: "startTime desc"
+      wrapper:
+        records_key: value
+    params:
+      "$top":  {role: limit, default: 60, max: 5000}
+      "$skip": {role: offset}
+    synthesize_future_records:
+      cursor_field: startTime
+      count: 3
+
+  # ---- dax_query_result ----
+  #
+  # POST executeQueries. Handler-backed: the response is a fixed-depth envelope
+  # (results[0].tables[0].rows) whose rows are the *user's* DAX result, so no
+  # corpus table can stand in for it. See handlers/dax.py.
+  - path: "/v1.0/myorg/groups/{groupId}/datasets/{datasetId}/executeQueries"
+    method: POST
+    handler: databricks.labs.community_connector.source_simulator.specs.power_bi_semantic_model.handlers.dax:execute_queries
