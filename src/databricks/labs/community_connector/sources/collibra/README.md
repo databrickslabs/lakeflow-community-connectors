@@ -110,12 +110,12 @@ All tables work with no options. Optional table-specific options narrow the extr
 | Table              | Required Options | Optional Options                                          | Notes |
 |--------------------|------------------|-----------------------------------------------------------|-------|
 | `assets`           | None             | `sort_field`, `domain_id`, `community_id`, `max_records_per_batch`, `page_size` | `sort_field` defaults to `ID` — `/assets` accepts only `NAME` / `DISPLAY_NAME` / `ID` (`LAST_MODIFIED` is rejected 400), so the `lastModifiedOn` cursor is applied client-side. `domain_id` / `community_id` scope to a single domain or community. `max_records_per_batch` acts as a resumable page-granular cap on the default `sort_field=ID` path — see note below. |
-| `attributes`       | None             | `asset_id`, `type_public_ids`, `max_records_per_batch`    | `asset_id` fetches attributes for a single asset; `type_public_ids` filters by attribute type public ID (e.g. `Description`, `Certification`). |
+| `attributes`       | None             | `asset_id`, `type_public_ids`, `max_records_per_batch`    | `asset_id` fetches attributes for a single asset; `type_public_ids` filters by attribute type public IDs, comma-separated (e.g. `Definition,Description`). |
 | `responsibilities` | None             | `resource_ids`, `role_ids`, `max_records_per_batch`       | `resource_ids` scopes to specific asset/domain/community IDs; `role_ids` filters by role UUID. `includeInherited=true` is always set. |
 | `domains`          | None             | `community_id`                                            | Scope to domains within a specific community. |
 
 - **`max_records_per_batch`** (`attributes` / `responsibilities`): caps records emitted per microbatch. Defaults to `5000`; set to `0` (or negative) for no cap. It is a **soft** cap — once reached, the connector keeps draining records that share the boundary `lastModifiedOn` value (the tie group) before stopping, so a batch never splits a group sharing one cursor value (which would silently skip the remainder on the next run). Safe to truncate this way because these endpoints are server-sorted `LAST_MODIFIED ASC` and CDC tables upsert-dedup on the primary key. **On `assets` it is a resumable page-granular cap**: `/assets` is sorted by `ID` (not `LAST_MODIFIED`), so a count-based cap can't safely advance the `lastModifiedOn` watermark directly. Instead the reader paginates by the `/assets` keyset cursor and, once the cap is reached, stops at a page boundary and persists that page cursor in the offset (`page_token` + a frozen snapshot bound `pass_ts`); the `lastModifiedOn` watermark only advances when a full id-pass completes. This lets a run killed mid-collection (e.g. m2m token expiry on a large full-load) resume from the last page instead of restarting. Only the default `sort_field=ID` (a unique keyset) uses this path; `NAME`/`DISPLAY_NAME` are non-unique and fall back to draining the full collection per run (bounded by the init-time cap). `page_size` (default 1000) controls the page size the cap is measured against.
-- To use any of these table options, include them in the connection's `externalOptionsAllowList` so they are passed through.
+- To use any of these table options, include them in the connection's `externalOptionsAllowList` so they are passed through. See [Step 2](#step-2-configure-your-pipeline) for where options go in managed vs. `ingest.py` pipelines.
 
 ### Schema highlights
 
@@ -204,7 +204,24 @@ pipeline_spec = {
 ingest(spark, pipeline_spec)
 ```
 
-To scope a table, add `table_options` (and make sure the option is in the connection's `externalOptionsAllowList`). For example, to fetch only Description and Certification attributes:
+To scope a table, pass table options (and make sure each option is in the connection's `externalOptionsAllowList`). Multi-value options (`type_public_ids`, `resource_ids`, `role_ids`) take a comma-separated string; the connector sends each value as a repeated query parameter, which is what Collibra expects. Attribute type public IDs are instance-specific; look them up in Collibra under Settings → Operating Model → Attribute Types.
+
+Where the options go depends on how the pipeline was created.
+
+**Managed ingestion pipelines** (created from the "Add data" UI or `community-connector create_pipeline`): put source options under `connector_options.community_connector_options.options`. `table_configuration` only takes ingestion controls (`scd_type`, `primary_keys`, `sequence_by`), and other keys there are not passed to the connector. For example, to fetch only Definition and Description attributes:
+
+```yaml
+connection_name: my_collibra_connection
+objects:
+  - table:
+      source_table: attributes
+      connector_options:
+        community_connector_options:
+          options:
+            type_public_ids: "Definition,Description"
+```
+
+**`ingest.py` pipelines** (as in the snippet above): put source options in `table_configuration`:
 
 ```python
 pipeline_spec = {
@@ -213,7 +230,7 @@ pipeline_spec = {
         {
             "table": {
                 "source_table": "attributes",
-                "table_options": {"type_public_ids": "Description,Certification"},
+                "table_configuration": {"type_public_ids": "Definition,Description"},
             }
         },
     ],
