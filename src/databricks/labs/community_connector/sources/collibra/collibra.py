@@ -45,6 +45,12 @@ import requests
 from pyspark.sql.types import StructType
 
 from databricks.labs.community_connector.interface import LakeflowConnect
+from databricks.labs.community_connector.libs.resumable import (
+    RESUME_TOKEN,
+    SNAPSHOT_TS,
+    WATERMARK,
+    resumable_cdc_read,
+)
 from databricks.labs.community_connector.sources.collibra.collibra_schemas import (
     DEFAULT_PAGE_SIZE,
     MAX_PAGE_SIZE,
@@ -196,7 +202,8 @@ class CollibraLakeflowConnect(LakeflowConnect):
         (400); that value is valid only on ``/responsibilities`` and
         ``/relations``. We therefore default to ``ID`` (stable keyset order),
         and the ``lastModifiedOn`` incremental cursor is applied CLIENT-SIDE
-        (see ``_read_cdc_incremental``) rather than relying on server ordering.
+        (see ``_incremental_from_iter`` / ``_incremental_assets_resumable``)
+        rather than relying on server ordering.
         Overridable via the ``sort_field`` table option (NAME/DISPLAY_NAME/ID).
         """
         sort_field = table_options.get("sort_field", "ID")
@@ -421,98 +428,63 @@ class CollibraLakeflowConnect(LakeflowConnect):
         """Resumable incremental read for the ID-sorted ``assets`` path.
 
         ``/assets`` is keyset-paginated by ``id`` (its opaque ``nextCursor`` is
-        an ``AFTER:id:<id>`` token), but filtered incrementally on
-        ``lastModifiedOn``. Those are two independent dimensions, so we track
-        them separately in the offset:
+        an ``AFTER:id:<id>`` token) but filtered incrementally on
+        ``lastModifiedOn``. The generic resumable state machine — page by the
+        stable key, advance the watermark only on a provably complete pass, cap
+        at a page boundary and persist the resume token — lives in
+        :func:`resumable.resumable_cdc_read`. This method only adapts Collibra's
+        specifics to it:
 
-          * ``cursor``     — the committed ``lastModifiedOn`` watermark (floor).
-                             Only advances when a full id-pass completes.
-          * ``page_token`` — the opaque nextCursor to resume an in-progress
-                             id-pass. Absent ⇒ start a fresh pass.
-          * ``pass_ts``    — ``_init_ts`` frozen at the start of a pass, kept
-                             across resumes so the pass sees one consistent
-                             snapshot upper bound.
+          * the persisted offset keeps Collibra's historical keys
+            (``cursor`` / ``page_token`` / ``pass_ts``) rather than the helper's
+            generic ones, so offsets checkpointed by earlier runs keep resuming;
+          * ``lastModifiedOn`` cursors are int64 epoch ms (via ``_as_cursor``),
+            with ``0`` as the "no committed floor yet" sentinel.
 
-        Per run we page by id from ``page_token`` (or the start), emitting rows
-        where ``cursor < lastModifiedOn <= pass_ts``. ``max_records_per_batch``
-        is a page-granular cap: once reached we stop at the page boundary and
-        persist ``page_token`` = that page's nextCursor, leaving the committed
-        watermark UNCHANGED (we haven't proven we've seen everything ≤ any given
-        lastModifiedOn yet). When pagination is exhausted the pass is complete —
-        we advance the committed watermark to ``pass_ts`` and clear
-        ``page_token``/``pass_ts`` so the next run starts a fresh pass from the
-        new floor. A run killed mid-pass (e.g. m2m token expiry) resumes from
-        the last committed ``page_token`` instead of restarting.
-
-        Progress within a pass is by id (the true sort key), so truncation never
-        skips a record; the watermark only moves after a provably complete pass,
-        so the next fresh pass's strict ``> committed`` filter can't skip an
-        un-emitted record.
+        A run killed mid-pass (e.g. m2m token expiry) resumes from the persisted
+        ``page_token`` instead of restarting.
         """
         start_offset = start_offset or {}
+        # Adapt Collibra's persisted offset -> the helper's generic schema,
+        # coercing the epoch-ms cursor and frozen snapshot bound to int.
+        generic_start: dict[str, Any] = {}
         committed = self._as_cursor(start_offset.get("cursor"))
-        page_token = start_offset.get("page_token") or ""
-        # Freeze the snapshot boundary at pass start; keep it across resumes.
-        pass_ts = start_offset.get("pass_ts")
-        if not page_token or pass_ts is None:
-            # Fresh pass.
-            page_token = ""
-            pass_ts = self._init_ts
-        pass_ts = int(pass_ts)
+        if committed is not None:
+            generic_start[WATERMARK] = committed
+        if start_offset.get("page_token"):
+            generic_start[RESUME_TOKEN] = start_offset["page_token"]
+        if start_offset.get("pass_ts") is not None:
+            generic_start[SNAPSHOT_TS] = int(start_offset["pass_ts"])
 
-        # Already caught up: committed floor has reached the snapshot boundary
-        # and no pass is in flight — nothing new to emit, converge.
-        if not page_token and committed is not None and committed >= pass_ts:
-            return iter([]), {"cursor": committed}
-
-        max_records = self._parse_max_records(table_options)
         url = f"{self.base_url}/assets"
+        records, end_offset = resumable_cdc_read(
+            start_offset=generic_start,
+            snapshot_ts=self._init_ts,
+            paginate=lambda token: cursor_paginate_pages(
+                self._session, url, base_params, "assets", start_cursor=token
+            ),
+            cursor_of=lambda raw: self._as_cursor(raw.get("lastModifiedOn")),
+            shape=self._shape_asset,
+            max_records=self._parse_max_records(table_options),
+        )
+        return records, self._to_collibra_offset(end_offset)
 
-        records: list[dict[str, Any]] = []
-        next_page_token: str | None = None
-        pass_complete = True
-        for batch, next_cursor in cursor_paginate_pages(
-            self._session, url, base_params, "assets", start_cursor=page_token
-        ):
-            for raw in batch:
-                cursor = self._as_cursor(raw.get("lastModifiedOn"))
-                # Incremental window: (committed, pass_ts].
-                if committed is not None and cursor is not None and cursor <= committed:
-                    continue
-                if cursor is not None and cursor > pass_ts:
-                    continue
-                records.append(self._shape_asset(raw))
+    @staticmethod
+    def _to_collibra_offset(end_offset: dict) -> dict:
+        """Translate the generic resumable offset back to Collibra's keys.
 
-            # Page-granular cap: stop at this boundary, resume here next run.
-            # Only a page that has a real nextCursor can be a resume point; if
-            # next_cursor is None this was the last page (pass completes).
-            if (
-                max_records is not None
-                and len(records) >= max_records
-                and next_cursor is not None
-            ):
-                next_page_token = next_cursor
-                pass_complete = False
-                break
-        else:
-            # Iterator exhausted without hitting the cap ⇒ pass complete.
-            pass_complete = True
-
-        if pass_complete:
-            # Whole id-space scanned under one snapshot: safe to advance the
-            # committed watermark to the snapshot boundary and clear pass state.
-            new_committed = pass_ts if committed is None else max(committed, pass_ts)
-            end_offset = {"cursor": new_committed}
-        else:
-            # Mid-pass: hold the watermark, persist the id resume point + the
-            # frozen snapshot boundary.
-            end_offset = {
-                "cursor": committed if committed is not None else 0,
-                "page_token": next_page_token,
-                "pass_ts": pass_ts,
+        Mid-pass (``resume_token`` present) → ``{cursor, page_token, pass_ts}``,
+        with ``cursor`` defaulting to ``0`` when no floor has been committed yet.
+        Pass-complete / caught-up → ``{cursor}``.
+        """
+        if RESUME_TOKEN in end_offset:
+            watermark = end_offset.get(WATERMARK)
+            return {
+                "cursor": watermark if watermark is not None else 0,
+                "page_token": end_offset[RESUME_TOKEN],
+                "pass_ts": end_offset[SNAPSHOT_TS],
             }
-
-        return iter(records), end_offset
+        return {"cursor": end_offset[WATERMARK]}
 
     # ------------------------------------------------------------------ #
     # Record shaping
