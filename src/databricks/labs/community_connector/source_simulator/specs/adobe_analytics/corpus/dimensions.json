@@ -1,0 +1,99 @@
+[
+  {
+    "id": "variables/evar1",
+    "title": "Example eVar 1",
+    "name": "Example eVar 1",
+    "type": "string",
+    "category": "Custom Conversion",
+    "support": [
+      "oberon",
+      "dataWarehouse"
+    ],
+    "pathable": false,
+    "segmentable": true,
+    "reportable": [
+      "oberon"
+    ],
+    "allowedForReporting": true,
+    "categories": [
+      "Custom Conversion"
+    ],
+    "noneSettings": {
+      "includeNoneByDefault": true,
+      "noneChangeable": true
+    },
+    "tags": [
+      {
+        "id": 1,
+        "name": "Example tag"
+      }
+    ],
+    "extraTitleInfo": "Example eVar 1 info",
+    "description": "Example conversion variable",
+    "attributionModel": {
+      "func": "allocation-lastTouch"
+    }
+  },
+  {
+    "id": "variables/page",
+    "title": "Page",
+    "name": "Page",
+    "type": "string",
+    "category": "Content",
+    "support": [
+      "oberon",
+      "dataWarehouse"
+    ],
+    "pathable": true,
+    "segmentable": true,
+    "reportable": [
+      "oberon"
+    ],
+    "allowedForReporting": true,
+    "categories": [
+      "Content"
+    ],
+    "noneSettings": {
+      "includeNoneByDefault": true,
+      "noneChangeable": true
+    },
+    "tags": [
+      {
+        "id": 1,
+        "name": "Example tag"
+      }
+    ],
+    "parent": "",
+    "description": "Page name"
+  },
+  {
+    "id": "variables/daterangeday",
+    "title": "Day",
+    "name": "Day",
+    "type": "time",
+    "category": "Time",
+    "support": [
+      "oberon",
+      "dataWarehouse"
+    ],
+    "pathable": false,
+    "segmentable": true,
+    "reportable": [
+      "oberon"
+    ],
+    "allowedForReporting": true,
+    "categories": [
+      "Time"
+    ],
+    "noneSettings": {
+      "includeNoneByDefault": true,
+      "noneChangeable": true
+    },
+    "tags": [
+      {
+        "id": 1,
+        "name": "Example tag"
+      }
+    ]
+  }
+]

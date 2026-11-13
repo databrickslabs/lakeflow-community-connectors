@@ -1,0 +1,68 @@
+[
+  {
+    "id": "metrics/visits",
+    "title": "Visits",
+    "name": "Visits",
+    "type": "int",
+    "category": "Traffic",
+    "support": [
+      "oberon",
+      "dataWarehouse"
+    ],
+    "allocation": true,
+    "precision": 0,
+    "calculated": false,
+    "segmentable": true,
+    "polarity": "positive",
+    "allowedForReporting": true,
+    "categories": [
+      "Traffic"
+    ],
+    "tags": [],
+    "description": "Number of sessions",
+    "extraTitleInfo": "sessions",
+    "helpLink": "https://example.com/help/visits"
+  },
+  {
+    "id": "metrics/pageviews",
+    "title": "Page Views",
+    "name": "Page Views",
+    "type": "int",
+    "category": "Traffic",
+    "support": [
+      "oberon",
+      "dataWarehouse"
+    ],
+    "allocation": true,
+    "precision": 0,
+    "calculated": false,
+    "segmentable": true,
+    "polarity": "positive",
+    "allowedForReporting": true,
+    "categories": [
+      "Traffic"
+    ],
+    "tags": []
+  },
+  {
+    "id": "metrics/visitors",
+    "title": "Unique Visitors",
+    "name": "Unique Visitors",
+    "type": "int",
+    "category": "Traffic",
+    "support": [
+      "oberon",
+      "dataWarehouse"
+    ],
+    "allocation": true,
+    "precision": 0,
+    "calculated": false,
+    "segmentable": true,
+    "polarity": "positive",
+    "allowedForReporting": true,
+    "categories": [
+      "Traffic"
+    ],
+    "tags": []
+  }
+]

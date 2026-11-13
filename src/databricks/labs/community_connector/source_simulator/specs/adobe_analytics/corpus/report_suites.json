@@ -1,0 +1,30 @@
+[
+  {
+    "collectionItemType": "reportsuite",
+    "id": "examplersid",
+    "rsid": "examplersid",
+    "name": "Example Report Suite",
+    "parentRsid": "examplersid",
+    "currency": "USD",
+    "timezoneZoneinfo": "America/New_York",
+    "calendarType": {
+      "rsid": "examplersid",
+      "anchorDate": "2024-01-01T00:00:00Z",
+      "type": "gregorian"
+    }
+  },
+  {
+    "collectionItemType": "reportsuite",
+    "id": "examplersid2",
+    "rsid": "examplersid2",
+    "name": "Example Report Suite 2",
+    "parentRsid": "examplersid2",
+    "currency": "EUR",
+    "timezoneZoneinfo": "UTC",
+    "calendarType": {
+      "rsid": "examplersid2",
+      "anchorDate": "2024-01-01T00:00:00Z",
+      "type": "gregorian"
+    }
+  }
+]

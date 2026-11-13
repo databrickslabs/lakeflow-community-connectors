@@ -1,0 +1,71 @@
+[
+  {
+    "id": "cm000000000_000000000000000000000001",
+    "name": "Example page views per visit",
+    "description": "Example calculated metric",
+    "rsid": "examplersid",
+    "reportSuiteName": "Example Report Suite",
+    "owner": {
+      "id": 100001,
+      "name": "Example Owner",
+      "login": "example.owner@example.com"
+    },
+    "polarity": "positive",
+    "precision": 2,
+    "type": "decimal",
+    "template": false,
+    "definition": {
+      "func": "calc-metric",
+      "formula": {
+        "func": "divide",
+        "col1": {
+          "func": "metric",
+          "name": "metrics/pageviews"
+        },
+        "col2": {
+          "func": "metric",
+          "name": "metrics/visits"
+        }
+      },
+      "version": [
+        1,
+        0,
+        0
+      ]
+    },
+    "categories": [
+      "example-category"
+    ],
+    "tags": [
+      {
+        "id": 1,
+        "name": "Example tag"
+      }
+    ],
+    "modified": "2024-02-03T10:00:00Z",
+    "created": "2024-01-20T09:00:00Z"
+  },
+  {
+    "id": "cm000000000_000000000000000000000002",
+    "name": "Example template metric",
+    "rsid": "examplersid",
+    "owner": {
+      "id": 100002,
+      "name": "Example Analyst",
+      "login": "example.analyst@example.com"
+    },
+    "polarity": "negative",
+    "precision": 0,
+    "type": "int",
+    "template": true,
+    "definition": {
+      "func": "calc-metric",
+      "version": [
+        1,
+        0,
+        0
+      ]
+    },
+    "modified": "2024-02-04T10:00:00Z"
+  }
+]

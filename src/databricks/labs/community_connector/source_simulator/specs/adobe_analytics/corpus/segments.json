@@ -1,0 +1,69 @@
+[
+  {
+    "id": "s000000000_000000000000000000000001",
+    "name": "Example segment 1",
+    "description": "Example segment for simulator tests",
+    "rsid": "examplersid",
+    "reportSuiteName": "Example Report Suite",
+    "owner": {
+      "id": 100001,
+      "name": "Example Owner",
+      "login": "example.owner@example.com"
+    },
+    "definition": {
+      "func": "segment",
+      "version": [
+        1,
+        0,
+        0
+      ],
+      "container": {
+        "func": "container",
+        "context": "hits",
+        "pred": {
+          "func": "exists",
+          "val": {
+            "func": "attr",
+            "name": "variables/evar1"
+          }
+        }
+      }
+    },
+    "definitionLastModified": "2024-02-01T10:00:00Z",
+    "modified": "2024-02-01T10:00:00Z",
+    "created": "2024-01-15T09:00:00Z",
+    "categories": [
+      "example-category"
+    ],
+    "tags": [
+      {
+        "id": 1,
+        "name": "Example tag"
+      }
+    ],
+    "publishingStatus": {
+      "published": false
+    }
+  },
+  {
+    "id": "s000000000_000000000000000000000002",
+    "name": "Example segment 2",
+    "rsid": "examplersid",
+    "reportSuiteName": "Example Report Suite",
+    "owner": {
+      "id": 100002,
+      "name": "Example Analyst",
+      "login": "example.analyst@example.com"
+    },
+    "definition": {
+      "func": "segment",
+      "version": [
+        1,
+        0,
+        0
+      ]
+    },
+    "modified": 1709287200000,
+    "created": "2024-01-16T09:00:00+0000"
+  }
+]

@@ -1,0 +1,55 @@
+# adobe_analytics Community Connector Spec
+# This file defines the specification for the connector including
+# connection parameters and allowlist options.
+
+# ============================================================================
+# Connection Parameters
+# These are provided when creating the Unity Catalog connection.
+# ============================================================================
+display_name: Adobe Analytics
+connection:
+  parameters:
+    - name: client_id
+      type: string
+      required: true
+      description: >
+        Client ID of an OAuth Server-to-Server credential created in the Adobe
+        Developer Console, with the Adobe Analytics API added to it. Its technical
+        account must belong to an Analytics product profile, and the connector can
+        only read the data that profile allows.
+
+    - name: client_secret
+      type: string
+      required: true
+      secret: true
+      description: >
+        Client secret of the same OAuth Server-to-Server credential. Copy it from
+        the credential's details page in the Adobe Developer Console.
+
+    - name: global_company_id
+      type: string
+      required: false
+      description: >
+        Global company ID (for example, examplecompanyid) of the Analytics company to read.
+        Leave blank to let the connector find it automatically. Auto-discovery works
+        when the credential has access to exactly one company. If it has access to
+        several, the connector stops with an error that lists the IDs to choose from.
+        Set this value to pick one of them.
+
+    - name: scopes
+      type: string
+      required: false
+      description: >
+        Comma-separated OAuth scopes to request when getting an access token. Leave
+        blank to use the default scopes:
+        openid,AdobeID,read_organizations,additional_info.projectedProductContext.
+        Change this only if your Adobe Developer Console credential lists different
+        scopes. A mismatch causes the sign-in to fail.
+
+# ============================================================================
+# External Options Allowlist
+# These table-specific options must be included in the externalOptionsAllowList
+# parameter of the UC connection to allow them to be passed through.
+# Use a comma-separated string of option names.
+# ============================================================================
+external_options_allowlist: "rsid,metrics,dimension,segment_ids,granularity,start_date,lookback_days,nones_behavior,count_repeat_instances,max_rows_per_bucket,limit,max_records_per_batch,delete_stale_rows,max_tracked_keys,include_type"
