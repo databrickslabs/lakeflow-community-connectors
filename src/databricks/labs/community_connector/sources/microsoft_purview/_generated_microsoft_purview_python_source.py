@@ -916,6 +916,93 @@ def register_lakeflow_source(spark):
                 break
 
 
+    def skip_top_paginate(
+        session: requests.Session,
+        url: str,
+        params: dict[str, str],
+        label: str,
+        records_key: str = "value",
+        *,
+        timeout: int = DEFAULT_TIMEOUT,
+    ) -> Iterator[dict[str, Any]]:
+        """Yield records from a ``skip`` / ``top`` paginated Unified Catalog endpoint.
+
+        Live behaviour (verified against a Purview tenant): ``dataProducts`` and
+        ``terms`` return ``{value, count}`` and **no** ``nextLink`` — the caller
+        pages by advancing ``skip``. ``params`` must already carry ``top``.
+
+        * ``skip`` advances by the number of records actually returned (not by
+          ``top``), so a server that caps ``top`` below the requested size still
+          pages correctly instead of stopping early.
+        * Stops on an empty page, or once ``skip`` reaches ``count`` when the
+          response reports it.
+        * If a response ever does carry a ``nextLink``, it is followed instead
+          (it already embeds ``skip``/``top``), so the helper works with either
+          continuation shape.
+        * Guard: if a page repeats the previous page's first record (a server
+          ignoring ``skip``), stop rather than loop forever re-reading it.
+        """
+        skip = 0
+        prev_first_id: Any = None
+        next_url: str | None = None
+        while True:
+            if next_url:
+                body = api_get(session, next_url, None, label, timeout=timeout)
+            else:
+                page_params = dict(params)
+                page_params["skip"] = str(skip)
+                body = api_get(session, url, page_params, label, timeout=timeout)
+
+            batch = body.get(records_key) or []
+            if not batch:
+                return
+            first_id = batch[0].get("id") if isinstance(batch[0], dict) else None
+            if first_id is not None and first_id == prev_first_id:
+                return
+            prev_first_id = first_id
+
+            yield from batch
+            skip += len(batch)
+
+            next_url = body.get("nextLink") or None
+            if next_url:
+                continue
+            count = body.get("count")
+            if isinstance(count, int) and skip >= count:
+                return
+
+
+    def empty_structs_to_none(record: dict[str, Any], schema: Any) -> dict[str, Any]:
+        """Replace empty objects in struct-typed fields with None, per ``schema``.
+
+        Purview can return ``{}`` for an object field with nothing in it (seen:
+        ``additionalProperties`` on a data product with no data assets). The
+        framework rejects an empty dict for a StructType ("field in StructType
+        cannot be an empty dict"), which aborts the whole pipeline, so these become
+        None. Walks nested structs and arrays of structs; fields not in the record
+        are left alone.
+        """
+        for field in schema.fields:
+            if field.name in record:
+                record[field.name] = _clean_struct_value(record[field.name], field.dataType)
+        return record
+
+
+    def _clean_struct_value(value: Any, data_type: Any) -> Any:
+        if isinstance(data_type, StructType):
+            if not isinstance(value, dict):
+                return value
+            if not value:
+                return None
+            return {
+                k: (_clean_struct_value(v, data_type[k].dataType) if k in data_type.names else v)
+                for k, v in value.items()
+            }
+        if isinstance(data_type, ArrayType) and isinstance(value, list):
+            return [_clean_struct_value(v, data_type.elementType) for v in value]
+        return value
+
+
     def normalize_contacts(value: Any) -> dict[str, Any] | None:
         """Normalize a ``ContactsMap`` to the declared struct shape.
 
@@ -946,6 +1033,12 @@ def register_lakeflow_source(spark):
 
     _LOG = logging.getLogger(__name__)
 
+    # The connector version, kept in the source (not only pyproject.toml) so it
+    # survives being copied into a workspace or merged into a single file, where
+    # package metadata isn't available. Must equal `version` in pyproject.toml; a
+    # unit test enforces that. Answers "which version is my pipeline running?"
+    CONNECTOR_VERSION = "1.0.1"
+
     DEFAULT_MAX_RECORDS_PER_BATCH = 5000
 
     # Catalog path prefixes (relative to the data-plane endpoint).
@@ -954,6 +1047,10 @@ def register_lakeflow_source(spark):
 
     class MicrosoftPurviewLakeflowConnect(LakeflowConnect):
         """LakeflowConnect implementation for the Purview Unified Catalog API."""
+
+        # The connector is constructed many times per run (per table and batch),
+        # so the version is logged once per process rather than on every init.
+        _version_logged = False
 
         def __init__(self, options: dict[str, str]) -> None:
             """Initialize the Microsoft Purview connector.
@@ -971,6 +1068,9 @@ def register_lakeflow_source(spark):
                 - page_size: ``top`` page size for skip/top-paginated endpoints.
             """
             super().__init__(options)
+            if not MicrosoftPurviewLakeflowConnect._version_logged:
+                _LOG.info("Microsoft Purview connector version %s", CONNECTOR_VERSION)
+                MicrosoftPurviewLakeflowConnect._version_logged = True
 
             self.tenant_id = options.get("tenant_id") or options.get("account")
             if not self.tenant_id:
@@ -1082,7 +1182,8 @@ def register_lakeflow_source(spark):
         ) -> tuple[Iterator[dict], dict]:
             """Read data products incrementally on ``systemData.lastModifiedAt``.
 
-            Paginated by ``skip`` / ``top`` with a ``nextLink`` follow. Optional
+            Paginated by advancing ``skip`` (``top`` = page size); the endpoint
+            returns ``count`` but no ``nextLink`` — see ``skip_top_paginate``. Optional
             ``domain_id`` scopes to a single governance domain.
             """
             params = {"api-version": API_VERSION, "top": str(self._page_size)}
@@ -1092,7 +1193,7 @@ def register_lakeflow_source(spark):
                 params["orderBy"] = table_options["order_by"]
 
             url = f"{self.endpoint}{_CATALOG_BASE}/dataProducts"
-            record_iter = next_link_paginate(self._session, url, params, "data_products")
+            record_iter = skip_top_paginate(self._session, url, params, "data_products")
             return self._incremental_from_iter(
                 record_iter, start_offset, transform=self._shape_data_product
             )
@@ -1102,7 +1203,8 @@ def register_lakeflow_source(spark):
         ) -> tuple[Iterator[dict], dict]:
             """Read glossary terms incrementally on ``systemData.lastModifiedAt``.
 
-            Paginated by ``skip`` / ``top`` with a ``nextLink`` follow. Optional
+            Paginated by advancing ``skip`` (``top`` = page size); the endpoint
+            returns ``count`` but no ``nextLink`` — see ``skip_top_paginate``. Optional
             ``domain_id`` / ``parent_id`` / ``keyword`` narrow the extract.
             """
             params = {"api-version": API_VERSION, "top": str(self._page_size)}
@@ -1116,7 +1218,7 @@ def register_lakeflow_source(spark):
                 params["orderBy"] = table_options["order_by"]
 
             url = f"{self.endpoint}{_CATALOG_BASE}/terms"
-            record_iter = next_link_paginate(self._session, url, params, "terms")
+            record_iter = skip_top_paginate(self._session, url, params, "terms")
             return self._incremental_from_iter(
                 record_iter, start_offset, transform=self._shape_term
             )
@@ -1221,7 +1323,7 @@ def register_lakeflow_source(spark):
         def _shape_business_domain(self, raw: dict[str, Any]) -> dict[str, Any]:
             rec = dict(raw)
             rec["purview_tenant_id"] = self.tenant_id
-            return rec
+            return empty_structs_to_none(rec, TABLE_SCHEMAS["business_domains"])
 
         def _shape_data_product(self, raw: dict[str, Any]) -> dict[str, Any]:
             rec = dict(raw)
@@ -1229,7 +1331,7 @@ def register_lakeflow_source(spark):
             # Promote the nested cursor to a top-level column for cdc sequence_by.
             rec["last_modified_at"] = self._record_cursor(raw)
             rec["purview_tenant_id"] = self.tenant_id
-            return rec
+            return empty_structs_to_none(rec, TABLE_SCHEMAS["data_products"])
 
         def _shape_term(self, raw: dict[str, Any]) -> dict[str, Any]:
             rec = dict(raw)
@@ -1237,7 +1339,7 @@ def register_lakeflow_source(spark):
             # Promote the nested cursor to a top-level column for cdc sequence_by.
             rec["last_modified_at"] = self._record_cursor(raw)
             rec["purview_tenant_id"] = self.tenant_id
-            return rec
+            return empty_structs_to_none(rec, TABLE_SCHEMAS["terms"])
 
         # ------------------------------------------------------------------ #
         # Helpers

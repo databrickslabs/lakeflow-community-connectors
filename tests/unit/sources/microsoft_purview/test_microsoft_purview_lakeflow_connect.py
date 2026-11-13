@@ -16,5 +16,9 @@ class TestMicrosoftPurviewConnector(LakeflowConnectTests):
     replay_config = {
         "tenant_id": "00000000-0000-0000-0000-000000000000",
         "access_token": "simulator-fake-token",
+        # Small page size so the 6-record corpora span several skip/top pages:
+        # the full read cycle then exercises multi-page paging (the endpoint
+        # returns no nextLink; a single-page read once hid a truncation bug).
+        "page_size": "2",
     }
 

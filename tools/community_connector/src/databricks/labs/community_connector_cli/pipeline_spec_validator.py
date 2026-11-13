@@ -9,10 +9,12 @@ Validates the pipeline_spec structure according to the spec reference:
     - destination_catalog (optional): Target catalog
     - destination_schema (optional): Target schema
     - destination_table (optional): Target table name
-    - table_configuration (optional): Additional options:
+    - connector_options (optional): Source-specific options, nested as
+      connector_options.community_connector_options.options (e.g. owner/repo
+      for GitHub). Passed through to the pipelines API verbatim.
+    - table_configuration (optional): Ingestion controls only:
       - scd_type: SCD_TYPE_1, SCD_TYPE_2, or APPEND_ONLY
       - primary_keys: List of columns
-      - (other source-specific options)
 """
 
 from typing import Optional
@@ -148,9 +150,11 @@ def _validate_object(obj: dict, path: str) -> list[str]:
     # Warn about unknown keys in table
     known_table_keys = {
         "source_table",
+        "source_schema",
         "destination_catalog",
         "destination_schema",
         "destination_table",
+        "connector_options",
         "table_configuration",
     }
     unknown_table_keys = set(table.keys()) - known_table_keys

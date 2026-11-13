@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "lakeflow-community-connectors-microsoft-purview"
-version = "0.1.0"
+version = "1.0.1"
 description = "Microsoft Purview connector for Lakeflow Community Connectors"
 requires-python = ">=3.10"
 dependencies = [
