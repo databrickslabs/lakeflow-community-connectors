@@ -138,6 +138,10 @@ class LakeflowStreamReader(SimpleDataSourceStreamReader, SupportsTriggerAvailabl
         return rows, offset
 
     def readBetweenOffsets(self, start: dict, end: dict) -> Iterator[tuple]:
+        replay = getattr(self.lakeflow_connect, "read_table_between_offsets", None)
+        if replay is not None and self.options.get(IS_DELETE_FLOW) != "true":
+            records = replay(self.options[TABLE_NAME], start, end, self.options)
+            return map(lambda row: parse_value(row, self.schema), records)
         # TODO: This does not ensure the records returned are identical across repeated calls.
         # For append-only tables, the data source must guarantee that reading from the same
         # start offset will always yield the same set of records.

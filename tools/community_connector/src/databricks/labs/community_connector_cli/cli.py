@@ -47,6 +47,7 @@ from databricks.labs.community_connector_cli.managed_pipeline import (
     augment_full_pipeline_body,
     build_bare_pipeline_body,
     is_full_pipeline_spec,
+    normalize_hubspot_table_configs,
     validate_ingestion_definition,
 )
 from databricks.labs.community_connector_cli.pipeline_client import PipelineClient
@@ -1658,17 +1659,21 @@ def _build_managed_pipeline_body(
     )
 
     if is_full:
-        return augment_full_pipeline_body(
+        body = augment_full_pipeline_body(
             spec, pipeline_name, connection_name, catalog, schema, dependencies,
         )
-    # On update (base_spec set) omit the managed channel/serverless defaults so
-    # the pipeline's existing values are preserved by the merge.
-    return build_bare_pipeline_body(
-        spec, pipeline_name, connection_name, catalog, schema, dependencies,
-        channel=None if base_spec else _MANAGED_DEFAULT_CHANNEL,
-        serverless=None if base_spec else _MANAGED_DEFAULT_SERVERLESS,
-        base=base_spec,
-    )
+    else:
+        # Preserve existing channel/serverless defaults on bare updates.
+        body = build_bare_pipeline_body(
+            spec, pipeline_name, connection_name, catalog, schema, dependencies,
+            channel=None if base_spec else _MANAGED_DEFAULT_CHANNEL,
+            serverless=None if base_spec else _MANAGED_DEFAULT_SERVERLESS,
+            base=base_spec,
+        )
+    try:
+        return normalize_hubspot_table_configs(body, source_name)
+    except ManagedPipelineSpecError as error:
+        raise click.ClickException(str(error)) from None
 
 
 # ---- end managed ingestion helpers -------------------------------------------
