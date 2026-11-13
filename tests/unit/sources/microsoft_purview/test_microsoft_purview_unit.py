@@ -454,6 +454,98 @@ class TestIncrementalEngine:
         assert {r["id"] for r in records} == {"a", "nocursor"}
         assert end_offset == {"cursor": "2026-02-01T00:00:00+00:00"}
 
+    def test_purview_7_digit_timestamps_advance_the_offset(self):
+        """Purview emits 100-ns precision with a trailing 'Z'. Python 3.10's
+        fromisoformat rejects 7 fractional digits; if parsing failed, every
+        cursor would be uncomparable and the batch would never advance."""
+        conn = _connector()
+        arrival = [
+            _rec("a", "2026-09-22T20:32:33.4438881Z"),
+            _rec("b", "2026-09-22T20:32:33.4438882Z"),
+        ]
+        records, end_offset = _drain(
+            conn._incremental_from_iter(iter(arrival), {}, transform=lambda r: r)
+        )
+        assert {r["id"] for r in records} == {"a", "b"}
+        assert end_offset == {"cursor": "2026-09-22T20:32:33.4438882Z"}
+
+    def test_mixed_iso_spellings_compare_as_timestamps(self):
+        """The cursor ('Z') and _init_ts ('+00:00', with a fraction) differ in
+        spelling. As strings, '...:33Z' > '...:33.5+00:00' ('Z' sorts after '.'),
+        so a string compare would wrongly treat a record from before the cap as
+        after it and skip it. Parsed, it is earlier and must be emitted."""
+        conn = _connector()
+        conn._init_ts = "2026-09-22T20:32:33.500000+00:00"
+        arrival = [
+            _rec("before_cap", "2026-09-22T20:32:33Z"),
+            _rec("after_cap", "2026-09-22T20:32:34.0000001Z"),
+        ]
+        assert "2026-09-22T20:32:33Z" > conn._init_ts  # the string-compare trap
+        records, end_offset = _drain(
+            conn._incremental_from_iter(iter(arrival), {}, transform=lambda r: r)
+        )
+        assert [r["id"] for r in records] == ["before_cap"]
+        assert end_offset == {"cursor": "2026-09-22T20:32:33Z"}
+
+    def test_boundary_with_z_spelling_is_skipped(self):
+        """A resumed run must skip the boundary record even when the saved
+        cursor and the record use Purview's own 'Z' spelling."""
+        conn = _connector()
+        since = "2026-09-22T20:32:33.4438881Z"
+        arrival = [_rec("edge", since), _rec("new", "2026-09-22T20:32:33.4438882Z")]
+        records, end_offset = _drain(
+            conn._incremental_from_iter(
+                iter(arrival), {"cursor": since}, transform=lambda r: r
+            )
+        )
+        assert [r["id"] for r in records] == ["new"]
+        assert end_offset == {"cursor": "2026-09-22T20:32:33.4438882Z"}
+
+    def test_batch_without_parseable_cursor_is_empty_and_logged(self, caplog):
+        """A non-empty batch must advance the offset. If no record has a usable
+        cursor the offset can't move, so the batch is dropped (with a warning)
+        rather than returned against an unchanged offset, which would abort the
+        pipeline with SIMPLE_STREAM_READER_OFFSET_DID_NOT_ADVANCE."""
+        conn = _connector()
+        start = {"cursor": "2026-05-01T00:00:00Z"}
+        arrival = [_rec("nocursor", None), _rec("garbage", "not-a-timestamp")]
+        with caplog.at_level("WARNING", logger=mp.__name__):
+            records, end_offset = _drain(
+                conn._incremental_from_iter(iter(arrival), start, transform=lambda r: r)
+            )
+        assert records == []
+        assert end_offset == start
+        assert "Dropping 2 record(s)" in caplog.text
+
+
+class TestParseTs:
+    @pytest.mark.parametrize(
+        "value",
+        [
+            "2026-09-22T20:32:33.4438881Z",
+            "2026-09-22T20:32:33.443888Z",
+            "2026-09-22T20:32:33Z",
+            "2026-09-22T20:32:33.443888+00:00",
+        ],
+    )
+    def test_parses_purview_and_isoformat_spellings(self, value):
+        assert MicrosoftPurviewLakeflowConnect._parse_ts(value) is not None
+
+    def test_keeps_100ns_precision(self):
+        parse = MicrosoftPurviewLakeflowConnect._parse_ts
+        assert parse("2026-09-22T20:32:33.4438881Z") < parse("2026-09-22T20:32:33.4438882Z")
+
+    def test_equal_instants_in_different_spellings_compare_equal(self):
+        parse = MicrosoftPurviewLakeflowConnect._parse_ts
+        assert parse("2026-09-22T20:32:33.4438880Z") == parse(
+            "2026-09-22T20:32:33.443888+00:00"
+        )
+        assert parse("2026-09-22T22:32:33Z") == parse("2026-09-23T00:32:33+02:00")
+
+    @pytest.mark.parametrize("value", [None, "", "not-a-timestamp", 123])
+    def test_unparseable_returns_none(self, value):
+        assert MicrosoftPurviewLakeflowConnect._parse_ts(value) is None
+
 
 class TestRecordCursor:
     def test_extracts_last_modified_at(self):
