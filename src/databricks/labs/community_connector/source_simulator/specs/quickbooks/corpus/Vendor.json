@@ -1,0 +1,30 @@
+[
+  {
+    "Id": "10",
+    "SyncToken": "1",
+    "MetaData": {
+      "CreateTime": "2025-01-02T08:00:00Z",
+      "LastUpdatedTime": "2026-07-20T10:00:00Z"
+    },
+    "DisplayName": "Supply Co",
+    "CompanyName": "Supply Co Inc",
+    "GivenName": "Vera",
+    "FamilyName": "Vendor",
+    "PrimaryEmailAddr": {"Address": "vera@example.test"},
+    "PrimaryPhone": {"FreeFormNumber": "+1-555-0101"},
+    "Balance": 88.10,
+    "Vendor1099": true,
+    "CurrencyRef": {"value": "USD"},
+    "Active": true
+  },
+  {
+    "Id": "11",
+    "SyncToken": "0",
+    "MetaData": {
+      "CreateTime": "2025-01-03T08:00:00Z",
+      "LastUpdatedTime": "2026-07-20T11:00:00Z"
+    },
+    "DisplayName": "Inactive Vendor",
+    "Active": false
+  }
+]

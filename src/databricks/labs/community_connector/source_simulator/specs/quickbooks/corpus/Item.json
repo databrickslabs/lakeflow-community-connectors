@@ -1,0 +1,31 @@
+[
+  {
+    "Id": "30",
+    "SyncToken": "4",
+    "MetaData": {
+      "CreateTime": "2025-01-06T08:00:00Z",
+      "LastUpdatedTime": "2026-07-20T14:00:00Z"
+    },
+    "Name": "Widget",
+    "FullyQualifiedName": "Inventory:Widget",
+    "Type": "Inventory",
+    "Description": "A test widget",
+    "UnitPrice": 19.99,
+    "PurchaseCost": 8.25,
+    "QtyOnHand": 42,
+    "IncomeAccountRef": {"value": "40"},
+    "ExpenseAccountRef": {"value": "41"},
+    "AssetAccountRef": {"value": "42"},
+    "Active": true
+  },
+  {
+    "Id": "31",
+    "SyncToken": "0",
+    "MetaData": {
+      "CreateTime": "2025-01-07T08:00:00Z",
+      "LastUpdatedTime": "2026-07-20T15:00:00Z"
+    },
+    "Name": "Inactive Item",
+    "Active": false
+  }
+]
