@@ -323,10 +323,10 @@ class OneStreamLakeflowConnect(LakeflowConnect, SupportsPartitionedStream):
         new_entities = cube_new_entities(
             state["e"], scope["entity_csv"], lambda: self._all_entity_ids(scope["page_size"])
         )
-        target = cube_apply_scope(state, scope["entity_csv"], new_entities, in_scope)
+        target = cube_apply_scope(state, scope["entity_csv"], new_entities)
 
         rows = self._slice_rows(scope, state, stats, certify)
-        catch_rows = self._catch_up_rows(scope, target)
+        catch_rows = self._catch_up_rows(scope, target, in_scope)
         nxt = cube_offset_advance(
             target,
             rows,
@@ -362,12 +362,21 @@ class OneStreamLakeflowConnect(LakeflowConnect, SupportsPartitionedStream):
                 )
         return {k: sorted(v) for k, v in rows.items()}
 
-    def _catch_up_rows(self, scope: dict, target: dict) -> dict:
-        """``{slice: sorted [ticks]}`` for entities being caught up after joining the scope."""
-        if not target.get("x"):
+    def _catch_up_rows(self, scope: dict, target: dict, in_scope: set) -> dict:
+        """``{slice: sorted [ticks]}`` for entities being caught up after joining the scope.
+
+        Only in-scope slices that still have catch-up work are fetched, so a
+        finished catch-up, or one waiting on out-of-scope slices, costs no query.
+        """
+        pending = [
+            k
+            for k, ceiling in target["xm"].items()
+            if k in in_scope and target["xp"].get(k, 0) < ceiling
+        ]
+        if not target.get("x") or not pending:
             return {}
-        lo = min(target["xp"].values(), default=0)
-        hi = max(target["xm"].values(), default=0)
+        lo = min(target["xp"].get(k, 0) for k in pending)
+        hi = max(target["xm"][k] for k in pending)
         rows: dict = defaultdict(list)
         for r in self._fetch_du_rows(scope, lo, hi, sorted(cube_entity_set(target["x"]))):
             rows[_slice_key(r)].append(int(r["TimestampTicks"]))

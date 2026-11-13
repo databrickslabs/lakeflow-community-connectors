@@ -21,6 +21,11 @@ Offset format (values are primitives so Spark can checkpoint them)::
     "xp|<year>|<scenario>|<cube>": ticks  catch-up progress for the ``x`` entities
     "xm|<year>|<scenario>|<cube>": ticks  catch-up ceiling (slice cursor at join)
 
+Entity catch-up covers every slice that has a cursor, including slices outside
+the current scope (they catch up once they are re-added). A catch-up that
+completes stays in that batch's end offset with ``xp == xm`` so the batch's
+reads can still be derived from its two offsets; the next advance clears it.
+
 Confirmation re-read: a data unit stamped within ``lookback`` of a run is read
 by that run and then re-read exactly once by the first later run that starts
 more than ``lookback`` after its stamp. That catches commits that became
@@ -92,16 +97,24 @@ def cube_new_entities(prev_e: str | None, cur_e: str, all_entity_ids) -> set[int
     return cube_entity_set(cur_e) - previous
 
 
-def cube_apply_scope(state: dict, cur_e: str, new_entities: set[int], in_scope: set) -> dict:
+def cube_catchup_done(state: dict) -> bool:
+    """True when every catch-up slice has reached its ceiling (or there is none)."""
+    return all(state["xp"].get(k, 0) >= m for k, m in state["xm"].items())
+
+
+def cube_apply_scope(state: dict, cur_e: str, new_entities: set[int]) -> dict:
     """Record the current entity scope and start (or restart) entity catch-up."""
     nxt = cube_copy_state(state)
     nxt["e"] = cur_e
     if new_entities:
-        pending = new_entities | cube_entity_set(state.get("x"))
-        nxt["x"] = cube_entity_csv(pending)
+        # Entities whose catch-up already finished need no second pass.
+        carry = set() if cube_catchup_done(state) else cube_entity_set(state.get("x"))
+        nxt["x"] = cube_entity_csv(new_entities | carry)
         # Catch up from tick 0 to each slice's cursor at the moment they joined;
-        # anything stamped later is covered by the normal slice cursor.
-        nxt["xm"] = {k: c for k, c in state["c"].items() if k in in_scope}
+        # anything stamped later is covered by the normal slice cursor. Slices
+        # outside the current scope get a ceiling too: their cursor does not
+        # cover the new entities, so they catch up when they are re-added.
+        nxt["xm"] = dict(state["c"])
         nxt["xp"] = {k: 0 for k in nxt["xm"]}
         if not nxt["xm"]:
             nxt["x"], nxt["xm"], nxt["xp"] = None, {}, {}
@@ -154,8 +167,13 @@ def cube_offset_advance(
         nxt["c"][key] = c1
         nxt["w"][key] = w1
 
-    if nxt.get("x") and not exhausted:
-        _cube_advance_catchup(nxt, catch_rows, budget)
+    if nxt.get("x"):
+        if cube_catchup_done(nxt):
+            # Finished in the previous batch, whose end offset kept it so that
+            # batch's catch-up ranges could be planned. Nothing is left to read.
+            nxt["x"], nxt["xp"], nxt["xm"] = None, {}, {}
+        elif not exhausted:
+            _cube_advance_catchup(nxt, catch_rows, budget, in_scope)
     return nxt
 
 
@@ -199,9 +217,16 @@ def _cube_advance_slice(slice_rows, c0, w0, hold_at, certify, budget):
     return c1, max(w0, w_target), consumed, exhausted
 
 
-def _cube_advance_catchup(nxt, catch_rows, budget):
-    """Advance entity catch-up within the remaining budget; clear it when done."""
+def _cube_advance_catchup(nxt, catch_rows, budget, in_scope):
+    """Advance entity catch-up for in-scope slices within the remaining budget.
+
+    Out-of-scope slices keep their progress until they are re-added. A
+    catch-up that completes here is not cleared: ``cube_batch_ranges`` needs
+    it in this batch's end offset to plan the reads (see the module docstring).
+    """
     for key in sorted(nxt["xm"]):
+        if key not in in_scope:
+            continue
         ceiling, p0 = nxt["xm"][key], nxt["xp"].get(key, 0)
         pending = [t for t in catch_rows.get(key, []) if p0 < t <= ceiling]
         if len(pending) > budget:
@@ -209,8 +234,6 @@ def _cube_advance_catchup(nxt, catch_rows, budget):
             break
         nxt["xp"][key] = ceiling
         budget -= len(pending)
-    if all(nxt["xp"].get(k, 0) >= m for k, m in nxt["xm"].items()):
-        nxt["x"], nxt["xp"], nxt["xm"] = None, {}, {}
 
 
 def cube_batch_ranges(start: dict, end: dict) -> tuple[list, list, str | None]:
@@ -237,7 +260,7 @@ def cube_batch_ranges(start: dict, end: dict) -> tuple[list, list, str | None]:
             p0 = start["xp"].get(key, 0) if same else 0
             if p1 > p0:
                 catch.append((key, p0, p1))
-    elif start.get("x"):  # catch-up finished in this batch
+    elif start.get("x"):  # catch-up cleared: only ranges the start had not reached yet
         catch_entities = start["x"]
         for key, ceiling in sorted(start["xm"].items()):
             p0 = start["xp"].get(key, 0)

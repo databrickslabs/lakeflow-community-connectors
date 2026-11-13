@@ -32,6 +32,8 @@ from databricks.labs.community_connector.sources.onestream.onestream_client impo
     normalize_base_url,
 )
 from databricks.labs.community_connector.sources.onestream.onestream_offsets import (
+    cube_apply_scope,
+    cube_batch_ranges,
     cube_offset_advance,
     cube_offset_decode,
     cube_offset_encode,
@@ -183,17 +185,39 @@ class TestOneStreamConnector(LakeflowConnectTests, SupportsPartitionedStreamTest
         )
         assert len(added) == 216 and {r["ScenarioId"] for r in added} == {BUDGET}
 
-    def test_widen_entities_catches_up_only_new_entity(self, sim_db):
+    # "2": the catch-up spans several micro-batches. "1000": it starts and
+    # finishes in one, so its reads must still be planned from the two offsets.
+    @pytest.mark.parametrize("batch_units", ["2", "1000"])
+    def test_widen_entities_catches_up_only_new_entity(self, sim_db, batch_units):
         _make_recent("EntityId", [EAST], self.connector._init_ticks - 3600 * SEC)
-        _, offset = self._drain(self._connector(), self._base_opts(entities="SimEast"))
+        opts = {"max_data_units_per_batch": batch_units}
+        _, offset = self._drain(self._connector(), self._base_opts(entities="SimEast", **opts))
         added, final = self._drain(
-            self._connector(), self._base_opts(entities="SimEast,SimWest"), offset
+            self._connector(), self._base_opts(entities="SimEast,SimWest", **opts), offset
         )
         assert len(added) == 144 and {r["EntityId"] for r in added} == {WEST}
         assert "x" not in final  # catch-up finished and was cleared
 
-    def test_hierarchy_change_catches_up_new_descendant(self, sim_db):
-        opts = self._base_opts(entities="SimCorp", include_descendants="true")
+    @pytest.mark.parametrize("batch_units", ["2", "1000"])
+    def test_entity_added_while_slice_out_of_scope_catches_up_on_readd(self, sim_db, batch_units):
+        """A slice outside the scope when an entity joins must not trust its old
+        cursor for that entity once it is re-added."""
+        _make_recent("EntityId", [EAST], self.connector._init_ticks - 3600 * SEC)
+        opts = {"max_data_units_per_batch": batch_units}
+        _, offset = self._drain(self._connector(), self._base_opts(entities="SimEast", **opts))
+        narrowed = self._base_opts(years="2026", entities="SimEast,SimWest", **opts)
+        added, offset = self._drain(self._connector(), narrowed, offset)
+        assert len(added) == 72 and {(r["EntityId"], r["YearId"]) for r in added} == {(WEST, 2026)}
+        readded = self._base_opts(entities="SimEast,SimWest", **opts)
+        added, final = self._drain(self._connector(), readded, offset)
+        assert len(added) == 72 and {(r["EntityId"], r["YearId"]) for r in added} == {(WEST, 2025)}
+        assert "x" not in final
+
+    @pytest.mark.parametrize("batch_units", ["2", "1000"])
+    def test_hierarchy_change_catches_up_new_descendant(self, sim_db, batch_units):
+        opts = self._base_opts(
+            entities="SimCorp", include_descendants="true", max_data_units_per_batch=batch_units
+        )
         sim.execute(
             "DELETE FROM dbo.Relationship WHERE DimTypeId = 0 AND ParentId = 100 AND ChildId = ?",
             (NORTH,),
@@ -560,6 +584,27 @@ def test_out_of_scope_slice_is_left_untouched():
         in_scope={(2026, 200, 0)},
     )
     assert nxt["w"][(2025, 200, 0)] == 50  # not advanced without being re-read
+
+
+def test_catch_up_that_fits_in_one_batch_is_still_read():
+    """An entity stamped at 50 joins a settled slice (c = w = 100) and its whole
+    history fits in one batch: the batch must still plan the catch-up read."""
+    key = (2026, 200, 0)
+    kw = dict(now=10_000, lookback=10, max_units=1000, hold=False, hold_timeout=0, in_scope={key})
+
+    def advance(state, catch_rows):  # what latest_offset commits, round-tripped
+        nxt = cube_offset_advance(state, {}, catch_rows, **kw)
+        return cube_offset_decode(cube_offset_encode(nxt))
+
+    start = cube_offset_decode({"fmt": 2, "e": "101", "c|2026|200|0": 100, "w|2026|200|0": 100})
+    end = advance(cube_apply_scope(start, "101,102", {102}), {key: [50]})
+    assert cube_batch_ranges(start, end) == ([], [(key, 0, 100)], "102")
+    # The next batch clears the finished catch-up without reading it again...
+    cleared = advance(end, {})
+    assert cleared["x"] is None and cleared["e"] == "101,102"
+    assert cube_batch_ranges(end, cleared) == ([], [], "102")
+    # ...and the offset then settles, so Trigger.AvailableNow terminates.
+    assert advance(cleared, {}) == cleared
 
 
 def test_unexpected_response_body_is_an_error():

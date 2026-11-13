@@ -113,7 +113,7 @@ Each run is capped at its start time, so `Trigger.AvailableNow` always terminate
 
 - **Adding years, scenarios, or cubes**: the new slices are backfilled from the beginning, and existing slices continue from their checkpoint.
 - **Adding entities**: added explicitly or picked up through `include_descendants` after a hierarchy change. The history of just those entities is backfilled, and nothing else is re-read.
-- **Removing years, scenarios, or cubes**: those rows stop updating but stay in the table. Their checkpoints are kept, so adding them back later resumes from where they stopped.
+- **Removing years, scenarios, or cubes**: those rows stop updating but stay in the table. Their checkpoints are kept, so adding them back later resumes from where they stopped. Entities added while a slice was removed get their history in that slice backfilled when the slice is added back.
 - **Removing entities**: those rows stop updating but stay in the table. If you add an entity back later, its history is backfilled again, like any newly added entity.
 
 Delete rows that left the scope downstream if needed.
