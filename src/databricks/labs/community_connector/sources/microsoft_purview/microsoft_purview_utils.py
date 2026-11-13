@@ -24,6 +24,7 @@ import time
 from typing import Any, Iterator
 
 import requests
+from pyspark.sql.types import ArrayType, StructType
 
 from databricks.labs.community_connector.sources.microsoft_purview.microsoft_purview_schemas import (  # pylint: disable=line-too-long
     INITIAL_BACKOFF,
@@ -170,6 +171,37 @@ def skip_top_paginate(
         count = body.get("count")
         if isinstance(count, int) and skip >= count:
             return
+
+
+def empty_structs_to_none(record: dict[str, Any], schema: Any) -> dict[str, Any]:
+    """Replace empty objects in struct-typed fields with None, per ``schema``.
+
+    Purview can return ``{}`` for an object field with nothing in it (seen:
+    ``additionalProperties`` on a data product with no data assets). The
+    framework rejects an empty dict for a StructType ("field in StructType
+    cannot be an empty dict"), which aborts the whole pipeline, so these become
+    None. Walks nested structs and arrays of structs; fields not in the record
+    are left alone.
+    """
+    for field in schema.fields:
+        if field.name in record:
+            record[field.name] = _clean_struct_value(record[field.name], field.dataType)
+    return record
+
+
+def _clean_struct_value(value: Any, data_type: Any) -> Any:
+    if isinstance(data_type, StructType):
+        if not isinstance(value, dict):
+            return value
+        if not value:
+            return None
+        return {
+            k: (_clean_struct_value(v, data_type[k].dataType) if k in data_type.names else v)
+            for k, v in value.items()
+        }
+    if isinstance(data_type, ArrayType) and isinstance(value, list):
+        return [_clean_struct_value(v, data_type.elementType) for v in value]
+    return value
 
 
 def normalize_contacts(value: Any) -> dict[str, Any] | None:
