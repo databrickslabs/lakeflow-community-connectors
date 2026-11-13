@@ -1,0 +1,102 @@
+# mongodb Community Connector Spec
+# This file defines the specification for the connector including
+# connection parameters and allowlist options.
+
+# ============================================================================
+# Connection Parameters
+# These are provided when creating the Unity Catalog connection.
+# ============================================================================
+display_name: MongoDB
+connection:
+  parameters:
+    - name: connection_uri
+      type: string
+      required: true
+      secret: true
+      description: >
+        MongoDB connection string (mongodb:// or mongodb+srv://). For SCRAM, include the
+        user and password. For MONGODB-AWS on classic dedicated compute with an instance
+        profile, add authMechanism=MONGODB-AWS&authSource=%24external and no user.
+        For auth_mode=aws_service_credential or x509, give the host part only.
+
+    - name: auth_mode
+      type: string
+      required: false
+      description: >
+        uri (default): authenticate with what connection_uri says.
+        x509: client certificate from tls_certificate_key_pem.
+        aws_service_credential: MONGODB-AWS with temporary AWS keys from a Unity Catalog
+        service credential. Use this on serverless and standard access mode compute,
+        where user code cannot reach the EC2 instance metadata service.
+
+    - name: database
+      type: string
+      required: false
+      description: >
+        Default database. When set, tables are the collections of this database.
+        Otherwise set the database table option or name tables "<database>.<collection>".
+
+    - name: tls_certificate_key_pem
+      type: string
+      required: false
+      secret: true
+      description: >
+        PEM with the client certificate and private key (auth_mode=x509).
+
+    - name: tls_ca_pem
+      type: string
+      required: false
+      description: >
+        PEM of the CA that signed the server certificate, when it is not a public CA.
+
+    - name: aws_service_credential
+      type: string
+      required: false
+      description: >
+        Name of the Unity Catalog service credential (AWS IAM role) whose temporary keys
+        authenticate with MONGODB-AWS (auth_mode=aws_service_credential). Create the
+        Atlas database user for that IAM role ARN.
+
+    - name: databricks_host
+      type: string
+      required: false
+      description: >
+        Workspace URL used to request temporary keys (auth_mode=aws_service_credential),
+        for example https://dbc-1234abcd-5678.cloud.databricks.com.
+
+    - name: databricks_client_id
+      type: string
+      required: false
+      description: >
+        Application ID of the service principal that requests the temporary keys. It needs
+        the workspace-access entitlement and ACCESS on the service credential.
+
+    - name: databricks_client_secret
+      type: string
+      required: false
+      secret: true
+      description: >
+        OAuth secret of that service principal. A service principal can hold up to five
+        secrets, so rotate by adding a new one before removing the old one.
+
+    - name: aws_refresh_margin_seconds
+      type: string
+      required: false
+      description: >
+        Request new temporary keys this many seconds before they expire (default 600).
+
+    - name: unicode_decode_error_handler
+      type: string
+      required: false
+      description: >
+        strict (default) fails on strings that are not valid UTF-8; replace ingests them
+        with U+FFFD replacement characters.
+
+# ============================================================================
+# External Options Allowlist
+# These table-specific options must be included in the externalOptionsAllowList
+# parameter of the UC connection to allow them to be passed through.
+# Use a comma-separated string of option names.
+# If no table-specific options are needed, set to empty string or omit.
+# ============================================================================
+external_options_allowlist: "database,collection,ingestion_type,start_mode,start_at_operation_time,full_document,document_format,max_records_per_batch,snapshot_batch_size,max_await_time_ms,delete_lookback_seconds,idle_advance_seconds,assume_unique_id"
