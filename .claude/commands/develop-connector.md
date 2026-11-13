@@ -85,7 +85,7 @@ If any test still fails, do NOT open a PR. Report the failures clearly so the de
 
 ## Step 6 — Prebuilt Wheel
 
-If `{SRC}/pyproject.toml` doesn't exist, create it with the template in `.claude/skills/build_connector_package/SKILL.md` (version `0.1.0`). Then build and verify the wheel yourself:
+If `{SRC}/pyproject.toml` doesn't exist, create it with the template in `.claude/skills/build_connector_package/SKILL.md` (version `0.1.0`), and also create `{SRC}/version-change-log.md` with a single `0.1.0` `INITIAL` entry (format in `CONTRIBUTING.md`, Change log). Then build and verify the wheel yourself:
 
 ```bash
 source .venv/bin/activate

@@ -82,7 +82,7 @@ If any test still fails → mark connector failed (record pytest output), do NOT
 
 ### Step 6 — Prebuilt Wheel
 
-If `{SRC}/pyproject.toml` doesn't exist, create it with the template in `.claude/skills/build_connector_package/SKILL.md` (version `0.1.0`). Then:
+If `{SRC}/pyproject.toml` doesn't exist, create it with the template in `.claude/skills/build_connector_package/SKILL.md` (version `0.1.0`), and also create `{SRC}/version-change-log.md` with a single `0.1.0` `INITIAL` entry (format in `CONTRIBUTING.md`, Change log). Then:
 
 ```bash
 python tools/scripts/build_wheelhouse.py {source_name}

@@ -28,6 +28,9 @@ Every run also checks that the framework version satisfies the
 the framework is a target, otherwise only the given connectors. The wizard installs
 the framework wheel next to any connector wheel from the same revision, so a
 mismatch would fail at install time.
+
+It also checks each target's version-change-log.md: the newest entry must be for
+the version in pyproject.toml, and versions must decrease down the file.
 """
 
 import argparse
@@ -44,6 +47,10 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 SOURCES_DIR = PROJECT_ROOT / "src/databricks/labs/community_connector/sources"
 WHEELHOUSE_DIR = PROJECT_ROOT / "wheelhouse"
 FRAMEWORK = "_framework"
+CHANGE_LOG = "version-change-log.md"
+CHANGE_LOG_HEADING = re.compile(
+    r"^## (?P<version>\S+) — (?P<date>\d{4}-\d{2}-\d{2}) - (?P<type>MAJOR|MINOR|PATCH|INITIAL)\s*$"
+)
 
 # Members that don't change what a pipeline runs.
 IGNORED_MEMBER_PATTERNS = [
@@ -125,6 +132,41 @@ def check_framework_compatibility(sources: List[str]) -> List[str]:
     if uncapped:
         print("note        no framework upper cap (add `,<{next major}`): " + ", ".join(uncapped))
     return errors
+
+
+def check_change_log(target: str) -> List[str]:
+    """Return errors unless the change log's newest entry matches pyproject.toml."""
+    from packaging.version import InvalidVersion, Version
+
+    path = package_dir(target) / CHANGE_LOG
+    rel = path.relative_to(PROJECT_ROOT)
+    if not path.is_file():
+        return [f"{target}: missing {rel} (see CONTRIBUTING.md, Versioning)"]
+    lines = path.read_text().splitlines()
+    malformed = [
+        n
+        for n, line in enumerate(lines, 1)
+        if line.startswith("## ") and not CHANGE_LOG_HEADING.match(line)
+    ]
+    if malformed:
+        return [
+            f"{target}: {rel}:{malformed[0]}: entry heading must look like "
+            "`## 1.2.0 — 2026-11-05 - MINOR` (MAJOR, MINOR, PATCH or INITIAL)"
+        ]
+    try:
+        versions = [Version(m["version"]) for m in map(CHANGE_LOG_HEADING.match, lines) if m]
+    except InvalidVersion as exc:
+        return [f"{target}: {rel}: {exc}"]
+    expected = Version(read_project_field(pyproject_path(target).read_text(), "version"))
+    if not versions or versions[0] != expected:
+        newest = versions[0] if versions else "no entries"
+        return [
+            f"{target}: {rel} newest entry is {newest}, but pyproject.toml is {expected}; "
+            "add an entry for the new version at the top"
+        ]
+    if any(a <= b for a, b in zip(versions, versions[1:])):
+        return [f"{target}: {rel}: versions must decrease from top to bottom"]
+    return []
 
 
 def comparable_contents(wheel_bytes: bytes) -> Dict[str, bytes]:
@@ -295,6 +337,8 @@ def main() -> int:
             errors.append(f"{target}: {exc}")
     connectors = list_sources() if FRAMEWORK in targets else targets
     errors += check_framework_compatibility(connectors)
+    for target in targets:
+        errors += check_change_log(target)
     for error in errors:
         print(f"ERROR  {error}", file=sys.stderr)
     return 1 if errors else 0
