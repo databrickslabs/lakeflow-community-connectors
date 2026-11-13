@@ -539,10 +539,14 @@ class LakeflowConnectTests:
                 )
             try:
                 schema = self.connector.get_table_schema(table, self._opts(table))
-                missing = [pk for pk in pks if not self._field_in_schema(pk, schema)]
+                # Managed ingestion only supports top-level key columns (a dotted name is
+                # quoted as one identifier, not walked as a struct path).
+                missing = [pk for pk in pks if pk not in schema.fieldNames()]
                 if missing:
+                    hints = "".join(self._nested_path_hint(pk, schema) for pk in missing)
                     return (
-                        f"[{table}] primary_keys {missing} not in schema {schema.fieldNames()}.\n"
+                        f"[{table}] primary_keys {missing} are not top-level columns of "
+                        f"schema {schema.fieldNames()}.\n{hints}"
                         "  Fix: Add them to get_table_schema() or fix the primary_keys list."
                     )
             except Exception:
@@ -567,15 +571,9 @@ class LakeflowConnectTests:
                 # only, so a nested path (e.g. 'attributes.updated_at') fails at pipeline
                 # analysis with SEQUENCE_BY_COLUMN_NOT_FOUND.
                 if cf not in schema.fieldNames():
-                    nested_hint = (
-                        f"  '{cf}' looks like a nested path; promote it to a top-level "
-                        "column in get_table_schema() and every record.\n"
-                        if self._field_in_schema(cf, schema)
-                        else ""
-                    )
                     return (
                         f"[{table}] cursor_field '{cf}' is not a top-level column of "
-                        f"schema {schema.fieldNames()}.\n{nested_hint}"
+                        f"schema {schema.fieldNames()}.\n{self._nested_path_hint(cf, schema)}"
                         "  Fix: Add it to get_table_schema() or choose a different cursor_field."
                     )
             except Exception:
@@ -1040,6 +1038,14 @@ class LakeflowConnectTests:
             if len(out) >= max_records:
                 break
         return out
+
+    def _nested_path_hint(self, path: str, schema) -> str:
+        if not self._field_in_schema(path, schema):
+            return ""
+        return (
+            f"  '{path}' looks like a nested path; promote it to a top-level "
+            "column in get_table_schema() and every record.\n"
+        )
 
     def _field_in_schema(self, path: str, schema) -> bool:
         if "." not in path:
