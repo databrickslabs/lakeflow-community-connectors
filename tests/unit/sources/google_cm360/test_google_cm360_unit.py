@@ -160,6 +160,7 @@ EXPECTED_TABLES = [
     "reach_report_daily",
     "ad_report_placement_daily",
     "reach_report_period",
+    "reach_report_period_incremental",
 ]
 
 REPOSITORY_ROOT = Path(__file__).parents[4]
@@ -2285,7 +2286,7 @@ def test_connector_spec_matches_oauth_and_option_contract():
     assert spec["external_options_allowlist"] == (
         "sync_start_date,sync_end_date,initial_lookback_months,lookback_window_days,"
         "reporting_timezone,advertiser_ids,delivery_country_codes,max_records_per_batch,"
-        "emit_request_telemetry"
+        "refresh_ended_within_days,emit_request_telemetry"
     )
 
 
@@ -2412,8 +2413,14 @@ PLACEMENT_CSV_HEADER = (
     "Media Cost,Video Plays,Video Views,Video Mid-points,Video Completions,"
     "DV360 cost (Account currency)"
 )
-PLACEMENT_CSV_ROW = "3001,Example North America,1001,Summer,500001,Example Video Placement,600,15,70.25,480,360,300,240,1.5"
-SECOND_PLACEMENT_CSV_ROW = "3001,Example North America,1001,Summer,500002,Example Banner Placement,400,10,53.2,320,240,200,160,"
+PLACEMENT_CSV_ROW = (
+    "3001,Example North America,1001,Summer,500001,Example Video Placement,"
+    "600,15,70.25,480,360,300,240,1.5"
+)
+SECOND_PLACEMENT_CSV_ROW = (
+    "3001,Example North America,1001,Summer,500002,Example Banner Placement,"
+    "400,10,53.2,320,240,200,160,"
+)
 PLACEMENT_KEY_FIELDS = ("advertiser_id", "campaign_id", "placement_id")
 
 

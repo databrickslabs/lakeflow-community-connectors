@@ -30,6 +30,7 @@ These are report-backed tables, not CM360 resources. Spark schemas are fixed in
 | `reach_report_daily` | Profile, returned day, delivery country, advertiser, campaign | `uniqueReachImpressionReach` | CDC |
 | `ad_report_placement_daily` | Profile, request day, advertiser, campaign, placement; all countries | Performance metrics plus `dv360Cost` | CDC |
 | `reach_report_period` | Profile, delivery country, advertiser, campaign | Native cumulative `uniqueReachImpressionReach` | Snapshot |
+| `reach_report_period_incremental` | Period reach grain plus source cutoff | Native cumulative `uniqueReachImpressionReach` | CDC |
 
 Performance metrics are `impressions`, `clicks`, `mediaCost`,
 `richMediaVideoPlays`, `richMediaVideoViews`, `richMediaVideoMidpoints` and
@@ -62,6 +63,8 @@ All tables contain `profile_id`, `account_id`, `account_name`, `subaccount_id`,
   `campaign_start_date`, `campaign_end_date`, `period_start`, `period_end`,
   `source_cutoff_date`, `metadata_anchor`, `reporting_timezone` and
   `coverage_status`. It has no `report_date` column.
+- `reach_report_period_incremental` adds the same columns as `reach_report_period`
+  plus `snapshot_campaign_count`, the expected size of the frozen campaign cohort.
 
 Types follow the mapping below and the README's source-field mapping. Schema
 nullability is explicit in `google_cm360_schemas.py`; optional subaccount pairs,
@@ -74,6 +77,8 @@ campaign/placement names, metrics and campaign/period bounds can be NULL.
 - Daily placement: `profile_id`, `report_date`, `advertiser_id`, `campaign_id`,
   `placement_id`.
 - Period reach: `profile_id`, `delivery_country`, `advertiser_id`, `campaign_id`.
+- Resumable period reach: the period-reach key plus `source_cutoff_date`, sequenced
+  by `report_file_last_modified_at`.
 - Daily cursor: `report_file_last_modified_at`, from File `lastModifiedTime`
   (epoch milliseconds converted to UTC).
 - Daily offset: independent ISO date state, not the revision timestamp.
@@ -159,10 +164,38 @@ The anchor is not a substitute for campaign start. No delivery in the discovery
 window means the campaign is absent.
 
 Spans over 92 inclusive days retain metadata with NULL reach and `WINDOW_LIMIT`.
-Unknown starts produce NULL reach with `UNPROVEN_START`. Otherwise coverage is
-`COMPLETE`. Each row carries campaign bounds, effective period, source cutoff,
+Unknown starts produce NULL reach with `UNPROVEN_START`; campaigns starting after
+the cutoff produce `START_AFTER_CUTOFF`. Otherwise coverage is `COMPLETE`. Each row carries campaign bounds, effective period, source cutoff,
 metadata anchor and timezone. Materialize the whole snapshot before returning:
 a late campaign failure cannot publish an earlier prefix. Never sum daily reach.
+
+Campaigns with identical exact period bounds share one native REACH export with
+the campaign and country dimensions; returned values are copied unchanged.
+Exports are sequential. Duplicate or unexpected campaign rows reject the result.
+
+The snapshot has a fixed 2700-second monotonic execution deadline. Request
+timeouts, backoff and polling waits are limited by the remaining budget. The
+check is cooperative: it cannot interrupt runtime scheduling, CPU work or a
+socket that keeps streaming. No rows are returned after the deadline
+(`Cm360SnapshotTimeout`). HTTP 401 raises `Cm360AuthenticationError`
+immediately. Both inherit `Cm360ApiError` and carry the snapshot phase. Cleanup
+failures are sanitized and cannot mask the primary failure.
+
+### Resumable Period Reach
+
+`reach_report_period_incremental` uses the same discovery and native values as
+the snapshot but checkpoints them. The first batch stores campaign membership
+and exact-period groups (manifest limit 1 MiB) and returns no rows. Each later
+query exports whole groups serially, at most 10 groups or 1800 seconds of source
+work. A failed interval returns no rows and replays in full. Settings must stay
+fixed until a cutoff completes; incompatible checkpoints fail without resetting
+progress. A completed cutoff is a no-op.
+
+`refresh_ended_within_days` (`0`–`3650`) marks complete campaigns that ended
+long before both the cutoff and the previous completed cutoff, and that the
+previous cutoff already held with a final value for the same period, as
+`NOT_REFRESHED` with NULL reach and no report. The decision is frozen at
+discovery. `reach_report_period` rejects the option.
 
 ## Types, Limits and Errors
 

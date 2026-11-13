@@ -20,6 +20,7 @@ import json
 import re
 import time
 
+from contextlib import contextmanager
 from email.utils import parsedate_to_datetime
 from pyspark.sql import Row
 from pyspark.sql.datasource import (
@@ -53,6 +54,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 import base64
 import calendar
 import csv
+import hashlib
 import logging
 import math
 import requests
@@ -604,6 +606,225 @@ def register_lakeflow_source(spark):
 
 
     ########################################################
+    # src/databricks/labs/community_connector/sources/google_cm360/google_cm360_period_stream.py
+    ########################################################
+
+    PERIOD_STREAM_TABLE = "reach_report_period_incremental"
+    _MAX_MANIFEST_BYTES = 1024 * 1024
+    _QUERY_GROUPS = 10
+    _QUERY_SECONDS = 1800
+    _KEYS = ("profile_id", "delivery_country", "advertiser_id", "campaign_id")
+    logger = logging.getLogger(__name__)
+
+
+    def _json(value):
+        return json.dumps(value, sort_keys=True, separators=(",", ":"), allow_nan=False)
+
+
+    def _key(row):
+        values = tuple(row[name] for name in _KEYS)
+        if not all(isinstance(value, str) and value for value in values):
+            raise ValueError("CM360 period metadata has an invalid campaign key")
+        return values
+
+
+    def _groups(rows):
+        groups = {}
+        for index, row in enumerate(rows):
+            bounds = ((row["period_start"], row["period_end"])
+                      if row["coverage_status"] == "COMPLETE" else ("", ""))
+            groups.setdefault(bounds, []).append(index)
+        return [groups[bounds] for bounds in sorted(groups)]
+
+
+    class PeriodReachStreamMixin(SupportsPartitionedStream):
+        """Source-only mixin; the Spark offset is the sole durable progress store."""
+
+        def is_partitioned(self, table_name):
+            return table_name == PERIOD_STREAM_TABLE
+
+        def _period_identity(self, options):
+            return {
+                "profile_id": self._profile_id,
+                "metadata_anchor": options.sync_start_date.isoformat(),
+                "reporting_timezone": str(options.reporting_timezone),
+                "advertiser_ids": sorted(set(options.advertiser_ids)),
+                "delivery_country_codes": list(options.delivery_country_codes),
+            }
+
+        def _period_budget(self):
+            if not hasattr(self, "_period_query_deadline"):
+                self._period_query_deadline = time.time() + _QUERY_SECONDS
+            return self._period_query_deadline
+
+        @contextmanager
+        def _period_bounded(self, deadline_epoch):
+            remaining = deadline_epoch - time.time()
+            if remaining <= 0:
+                raise TimeoutError("CM360 period query execution deadline reached")
+            old_deadline = getattr(self, "_snapshot_deadline", None)
+            old_client_deadline = self._client._snapshot_deadline
+            self._snapshot_deadline = time.monotonic() + remaining
+            self._client._snapshot_deadline = self._snapshot_deadline
+            try:
+                yield
+                if time.monotonic() >= self._snapshot_deadline:
+                    raise TimeoutError("CM360 period query execution deadline reached")
+            finally:
+                self._snapshot_deadline = old_deadline
+                self._client._snapshot_deadline = old_client_deadline
+
+        @staticmethod
+        def _period_offset(manifest, position):
+            text = _json(manifest)
+            if len(text.encode()) > _MAX_MANIFEST_BYTES:
+                raise ValueError("CM360 period checkpoint manifest exceeds 1MiB")
+            return {"version": 1, "manifest": text, "position": position,
+                    "manifest_sha256": hashlib.sha256(text.encode()).hexdigest()}
+
+        def _period_state(self, offset, options):
+            if not isinstance(offset, dict) or set(offset) != {
+                "version", "manifest", "position", "manifest_sha256",
+            }:
+                raise ValueError("CM360 period checkpoint shape is invalid")
+            text = offset["manifest"]
+            if (not isinstance(offset["version"], int) or isinstance(offset["version"], bool)
+                    or offset["version"] != 1
+                    or not isinstance(text, str)):
+                raise ValueError("CM360 period checkpoint manifest is corrupt or unsupported")
+            if (len(text.encode()) > _MAX_MANIFEST_BYTES
+                    or hashlib.sha256(text.encode()).hexdigest() != offset["manifest_sha256"]):
+                raise ValueError("CM360 period checkpoint manifest is corrupt or unsupported")
+            try:
+                manifest = json.loads(text)
+                groups = _groups(manifest["rows"])
+                valid = (manifest["identity"] == self._period_identity(options)
+                         and isinstance(manifest["cutoff"], str)
+                         and bool(manifest["rows"]))
+            except (ValueError, TypeError, KeyError) as error:
+                raise ValueError("CM360 period checkpoint manifest is invalid") from error
+            position = offset["position"]
+            if (not valid or not isinstance(position, int) or isinstance(position, bool)
+                    or not 0 <= position <= len(groups)):
+                raise ValueError("CM360 period checkpoint identity or position is invalid")
+            return manifest, groups
+
+        def latest_offset(self, table_name, table_options, start_offset=None):
+            if not self.is_partitioned(table_name):
+                raise NotImplementedError("Only incremental period reach is partitioned")
+            options = self._period_stream_options(table_options)
+            if start_offset is not None and not isinstance(start_offset, dict):
+                raise ValueError("CM360 period checkpoint must be a dictionary")
+            start = start_offset if start_offset is not None else {}
+            cutoff = options.sync_end_date.isoformat()
+            identity = _json({**self._period_identity(options), "cutoff": cutoff})
+            if getattr(self, "_period_query_identity", identity) != identity:
+                raise ValueError("CM360 period configuration changed within a query")
+            self._period_query_identity = identity
+            previous = None
+            if start:
+                manifest, groups = self._period_state(start, options)
+                previous = manifest
+                if manifest["cutoff"] == cutoff:
+                    if getattr(self, "_period_planned_start", None) == start:
+                        return dict(self._period_planned_end)
+                    if not hasattr(self, "_period_query_first"):
+                        self._period_query_first = start["position"]
+                    if (start["position"] >= min(len(groups), self._period_query_first + _QUERY_GROUPS)
+                            or time.time() >= self._period_budget()):
+                        return start
+                    end = {**start, "position": min(
+                        len(groups), self._period_query_first + _QUERY_GROUPS)}
+                    self._period_planned_start, self._period_planned_end = dict(start), dict(end)
+                    return end
+                if start["position"] != len(groups) or manifest["cutoff"] >= cutoff:
+                    raise ValueError(
+                        "CM360 period cutoff cannot change before checkpoint completion"
+                    )
+            if not hasattr(self, "_period_discovery"):
+                with self._period_bounded(self._period_budget()):
+                    rows, profile, country_id = self._period_stream_discover(options, previous)
+                if not rows:
+                    raise ValueError("CM360 period metadata discovery is empty")
+                rows = sorted(rows, key=_key)
+                if len({_key(row) for row in rows}) != len(rows):
+                    raise ValueError("CM360 period metadata returned duplicate campaigns")
+                self._period_discovery = self._period_offset({
+                    "identity": self._period_identity(options), "cutoff": cutoff,
+                    "rows": rows, "profile": profile, "country_id": country_id,
+                }, 0)
+                self._period_query_first = 0
+            return dict(self._period_discovery)
+
+        def get_partitions(self, table_name, table_options, start_offset=None, end_offset=None):
+            if not self.is_partitioned(table_name):
+                raise NotImplementedError("Preserve existing batch-reader fallback")
+            options = self._period_stream_options(table_options)
+            manifest, _ = self._period_state(end_offset, options)
+            if manifest["cutoff"] != options.sync_end_date.isoformat():
+                raise ValueError("CM360 period partition cutoff differs from configured cutoff")
+            first = 0
+            if start_offset:
+                previous, groups = self._period_state(start_offset, options)
+                if start_offset["manifest"] == end_offset["manifest"]:
+                    first = start_offset["position"]
+                elif (start_offset["position"] != len(groups)
+                      or previous["cutoff"] >= manifest["cutoff"]):
+                    raise ValueError("CM360 period interval changed unfinished campaign membership")
+            elif start_offset not in (None, {}):
+                raise ValueError("CM360 period interval start is invalid")
+            if first > end_offset["position"]:
+                raise ValueError("CM360 period interval is reversed")
+            if first == end_offset["position"]:
+                return []
+            self._period_query_first = min(getattr(self, "_period_query_first", first), first)
+            if end_offset["position"] > self._period_query_first + _QUERY_GROUPS:
+                raise ValueError("CM360 period interval exceeds the query group budget")
+            return [{"offset": end_offset, "first": first, "deadline_epoch": self._period_budget()}]
+
+        def read_partition(self, table_name, partition, table_options):
+            if not self.is_partitioned(table_name):
+                raise NotImplementedError("Only incremental period reach is partitioned")
+            options = self._period_stream_options(table_options)
+            manifest, groups = self._period_state(partition["offset"], options)
+            first, last = partition["first"], partition["offset"]["position"]
+            if (manifest["cutoff"] != options.sync_end_date.isoformat()
+                    or not isinstance(first, int) or isinstance(first, bool) or not 0 <= first <= last):
+                raise ValueError("CM360 period partition boundaries or deadline are invalid")
+            if (not isinstance(partition["deadline_epoch"], (int, float))
+                    or not math.isfinite(partition["deadline_epoch"])):
+                raise ValueError("CM360 period partition boundaries or deadline are invalid")
+            rows = []
+            with self._period_bounded(partition["deadline_epoch"]):
+                for position in range(first, last):
+                    frozen = [manifest["rows"][index] for index in groups[position]]
+                    started = time.monotonic()
+                    try:
+                        values = self._period_stream_export(frozen, options, manifest)
+                    except Exception as error:
+                        context = (
+                            f"CM360 incremental group failed position={position + 1} total={len(groups)} "
+                            f"interval_first={first} interval_last={last} "
+                            f"elapsed_seconds={time.monotonic() - started:.3f}"
+                        )
+                        logger.warning("%s", context)
+                        if hasattr(error, "add_note"):
+                            error.add_note(context)
+                        raise
+                    if (len(values) != len(frozen)
+                            or {_key(value) for value in values} != {_key(row) for row in frozen}
+                            or any(value["source_cutoff_date"] != manifest["cutoff"]
+                                   for value in values)):
+                        raise ValueError("CM360 period interval returned unexpected campaign rows")
+                    rows.extend({**value, "snapshot_campaign_count": len(manifest["rows"])}
+                                for value in values)
+                    logger.info("CM360 incremental group completed position=%d total=%d",
+                                position + 1, len(groups))
+            # Nothing is yielded until the entire requested interval has succeeded.
+            return iter(rows)
+
+
+    ########################################################
     # src/databricks/labs/community_connector/sources/google_cm360/google_cm360_schemas.py
     ########################################################
 
@@ -856,6 +1077,16 @@ def register_lakeflow_source(spark):
         "ingestion_type": "snapshot",
     }
 
+    REACH_REPORT_PERIOD_INCREMENTAL_SCHEMA = StructType([
+        *REACH_REPORT_PERIOD_SCHEMA.fields,
+        StructField("snapshot_campaign_count", LongType(), False),
+    ])
+    REACH_REPORT_PERIOD_INCREMENTAL_METADATA = {
+        "primary_keys": [*REACH_REPORT_PERIOD_METADATA["primary_keys"], "source_cutoff_date"],
+        "cursor_field": "report_file_last_modified_at",
+        "ingestion_type": "cdc",
+    }
+
 
     ########################################################
     # src/databricks/labs/community_connector/sources/google_cm360/google_cm360.py
@@ -865,12 +1096,14 @@ def register_lakeflow_source(spark):
     REACH_REPORT_TABLE_NAME = "reach_report_daily"
     PLACEMENT_REPORT_TABLE_NAME = "ad_report_placement_daily"
     PERIOD_REACH_TABLE_NAME = "reach_report_period"
+    NOT_REFRESHED = "NOT_REFRESHED"
     _API_BASE_URL = "https://dfareporting.googleapis.com/dfareporting/v5"
     _RETRIABLE_STATUS_CODES = {429, 500, 502, 503, 504}
     _MAX_HTTP_ATTEMPTS = 5
     _HTTP_TIMEOUT_SECONDS = 30
     _MAX_RETRY_DELAY_SECONDS = 30.0
     _MAX_FILE_POLLS = 60
+    _SNAPSHOT_TIMEOUT_SECONDS = 2700
     _CSV_FOOTER_LABELS = {"Grand Total:", "Grand Total", "Report Time:", "Report Time"}
     _ISO_DATE_PATTERN = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}")
     _INTEGER_PATTERN = re.compile(r"[0-9]+")
@@ -892,6 +1125,7 @@ def register_lakeflow_source(spark):
         "delivery_country_codes",
         "max_records_per_batch",
         "emit_request_telemetry",
+        "refresh_ended_within_days",
     }
     _RESPONSE_STATUS_KEYS = (
         "200",
@@ -943,6 +1177,7 @@ def register_lakeflow_source(spark):
         delivery_country_codes: tuple[str, ...]
         max_records_per_batch: int
         emit_request_telemetry: bool
+        refresh_ended_within_days: int | None = None
 
 
     @dataclass(frozen=True)
@@ -1057,6 +1292,23 @@ def register_lakeflow_source(spark):
 
     class Cm360ApiError(RuntimeError):
         """A sanitized CM360 transport or response error."""
+
+
+    class Cm360AuthenticationError(Cm360ApiError):
+        """The source rejected the managed connection's supplied credential."""
+
+
+    class Cm360SnapshotTimeout(Cm360ApiError):
+        """The cooperative snapshot execution deadline was reached."""
+
+
+    def _snapshot_timeout(deadline: float | None) -> float:
+        if deadline is None:
+            return _HTTP_TIMEOUT_SECONDS
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise Cm360SnapshotTimeout("CM360 snapshot execution deadline reached (2700 seconds)")
+        return min(_HTTP_TIMEOUT_SECONDS, remaining)
 
 
     class Cm360ConfigurationError(ValueError):
@@ -1208,9 +1460,12 @@ def register_lakeflow_source(spark):
         if start is None:
             return None, None, "UNPROVEN_START"
         lower = _parse_iso_date(start, "campaign_start_date")
-        upper = min(_parse_iso_date(end, "campaign_end_date"), cutoff) if end else cutoff
-        if lower > upper:
+        scheduled_end = _parse_iso_date(end, "campaign_end_date") if end else None
+        if scheduled_end is not None and scheduled_end < lower:
             raise Cm360DataError("Campaign period ends before its start")
+        if lower > cutoff:
+            return None, None, "START_AFTER_CUTOFF"
+        upper = min(scheduled_end, cutoff) if scheduled_end is not None else cutoff
         return lower, upper, "WINDOW_LIMIT" if (upper - lower).days + 1 > 92 else "COMPLETE"
 
 
@@ -1266,6 +1521,12 @@ def register_lakeflow_source(spark):
             PERIOD_REACH_FIELD_SPECS,
             _build_period_reach_report,
         ),
+        PERIOD_STREAM_TABLE: TableContract(
+            REACH_REPORT_PERIOD_INCREMENTAL_SCHEMA,
+            REACH_REPORT_PERIOD_INCREMENTAL_METADATA,
+            PERIOD_REACH_FIELD_SPECS,
+            _build_period_reach_report,
+        ),
     }
 
 
@@ -1299,6 +1560,7 @@ def register_lakeflow_source(spark):
 
         def __init__(self, access_token: str, profile_id: str) -> None:
             self._profile_id = profile_id
+            self._snapshot_deadline: float | None = None
             self._session = requests.Session()
             self._session.headers.update(
                 {
@@ -1321,6 +1583,10 @@ def register_lakeflow_source(spark):
 
             url = f"{_API_BASE_URL}{path}"
             for attempt in range(_MAX_HTTP_ATTEMPTS):
+                timeout = _snapshot_timeout(self._snapshot_deadline)
+                started = time.monotonic() if self._snapshot_deadline is not None else None
+                if started is not None:
+                    logger.info("CM360 request started method=%s attempt=%d", method, attempt + 1)
                 if telemetry is not None:
                     telemetry.increment("http_attempts")
                 try:
@@ -1329,7 +1595,7 @@ def register_lakeflow_source(spark):
                         url,
                         params=params,
                         json=json_body,
-                        timeout=_HTTP_TIMEOUT_SECONDS,
+                        timeout=timeout,
                     )
                 except requests.RequestException as error:
                     if telemetry is not None:
@@ -1340,13 +1606,26 @@ def register_lakeflow_source(spark):
 
                 if telemetry is not None:
                     telemetry.record_response(response.status_code)
+                if started is not None:
+                    logger.info(
+                        "CM360 request completed method=%s status=%d elapsed_seconds=%.3f",
+                        method, response.status_code, time.monotonic() - started,
+                    )
+                _snapshot_timeout(self._snapshot_deadline)
+
+                if response.status_code == 401:
+                    raise Cm360AuthenticationError(
+                        f"{method} CM360 API returned HTTP 401 after {attempt + 1} attempt; "
+                        "managed connection credential rejected"
+                    )
 
                 if response.status_code in expected_statuses:
                     return response
                 if response.status_code in _RETRIABLE_STATUS_CODES and attempt < _MAX_HTTP_ATTEMPTS - 1:
                     if telemetry is not None:
                         telemetry.record_retry(response.status_code)
-                    time.sleep(_retry_delay(response, attempt))
+                    time.sleep(min(_retry_delay(response, attempt),
+                                   _snapshot_timeout(self._snapshot_deadline)))
                     continue
 
                 attempt_word = "attempt" if attempt == 0 else "attempts"
@@ -1680,18 +1959,22 @@ def register_lakeflow_source(spark):
         report_id: str,
         file_id: str,
         telemetry: RequestTelemetry | None = None,
+        deadline: float | None = None,
     ) -> dict:
         """Poll a CM360 File resource with a separate bounded backoff budget."""
 
         for attempt in range(_MAX_FILE_POLLS):
+            _snapshot_timeout(deadline)
             file_resource = client.get_file(report_id, file_id, **_telemetry_kwargs(telemetry))
+            _snapshot_timeout(deadline)
             status = file_resource.get("status")
             if status == "REPORT_AVAILABLE":
                 return file_resource
             if status in {"FAILED", "CANCELLED"}:
                 raise Cm360ReportError(f"CM360 report file entered terminal state {status}")
             if attempt < _MAX_FILE_POLLS - 1:
-                time.sleep(min(2 * 1.5**attempt, _MAX_RETRY_DELAY_SECONDS))
+                time.sleep(min(2 * 1.5**attempt, _MAX_RETRY_DELAY_SECONDS,
+                               _snapshot_timeout(deadline)))
         raise Cm360ReportError(f"CM360 report file was unavailable after {_MAX_FILE_POLLS} polls")
 
 
@@ -1712,6 +1995,18 @@ def register_lakeflow_source(spark):
             raise ValueError(f"{name} must be a positive integer") from error
         if value <= 0:
             raise ValueError(f"{name} must be a positive integer")
+        return value
+
+
+    def _parse_optional_days(options: dict[str, str], name: str) -> int | None:
+        raw_value = options.get(name)
+        if raw_value is None:
+            return None
+        if not isinstance(raw_value, str) or not _INTEGER_PATTERN.fullmatch(raw_value):
+            raise ValueError(f"{name} must be a whole number of days from 0 to 3650")
+        value = int(raw_value)
+        if value > 3650:
+            raise ValueError(f"{name} must be a whole number of days from 0 to 3650")
         return value
 
 
@@ -1764,6 +2059,7 @@ def register_lakeflow_source(spark):
             ),
             max_records_per_batch=_parse_positive_int(table_options, "max_records_per_batch", 100_000),
             emit_request_telemetry=_parse_strict_bool(table_options, "emit_request_telemetry", False),
+            refresh_ended_within_days=_parse_optional_days(table_options, "refresh_ended_within_days"),
         )
 
 
@@ -1876,7 +2172,7 @@ def register_lakeflow_source(spark):
         return state_offset, telemetry
 
 
-    class GoogleCm360LakeflowConnect(LakeflowConnect):
+    class GoogleCm360LakeflowConnect(PeriodReachStreamMixin, LakeflowConnect):
         """Expose fixed CM360 daily performance and reach contracts."""
 
         def __init__(self, options: dict[str, str]) -> None:
@@ -1888,6 +2184,8 @@ def register_lakeflow_source(spark):
             if not isinstance(profile_id, str) or not profile_id.isdigit():
                 raise ValueError("profile_id must contain digits only")
             self._access_token = access_token
+            self._created_at = time.time()
+            self._snapshot_deadline: float | None = None
             self._profile_id = profile_id
             self._upper_bounds: dict[str, date] = {}
             self._terminal_offsets: dict[str, dict] = {}
@@ -2062,12 +2360,20 @@ def register_lakeflow_source(spark):
             return rows
 
         def _period_export(self, report: dict, options: ReadOptions, fields: tuple) -> list[dict]:
+            logger.info("CM360 period report step=validate")
             self._client.validate_compatible_fields(report)
+            logger.info("CM360 period report step=create")
             report_id = self._client.insert_report(report)
             try:
+                logger.info("CM360 period report step=run")
                 file_id = self._client.run_report(report_id)
-                resource = _poll_until_available(self._client, report_id, file_id, None)
+                logger.info("CM360 period report step=poll")
+                resource = _poll_until_available(
+                    self._client, report_id, file_id, None, self._snapshot_deadline
+                )
+                logger.info("CM360 period report step=download")
                 text = self._client.download_file(report_id, file_id)
+                logger.info("CM360 period report step=parse")
                 csv_rows = list(csv.reader(io.StringIO(text)))
                 zone = next(
                     (r[1] for r in csv_rows if len(r) == 2 and r[0] == "Report Time Zone"), None
@@ -2098,10 +2404,15 @@ def register_lakeflow_source(spark):
                     field_specs=fields,
                 )
             finally:
-                self._client.delete_report(report_id)
+                try:
+                    self._client.delete_report(report_id)
+                except Exception:  # pylint: disable=broad-exception-caught
+                    logger.warning("CM360 period temporary report cleanup failed")
 
         def _period_campaigns(self, options: ReadOptions) -> list[dict]:
+            logger.info("CM360 period metadata step=profile")
             self._period_profile_metadata = _build_profile_metadata(self._client.get_profile())
+            logger.info("CM360 period metadata step=country")
             response = self._client.query_dimension_values(
                 "country",
                 DELIVERY_COUNTRY_NAMES[options.delivery_country_codes[0]],
@@ -2135,11 +2446,18 @@ def register_lakeflow_source(spark):
             return self._period_export(report, options, CAMPAIGN_PERIOD_FIELD_SPECS)
 
         def _period_campaign_row(self, campaign: dict, options: ReadOptions) -> dict:
-            lower, upper, coverage = _campaign_period(
-                campaign["campaign_start_date"],
-                campaign["campaign_end_date"],
-                options.sync_end_date,
-            )
+            try:
+                lower, upper, coverage = _campaign_period(
+                    campaign["campaign_start_date"],
+                    campaign["campaign_end_date"],
+                    options.sync_end_date,
+                )
+            except ValueError as error:
+                raise Cm360DataError(
+                    f"{error}; campaign_id={campaign['campaign_id']} "
+                    f"start={campaign['campaign_start_date']} end={campaign['campaign_end_date']} "
+                    f"cutoff={options.sync_end_date}"
+                ) from error
             row = {k: v for k, v in campaign.items() if k not in {"report_date", "impressions"}}
             row.update(
                 {
@@ -2152,21 +2470,102 @@ def register_lakeflow_source(spark):
                     "unique_reach_impression_reach": None,
                 }
             )
-            if coverage == "COMPLETE":
+            return row
+
+        def _period_campaign_rows(self, campaigns: list[dict], options: ReadOptions) -> list[dict]:
+            rows = [self._period_campaign_row(campaign, options) for campaign in campaigns]
+            for campaign, row in zip(campaigns, rows):
+                # A frozen checkpoint row keeps the refresh decision made at discovery.
+                if (
+                    campaign.get("coverage_status") == NOT_REFRESHED
+                    and row["coverage_status"] == "COMPLETE"
+                ):
+                    row["coverage_status"] = NOT_REFRESHED
+            groups: dict[tuple[str, str], list[dict]] = {}
+            for row in rows:
+                if row.get("coverage_status") == "COMPLETE":
+                    groups.setdefault((row["period_start"], row["period_end"]), []).append(row)
+            for group_number, ((lower, upper), group) in enumerate(groups.items(), 1):
+                _snapshot_timeout(self._snapshot_deadline)
+                logger.info("CM360 reach group started group=%d total=%d", group_number, len(groups))
+                expected = {row["campaign_id"]: row for row in group}
+                if len(expected) != len(group):
+                    raise Cm360DataError("CM360 metadata returned duplicate campaigns")
                 report = _build_period_reach_report(
-                    lower, upper, campaign["campaign_id"], self._period_country_id
+                    date.fromisoformat(lower), date.fromisoformat(upper),
+                    group[0]["campaign_id"], self._period_country_id,
+                )
+                # CM360 ORs filters of the same dimension. Campaign remains an output
+                # dimension: each value is native campaign reach, never a group total.
+                report["reachCriteria"]["dimensionFilters"].extend(
+                    {"dimensionName": "campaign", "id": row["campaign_id"]} for row in group[1:]
                 )
                 values = self._period_export(report, options, PERIOD_REACH_FIELD_SPECS)
-                if len(values) > 1 or any(
-                    v["campaign_id"] != campaign["campaign_id"]
-                    or v["advertiser_id"] != campaign["advertiser_id"]
-                    for v in values
-                ):
-                    raise Cm360DataError("CM360 period report returned an unexpected campaign")
-                if values:
-                    row["unique_reach_impression_reach"] = values[0]["unique_reach_impression_reach"]
-                    row["report_file_last_modified_at"] = values[0]["report_file_last_modified_at"]
-            return row
+                seen = set()
+                for value in values:
+                    key = value["campaign_id"]
+                    if key not in expected or value["advertiser_id"] != expected[key]["advertiser_id"]:
+                        raise Cm360DataError("CM360 period report returned an unexpected campaign")
+                    if key in seen:
+                        raise Cm360DataError("CM360 period report returned a duplicate campaign")
+                    seen.add(key)
+                    for field_name in (
+                        "unique_reach_impression_reach",
+                        "report_file_last_modified_at",
+                    ):
+                        expected[key][field_name] = value[field_name]
+                self._period_groups_completed += 1
+                logger.info("CM360 reach group completed group=%d total=%d", group_number, len(groups))
+            return rows
+
+        @staticmethod
+        def _period_stream_options(table_options):
+            options = _parse_read_options(table_options)
+            if (options.sync_start_date is None or options.sync_end_date is None
+                    or not options.delivery_country_codes
+                    or options.sync_start_date > options.sync_end_date
+                    or options.sync_end_date >= datetime.now(options.reporting_timezone).date()):
+                raise Cm360ConfigurationError(
+                    "Incremental period reach requires explicit completed bounds and one country"
+                )
+            return options
+
+        def _period_stream_discover(self, options, previous=None):
+            campaigns = self._period_campaigns(options)
+            rows = [self._period_campaign_row(row, options) for row in campaigns]
+            if options.refresh_ended_within_days is not None and previous is not None:
+                # Native reach of a long-ended campaign no longer changes: keep the
+                # campaign in the cutoff's membership but request no reach report.
+                # Freeze only a campaign that the previous completed cutoff already held
+                # with a final value for the same whole period (COMPLETE, or carried
+                # forward as NOT_REFRESHED) and that was already past the window then.
+                # A campaign seen for the first time, one whose period changed, and every
+                # campaign after an ingestion gap get one real report first. The first
+                # cutoff of a stream refreshes everything.
+                # The option is deliberately not part of the checkpoint identity: the
+                # decision is frozen in the manifest and a change applies from the
+                # next cutoff, so an unfinished checkpoint is never invalidated.
+                window = timedelta(days=options.refresh_ended_within_days)
+                oldest_end = min(options.sync_end_date,
+                                 date.fromisoformat(previous["cutoff"])) - window
+                final = {
+                    tuple(row[k] for k in PERIOD_STREAM_KEYS): (row["period_start"], row["period_end"])
+                    for row in previous["rows"]
+                    if row["coverage_status"] in {"COMPLETE", NOT_REFRESHED}
+                }
+                for row in rows:
+                    if (row["coverage_status"] == "COMPLETE"
+                            and date.fromisoformat(row["period_end"]) < oldest_end
+                            and final.get(tuple(row[k] for k in PERIOD_STREAM_KEYS))
+                            == (row["period_start"], row["period_end"])):
+                        row["coverage_status"] = NOT_REFRESHED
+            return rows, self._period_profile_metadata.as_row(), self._period_country_id
+
+        def _period_stream_export(self, campaigns, options, manifest):
+            self._period_profile_metadata = ProfileMetadata(**manifest["profile"])
+            self._period_country_id = manifest["country_id"]
+            self._period_groups_completed = 0
+            return self._period_campaign_rows(campaigns, options)
 
         @staticmethod
         def _validate_table(table_name: str) -> None:
@@ -2201,7 +2600,15 @@ def register_lakeflow_source(spark):
         ) -> tuple[Iterator[dict], dict]:
             self._validate_table(table_name)
             options = _parse_read_options(table_options)
+            if table_name == PERIOD_STREAM_TABLE:
+                raise Cm360ConfigurationError("Incremental period reach requires partitioned streaming")
             if table_name == PERIOD_REACH_TABLE_NAME:
+                if options.refresh_ended_within_days is not None:
+                    # Snapshot semantics would replace stored reach with an empty value.
+                    raise Cm360ConfigurationError(
+                        "refresh_ended_within_days is supported only by "
+                        f"{PERIOD_STREAM_TABLE}"
+                    )
                 if (
                     options.sync_start_date is None
                     or options.sync_end_date is None
@@ -2216,8 +2623,31 @@ def register_lakeflow_source(spark):
                     raise ValueError("Period snapshot requires a completed reporting date")
                 # The framework reads once and discards offsets. Materialize the whole
                 # snapshot before returning; a late failure cannot publish a prefix.
-                campaigns = self._period_campaigns(options)
-                rows = [self._period_campaign_row(campaign, options) for campaign in campaigns]
+                started = time.monotonic()
+                self._snapshot_deadline = started + _SNAPSHOT_TIMEOUT_SECONDS
+                self._client._snapshot_deadline = self._snapshot_deadline
+                phase = "metadata"
+                self._period_groups_completed = 0
+                try:
+                    logger.info("CM360 snapshot started phase=metadata")
+                    campaigns = self._period_campaigns(options)
+                    _snapshot_timeout(self._snapshot_deadline)
+                    phase = "campaign_reach"
+                    logger.info("CM360 snapshot phase=campaign_reach campaigns=%d", len(campaigns))
+                    rows = self._period_campaign_rows(campaigns, options)
+                    _snapshot_timeout(self._snapshot_deadline)
+                    logger.info("CM360 snapshot completed elapsed_seconds=%.3f",
+                                time.monotonic() - started)
+                except (Cm360ApiError, Cm360ReportError) as error:
+                    raise type(error)(
+                        f"CM360 period snapshot failed phase={phase} "
+                        f"elapsed_seconds={int(time.monotonic() - started)} "
+                        f"connector_age_seconds={int(time.time() - self._created_at)} "
+                        f"completed_reach_groups={self._period_groups_completed}: {error}"
+                    ) from error
+                finally:
+                    self._client._snapshot_deadline = None
+                    self._snapshot_deadline = None
                 return iter(rows), {}
             if (
                 options.delivery_country_codes
@@ -2270,6 +2700,9 @@ def register_lakeflow_source(spark):
                 initial_start=state.initial_start,
             )
             return iter(rows), _next_offset(next_state, telemetry)
+
+
+    PERIOD_STREAM_KEYS = _KEYS
 
 
     ########################################################

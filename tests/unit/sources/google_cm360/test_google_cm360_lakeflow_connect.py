@@ -42,6 +42,14 @@ class TestGoogleCm360Connector(LakeflowConnectTests):
             )
         return kwargs
 
+    def _tables(self):
+        # The shared simulator models the four public report flows. The
+        # resumable period-reach table has its own focused bridge tests.
+        tables = super()._tables()
+        if not self._live_mode():
+            return [table for table in tables if table != "reach_report_period_incremental"]
+        return tables
+
     @classmethod
     def _load_table_configs(cls):
         if cls._live_mode():
@@ -91,7 +99,10 @@ class TestGoogleCm360Connector(LakeflowConnectTests):
         return self._record_replay_patch.corpus.tables.setdefault("_state", {})
 
     def test_shared_harness_includes_period_snapshot(self):
-        assert set(self._tables()) == set(self.connector.list_tables())
+        assert "reach_report_period" in self._tables()
+        assert set(self._tables()) | {"reach_report_period_incremental"} == set(
+            self.connector.list_tables()
+        )
 
     def _period_options(self):
         return {
@@ -134,8 +145,10 @@ class TestGoogleCm360Connector(LakeflowConnectTests):
         )
         assert state["reports"] == {}
         operations = [e["operation"] for e in state["request_log"]]
-        assert operations.count("download") == 5  # discovery plus four native reach reports
-        assert operations.count("delete") == 5
+        # Discovery plus one native REACH export shared by the four campaigns
+        # with identical complete periods.
+        assert operations.count("download") == 2
+        assert operations.count("delete") == 2
 
     def test_simulator_period_snapshot_can_be_empty(self):
         self._simulator_state().clear()
@@ -156,7 +169,7 @@ class TestGoogleCm360Connector(LakeflowConnectTests):
                 "reach_report_period", None, self._period_options()
             )
         operations = [e["operation"] for e in state["request_log"]]
-        assert operations.count("download") == 3  # discovery, success, then failure
+        assert operations.count("download") == 2  # discovery, then the failed shared export
         assert state["reports"] == {}
 
     def test_simulator_runs_full_report_sequence(self):

@@ -1,5 +1,9 @@
 """Lakeflow connector for daily Google Campaign Manager 360 ad reports."""
 
+# Keep the bounded snapshot diagnostics here rather than refactoring stable code
+# solely for the 1500-line limit (this addition exceeds it by about 45 lines).
+# pylint: disable=too-many-lines
+
 import calendar
 import csv
 import io
@@ -21,6 +25,11 @@ import requests
 from pyspark.sql.types import StructType
 
 from databricks.labs.community_connector.interface import LakeflowConnect
+from databricks.labs.community_connector.sources.google_cm360.google_cm360_period_stream import (
+    _KEYS as PERIOD_STREAM_KEYS,
+    PERIOD_STREAM_TABLE,
+    PeriodReachStreamMixin,
+)
 from databricks.labs.community_connector.sources.google_cm360.google_cm360_schemas import (
     AD_REPORT_DAILY_METADATA,
     AD_REPORT_DAILY_SCHEMA,
@@ -41,18 +50,22 @@ from databricks.labs.community_connector.sources.google_cm360.google_cm360_schem
     REACH_REPORT_DAILY_SCHEMA,
     REACH_REPORT_PERIOD_METADATA,
     REACH_REPORT_PERIOD_SCHEMA,
+    REACH_REPORT_PERIOD_INCREMENTAL_METADATA,
+    REACH_REPORT_PERIOD_INCREMENTAL_SCHEMA,
 )
 
 AD_REPORT_TABLE_NAME = "ad_report_daily"
 REACH_REPORT_TABLE_NAME = "reach_report_daily"
 PLACEMENT_REPORT_TABLE_NAME = "ad_report_placement_daily"
 PERIOD_REACH_TABLE_NAME = "reach_report_period"
+NOT_REFRESHED = "NOT_REFRESHED"
 _API_BASE_URL = "https://dfareporting.googleapis.com/dfareporting/v5"
 _RETRIABLE_STATUS_CODES = {429, 500, 502, 503, 504}
 _MAX_HTTP_ATTEMPTS = 5
 _HTTP_TIMEOUT_SECONDS = 30
 _MAX_RETRY_DELAY_SECONDS = 30.0
 _MAX_FILE_POLLS = 60
+_SNAPSHOT_TIMEOUT_SECONDS = 2700
 _CSV_FOOTER_LABELS = {"Grand Total:", "Grand Total", "Report Time:", "Report Time"}
 _ISO_DATE_PATTERN = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}")
 _INTEGER_PATTERN = re.compile(r"[0-9]+")
@@ -74,6 +87,7 @@ _TABLE_OPTION_NAMES = {
     "delivery_country_codes",
     "max_records_per_batch",
     "emit_request_telemetry",
+    "refresh_ended_within_days",
 }
 _RESPONSE_STATUS_KEYS = (
     "200",
@@ -125,6 +139,7 @@ class ReadOptions:
     delivery_country_codes: tuple[str, ...]
     max_records_per_batch: int
     emit_request_telemetry: bool
+    refresh_ended_within_days: int | None = None
 
 
 @dataclass(frozen=True)
@@ -239,6 +254,23 @@ class ProfileMetadata:
 
 class Cm360ApiError(RuntimeError):
     """A sanitized CM360 transport or response error."""
+
+
+class Cm360AuthenticationError(Cm360ApiError):
+    """The source rejected the managed connection's supplied credential."""
+
+
+class Cm360SnapshotTimeout(Cm360ApiError):
+    """The cooperative snapshot execution deadline was reached."""
+
+
+def _snapshot_timeout(deadline: float | None) -> float:
+    if deadline is None:
+        return _HTTP_TIMEOUT_SECONDS
+    remaining = deadline - time.monotonic()
+    if remaining <= 0:
+        raise Cm360SnapshotTimeout("CM360 snapshot execution deadline reached (2700 seconds)")
+    return min(_HTTP_TIMEOUT_SECONDS, remaining)
 
 
 class Cm360ConfigurationError(ValueError):
@@ -390,9 +422,12 @@ def _campaign_period(start: str | None, end: str | None, cutoff: date) -> tuple:
     if start is None:
         return None, None, "UNPROVEN_START"
     lower = _parse_iso_date(start, "campaign_start_date")
-    upper = min(_parse_iso_date(end, "campaign_end_date"), cutoff) if end else cutoff
-    if lower > upper:
+    scheduled_end = _parse_iso_date(end, "campaign_end_date") if end else None
+    if scheduled_end is not None and scheduled_end < lower:
         raise Cm360DataError("Campaign period ends before its start")
+    if lower > cutoff:
+        return None, None, "START_AFTER_CUTOFF"
+    upper = min(scheduled_end, cutoff) if scheduled_end is not None else cutoff
     return lower, upper, "WINDOW_LIMIT" if (upper - lower).days + 1 > 92 else "COMPLETE"
 
 
@@ -448,6 +483,12 @@ TABLE_CONTRACTS = {
         PERIOD_REACH_FIELD_SPECS,
         _build_period_reach_report,
     ),
+    PERIOD_STREAM_TABLE: TableContract(
+        REACH_REPORT_PERIOD_INCREMENTAL_SCHEMA,
+        REACH_REPORT_PERIOD_INCREMENTAL_METADATA,
+        PERIOD_REACH_FIELD_SPECS,
+        _build_period_reach_report,
+    ),
 }
 
 
@@ -481,6 +522,7 @@ class Cm360Client:
 
     def __init__(self, access_token: str, profile_id: str) -> None:
         self._profile_id = profile_id
+        self._snapshot_deadline: float | None = None
         self._session = requests.Session()
         self._session.headers.update(
             {
@@ -503,6 +545,10 @@ class Cm360Client:
 
         url = f"{_API_BASE_URL}{path}"
         for attempt in range(_MAX_HTTP_ATTEMPTS):
+            timeout = _snapshot_timeout(self._snapshot_deadline)
+            started = time.monotonic() if self._snapshot_deadline is not None else None
+            if started is not None:
+                logger.info("CM360 request started method=%s attempt=%d", method, attempt + 1)
             if telemetry is not None:
                 telemetry.increment("http_attempts")
             try:
@@ -511,7 +557,7 @@ class Cm360Client:
                     url,
                     params=params,
                     json=json_body,
-                    timeout=_HTTP_TIMEOUT_SECONDS,
+                    timeout=timeout,
                 )
             except requests.RequestException as error:
                 if telemetry is not None:
@@ -522,13 +568,26 @@ class Cm360Client:
 
             if telemetry is not None:
                 telemetry.record_response(response.status_code)
+            if started is not None:
+                logger.info(
+                    "CM360 request completed method=%s status=%d elapsed_seconds=%.3f",
+                    method, response.status_code, time.monotonic() - started,
+                )
+            _snapshot_timeout(self._snapshot_deadline)
+
+            if response.status_code == 401:
+                raise Cm360AuthenticationError(
+                    f"{method} CM360 API returned HTTP 401 after {attempt + 1} attempt; "
+                    "managed connection credential rejected"
+                )
 
             if response.status_code in expected_statuses:
                 return response
             if response.status_code in _RETRIABLE_STATUS_CODES and attempt < _MAX_HTTP_ATTEMPTS - 1:
                 if telemetry is not None:
                     telemetry.record_retry(response.status_code)
-                time.sleep(_retry_delay(response, attempt))
+                time.sleep(min(_retry_delay(response, attempt),
+                               _snapshot_timeout(self._snapshot_deadline)))
                 continue
 
             attempt_word = "attempt" if attempt == 0 else "attempts"
@@ -862,18 +921,22 @@ def _poll_until_available(
     report_id: str,
     file_id: str,
     telemetry: RequestTelemetry | None = None,
+    deadline: float | None = None,
 ) -> dict:
     """Poll a CM360 File resource with a separate bounded backoff budget."""
 
     for attempt in range(_MAX_FILE_POLLS):
+        _snapshot_timeout(deadline)
         file_resource = client.get_file(report_id, file_id, **_telemetry_kwargs(telemetry))
+        _snapshot_timeout(deadline)
         status = file_resource.get("status")
         if status == "REPORT_AVAILABLE":
             return file_resource
         if status in {"FAILED", "CANCELLED"}:
             raise Cm360ReportError(f"CM360 report file entered terminal state {status}")
         if attempt < _MAX_FILE_POLLS - 1:
-            time.sleep(min(2 * 1.5**attempt, _MAX_RETRY_DELAY_SECONDS))
+            time.sleep(min(2 * 1.5**attempt, _MAX_RETRY_DELAY_SECONDS,
+                           _snapshot_timeout(deadline)))
     raise Cm360ReportError(f"CM360 report file was unavailable after {_MAX_FILE_POLLS} polls")
 
 
@@ -894,6 +957,18 @@ def _parse_positive_int(options: dict[str, str], name: str, default: int) -> int
         raise ValueError(f"{name} must be a positive integer") from error
     if value <= 0:
         raise ValueError(f"{name} must be a positive integer")
+    return value
+
+
+def _parse_optional_days(options: dict[str, str], name: str) -> int | None:
+    raw_value = options.get(name)
+    if raw_value is None:
+        return None
+    if not isinstance(raw_value, str) or not _INTEGER_PATTERN.fullmatch(raw_value):
+        raise ValueError(f"{name} must be a whole number of days from 0 to 3650")
+    value = int(raw_value)
+    if value > 3650:
+        raise ValueError(f"{name} must be a whole number of days from 0 to 3650")
     return value
 
 
@@ -946,6 +1021,7 @@ def _parse_read_options(table_options: dict[str, str]) -> ReadOptions:
         ),
         max_records_per_batch=_parse_positive_int(table_options, "max_records_per_batch", 100_000),
         emit_request_telemetry=_parse_strict_bool(table_options, "emit_request_telemetry", False),
+        refresh_ended_within_days=_parse_optional_days(table_options, "refresh_ended_within_days"),
     )
 
 
@@ -1058,7 +1134,7 @@ def _read_telemetry(
     return state_offset, telemetry
 
 
-class GoogleCm360LakeflowConnect(LakeflowConnect):
+class GoogleCm360LakeflowConnect(PeriodReachStreamMixin, LakeflowConnect):
     """Expose fixed CM360 daily performance and reach contracts."""
 
     def __init__(self, options: dict[str, str]) -> None:
@@ -1070,6 +1146,8 @@ class GoogleCm360LakeflowConnect(LakeflowConnect):
         if not isinstance(profile_id, str) or not profile_id.isdigit():
             raise ValueError("profile_id must contain digits only")
         self._access_token = access_token
+        self._created_at = time.time()
+        self._snapshot_deadline: float | None = None
         self._profile_id = profile_id
         self._upper_bounds: dict[str, date] = {}
         self._terminal_offsets: dict[str, dict] = {}
@@ -1244,12 +1322,20 @@ class GoogleCm360LakeflowConnect(LakeflowConnect):
         return rows
 
     def _period_export(self, report: dict, options: ReadOptions, fields: tuple) -> list[dict]:
+        logger.info("CM360 period report step=validate")
         self._client.validate_compatible_fields(report)
+        logger.info("CM360 period report step=create")
         report_id = self._client.insert_report(report)
         try:
+            logger.info("CM360 period report step=run")
             file_id = self._client.run_report(report_id)
-            resource = _poll_until_available(self._client, report_id, file_id, None)
+            logger.info("CM360 period report step=poll")
+            resource = _poll_until_available(
+                self._client, report_id, file_id, None, self._snapshot_deadline
+            )
+            logger.info("CM360 period report step=download")
             text = self._client.download_file(report_id, file_id)
+            logger.info("CM360 period report step=parse")
             csv_rows = list(csv.reader(io.StringIO(text)))
             zone = next(
                 (r[1] for r in csv_rows if len(r) == 2 and r[0] == "Report Time Zone"), None
@@ -1280,10 +1366,15 @@ class GoogleCm360LakeflowConnect(LakeflowConnect):
                 field_specs=fields,
             )
         finally:
-            self._client.delete_report(report_id)
+            try:
+                self._client.delete_report(report_id)
+            except Exception:  # pylint: disable=broad-exception-caught
+                logger.warning("CM360 period temporary report cleanup failed")
 
     def _period_campaigns(self, options: ReadOptions) -> list[dict]:
+        logger.info("CM360 period metadata step=profile")
         self._period_profile_metadata = _build_profile_metadata(self._client.get_profile())
+        logger.info("CM360 period metadata step=country")
         response = self._client.query_dimension_values(
             "country",
             DELIVERY_COUNTRY_NAMES[options.delivery_country_codes[0]],
@@ -1317,11 +1408,18 @@ class GoogleCm360LakeflowConnect(LakeflowConnect):
         return self._period_export(report, options, CAMPAIGN_PERIOD_FIELD_SPECS)
 
     def _period_campaign_row(self, campaign: dict, options: ReadOptions) -> dict:
-        lower, upper, coverage = _campaign_period(
-            campaign["campaign_start_date"],
-            campaign["campaign_end_date"],
-            options.sync_end_date,
-        )
+        try:
+            lower, upper, coverage = _campaign_period(
+                campaign["campaign_start_date"],
+                campaign["campaign_end_date"],
+                options.sync_end_date,
+            )
+        except ValueError as error:
+            raise Cm360DataError(
+                f"{error}; campaign_id={campaign['campaign_id']} "
+                f"start={campaign['campaign_start_date']} end={campaign['campaign_end_date']} "
+                f"cutoff={options.sync_end_date}"
+            ) from error
         row = {k: v for k, v in campaign.items() if k not in {"report_date", "impressions"}}
         row.update(
             {
@@ -1334,21 +1432,102 @@ class GoogleCm360LakeflowConnect(LakeflowConnect):
                 "unique_reach_impression_reach": None,
             }
         )
-        if coverage == "COMPLETE":
+        return row
+
+    def _period_campaign_rows(self, campaigns: list[dict], options: ReadOptions) -> list[dict]:
+        rows = [self._period_campaign_row(campaign, options) for campaign in campaigns]
+        for campaign, row in zip(campaigns, rows):
+            # A frozen checkpoint row keeps the refresh decision made at discovery.
+            if (
+                campaign.get("coverage_status") == NOT_REFRESHED
+                and row["coverage_status"] == "COMPLETE"
+            ):
+                row["coverage_status"] = NOT_REFRESHED
+        groups: dict[tuple[str, str], list[dict]] = {}
+        for row in rows:
+            if row.get("coverage_status") == "COMPLETE":
+                groups.setdefault((row["period_start"], row["period_end"]), []).append(row)
+        for group_number, ((lower, upper), group) in enumerate(groups.items(), 1):
+            _snapshot_timeout(self._snapshot_deadline)
+            logger.info("CM360 reach group started group=%d total=%d", group_number, len(groups))
+            expected = {row["campaign_id"]: row for row in group}
+            if len(expected) != len(group):
+                raise Cm360DataError("CM360 metadata returned duplicate campaigns")
             report = _build_period_reach_report(
-                lower, upper, campaign["campaign_id"], self._period_country_id
+                date.fromisoformat(lower), date.fromisoformat(upper),
+                group[0]["campaign_id"], self._period_country_id,
+            )
+            # CM360 ORs filters of the same dimension. Campaign remains an output
+            # dimension: each value is native campaign reach, never a group total.
+            report["reachCriteria"]["dimensionFilters"].extend(
+                {"dimensionName": "campaign", "id": row["campaign_id"]} for row in group[1:]
             )
             values = self._period_export(report, options, PERIOD_REACH_FIELD_SPECS)
-            if len(values) > 1 or any(
-                v["campaign_id"] != campaign["campaign_id"]
-                or v["advertiser_id"] != campaign["advertiser_id"]
-                for v in values
-            ):
-                raise Cm360DataError("CM360 period report returned an unexpected campaign")
-            if values:
-                row["unique_reach_impression_reach"] = values[0]["unique_reach_impression_reach"]
-                row["report_file_last_modified_at"] = values[0]["report_file_last_modified_at"]
-        return row
+            seen = set()
+            for value in values:
+                key = value["campaign_id"]
+                if key not in expected or value["advertiser_id"] != expected[key]["advertiser_id"]:
+                    raise Cm360DataError("CM360 period report returned an unexpected campaign")
+                if key in seen:
+                    raise Cm360DataError("CM360 period report returned a duplicate campaign")
+                seen.add(key)
+                for field_name in (
+                    "unique_reach_impression_reach",
+                    "report_file_last_modified_at",
+                ):
+                    expected[key][field_name] = value[field_name]
+            self._period_groups_completed += 1
+            logger.info("CM360 reach group completed group=%d total=%d", group_number, len(groups))
+        return rows
+
+    @staticmethod
+    def _period_stream_options(table_options):
+        options = _parse_read_options(table_options)
+        if (options.sync_start_date is None or options.sync_end_date is None
+                or not options.delivery_country_codes
+                or options.sync_start_date > options.sync_end_date
+                or options.sync_end_date >= datetime.now(options.reporting_timezone).date()):
+            raise Cm360ConfigurationError(
+                "Incremental period reach requires explicit completed bounds and one country"
+            )
+        return options
+
+    def _period_stream_discover(self, options, previous=None):
+        campaigns = self._period_campaigns(options)
+        rows = [self._period_campaign_row(row, options) for row in campaigns]
+        if options.refresh_ended_within_days is not None and previous is not None:
+            # Native reach of a long-ended campaign no longer changes: keep the
+            # campaign in the cutoff's membership but request no reach report.
+            # Freeze only a campaign that the previous completed cutoff already held
+            # with a final value for the same whole period (COMPLETE, or carried
+            # forward as NOT_REFRESHED) and that was already past the window then.
+            # A campaign seen for the first time, one whose period changed, and every
+            # campaign after an ingestion gap get one real report first. The first
+            # cutoff of a stream refreshes everything.
+            # The option is deliberately not part of the checkpoint identity: the
+            # decision is frozen in the manifest and a change applies from the
+            # next cutoff, so an unfinished checkpoint is never invalidated.
+            window = timedelta(days=options.refresh_ended_within_days)
+            oldest_end = min(options.sync_end_date,
+                             date.fromisoformat(previous["cutoff"])) - window
+            final = {
+                tuple(row[k] for k in PERIOD_STREAM_KEYS): (row["period_start"], row["period_end"])
+                for row in previous["rows"]
+                if row["coverage_status"] in {"COMPLETE", NOT_REFRESHED}
+            }
+            for row in rows:
+                if (row["coverage_status"] == "COMPLETE"
+                        and date.fromisoformat(row["period_end"]) < oldest_end
+                        and final.get(tuple(row[k] for k in PERIOD_STREAM_KEYS))
+                        == (row["period_start"], row["period_end"])):
+                    row["coverage_status"] = NOT_REFRESHED
+        return rows, self._period_profile_metadata.as_row(), self._period_country_id
+
+    def _period_stream_export(self, campaigns, options, manifest):
+        self._period_profile_metadata = ProfileMetadata(**manifest["profile"])
+        self._period_country_id = manifest["country_id"]
+        self._period_groups_completed = 0
+        return self._period_campaign_rows(campaigns, options)
 
     @staticmethod
     def _validate_table(table_name: str) -> None:
@@ -1383,7 +1562,15 @@ class GoogleCm360LakeflowConnect(LakeflowConnect):
     ) -> tuple[Iterator[dict], dict]:
         self._validate_table(table_name)
         options = _parse_read_options(table_options)
+        if table_name == PERIOD_STREAM_TABLE:
+            raise Cm360ConfigurationError("Incremental period reach requires partitioned streaming")
         if table_name == PERIOD_REACH_TABLE_NAME:
+            if options.refresh_ended_within_days is not None:
+                # Snapshot semantics would replace stored reach with an empty value.
+                raise Cm360ConfigurationError(
+                    "refresh_ended_within_days is supported only by "
+                    f"{PERIOD_STREAM_TABLE}"
+                )
             if (
                 options.sync_start_date is None
                 or options.sync_end_date is None
@@ -1398,8 +1585,31 @@ class GoogleCm360LakeflowConnect(LakeflowConnect):
                 raise ValueError("Period snapshot requires a completed reporting date")
             # The framework reads once and discards offsets. Materialize the whole
             # snapshot before returning; a late failure cannot publish a prefix.
-            campaigns = self._period_campaigns(options)
-            rows = [self._period_campaign_row(campaign, options) for campaign in campaigns]
+            started = time.monotonic()
+            self._snapshot_deadline = started + _SNAPSHOT_TIMEOUT_SECONDS
+            self._client._snapshot_deadline = self._snapshot_deadline
+            phase = "metadata"
+            self._period_groups_completed = 0
+            try:
+                logger.info("CM360 snapshot started phase=metadata")
+                campaigns = self._period_campaigns(options)
+                _snapshot_timeout(self._snapshot_deadline)
+                phase = "campaign_reach"
+                logger.info("CM360 snapshot phase=campaign_reach campaigns=%d", len(campaigns))
+                rows = self._period_campaign_rows(campaigns, options)
+                _snapshot_timeout(self._snapshot_deadline)
+                logger.info("CM360 snapshot completed elapsed_seconds=%.3f",
+                            time.monotonic() - started)
+            except (Cm360ApiError, Cm360ReportError) as error:
+                raise type(error)(
+                    f"CM360 period snapshot failed phase={phase} "
+                    f"elapsed_seconds={int(time.monotonic() - started)} "
+                    f"connector_age_seconds={int(time.time() - self._created_at)} "
+                    f"completed_reach_groups={self._period_groups_completed}: {error}"
+                ) from error
+            finally:
+                self._client._snapshot_deadline = None
+                self._snapshot_deadline = None
             return iter(rows), {}
         if (
             options.delivery_country_codes
