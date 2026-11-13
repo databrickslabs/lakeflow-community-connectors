@@ -114,3 +114,35 @@ def test_success_logs_metadata_and_preserves_rows(caplog):
         result, offset = source.read_table("reach_report_period", None, OPTIONS)
     assert list(result) == rows and offset == {}
     assert "phase=metadata" in caplog.text and "snapshot completed" in caplog.text
+
+
+def test_cleanup_is_sent_after_the_deadline_expires(monkeypatch):
+    clock = [0.0]
+    monkeypatch.setattr(module.time, "monotonic", lambda: clock[0])
+    source = module.GoogleCm360LakeflowConnect({"access_token": "test", "profile_id": "123456"})
+    client = source._client
+    client._snapshot_deadline = 10.0
+    client.validate_compatible_fields = Mock()
+    client.insert_report = Mock(return_value="77")
+
+    def expire(_report_id):
+        clock[0] = 11.0
+        module._snapshot_timeout(client._snapshot_deadline)
+
+    client.run_report = Mock(side_effect=expire)
+    response = Mock(status_code=204)
+    request = Mock(return_value=response)
+    monkeypatch.setattr(client._session, "request", request)
+    with pytest.raises(module.Cm360SnapshotTimeout):
+        source._period_export({}, module._parse_read_options(OPTIONS), ())
+    assert [call.args[0] for call in request.call_args_list] == ["DELETE"]
+    assert request.call_args.args[1].endswith("/reports/77")
+    assert request.call_args.kwargs["timeout"] <= module._HTTP_TIMEOUT_SECONDS
+    assert client._snapshot_deadline == 10.0
+
+
+def test_timeout_message_does_not_name_a_fixed_budget():
+    with pytest.raises(module.Cm360SnapshotTimeout) as raised:
+        module._snapshot_timeout(-1.0)
+    assert "2700" not in str(raised.value)
+    assert "execution deadline" in str(raised.value)
