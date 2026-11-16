@@ -74,8 +74,8 @@ All tables have the same columns:
 | `document` | variant | The full document as relaxed Extended JSON. `string` with `document_format=string`. |
 | `_cdc_operation` | string | `snapshot`, `insert`, `update`, `replace` or `delete`. |
 | `_cdc_sequence` | string | Cursor field and `sequence_by` column: the change stream resume token (hex), which is ordered across the deployment. Snapshot rows carry the token taken before the snapshot started. |
-| `_cdc_cluster_time` | timestamp | Cluster time of the change. Null for snapshot rows. |
-| `_cdc_wall_time` | timestamp | Wall-clock time of the change (MongoDB 6.0+). Null for snapshot rows. |
+| `_cdc_cluster_time` | timestamp | Cluster time of the change. For snapshot rows, the time the snapshot started: the document is as of that time or later. |
+| `_cdc_wall_time` | timestamp | Wall-clock time of the change (MongoDB 6.0+). For snapshot rows, the time the snapshot started. |
 | `_cdc_namespace` | string | `<database>.<collection>`. |
 
 ### Ingestion types

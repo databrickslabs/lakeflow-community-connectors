@@ -2,8 +2,8 @@
 
 These run in CI without credentials. They exercise the connector's own logic
 (paging, offsets, resume tokens, trigger caps, replay, deletes, multibyte
-data) and the generic ``LakeflowConnectTests`` suite. Server behaviour is
-covered by ``test_mongodb_live.py`` against a real replica set.
+data). The generic suite is in test_mongodb_lakeflow_connect.py; server
+behaviour is covered by test_mongodb_live.py against a real replica set.
 """
 
 import json
@@ -17,7 +17,6 @@ from databricks.labs.community_connector.sources.mongodb import mongodb_auth
 from databricks.labs.community_connector.sources.mongodb.mongodb import MongodbLakeflowConnect
 from databricks.labs.community_connector.sources.mongodb.mongodb_utils import dumps, encode_id
 from tests.unit.sources.mongodb.fake_mongo import FakeMongoClient
-from tests.unit.sources.test_suite import LakeflowConnectTests
 
 MB_COLLECTION = "顧客🍣コレクション"
 MB_TEXT = "日本語・ｶﾀｶﾅ・한국어・中文・👨‍👩‍👧‍👦・é (e\u0301)・\u3000全角"
@@ -95,10 +94,10 @@ def test_changes_during_snapshot(fake):
     coll.insert_many([{"_id": i, "v": 0} for i in range(30)])
     options = {"max_records_per_batch": "5", "snapshot_batch_size": "5"}
     conn = _connector(uri)
-    rows = []
-    _, offset = conn.read_table("c", {}, options)
-    records, offset = conn.read_table("c", offset, options)
-    rows += list(records)
+    records, offset = conn.read_table("c", {}, options)  # the first page
+    rows = list(records)
+    assert len(rows) == 5 and offset["phase"] == "snapshot"
+    assert all(r["_cdc_cluster_time"] is not None for r in rows)  # snapshot "as of" time
     coll.update_one({"_id": 1}, {"$set": {"v": 1}})     # already read
     coll.update_one({"_id": 29}, {"$set": {"v": 2}})    # not read yet
     coll.delete_one({"_id": 2})
@@ -246,27 +245,26 @@ def test_collection_alias(fake):
     assert rows[0]["_cdc_namespace"] == f"db.{MB_COLLECTION}"
 
 
-class TestMongodbConnectorSimulated(LakeflowConnectTests):
-    """The generic conformance suite against the fake."""
+def test_replay_of_first_page_ignores_changed_start_mode(fake):
+    """The first batch is replayed from its offsets, not from today's options."""
+    client = FakeMongoClient("fake://first-page-replay")
+    client["db"].create_collection("c").insert_many([{"_id": i} for i in range(10)])
+    conn = _connector("fake://first-page-replay")
+    options = {"max_records_per_batch": "4", "snapshot_batch_size": "4"}
+    records, end = conn.read_table("c", {}, options)
+    original = [r["_id"] for r in records]
+    assert len(original) == 4
+    replayed = [r["_id"] for r in conn.read_table_range(
+        "c", {}, end, dict(options, start_mode="latest"))]
+    assert replayed == original
 
-    connector_class = MongodbLakeflowConnect
-    sample_records = 50
-    _uri = "fake://generic-suite"
 
-    @classmethod
-    def setup_class(cls):
-        cls._orig_create = mongodb_auth.MongoClientFactory.create
-        mongodb_auth.MongoClientFactory.create = _fake_create
-        db = FakeMongoClient(cls._uri)["suite"]
-        db.create_collection("注文").insert_many(
-            [{"_id": ObjectId(), "顧客": f"顧客{i}🍣", "金額": i} for i in range(30)])
-        db.create_collection("events").insert_many([{"_id": f"evt-{i}"} for i in range(30)])
-        cls.config = {"connection_uri": cls._uri, "database": "suite"}
-        cls.table_configs = {t: {"max_records_per_batch": "20", "snapshot_batch_size": "20"}
-                             for t in ("注文", "events")}
-        super().setup_class()
-
-    @classmethod
-    def teardown_class(cls):
-        super().teardown_class()
-        mongodb_auth.MongoClientFactory.create = cls._orig_create
+def test_replay_of_first_page_checks_namespace(fake):
+    client = FakeMongoClient("fake://first-page-ns")
+    client["db"].create_collection("a").insert_many([{"_id": i} for i in range(10)])
+    client["db"].create_collection("b").insert_many([{"_id": i} for i in range(10)])
+    conn = _connector("fake://first-page-ns")
+    options = {"max_records_per_batch": "4", "snapshot_batch_size": "4"}
+    _, end = conn.read_table("a", {}, options)
+    with pytest.raises(Exception, match="db.a"):
+        list(conn.read_table_range("b", {}, end, options))

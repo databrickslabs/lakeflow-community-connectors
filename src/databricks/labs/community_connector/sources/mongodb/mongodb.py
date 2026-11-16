@@ -13,6 +13,7 @@ See README.md for configuration, required MongoDB privileges and limits.
 from __future__ import annotations
 
 import time
+from datetime import datetime, timezone
 from typing import Any, Iterator, Optional
 
 from bson.errors import InvalidBSON
@@ -348,12 +349,34 @@ class MongodbLakeflowConnect(LakeflowConnect, SupportsNamespaces):
                           end: Optional[dict] = None) -> tuple[Iterator[dict], dict]:
         if not start:
             if end is not None:
-                return iter([]), end  # the first batch only fixes the starting point
-            return iter([]), self._initial_offset(cfg, flow)
+                # Replay of the first batch: it read the first snapshot page
+                # from the token in its end offset (upsert flow, snapshot mode).
+                self._check_offset(cfg, end)
+                first = self._first_snapshot_start(cfg, flow, end)
+                if first is None:
+                    return iter([]), end
+                return self._read_snapshot_page(cfg, first, end)
+            initial = self._initial_offset(cfg, flow)
+            if initial["phase"] == "snapshot":
+                # Read the first page right away instead of returning an
+                # empty first batch.
+                return self._read_snapshot_page(cfg, initial)
+            return iter([]), initial
         self._check_offset(cfg, start)
         if start["phase"] == "snapshot":
             return self._read_snapshot_page(cfg, start, end)
         return self._read_stream(cfg, start, flow, events, end)
+
+    def _first_snapshot_start(self, cfg: _TableConfig, flow: str, end: dict) -> Optional[dict]:
+        """The start offset the first batch used internally, rebuilt from its end."""
+        # Decided from the offset alone: the table options may have changed
+        # (e.g. start_mode) since the batch was planned.
+        if flow != "upsert" or not end.get("token"):
+            return None
+        if end.get("phase") != "snapshot" and "snapshot_last_id" not in end:
+            return None
+        return self._offset(cfg, "snapshot", end["token"], last_id=None,
+                            snap_at=end.get("snap_at"))
 
     def _check_offset(self, cfg: _TableConfig, offset: dict) -> None:
         if offset.get("v") != OFFSET_VERSION:
@@ -409,7 +432,9 @@ class MongodbLakeflowConnect(LakeflowConnect, SupportsNamespaces):
         token = self._current_token(cfg)
         if cfg.start_mode == "latest":
             return self._offset(cfg, "stream", token)
-        return self._offset(cfg, "snapshot", token, last_id=None)
+        # The snapshot's start time is kept in the offsets so that every
+        # snapshot row carries the same "as of" time, also on a replay.
+        return self._offset(cfg, "snapshot", token, last_id=None, snap_at=int(time.time()))
 
     def _read_snapshot_page(self, cfg: _TableConfig, start: dict,
                             end: Optional[dict] = None) -> tuple[Iterator[dict], dict]:
@@ -434,38 +459,45 @@ class MongodbLakeflowConnect(LakeflowConnect, SupportsNamespaces):
         docs = self._guard_decode(
             cfg, lambda: list(self._collection(cfg).find(query).sort("_id", 1).limit(limit))
         )
+        snap_at = start.get("snap_at")
         if end is not None:
-            return iter([self._snapshot_row(cfg, d, start["token"]) for d in docs]), end
-        rows = [self._snapshot_row(cfg, d, start["token"]) for d in docs]
+            return iter([self._snapshot_row(cfg, d, start["token"], snap_at) for d in docs]), end
+        rows = [self._snapshot_row(cfg, d, start["token"], snap_at) for d in docs]
         if len(docs) < limit:
             # Snapshot done: stream from the token taken before the snapshot began.
             # The last _id is kept so that a replay of this page can stop there.
             final_id = dumps(docs[-1]["_id"], CANONICAL) if docs else start.get("last_id")
             return iter(rows), self._offset(cfg, "stream", start["token"],
-                                            snapshot_last_id=final_id)
+                                            snapshot_last_id=final_id, snap_at=snap_at)
         last_id = dumps(docs[-1]["_id"], CANONICAL)
-        return iter(rows), self._offset(cfg, "snapshot", start["token"], last_id=last_id)
+        return iter(rows), self._offset(cfg, "snapshot", start["token"], last_id=last_id,
+                                        snap_at=snap_at)
 
     def _read_full_snapshot(self, cfg: _TableConfig) -> Iterator[dict]:
         # apply_changes_from_snapshot does not order by _cdc_sequence, and this
         # mode must work without change streams (standalone servers, users
         # without the changeStream privilege), so no resume token is taken.
         token = SNAPSHOT_SEQUENCE
+        snap_at = int(time.time())
         cursor = self._collection(cfg).find({}).sort("_id", 1).batch_size(cfg.snapshot_batch_size)
         try:
             for doc in cursor:
-                yield self._snapshot_row(cfg, doc, token)
+                yield self._snapshot_row(cfg, doc, token, snap_at)
         except (InvalidBSON, UnicodeDecodeError) as exc:
             raise self._decode_error(cfg, exc) from exc
 
-    def _snapshot_row(self, cfg: _TableConfig, doc: dict, token: str) -> dict:
+    def _snapshot_row(self, cfg: _TableConfig, doc: dict, token: str,
+                      snap_at: Optional[int]) -> dict:
+        # Snapshot rows have no change event; their times are the time the
+        # snapshot started, i.e. the document is as of that time or later.
+        as_of = datetime.fromtimestamp(snap_at, tz=timezone.utc) if snap_at else None
         return {
             "_id": encode_id(doc["_id"]),
             "document": dumps(doc),
             "_cdc_operation": "snapshot",
             "_cdc_sequence": token,
-            "_cdc_cluster_time": None,
-            "_cdc_wall_time": None,
+            "_cdc_cluster_time": as_of,
+            "_cdc_wall_time": as_of,
             "_cdc_namespace": cfg.namespace,
         }
 

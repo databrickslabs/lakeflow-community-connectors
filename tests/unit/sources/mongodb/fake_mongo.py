@@ -258,6 +258,10 @@ class FakeDatabase:
             self._s.data.setdefault((self.name, name), {})
         return self[name]
 
+    def list_collection_names_for_test(self) -> list[str]:
+        with self._s.lock:
+            return [c for (d, c) in self._s.types if d == self.name]
+
     def command(self, name: str, collection: str):
         assert name == "collStats"
         return {"ns": f"{self.name}.{collection}", "sharded": False}

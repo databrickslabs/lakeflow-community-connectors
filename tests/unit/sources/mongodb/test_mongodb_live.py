@@ -329,10 +329,10 @@ def test_replay_of_snapshot_page(db):
     coll.insert_many([{"_id": i} for i in range(10)])
     conn = _connector(db.name)
     options = {"max_records_per_batch": "4", "snapshot_batch_size": "4"}
-    _, start = conn.read_table("replay_snap", {}, options)
-    _, page1_end = conn.read_table("replay_snap", start, options)
-    records, page2_end = conn.read_table("replay_snap", page1_end, options)
+    _, page1_end = conn.read_table("replay_snap", {}, options)          # _id 0-3
+    records, page2_end = conn.read_table("replay_snap", page1_end, options)  # _id 4-7
     original = [r["_id"] for r in records]
+    assert original == [encode_id(i) for i in range(4, 8)]
     coll.insert_one({"_id": 4.5})  # lands inside the original page's _id range
     replayed = [r["_id"] for r in conn.read_table_range("replay_snap", page1_end, page2_end, options)]
     assert set(original) <= set(replayed)

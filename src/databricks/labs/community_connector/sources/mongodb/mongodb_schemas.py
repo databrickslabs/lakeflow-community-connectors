@@ -11,8 +11,10 @@ new field appears). Every collection gets the same columns:
 ``_cdc_sequence``       string     ordering key: the change stream resume token
                                     (hex, totally ordered); snapshot rows carry the
                                     token taken just before the snapshot started
-``_cdc_cluster_time``   timestamp  cluster time of the change (null for snapshot rows)
-``_cdc_wall_time``      timestamp  wall time of the change, MongoDB 6.0+ (null otherwise)
+``_cdc_cluster_time``   timestamp  cluster time of the change; for snapshot rows, the time
+                                    the snapshot started (the document is as of then or later)
+``_cdc_wall_time``      timestamp  wall time of the change (MongoDB 6.0+); for snapshot rows,
+                                    the time the snapshot started
 ``_cdc_namespace``      string     "<database>.<collection>"
 """
 
