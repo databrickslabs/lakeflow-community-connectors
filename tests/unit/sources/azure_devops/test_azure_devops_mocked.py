@@ -264,6 +264,48 @@ def test_pullrequests_stable_offset_when_no_changes(conn):
     assert offset == prior
 
 
+def test_pullrequests_pages_past_100(conn):
+    """A repo with >100 PRs must be paged with $top/$skip, not truncated."""
+    page1 = [
+        {"pullRequestId": i, "status": "completed", "closedDate": "2026-04-20T10:00:00Z"}
+        for i in range(100)
+    ]
+    page2 = [
+        {"pullRequestId": 100 + i, "status": "completed", "closedDate": "2026-04-19T10:00:00Z"}
+        for i in range(5)
+    ]
+    conn._session.get.side_effect = [
+        _response(json_body={"value": [{"id": "r1", "project": {"name": "proj1"}}]}),
+        _response(json_body={"value": page1}),
+        _response(json_body={"value": page2}),
+    ]
+
+    records, _ = conn._read_pullrequests({}, {})
+
+    assert len(list(records)) == 105
+    skips = [c.kwargs["params"].get("$skip") for c in conn._session.get.call_args_list[1:]]
+    assert skips == ["0", "100"]
+
+
+def test_pr_reviewers_cover_all_prs_beyond_first_100(conn):
+    """Child tables must see PR #101+, not just the first 100 PRs of a repo."""
+    prs_page1 = [{"pullRequestId": i} for i in range(100)]
+    prs_page2 = [{"pullRequestId": 100}]
+    responses = [
+        _response(json_body={"value": [{"id": "r1", "project": {"name": "proj1"}}]}),
+        _response(json_body={"value": prs_page1}),
+        _response(json_body={"value": prs_page2}),
+    ]
+    responses += [
+        _response(json_body={"value": [{"id": f"u{i}", "vote": 10}]}) for i in range(101)
+    ]
+    conn._session.get.side_effect = responses
+
+    records, _ = conn._read_pr_reviewers({}, {"project": "proj1"})
+
+    assert sorted(r["pullrequest_id"] for r in records) == list(range(101))
+
+
 # ---------------------------------------------------------------------------
 # _read_pullrequest_threads — Option D hybrid
 # ---------------------------------------------------------------------------
@@ -581,6 +623,47 @@ def test_builds_cap_keeps_builds_tied_on_finish_time(conn):
 
     assert [r["id"] for r in records] == [1, 2, 3]
     assert end["watermarks"]["proj1"] == "2024-01-01T11:00:00Z"
+
+
+def test_builds_limit_stops_paging_after_enough_builds(conn):
+    """With a limit, don't walk the whole backlog: stop once the cap is covered."""
+    conn._session.get.side_effect = [
+        _response(
+            json_body={"value": [
+                _build(1, "2024-01-01T10:00:00Z"),
+                _build(2, "2024-01-01T11:00:00Z"),
+                _build(3, "2024-01-01T12:00:00Z"),
+            ]},
+            headers={"x-ms-continuationtoken": "tok"},
+        ),
+    ]
+
+    records, end = conn._read_builds({}, {"max_records_per_batch": "2"})
+
+    assert [r["id"] for r in records] == [1, 2]
+    assert end["watermarks"]["proj1"] == "2024-01-01T11:00:00Z"
+    assert conn._session.get.call_count == 1
+    assert conn._session.get.call_args.kwargs["params"]["$top"] == "3"
+
+
+def test_builds_limit_keeps_paging_while_ties_continue(conn):
+    """A page ending in builds tied with the limit-th build needs another page."""
+    conn._session.get.side_effect = [
+        _response(
+            json_body={"value": [
+                _build(1, "2024-01-01T10:00:00Z"),
+                _build(2, "2024-01-01T11:00:00Z"),
+                _build(3, "2024-01-01T11:00:00Z"),
+            ]},
+            headers={"x-ms-continuationtoken": "tok"},
+        ),
+        _response(json_body={"value": [_build(4, "2024-01-01T11:00:00Z"),
+                                       _build(5, "2024-01-01T12:00:00Z")]}),
+    ]
+
+    records, _ = conn._read_builds({}, {"max_records_per_batch": "2"})
+
+    assert [r["id"] for r in records] == [1, 2, 3, 4]
 
 
 def test_build_timeline_emits_steps_and_skips_404(conn):

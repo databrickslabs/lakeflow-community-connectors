@@ -18,6 +18,7 @@ from databricks.labs.community_connector.sources.azure_devops.azure_devops_utils
     api_get,
     api_get_list,
     api_get_list_paged,
+    api_get_list_skip_top,
     for_each_pr,
     nullify_empty,
     parse_ts,
@@ -390,6 +391,10 @@ class AzureDevopsLakeflowConnect(LakeflowConnect):
 
         return iter(all_records), {"watermarks": watermarks}
 
+    def _list_pullrequests(self, url: str, params: dict[str, str], label: str) -> list[dict]:
+        """GET a repo's pull requests, paging past ADO's 100-item default."""
+        return api_get_list_skip_top(self._session, url, params, label)
+
     def _fetch_pullrequests(
         self,
         project: str,
@@ -408,7 +413,7 @@ class AzureDevopsLakeflowConnect(LakeflowConnect):
             params["searchCriteria.minTime"] = since
 
         try:
-            prs = api_get_list(self._session, url, params, "pullrequests")
+            prs = self._list_pullrequests(url, params, "pullrequests")
         except RuntimeError as exc:
             _LOG.warning(
                 "Skipping pullrequests for %s/%s: %s",
@@ -650,7 +655,7 @@ class AzureDevopsLakeflowConnect(LakeflowConnect):
             params["searchCriteria.queryTimeRangeType"] = "updated"
             params["searchCriteria.minTime"] = since
         try:
-            prs = api_get_list(self._session, url, params, "pullrequest_threads")
+            prs = self._list_pullrequests(url, params, "pullrequest_threads")
         except RuntimeError as exc:
             _LOG.warning(
                 "Skipping PR discovery for %s/%s: %s",
@@ -1137,7 +1142,11 @@ class AzureDevopsLakeflowConnect(LakeflowConnect):
         return iter(all_records), {}
 
     def _fetch_new_builds(
-        self, project: str, since: str | None, definition_id: str | None
+        self,
+        project: str,
+        since: str | None,
+        definition_id: str | None,
+        limit: int | None = None,
     ) -> list[dict[str, Any]]:
         """Fetch completed builds finished strictly after *since*.
 
@@ -1146,12 +1155,15 @@ class AzureDevopsLakeflowConnect(LakeflowConnect):
         inclusive, so the boundary build is dropped client-side to avoid
         duplicates in append tables. Builds finishing after the connector
         was created are left for the next run (``maxTime``).
+
+        With limit, a batch reads about one page instead of the
+        whole backlog while builds tied on finish time are never split.
         """
         params: dict[str, str] = {
             "api-version": "7.1",
             "statusFilter": "completed",
             "queryOrder": "finishTimeAscending",
-            "$top": "1000",
+            "$top": str(min(1000, limit + 1) if limit else 1000),
             "maxTime": self._init_time.strftime("%Y-%m-%dT%H:%M:%S.%fZ"),
         }
         if since:
@@ -1159,20 +1171,29 @@ class AzureDevopsLakeflowConnect(LakeflowConnect):
         if definition_id:
             params["definitions"] = definition_id
 
+        since_dt = parse_ts(since) if since else None
+
+        def is_fresh(b: dict[str, Any]) -> bool:
+            return bool(b.get("finishTime")) and (
+                since_dt is None or parse_ts(b["finishTime"]) > since_dt
+            )
+
+        def enough(items: list[dict]) -> bool:
+            if not limit:
+                return False
+            fresh = [b for b in items if is_fresh(b)]
+            return len(fresh) > limit and (
+                parse_ts(fresh[-1]["finishTime"]) > parse_ts(fresh[limit - 1]["finishTime"])
+            )
+
         builds = api_get_list_paged(
             self._session,
             f"{self.base_url}/{project}/_apis/build/builds",
             params,
             "builds",
+            should_stop=enough,
         )
-        since_dt = parse_ts(since) if since else None
-        fresh = [
-            b
-            for b in builds
-            if b.get("finishTime")
-            and (since_dt is None or parse_ts(b["finishTime"]) > since_dt)
-            and parse_ts(b["finishTime"]) <= self._init_time
-        ]
+        fresh = [b for b in builds if is_fresh(b) and parse_ts(b["finishTime"]) <= self._init_time]
         fresh.sort(key=lambda b: parse_ts(b["finishTime"]))
         return fresh
 
@@ -1206,7 +1227,9 @@ class AzureDevopsLakeflowConnect(LakeflowConnect):
             if remaining is not None and remaining <= 0:
                 break
             try:
-                builds = self._fetch_new_builds(project, watermarks.get(project), definition_id)
+                builds = self._fetch_new_builds(
+                    project, watermarks.get(project), definition_id, remaining
+                )
             except ApiError as exc:
                 if exc.status_code != 404:
                     raise
