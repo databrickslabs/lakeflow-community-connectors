@@ -109,7 +109,9 @@ class _Session:
 
     def post(self, url, **kwargs):
         self.calls.append(url)
+        self.last_kwargs = kwargs
         if url.endswith("/oidc/v1/token"):
+            self.token_data = kwargs.get("data")
             return _Resp(200, {"access_token": "tok", "expires_in": 3600})
         return _Resp(200, {
             "aws_temp_credentials": {"access_key_id": f"ASIA{len(self.calls)}",
@@ -144,6 +146,8 @@ class TestAwsServiceCredential:
         # The session token goes as a dict so commas or '=' cannot break parsing.
         assert kwargs["authMechanismProperties"] == {"AWS_SESSION_TOKEN": "t,with=chars"}
         assert session.calls[0] == "https://dbc-1.cloud.databricks.com/oidc/v1/token"
+        # The token is limited to the Unity Catalog APIs.
+        assert session.token_data == {"grant_type": "client_credentials", "scope": "unity-catalog"}
         assert session.calls[1].endswith("/api/2.1/unity-catalog/temporary-service-credentials")
 
     def test_refresh_is_based_on_reported_expiry(self, monkeypatch):
@@ -201,6 +205,68 @@ def test_uc_provider_requires_https():
     assert provider.host == "https://x.cloud.databricks.com"
 
 
+@pytest.mark.parametrize("host, expected", [
+    ("dbc-1.cloud.databricks.com", "https://dbc-1.cloud.databricks.com"),
+    ("https://DBC-1.cloud.databricks.com/", "https://dbc-1.cloud.databricks.com"),
+    ("https://my-ws.cloud.databricks.us", "https://my-ws.cloud.databricks.us"),
+])
+def test_workspace_url_accepts_aws_workspaces(host, expected):
+    assert mongodb_auth.workspace_url(host) == expected
+
+
+@pytest.mark.parametrize("host", [
+    "https://example.com",
+    "https://cloud.databricks.com.evil.example",
+    "https://evil.example/x.cloud.databricks.com",
+    "https://dbc-1.cloud.databricks.com/api",
+    "https://dbc-1.cloud.databricks.com:8443",
+    "https://dbc-1.cloud.databricks.com?x=1",
+    "https://user@evil.example",
+    "ftp://dbc-1.cloud.databricks.com",
+    "https://adb-1.azuredatabricks.net",  # MONGODB-AWS needs an AWS service credential
+])
+def test_workspace_url_rejects_other_hosts(host):
+    with pytest.raises(ValueError, match="databricks_host"):
+        mongodb_auth.workspace_url(host)
+
+
+@pytest.mark.parametrize("value, expected", [(None, 600), ("", 600), ("60", 60), ("1800", 1800)])
+def test_refresh_margin_in_range(value, expected):
+    assert mongodb_auth.refresh_margin(value) == expected
+
+
+@pytest.mark.parametrize("value", ["-1", "0", "59", "1801", "3600", "ten", "1.5"])
+def test_refresh_margin_out_of_range(value):
+    with pytest.raises(ValueError, match="aws_refresh_margin_seconds"):
+        mongodb_auth.refresh_margin(value)
+    with pytest.raises(ValueError, match="aws_refresh_margin_seconds"):
+        MongoClientFactory({**TestAwsServiceCredential.OPTIONS, "aws_refresh_margin_seconds": value})
+
+
+def test_pem_files_are_removed_once_the_client_is_built(monkeypatch):
+    import os  # pylint: disable=import-outside-toplevel
+
+    import pymongo  # pylint: disable=import-outside-toplevel
+
+    seen = {}
+
+    def _client(uri, **kwargs):
+        for key in ("tlsCertificateKeyFile", "tlsCAFile"):
+            with open(kwargs[key], encoding="utf-8") as handle:  # readable while it is built
+                seen[key] = (kwargs[key], handle.read())
+        return object()
+
+    monkeypatch.setattr(pymongo, "MongoClient", _client)
+    factory = MongoClientFactory({"connection_uri": "mongodb://h/", "auth_mode": "x509",
+                                  "tls_certificate_key_pem": "KEY 鍵", "tls_ca_pem": "CA"})
+    factory.create()
+    assert {k: v[1] for k, v in seen.items()} == {"tlsCertificateKeyFile": "KEY 鍵",
+                                                  "tlsCAFile": "CA"}
+    assert not any(os.path.exists(path) for path, _ in seen.values())
+    factory.create()  # a rebuilt client gets fresh files
+    assert not any(os.path.exists(path) for path, _ in seen.values())
+
+
 class TestDeleteLookback:
     """The delete flow's look-back finds the oldest readable start instead of jumping to now."""
 
@@ -239,3 +305,31 @@ class TestDeleteLookback:
         oplog_start = Timestamp(10_000 - 30, 0)
         with pytest.raises(RuntimeError, match="does not reach back"):
             conn._oldest_available_start(cfg, start, "delete")  # pylint: disable=protected-access
+
+
+def test_pem_files_with_lazy_srv_resolution(monkeypatch):
+    """mongodb+srv:// with connect=false re-reads the certificate files on first use."""
+    import os  # pylint: disable=import-outside-toplevel
+
+    import certifi  # pylint: disable=import-outside-toplevel
+    from pymongo.synchronous import srv_resolver  # pylint: disable=import-outside-toplevel
+
+    monkeypatch.setattr(srv_resolver._SrvResolver, "get_options",  # pylint: disable=protected-access
+                        lambda self: None)
+    for name, value in (("get_hosts", [("localhost", 27999)]),
+                        ("get_hosts_and_min_ttl", ([("localhost", 27999)], 60))):
+        monkeypatch.setattr(srv_resolver._SrvResolver, name,  # pylint: disable=protected-access
+                            lambda self, value=value: value)
+    with open(certifi.where(), encoding="utf-8") as handle:
+        ca = handle.read()
+    factory = MongoClientFactory({
+        "connection_uri": "mongodb+srv://cluster0.example.net/?connect=false&tls=true",
+        "tls_ca_pem": ca,
+    })
+    client = factory.create()
+    try:
+        assert not factory._files  # pylint: disable=protected-access
+        client._get_topology()  # pylint: disable=protected-access
+        assert client.topology_description.server_descriptions()  # resolved at construction
+    finally:
+        client.close()

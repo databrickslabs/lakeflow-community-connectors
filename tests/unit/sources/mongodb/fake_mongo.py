@@ -91,6 +91,13 @@ class _Server:
         self.oplog: list[dict] = []
         self.read_concerns: list = []
         self.read_preferences: list = []
+        # Sharding, for the connector's sharded-collection check: whether the
+        # client talks to a mongos, the config.collections entries, and
+        # whether reading config.collections is allowed.
+        self.mongos = False
+        self.config_collections: dict[str, dict] = {}
+        self.config_readable = True
+        self.commands: list[str] = []
         self._inc = itertools.count(1)
 
     def token(self, ts: Timestamp, seq: int, high_water: bool = False) -> str:
@@ -168,7 +175,14 @@ class FakeCollection:
         with self._s.lock:
             return _Cursor([d for d in self._docs.values() if _match(d, query)])
 
-    def find_one(self, query: dict):
+    def find_one(self, query: dict, projection=None):  # pylint: disable=unused-argument
+        if self._ns == ("config", "collections"):
+            import pymongo.errors  # pylint: disable=import-outside-toplevel
+
+            if not self._s.config_readable:
+                raise pymongo.errors.OperationFailure("not authorized on config", code=13)
+            entry = self._s.config_collections.get(query["_id"])
+            return dict(entry, _id=query["_id"]) if entry is not None else None
         with self._s.lock:
             for d in self._docs.values():
                 if _match(d, query):
@@ -262,9 +276,18 @@ class FakeDatabase:
         with self._s.lock:
             return [c for (d, c) in self._s.types if d == self.name]
 
-    def command(self, name: str, collection: str):
+    def command(self, name: str, collection: Optional[str] = None):
+        import pymongo.errors  # pylint: disable=import-outside-toplevel
+
+        self._s.commands.append(name)
+        if name == "hello":
+            return {"isWritablePrimary": True, **({"msg": "isdbgrid"} if self._s.mongos else {})}
         assert name == "collStats"
-        return {"ns": f"{self.name}.{collection}", "sharded": False}
+        ns = f"{self.name}.{collection}"
+        if self._s.config_readable is None:
+            raise pymongo.errors.OperationFailure("not authorized", code=13)
+        entry = self._s.config_collections.get(ns)
+        return {"ns": ns, "sharded": bool(entry and not entry.get("unsplittable"))}
 
     def list_collections(self, filter=None, authorizedCollections=None, nameOnly=None):  # pylint: disable=redefined-builtin,invalid-name
         del authorizedCollections, nameOnly
@@ -285,6 +308,10 @@ class FakeMongoClient:
 
     def __init__(self, uri: str = "fake://default", **_kwargs):
         self._s = FakeMongoClient._servers.setdefault(uri, _Server())
+
+    @property
+    def admin(self) -> FakeDatabase:
+        return self["admin"]
 
     def __getitem__(self, name: str) -> FakeDatabase:
         return FakeDatabase(self._s, name)

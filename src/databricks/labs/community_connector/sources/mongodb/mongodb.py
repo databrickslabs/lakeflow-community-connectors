@@ -180,7 +180,16 @@ class MongodbLakeflowConnect(LakeflowConnect, SupportsNamespaces):
 
     # ------------------------------------------------------------------ client
 
-    def _get_client(self):
+    def _get_client(self, refresh: bool = True):
+        """The client; with ``refresh``, first replace it if its AWS keys expire soon.
+
+        Pass ``refresh=False`` while a cursor or change stream of the current
+        client is open: closing the client would break it. Keys are refreshed
+        ``aws_refresh_margin_seconds`` before they expire, so the next batch
+        that opens a cursor replaces the client in time.
+        """
+        if not refresh and self._client is not None:
+            return self._client
         if self._client is not None and self._factory.credentials_expire_soon():
             # New temporary AWS keys: the old client keeps authenticated sockets,
             # but any reconnect would fail once the keys expire.
@@ -190,7 +199,7 @@ class MongodbLakeflowConnect(LakeflowConnect, SupportsNamespaces):
             self._client = self._factory.create()
         return self._client
 
-    def _collection(self, cfg: _TableConfig):
+    def _collection(self, cfg: _TableConfig, refresh: bool = True):
         from pymongo import ReadPreference  # pylint: disable=import-outside-toplevel
         from pymongo.read_concern import ReadConcern  # pylint: disable=import-outside-toplevel
 
@@ -199,7 +208,7 @@ class MongodbLakeflowConnect(LakeflowConnect, SupportsNamespaces):
         # roll back (the change stream would never report its removal), and must
         # not come from a secondary that lags behind the snapshot's start token
         # (a document missed there would never be read again).
-        return self._get_client()[cfg.database].get_collection(
+        return self._get_client(refresh)[cfg.database].get_collection(
             cfg.collection, read_concern=ReadConcern("majority"),
             read_preference=ReadPreference.PRIMARY,
         )
@@ -279,19 +288,45 @@ class MongodbLakeflowConnect(LakeflowConnect, SupportsNamespaces):
         """
         if cfg.assume_unique_id:
             return
-        import pymongo.errors  # pylint: disable=import-outside-toplevel
-
-        try:
-            stats = self._get_client()[cfg.database].command("collStats", cfg.collection)
-        except pymongo.errors.OperationFailure:
-            return  # not allowed to tell; the README states the limitation
-        if stats.get("sharded"):
+        if self._is_sharded(cfg):
             raise ValueError(
                 f"'{cfg.namespace}' is a sharded collection. _id is only unique per shard unless "
                 "it is the shard key, and this connector keys rows by _id. If _id is unique "
                 "across the collection (for example generated ObjectIds), set the table option "
                 "assume_unique_id=true and connect through mongos."
             )
+
+    def _is_sharded(self, cfg: _TableConfig) -> bool:
+        """Whether the collection is sharded; False when the server does not let us tell.
+
+        ``$collStats`` cannot answer this: it returns one document per shard,
+        and its ``shard`` field is present for unsharded collections on a
+        sharded cluster too. ``$listClusterCatalog`` (8.0.10+) is documented as
+        unsupported and unstable. So: only a mongos can have sharded
+        collections; there, ``config.collections`` lists them (entries marked
+        ``unsplittable`` are tracked unsharded collections, 8.0+). The
+        deprecated ``collStats`` command, which reports ``sharded``, is the
+        fallback when the user may not read the config database.
+        """
+        import pymongo.errors  # pylint: disable=import-outside-toplevel
+
+        client = self._get_client()
+        try:
+            if client.admin.command("hello").get("msg") != "isdbgrid":
+                return False  # a replica set or standalone server
+        except pymongo.errors.OperationFailure:
+            pass
+        try:
+            entry = client["config"]["collections"].find_one(
+                {"_id": cfg.namespace}, {"unsplittable": 1, "dropped": 1})
+            return bool(entry) and not entry.get("unsplittable") and not entry.get("dropped")
+        except pymongo.errors.OperationFailure:
+            pass
+        try:
+            stats = client[cfg.database].command("collStats", cfg.collection)
+        except pymongo.errors.OperationFailure:
+            return False  # not allowed to tell; the README states the limitation
+        return bool(stats.get("sharded"))
 
     def get_table_schema(self, table_name: str, table_options: dict[str, str]) -> StructType:
         cfg = self._config(table_name, table_options)
@@ -710,7 +745,9 @@ class MongodbLakeflowConnect(LakeflowConnect, SupportsNamespaces):
                 # whenAvailable: the post-image can be missing (for example expired
                 # by expireAfterSeconds). Fall back to the current document rather
                 # than dropping the change; `required` makes the server fail instead.
-                full = self._collection(cfg).find_one({"_id": key["_id"]})
+                # The change stream of this client is still open: do not
+                # replace the client here (see _get_client).
+                full = self._collection(cfg, refresh=False).find_one({"_id": key["_id"]})
             if full is not None:
                 document = dumps(full)
             elif cfg.ingestion_type != "append":

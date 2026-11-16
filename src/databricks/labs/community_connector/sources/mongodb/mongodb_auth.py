@@ -41,6 +41,16 @@ HTTP_TIMEOUT_SECONDS = 30
 # keys that were issued earlier, so the remaining lifetime is often well under
 # an hour; the refresh decision must be based on the reported expiry time.
 DEFAULT_REFRESH_MARGIN_SECONDS = 600
+# Temporary keys from Unity Catalog last at most one hour, and an issued key
+# can be returned again with part of its lifetime used (about 46 minutes left
+# was observed), so a margin above 30 minutes would refresh on every batch.
+MIN_REFRESH_MARGIN_SECONDS = 60
+MAX_REFRESH_MARGIN_SECONDS = 1800
+# OAuth scope of the token used for temporary-service-credentials.
+OAUTH_SCOPE = "unity-catalog"
+# The client secret is sent to databricks_host, so it must be a Databricks
+# workspace on AWS (MONGODB-AWS needs an AWS IAM role service credential).
+WORKSPACE_DOMAINS = (".cloud.databricks.com", ".cloud.databricks.us", ".cloud.databricks.mil")
 
 
 class AwsKeys:  # pylint: disable=too-few-public-methods
@@ -55,6 +65,51 @@ class AwsKeys:  # pylint: disable=too-few-public-methods
 
     def needs_refresh(self, margin_seconds: int, now: Optional[float] = None) -> bool:
         return (now if now is not None else time.time()) >= self.expires_at - margin_seconds
+
+
+def _auth_mode_from_options(options: dict[str, str]) -> str:
+    """The auth method whose required parameters are given (as the connector spec says)."""
+    if options.get("aws_service_credential"):
+        return "aws_service_credential"
+    if options.get("tls_certificate_key_pem"):
+        return "x509"
+    return "uri"
+
+
+def workspace_url(host: str) -> str:
+    """``https://<host>`` for a Databricks workspace on AWS; reject anything else.
+
+    The service principal's client secret is sent to this host, so a typo or a
+    look-alike domain must not receive it.
+    """
+    from urllib.parse import urlsplit  # pylint: disable=import-outside-toplevel
+
+    raw = host.strip()
+    url = urlsplit(raw if "://" in raw else "https://" + raw)
+    name = (url.hostname or "").lower()
+    if url.scheme not in ("https", "http") or not name.endswith(WORKSPACE_DOMAINS) \
+            or url.path.strip("/") or url.query or url.port not in (None, 443):
+        raise ValueError(
+            f"'databricks_host' must be the URL of a Databricks workspace on AWS (for example "
+            f"https://dbc-1234abcd-5678.cloud.databricks.com); got {host!r}. The service "
+            "principal's client secret is sent to this host."
+        )
+    return f"https://{name}"
+
+
+def refresh_margin(value: Optional[str]) -> int:
+    if value in (None, ""):
+        return DEFAULT_REFRESH_MARGIN_SECONDS
+    try:
+        margin = int(value)
+    except (TypeError, ValueError):
+        margin = -1
+    if not MIN_REFRESH_MARGIN_SECONDS <= margin <= MAX_REFRESH_MARGIN_SECONDS:
+        raise ValueError(
+            f"'aws_refresh_margin_seconds' must be an integer from {MIN_REFRESH_MARGIN_SECONDS} "
+            f"to {MAX_REFRESH_MARGIN_SECONDS} (temporary keys last at most one hour); got {value!r}"
+        )
+    return margin
 
 
 class UcServiceCredentialProvider:
@@ -76,9 +131,7 @@ class UcServiceCredentialProvider:
             )
         if not credential_name:
             raise ValueError("auth_mode=aws_service_credential requires 'aws_service_credential'")
-        self.host = host.rstrip("/")
-        if not self.host.startswith("https://"):
-            self.host = "https://" + self.host.removeprefix("http://")
+        self.host = workspace_url(host)
         self.client_id = client_id
         self.client_secret = client_secret
         self.credential_name = credential_name
@@ -91,7 +144,9 @@ class UcServiceCredentialProvider:
             return self._token
         resp = self._session.post(
             f"{self.host}/oidc/v1/token",
-            data={"grant_type": "client_credentials", "scope": "all-apis"},
+            # Only the Unity Catalog APIs: the token cannot call other APIs
+            # even if the service principal is allowed to.
+            data={"grant_type": "client_credentials", "scope": OAUTH_SCOPE},
             auth=(self.client_id, self.client_secret),
             timeout=HTTP_TIMEOUT_SECONDS,
         )
@@ -156,16 +211,14 @@ class MongoClientFactory:
         self.uri = options.get("connection_uri") or ""
         if not self.uri:
             raise ValueError("MongoDB connector requires the 'connection_uri' connection parameter")
-        self.auth_mode = options.get("auth_mode") or "uri"
+        self.auth_mode = options.get("auth_mode") or _auth_mode_from_options(options)
         if self.auth_mode not in AUTH_MODES:
             raise ValueError(
                 f"'auth_mode' must be one of {', '.join(AUTH_MODES)}; got {self.auth_mode!r}"
             )
         self.options = {k: v for k, v in options.items() if v is not None}
         self.client_kwargs = dict(client_kwargs or {})
-        self.refresh_margin = int(
-            options.get("aws_refresh_margin_seconds") or DEFAULT_REFRESH_MARGIN_SECONDS
-        )
+        self.refresh_margin = refresh_margin(options.get("aws_refresh_margin_seconds"))
         self._lock = threading.Lock()
         self._provider: Optional[UcServiceCredentialProvider] = None
         self._keys: Optional[AwsKeys] = None
@@ -199,6 +252,12 @@ class MongoClientFactory:
         return self._provider
 
     def _file_option(self, key: str, suffix: str) -> Optional[str]:
+        """Write a PEM option to a private temp file and return its path.
+
+        PyMongo takes certificates only as file paths. It reads them into the
+        SSL context when ``MongoClient`` is constructed, so :meth:`create`
+        deletes the files right after that.
+        """
         pem = self.options.get(key)
         if not pem:
             return None
@@ -207,6 +266,14 @@ class MongoClientFactory:
             path = _write_private_file(pem, suffix)
             self._files[key] = path
         return path
+
+    def _remove_files(self) -> None:
+        for path in self._files.values():
+            try:
+                os.remove(path)
+            except FileNotFoundError:
+                pass
+        self._files.clear()
 
     def credentials_expire_soon(self) -> bool:
         """True when a client built earlier must be replaced (new AWS keys)."""
@@ -253,4 +320,15 @@ class MongoClientFactory:
     def create(self):
         import pymongo  # pylint: disable=import-outside-toplevel
 
-        return pymongo.MongoClient(self.uri, **self.build_kwargs())
+        kwargs = self.build_kwargs()
+        if self._files:
+            # PyMongo resolves mongodb+srv:// when the client first connects and
+            # then reads the certificate files again. connect=True (overriding
+            # connect=false in the URI) does that inside the constructor, so the
+            # files can be deleted right after it.
+            kwargs["connect"] = True
+        try:
+            return pymongo.MongoClient(self.uri, **kwargs)
+        finally:
+            # The certificates are in the client's SSL context now.
+            self._remove_files()

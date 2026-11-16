@@ -612,6 +612,16 @@ def register_lakeflow_source(spark):
     # keys that were issued earlier, so the remaining lifetime is often well under
     # an hour; the refresh decision must be based on the reported expiry time.
     DEFAULT_REFRESH_MARGIN_SECONDS = 600
+    # Temporary keys from Unity Catalog last at most one hour, and an issued key
+    # can be returned again with part of its lifetime used (about 46 minutes left
+    # was observed), so a margin above 30 minutes would refresh on every batch.
+    MIN_REFRESH_MARGIN_SECONDS = 60
+    MAX_REFRESH_MARGIN_SECONDS = 1800
+    # OAuth scope of the token used for temporary-service-credentials.
+    OAUTH_SCOPE = "unity-catalog"
+    # The client secret is sent to databricks_host, so it must be a Databricks
+    # workspace on AWS (MONGODB-AWS needs an AWS IAM role service credential).
+    WORKSPACE_DOMAINS = (".cloud.databricks.com", ".cloud.databricks.us", ".cloud.databricks.mil")
 
 
     class AwsKeys:  # pylint: disable=too-few-public-methods
@@ -626,6 +636,51 @@ def register_lakeflow_source(spark):
 
         def needs_refresh(self, margin_seconds: int, now: Optional[float] = None) -> bool:
             return (now if now is not None else time.time()) >= self.expires_at - margin_seconds
+
+
+    def _auth_mode_from_options(options: dict[str, str]) -> str:
+        """The auth method whose required parameters are given (as the connector spec says)."""
+        if options.get("aws_service_credential"):
+            return "aws_service_credential"
+        if options.get("tls_certificate_key_pem"):
+            return "x509"
+        return "uri"
+
+
+    def workspace_url(host: str) -> str:
+        """``https://<host>`` for a Databricks workspace on AWS; reject anything else.
+
+        The service principal's client secret is sent to this host, so a typo or a
+        look-alike domain must not receive it.
+        """
+        from urllib.parse import urlsplit  # pylint: disable=import-outside-toplevel
+
+        raw = host.strip()
+        url = urlsplit(raw if "://" in raw else "https://" + raw)
+        name = (url.hostname or "").lower()
+        if url.scheme not in ("https", "http") or not name.endswith(WORKSPACE_DOMAINS) \
+                or url.path.strip("/") or url.query or url.port not in (None, 443):
+            raise ValueError(
+                f"'databricks_host' must be the URL of a Databricks workspace on AWS (for example "
+                f"https://dbc-1234abcd-5678.cloud.databricks.com); got {host!r}. The service "
+                "principal's client secret is sent to this host."
+            )
+        return f"https://{name}"
+
+
+    def refresh_margin(value: Optional[str]) -> int:
+        if value in (None, ""):
+            return DEFAULT_REFRESH_MARGIN_SECONDS
+        try:
+            margin = int(value)
+        except (TypeError, ValueError):
+            margin = -1
+        if not MIN_REFRESH_MARGIN_SECONDS <= margin <= MAX_REFRESH_MARGIN_SECONDS:
+            raise ValueError(
+                f"'aws_refresh_margin_seconds' must be an integer from {MIN_REFRESH_MARGIN_SECONDS} "
+                f"to {MAX_REFRESH_MARGIN_SECONDS} (temporary keys last at most one hour); got {value!r}"
+            )
+        return margin
 
 
     class UcServiceCredentialProvider:
@@ -647,9 +702,7 @@ def register_lakeflow_source(spark):
                 )
             if not credential_name:
                 raise ValueError("auth_mode=aws_service_credential requires 'aws_service_credential'")
-            self.host = host.rstrip("/")
-            if not self.host.startswith("https://"):
-                self.host = "https://" + self.host.removeprefix("http://")
+            self.host = workspace_url(host)
             self.client_id = client_id
             self.client_secret = client_secret
             self.credential_name = credential_name
@@ -662,7 +715,9 @@ def register_lakeflow_source(spark):
                 return self._token
             resp = self._session.post(
                 f"{self.host}/oidc/v1/token",
-                data={"grant_type": "client_credentials", "scope": "all-apis"},
+                # Only the Unity Catalog APIs: the token cannot call other APIs
+                # even if the service principal is allowed to.
+                data={"grant_type": "client_credentials", "scope": OAUTH_SCOPE},
                 auth=(self.client_id, self.client_secret),
                 timeout=HTTP_TIMEOUT_SECONDS,
             )
@@ -727,16 +782,14 @@ def register_lakeflow_source(spark):
             self.uri = options.get("connection_uri") or ""
             if not self.uri:
                 raise ValueError("MongoDB connector requires the 'connection_uri' connection parameter")
-            self.auth_mode = options.get("auth_mode") or "uri"
+            self.auth_mode = options.get("auth_mode") or _auth_mode_from_options(options)
             if self.auth_mode not in AUTH_MODES:
                 raise ValueError(
                     f"'auth_mode' must be one of {', '.join(AUTH_MODES)}; got {self.auth_mode!r}"
                 )
             self.options = {k: v for k, v in options.items() if v is not None}
             self.client_kwargs = dict(client_kwargs or {})
-            self.refresh_margin = int(
-                options.get("aws_refresh_margin_seconds") or DEFAULT_REFRESH_MARGIN_SECONDS
-            )
+            self.refresh_margin = refresh_margin(options.get("aws_refresh_margin_seconds"))
             self._lock = threading.Lock()
             self._provider: Optional[UcServiceCredentialProvider] = None
             self._keys: Optional[AwsKeys] = None
@@ -770,6 +823,12 @@ def register_lakeflow_source(spark):
             return self._provider
 
         def _file_option(self, key: str, suffix: str) -> Optional[str]:
+            """Write a PEM option to a private temp file and return its path.
+
+            PyMongo takes certificates only as file paths. It reads them into the
+            SSL context when ``MongoClient`` is constructed, so :meth:`create`
+            deletes the files right after that.
+            """
             pem = self.options.get(key)
             if not pem:
                 return None
@@ -778,6 +837,14 @@ def register_lakeflow_source(spark):
                 path = _write_private_file(pem, suffix)
                 self._files[key] = path
             return path
+
+        def _remove_files(self) -> None:
+            for path in self._files.values():
+                try:
+                    os.remove(path)
+                except FileNotFoundError:
+                    pass
+            self._files.clear()
 
         def credentials_expire_soon(self) -> bool:
             """True when a client built earlier must be replaced (new AWS keys)."""
@@ -824,7 +891,18 @@ def register_lakeflow_source(spark):
         def create(self):
             import pymongo  # pylint: disable=import-outside-toplevel
 
-            return pymongo.MongoClient(self.uri, **self.build_kwargs())
+            kwargs = self.build_kwargs()
+            if self._files:
+                # PyMongo resolves mongodb+srv:// when the client first connects and
+                # then reads the certificate files again. connect=True (overriding
+                # connect=false in the URI) does that inside the constructor, so the
+                # files can be deleted right after it.
+                kwargs["connect"] = True
+            try:
+                return pymongo.MongoClient(self.uri, **kwargs)
+            finally:
+                # The certificates are in the client's SSL context now.
+                self._remove_files()
 
 
     ########################################################
@@ -1100,7 +1178,16 @@ def register_lakeflow_source(spark):
 
         # ------------------------------------------------------------------ client
 
-        def _get_client(self):
+        def _get_client(self, refresh: bool = True):
+            """The client; with ``refresh``, first replace it if its AWS keys expire soon.
+
+            Pass ``refresh=False`` while a cursor or change stream of the current
+            client is open: closing the client would break it. Keys are refreshed
+            ``aws_refresh_margin_seconds`` before they expire, so the next batch
+            that opens a cursor replaces the client in time.
+            """
+            if not refresh and self._client is not None:
+                return self._client
             if self._client is not None and self._factory.credentials_expire_soon():
                 # New temporary AWS keys: the old client keeps authenticated sockets,
                 # but any reconnect would fail once the keys expire.
@@ -1110,7 +1197,7 @@ def register_lakeflow_source(spark):
                 self._client = self._factory.create()
             return self._client
 
-        def _collection(self, cfg: _TableConfig):
+        def _collection(self, cfg: _TableConfig, refresh: bool = True):
             from pymongo import ReadPreference  # pylint: disable=import-outside-toplevel
             from pymongo.read_concern import ReadConcern  # pylint: disable=import-outside-toplevel
 
@@ -1119,7 +1206,7 @@ def register_lakeflow_source(spark):
             # roll back (the change stream would never report its removal), and must
             # not come from a secondary that lags behind the snapshot's start token
             # (a document missed there would never be read again).
-            return self._get_client()[cfg.database].get_collection(
+            return self._get_client(refresh)[cfg.database].get_collection(
                 cfg.collection, read_concern=ReadConcern("majority"),
                 read_preference=ReadPreference.PRIMARY,
             )
@@ -1199,19 +1286,45 @@ def register_lakeflow_source(spark):
             """
             if cfg.assume_unique_id:
                 return
-            import pymongo.errors  # pylint: disable=import-outside-toplevel
-
-            try:
-                stats = self._get_client()[cfg.database].command("collStats", cfg.collection)
-            except pymongo.errors.OperationFailure:
-                return  # not allowed to tell; the README states the limitation
-            if stats.get("sharded"):
+            if self._is_sharded(cfg):
                 raise ValueError(
                     f"'{cfg.namespace}' is a sharded collection. _id is only unique per shard unless "
                     "it is the shard key, and this connector keys rows by _id. If _id is unique "
                     "across the collection (for example generated ObjectIds), set the table option "
                     "assume_unique_id=true and connect through mongos."
                 )
+
+        def _is_sharded(self, cfg: _TableConfig) -> bool:
+            """Whether the collection is sharded; False when the server does not let us tell.
+
+            ``$collStats`` cannot answer this: it returns one document per shard,
+            and its ``shard`` field is present for unsharded collections on a
+            sharded cluster too. ``$listClusterCatalog`` (8.0.10+) is documented as
+            unsupported and unstable. So: only a mongos can have sharded
+            collections; there, ``config.collections`` lists them (entries marked
+            ``unsplittable`` are tracked unsharded collections, 8.0+). The
+            deprecated ``collStats`` command, which reports ``sharded``, is the
+            fallback when the user may not read the config database.
+            """
+            import pymongo.errors  # pylint: disable=import-outside-toplevel
+
+            client = self._get_client()
+            try:
+                if client.admin.command("hello").get("msg") != "isdbgrid":
+                    return False  # a replica set or standalone server
+            except pymongo.errors.OperationFailure:
+                pass
+            try:
+                entry = client["config"]["collections"].find_one(
+                    {"_id": cfg.namespace}, {"unsplittable": 1, "dropped": 1})
+                return bool(entry) and not entry.get("unsplittable") and not entry.get("dropped")
+            except pymongo.errors.OperationFailure:
+                pass
+            try:
+                stats = client[cfg.database].command("collStats", cfg.collection)
+            except pymongo.errors.OperationFailure:
+                return False  # not allowed to tell; the README states the limitation
+            return bool(stats.get("sharded"))
 
         def get_table_schema(self, table_name: str, table_options: dict[str, str]) -> StructType:
             cfg = self._config(table_name, table_options)
@@ -1630,7 +1743,9 @@ def register_lakeflow_source(spark):
                     # whenAvailable: the post-image can be missing (for example expired
                     # by expireAfterSeconds). Fall back to the current document rather
                     # than dropping the change; `required` makes the server fail instead.
-                    full = self._collection(cfg).find_one({"_id": key["_id"]})
+                    # The change stream of this client is still open: do not
+                    # replace the client here (see _get_client).
+                    full = self._collection(cfg, refresh=False).find_one({"_id": key["_id"]})
                 if full is not None:
                     document = dumps(full)
                 elif cfg.ingestion_type != "append":

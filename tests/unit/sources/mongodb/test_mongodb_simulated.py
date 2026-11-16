@@ -217,16 +217,54 @@ def test_drop_and_unknown_and_views(fake):
         drive(conn, "c", {"start_mode": "latest"}, start=offset)
 
 
-def test_sharded_collection_needs_assume_unique_id(fake, monkeypatch):
+def _server(uri):
+    return FakeMongoClient(uri)._s  # pylint: disable=protected-access
+
+
+def test_sharded_collection_needs_assume_unique_id(fake):
     uri, db = fake
     db.create_collection("sharded").insert_one({"_id": 1})
-    from tests.unit.sources.mongodb import fake_mongo  # pylint: disable=import-outside-toplevel
-    monkeypatch.setattr(fake_mongo.FakeDatabase, "command",
-                        lambda self, name, coll: {"sharded": True})
+    server = _server(uri)
+    server.mongos = True
+    server.config_collections["db.sharded"] = {"key": {"region": 1}}
     with pytest.raises(ValueError, match="assume_unique_id=true"):
         _connector(uri).read_table("sharded", {}, {})
     rows, _ = drive(_connector(uri), "sharded", {"assume_unique_id": "true"})
     assert [r["_id"] for r in rows] == [encode_id(1)]
+
+
+def test_replica_set_needs_no_shard_lookup(fake):
+    uri, db = fake
+    db.create_collection("c").insert_one({"_id": 1})
+    drive(_connector(uri), "c", {})
+    assert "collStats" not in _server(uri).commands  # the deprecated command is not used
+
+
+@pytest.mark.parametrize("entry", [None, {"key": {"_id": 1}, "unsplittable": True}])
+def test_unsharded_collection_on_a_sharded_cluster(fake, entry):
+    uri, db = fake
+    db.create_collection("c").insert_one({"_id": 1})
+    server = _server(uri)
+    server.mongos = True
+    if entry is not None:  # a tracked unsharded collection (8.0+)
+        server.config_collections["db.c"] = entry
+    rows, _ = drive(_connector(uri), "c", {})
+    assert len(rows) == 1
+
+
+def test_shard_check_falls_back_to_collstats(fake):
+    uri, db = fake
+    db.create_collection("sharded").insert_one({"_id": 1})
+    server = _server(uri)
+    server.mongos = True
+    server.config_collections["db.sharded"] = {"key": {"region": 1}}
+    server.config_readable = False  # no read on the config database
+    with pytest.raises(ValueError, match="assume_unique_id=true"):
+        _connector(uri).read_table("sharded", {}, {})
+    assert "collStats" in server.commands
+    server.config_readable = None  # collStats refused as well: cannot tell, read
+    rows, _ = drive(_connector(uri), "sharded", {})
+    assert len(rows) == 1
 
 
 def test_snapshot_reads_use_majority_on_the_primary(fake):
@@ -268,3 +306,22 @@ def test_replay_of_first_page_checks_namespace(fake):
     _, end = conn.read_table("a", {}, options)
     with pytest.raises(Exception, match="db.a"):
         list(conn.read_table_range("b", {}, end, options))
+
+
+def test_client_is_not_replaced_while_the_change_stream_is_open(fake, monkeypatch):
+    """whenAvailable lookups run inside the open change stream: no client swap there."""
+    uri, db = fake
+    coll = db.create_collection("c")
+    coll.insert_many([{"_id": i, "v": 0} for i in range(3)])
+    conn = _connector(uri)
+    options = {"full_document": "whenAvailable"}
+    _, offset = drive(conn, "c", options)
+    for i in range(3):
+        coll.update_one({"_id": i}, {"$set": {"v": 1}})  # no post-image: lookup
+    closes = []
+    monkeypatch.setattr(FakeMongoClient, "close", lambda self: closes.append(1))
+    monkeypatch.setattr(conn._factory, "credentials_expire_soon", lambda: True)  # pylint: disable=protected-access
+    records, _ = conn.read_table("c", offset, options)
+    rows = list(records)
+    assert [json.loads(r["document"])["v"] for r in rows] == [1, 1, 1]
+    assert len(closes) == 1  # replaced once, when the batch opened its stream

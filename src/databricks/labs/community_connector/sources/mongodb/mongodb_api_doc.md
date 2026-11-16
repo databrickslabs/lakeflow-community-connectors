@@ -31,8 +31,8 @@ Collections are schemaless. The connector does not sample documents; every colle
 | `document` | variant (or string) | full document as relaxed Extended JSON |
 | `_cdc_operation` | string | `snapshot` or change event `operationType` |
 | `_cdc_sequence` | string | change event `_id._data` (resume token) |
-| `_cdc_cluster_time` | timestamp | change event `clusterTime` |
-| `_cdc_wall_time` | timestamp | change event `wallTime` (MongoDB 6.0+) |
+| `_cdc_cluster_time` | timestamp | change event `clusterTime`; snapshot rows: the time the snapshot started (local clock) |
+| `_cdc_wall_time` | timestamp | change event `wallTime` (MongoDB 6.0+); snapshot rows: the time the snapshot started |
 | `_cdc_namespace` | string | `<database>.<collection>` |
 
 ## **Get Object Primary Keys**
@@ -58,6 +58,8 @@ Cursor field: `_cdc_sequence`.
 | Snapshot | `find({"$expr": {"$gt": ["$_id", {"$literal": last_id}]}}).sort({"_id": 1}).limit(n)` | `$expr` compares across BSON types in sort order ([comparison order](https://www.mongodb.com/docs/manual/reference/bson-type-comparison-order/)) |
 | Changes | `aggregate` with `$changeStream`, `resumeAfter` (or `startAtOperationTime`), `fullDocument` (`updateLookup` / `whenAvailable` / `required`), `$match` on `operationType`; then `getMore` with `maxAwaitTimeMS` | [Change streams](https://www.mongodb.com/docs/manual/changeStreams/), [resume](https://www.mongodb.com/docs/manual/changeStreams/#resume-a-change-stream) |
 | Post-image fallback | `find_one({"_id": ...})` | only for `whenAvailable` when the event has no `fullDocument` |
+| Sharded-collection check | `hello` (`msg: "isdbgrid"` on mongos); on mongos `config.collections.findOne({_id: <ns>})`; fallback `collStats` (`sharded`) | [config.collections](https://www.mongodb.com/docs/manual/reference/config-database/#mongodb-data-config.collections); `$collStats` has no `sharded` field ([$collStats](https://www.mongodb.com/docs/manual/reference/operator/aggregation/collStats/)) |
+| Temporary AWS keys (`auth_mode=aws_service_credential`) | `POST {databricks_host}/oidc/v1/token` (`grant_type=client_credentials`, `scope=unity-catalog`), then `POST {databricks_host}/api/2.1/unity-catalog/temporary-service-credentials` | [OAuth M2M](https://docs.databricks.com/aws/en/dev-tools/auth/oauth-m2m), [temporary service credentials](https://docs.databricks.com/api/workspace/credentials/generatetemporaryservicecredential) |
 
 Change events that end a stream (`drop`, `rename`, `dropDatabase`, `invalidate`) are matched so the connector can fail with a clear message. Server error codes handled: `286` (ChangeStreamHistoryLost), `280` (ChangeStreamFatalError), `40573` (change streams not supported on a standalone server).
 

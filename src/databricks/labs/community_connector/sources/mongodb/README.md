@@ -1,6 +1,6 @@
 # Lakeflow MongoDB Community Connector
 
-This connector ingests MongoDB collections into Databricks. Each collection becomes one table: an initial snapshot, then continuous change data capture from the collection's [change stream](https://www.mongodb.com/docs/manual/changeStreams/), including deletes. It works with MongoDB Atlas and self-managed replica sets. End-to-end runs were done on serverless pipelines; classic pipelines run the same reader code. Sharded collections are read only when `_id` is declared unique across the collection (`assume_unique_id=true`, see [Limitations](#limitations)); otherwise the connector refuses them when it can detect them (`collStats`).
+This connector ingests MongoDB collections into Databricks. Each collection becomes one table: an initial snapshot, then continuous change data capture from the collection's [change stream](https://www.mongodb.com/docs/manual/changeStreams/), including deletes. It works with MongoDB Atlas and self-managed replica sets. End-to-end runs were done on serverless pipelines; classic pipelines run the same reader code. Sharded collections are read only when `_id` is declared unique across the collection (`assume_unique_id=true`, see [Limitations](#limitations)); otherwise the connector refuses them when it can detect them.
 
 ## Prerequisites
 
@@ -15,18 +15,20 @@ This connector ingests MongoDB collections into Databricks. Each collection beco
 
 ### Required Connection Parameters
 
+The Required column names the authentication method (`auth_mode`) that needs the parameter.
+
 | Parameter | Type | Required | Description | Example |
 |---|---|---|---|---|
 | `connection_uri` | string (secret) | Yes | MongoDB connection string. For SCRAM include user and password. For `auth_mode=x509` or `aws_service_credential`, give the host part only. | `mongodb+srv://ingest:****@cluster0.abcde.mongodb.net/` |
-| `auth_mode` | string | No | `uri` (default), `x509` or `aws_service_credential` (see [Authentication](#authentication)). | `aws_service_credential` |
+| `auth_mode` | string | No | `uri`, `x509` or `aws_service_credential` (see [Authentication](#authentication)). When not set: `aws_service_credential` if `aws_service_credential` is given, `x509` if `tls_certificate_key_pem` is given, otherwise `uri`. | `aws_service_credential` |
 | `database` | string | No | Default database. When set, tables are the collections of this database. | `shop` |
-| `tls_certificate_key_pem` | string (secret) | No | Client certificate and private key in PEM (`auth_mode=x509`). | |
-| `tls_ca_pem` | string | No | CA certificate in PEM when the server certificate is not signed by a public CA. | |
-| `aws_service_credential` | string | No | Unity Catalog service credential for `auth_mode=aws_service_credential`. | `atlas_ingest_role` |
-| `databricks_host` | string | No | Workspace URL for `auth_mode=aws_service_credential`. | `https://dbc-1234abcd-5678.cloud.databricks.com` |
-| `databricks_client_id` | string | No | Service principal application ID for `auth_mode=aws_service_credential`. | |
-| `databricks_client_secret` | string (secret) | No | OAuth secret of that service principal. | |
-| `aws_refresh_margin_seconds` | string | No | Request new AWS keys this many seconds before they expire. Default `600`. | `600` |
+| `tls_certificate_key_pem` | string (secret) | `x509` | Client certificate and private key in PEM. PyMongo takes certificates only as files, so the connector writes it to a private (`0600`) temporary file and deletes the file as soon as the client is built (the client keeps it in memory). | |
+| `tls_ca_pem` | string | No | CA certificate in PEM when the server certificate is not signed by a public CA. Handled like `tls_certificate_key_pem`. | |
+| `aws_service_credential` | string | `aws_service_credential` | Unity Catalog service credential (AWS IAM role). | `atlas_ingest_role` |
+| `databricks_host` | string | `aws_service_credential` | URL of the workspace that issues the temporary keys, normally the workspace the pipeline runs in. The client secret is sent to this host, so only Databricks workspace URLs on AWS (`*.cloud.databricks.com`, `*.cloud.databricks.us`, `*.cloud.databricks.mil`) are accepted. | `https://dbc-1234abcd-5678.cloud.databricks.com` |
+| `databricks_client_id` | string | `aws_service_credential` | Service principal application ID. | |
+| `databricks_client_secret` | string (secret) | `aws_service_credential` | OAuth secret of that service principal. | |
+| `aws_refresh_margin_seconds` | string | No | Request new AWS keys this many seconds before they expire: an integer from `60` to `1800` (keys last at most one hour). Default `600`. | `600` |
 | `unicode_decode_error_handler` | string | No | `strict` (default) fails on strings that are not valid UTF-8; `replace` ingests them with U+FFFD. | `strict` |
 | `externalOptionsAllowList` | string | Yes | Must be set to the full list of table options below. | `database,collection,ingestion_type,start_mode,start_at_operation_time,full_document,document_format,max_records_per_batch,snapshot_batch_size,max_await_time_ms,delete_lookback_seconds,idle_advance_seconds,assume_unique_id` |
 
@@ -45,8 +47,10 @@ Set it up as follows:
 
 1. Create an AWS IAM role for the service credential and a [service credential](https://docs.databricks.com/aws/en/connect/unity-catalog/cloud-services/service-credentials) that uses it.
 2. In Atlas, add a database user of type **AWS IAM → IAM Role** with that role's ARN and give it the `read` role on the database.
-3. Create a service principal with an OAuth secret. Give it the **workspace-access** entitlement and `ACCESS` on the service credential (`GRANT ACCESS ON SERVICE CREDENTIAL ... TO ...`).
-4. Create the connection with `auth_mode=aws_service_credential`, `aws_service_credential`, `databricks_host`, `databricks_client_id` and `databricks_client_secret`.
+3. Create a service principal with an OAuth secret. Give it the **workspace-access** entitlement and `ACCESS` on the service credential (`GRANT ACCESS ON SERVICE CREDENTIAL ... TO ...`). The connector requests its OAuth token with the `unity-catalog` scope only, so the token cannot call other APIs; a [scoped OAuth secret](https://docs.databricks.com/aws/en/dev-tools/auth/oauth-m2m) limited to `unity-catalog` is enough and limits a leaked secret as well.
+4. Create the connection with `auth_mode=aws_service_credential`, `aws_service_credential`, `databricks_host`, `databricks_client_id` and `databricks_client_secret`. `databricks_host` cannot default to the pipeline's workspace: the connector's reader runs in Python workers that have neither a Spark session nor the workspace URL.
+
+The connector replaces its MongoDB client with new keys between batches only, never while a cursor or change stream of the old client is open.
 
 A service principal can hold up to five OAuth secrets. To rotate, add a new secret, update the connection, restart the pipeline, then delete the old secret.
 
@@ -108,7 +112,7 @@ How it stays correct:
 - **Continuous mode latency**: each poll reads the changes up to the time it started; a change made while a poll runs is read by the poll after the next one.
 - **`updateLookup`**: an update row holds the document as it is when the change is read (see Best Practices for post-images).
 - Views, time series collections and `system.*` collections cannot be ingested (no change stream).
-- **Sharded collections**: rows are keyed by `_id`, but on a collection sharded by another key MongoDB only guarantees `_id` to be unique per shard. The connector therefore refuses sharded collections (detected with `collStats`) unless the table option `assume_unique_id=true` declares that `_id` is unique across the collection, for example when `_id` is the shard key, or when every `_id` is a driver-generated ObjectId (unique in practice, not enforced across shards). Connect through mongos: the snapshot query then merges the shards in `_id` order and the change stream merges them in cluster-time order. Sharded clusters have not been tested with this connector yet.
+- **Sharded collections**: rows are keyed by `_id`, but on a collection sharded by another key MongoDB only guarantees `_id` to be unique per shard. The connector therefore refuses sharded collections unless the table option `assume_unique_id=true` declares that `_id` is unique across the collection, for example when `_id` is the shard key, or when every `_id` is a driver-generated ObjectId (unique in practice, not enforced across shards). Connect through mongos: the snapshot query then merges the shards in `_id` order and the change stream merges them in cluster-time order. How a sharded collection is detected: through mongos (`hello` reports `isdbgrid`), the collection's entry in `config.collections`; without read access to the config database, the `sharded` field of `collStats` (deprecated, but `$collStats` does not report whether a collection is sharded). If neither is allowed, the connector cannot tell and reads the collection. Sharded clusters have not been tested with this connector yet.
 
 ## Table Configurations
 
