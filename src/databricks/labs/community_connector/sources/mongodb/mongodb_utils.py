@@ -3,36 +3,74 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from typing import Any, Optional
+from typing import TYPE_CHECKING, Any, Optional
 
-from bson import ObjectId, json_util
-from bson.json_util import JSONOptions, JSONMode
-from bson.timestamp import Timestamp
+if TYPE_CHECKING:
+    from bson.timestamp import Timestamp
+
+# bson and pymongo are imported inside the functions that use them, never at
+# module level. The merged single-file source is pickled by value, and in
+# managed ingestion it is unpickled in a Python worker that has only the
+# serverless base packages, not the pipeline's dependencies: a module-level
+# reference to a bson name would fail there with "No module named 'bson'".
+# See tests/unit/sources/mongodb/test_mongodb_no_driver_worker.py.
 
 # Canonical Extended JSON keeps every BSON type distinguishable (Int64 vs
 # Int32, Decimal128, Binary subtype, ...). It is used for the primary key and
 # for offsets, where an exact, reversible encoding matters.
-CANONICAL = JSONOptions(json_mode=JSONMode.CANONICAL, tz_aware=True, tzinfo=timezone.utc)
+CANONICAL = "canonical"
 # Relaxed Extended JSON reads naturally (numbers stay numbers, dates become
 # {"$date": "2024-01-01T00:00:00Z"}) and is what we put into the document column.
-RELAXED = JSONOptions(json_mode=JSONMode.RELAXED, tz_aware=True, tzinfo=timezone.utc)
+RELAXED = "relaxed"
 
 OFFSET_VERSION = 1
 
+_JSON_OPTIONS: dict = {}
 
-def dumps(value: Any, options: JSONOptions = RELAXED) -> str:
+
+def _json_options(mode: str):
+    options = _JSON_OPTIONS.get(mode)
+    if options is None:
+        from bson.json_util import JSONMode, JSONOptions
+
+        json_mode = JSONMode.CANONICAL if mode == CANONICAL else JSONMode.RELAXED
+        options = JSONOptions(json_mode=json_mode, tz_aware=True, tzinfo=timezone.utc)
+        _JSON_OPTIONS[mode] = options
+    return options
+
+
+def bson_timestamp(time_: int, inc: int) -> Timestamp:
+    """A BSON ``Timestamp`` (cluster time)."""
+    from bson.timestamp import Timestamp as _Timestamp
+
+    return _Timestamp(time_, inc)
+
+
+def decode_errors() -> tuple:
+    """Exceptions PyMongo raises for undecodable BSON or invalid UTF-8."""
+    from bson.errors import InvalidBSON
+
+    return (InvalidBSON, UnicodeDecodeError)
+
+
+def dumps(value: Any, mode: str = RELAXED) -> str:
     """Serialize a BSON value to Extended JSON without escaping non-ASCII text.
 
     ``ensure_ascii=False`` keeps multibyte text (Japanese, emoji, combining
     characters) as literal UTF-8 instead of ``\\uXXXX`` escapes, so the
     string column is readable and byte-for-byte equal to the source text.
     """
-    return json_util.dumps(value, json_options=options, ensure_ascii=False, separators=(",", ":"))
+    from bson import json_util
+
+    return json_util.dumps(value, json_options=_json_options(mode), ensure_ascii=False,
+                           separators=(",", ":"))
 
 
-def loads(text: str, options: JSONOptions = CANONICAL) -> Any:
+def loads(text: str, mode: str = CANONICAL) -> Any:
     """Parse Extended JSON produced by :func:`dumps`."""
-    return json_util.loads(text, json_options=options)
+    from bson import json_util
+
+    return json_util.loads(text, json_options=_json_options(mode))
 
 
 def encode_id(value: Any) -> str:
@@ -45,6 +83,8 @@ def encode_id(value: Any) -> str:
       (``{"$numberInt": "7"}``), which is stable because MongoDB returns an
       ``_id`` with the type it was stored with.
     """
+    from bson import ObjectId
+
     if isinstance(value, ObjectId):
         return str(value)
     return dumps(value, CANONICAL)
@@ -52,6 +92,8 @@ def encode_id(value: Any) -> str:
 
 def decode_id(text: str) -> Any:
     """Inverse of :func:`encode_id`."""
+    from bson import ObjectId
+
     if len(text) == 24 and ObjectId.is_valid(text) and not text.startswith('"'):
         return ObjectId(text)
     return loads(text, CANONICAL)

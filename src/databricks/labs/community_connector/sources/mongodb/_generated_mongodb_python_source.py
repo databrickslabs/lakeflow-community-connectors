@@ -14,15 +14,12 @@ from typing import (
     Iterator,
     Optional,
     Sequence,
+    TYPE_CHECKING,
 )
 import json
 import os
 import time
 
-from bson import ObjectId, json_util
-from bson.errors import InvalidBSON
-from bson.json_util import JSONMode, JSONOptions
-from bson.timestamp import Timestamp
 from pyspark.sql import Row
 from pyspark.sql.datasource import (
     DataSource,
@@ -934,27 +931,72 @@ def register_lakeflow_source(spark):
     # src/databricks/labs/community_connector/sources/mongodb/mongodb_utils.py
     ########################################################
 
-    CANONICAL = JSONOptions(json_mode=JSONMode.CANONICAL, tz_aware=True, tzinfo=timezone.utc)
+    if TYPE_CHECKING:
+        from bson.timestamp import Timestamp
+
+    # bson and pymongo are imported inside the functions that use them, never at
+    # module level. The merged single-file source is pickled by value, and in
+    # managed ingestion it is unpickled in a Python worker that has only the
+    # serverless base packages, not the pipeline's dependencies: a module-level
+    # reference to a bson name would fail there with "No module named 'bson'".
+    # See tests/unit/sources/mongodb/test_mongodb_no_driver_worker.py.
+
+    # Canonical Extended JSON keeps every BSON type distinguishable (Int64 vs
+    # Int32, Decimal128, Binary subtype, ...). It is used for the primary key and
+    # for offsets, where an exact, reversible encoding matters.
+    CANONICAL = "canonical"
     # Relaxed Extended JSON reads naturally (numbers stay numbers, dates become
     # {"$date": "2024-01-01T00:00:00Z"}) and is what we put into the document column.
-    RELAXED = JSONOptions(json_mode=JSONMode.RELAXED, tz_aware=True, tzinfo=timezone.utc)
+    RELAXED = "relaxed"
 
     OFFSET_VERSION = 1
 
+    _JSON_OPTIONS: dict = {}
 
-    def dumps(value: Any, options: JSONOptions = RELAXED) -> str:
+
+    def _json_options(mode: str):
+        options = _JSON_OPTIONS.get(mode)
+        if options is None:
+            from bson.json_util import JSONMode, JSONOptions
+
+            json_mode = JSONMode.CANONICAL if mode == CANONICAL else JSONMode.RELAXED
+            options = JSONOptions(json_mode=json_mode, tz_aware=True, tzinfo=timezone.utc)
+            _JSON_OPTIONS[mode] = options
+        return options
+
+
+    def bson_timestamp(time_: int, inc: int) -> Timestamp:
+        """A BSON ``Timestamp`` (cluster time)."""
+        from bson.timestamp import Timestamp as _Timestamp
+
+        return _Timestamp(time_, inc)
+
+
+    def decode_errors() -> tuple:
+        """Exceptions PyMongo raises for undecodable BSON or invalid UTF-8."""
+        from bson.errors import InvalidBSON
+
+        return (InvalidBSON, UnicodeDecodeError)
+
+
+    def dumps(value: Any, mode: str = RELAXED) -> str:
         """Serialize a BSON value to Extended JSON without escaping non-ASCII text.
 
         ``ensure_ascii=False`` keeps multibyte text (Japanese, emoji, combining
         characters) as literal UTF-8 instead of ``\\uXXXX`` escapes, so the
         string column is readable and byte-for-byte equal to the source text.
         """
-        return json_util.dumps(value, json_options=options, ensure_ascii=False, separators=(",", ":"))
+        from bson import json_util
+
+        return json_util.dumps(value, json_options=_json_options(mode), ensure_ascii=False,
+                               separators=(",", ":"))
 
 
-    def loads(text: str, options: JSONOptions = CANONICAL) -> Any:
+    def loads(text: str, mode: str = CANONICAL) -> Any:
         """Parse Extended JSON produced by :func:`dumps`."""
-        return json_util.loads(text, json_options=options)
+        from bson import json_util
+
+        return json_util.loads(text, json_options=_json_options(mode))
 
 
     def encode_id(value: Any) -> str:
@@ -967,6 +1009,8 @@ def register_lakeflow_source(spark):
           (``{"$numberInt": "7"}``), which is stable because MongoDB returns an
           ``_id`` with the type it was stored with.
         """
+        from bson import ObjectId
+
         if isinstance(value, ObjectId):
             return str(value)
         return dumps(value, CANONICAL)
@@ -974,6 +1018,8 @@ def register_lakeflow_source(spark):
 
     def decode_id(text: str) -> Any:
         """Inverse of :func:`encode_id`."""
+        from bson import ObjectId
+
         if len(text) == 24 and ObjectId.is_valid(text) and not text.startswith('"'):
             return ObjectId(text)
         return loads(text, CANONICAL)
@@ -1039,6 +1085,9 @@ def register_lakeflow_source(spark):
     ########################################################
     # src/databricks/labs/community_connector/sources/mongodb/mongodb.py
     ########################################################
+
+    if TYPE_CHECKING:
+        from bson.timestamp import Timestamp
 
     INGESTION_TYPES = ("cdc_with_deletes", "cdc", "append", "snapshot")
     START_MODES = ("snapshot", "latest", "timestamp")
@@ -1122,9 +1171,20 @@ def register_lakeflow_source(spark):
             self.full_document = parse_choice(
                 opts.get("full_document"), "updateLookup", "full_document", FULL_DOCUMENT_MODES
             )
+            # ingestion_type=snapshot is applied with apply_changes_from_snapshot,
+            # which compares whole rows, and VARIANT values cannot be compared
+            # ("<=> does not support ordering on type VARIANT"). So the document
+            # is a string there.
+            snapshot = self.ingestion_type == "snapshot"
             self.document_format = parse_choice(
-                opts.get("document_format"), "variant", "document_format", DOCUMENT_FORMATS
+                opts.get("document_format"), "string" if snapshot else "variant", "document_format",
+                DOCUMENT_FORMATS
             )
+            if snapshot and self.document_format == "variant":
+                raise ValueError(
+                    "ingestion_type=snapshot needs document_format=string: the snapshot is applied "
+                    "by comparing whole rows, and VARIANT values cannot be compared"
+                )
             self.max_records = parse_int(
                 opts.get("max_records_per_batch"), DEFAULT_MAX_RECORDS_PER_BATCH,
                 "max_records_per_batch"
@@ -1222,7 +1282,7 @@ def register_lakeflow_source(spark):
             ``CLOCK_SKEW_SECONDS`` so that every change made before the trigger
             started is read in that trigger, even if the server clock runs ahead.
             """
-            return Timestamp(int(time.time()) + 1 + CLOCK_SKEW_SECONDS, 0)
+            return bson_timestamp(int(time.time()) + 1 + CLOCK_SKEW_SECONDS, 0)
 
         # --------------------------------------------------------------- catalog
 
@@ -1327,8 +1387,16 @@ def register_lakeflow_source(spark):
             return bool(stats.get("sharded"))
 
         def get_table_schema(self, table_name: str, table_options: dict[str, str]) -> StructType:
-            cfg = self._config(table_name, table_options)
-            return table_schema(cfg.document_format)
+            # The schema is fixed; only the options decide it. Where PyMongo is
+            # installed, the collection is checked as well (unknown tables fail
+            # here). Managed ingestion asks for the schema in a Python worker that
+            # has only the base packages (see mongodb_utils): there the check is
+            # skipped and happens when the table is read.
+            try:
+                import pymongo  # pylint: disable=import-outside-toplevel,unused-import  # noqa: F401
+            except ImportError:
+                return table_schema(_TableConfig(self, table_name, table_options).document_format)
+            return table_schema(self._config(table_name, table_options).document_format)
 
         def read_table_metadata(self, table_name: str, table_options: dict[str, str]) -> dict:
             cfg = self._config(table_name, table_options)
@@ -1516,7 +1584,7 @@ def register_lakeflow_source(spark):
             try:
                 for doc in cursor:
                     yield self._snapshot_row(cfg, doc, token, snap_at)
-            except (InvalidBSON, UnicodeDecodeError) as exc:
+            except decode_errors() as exc:
                 raise self._decode_error(cfg, exc) from exc
 
         def _snapshot_row(self, cfg: _TableConfig, doc: dict, token: str,
@@ -1592,7 +1660,7 @@ def register_lakeflow_source(spark):
                             break
             except pymongo.errors.OperationFailure as exc:
                 return iter([]), self._stream_failure(cfg, start, flow, exc, replay=end is not None)
-            except (InvalidBSON, UnicodeDecodeError) as exc:
+            except decode_errors() as exc:
                 raise self._decode_error(cfg, exc) from exc
 
             if end is not None:
@@ -1641,7 +1709,7 @@ def register_lakeflow_source(spark):
             if start.get("token"):
                 kwargs["resume_after"] = {"_data": start["token"]}
             else:
-                kwargs["start_at_operation_time"] = Timestamp(int(start["start_at"]),
+                kwargs["start_at_operation_time"] = bson_timestamp(int(start["start_at"]),
                                                               int(start.get("start_at_inc", 0)))
             if flow == "upsert":
                 kwargs["full_document"] = cfg.full_document
@@ -1700,21 +1768,21 @@ def register_lakeflow_source(spark):
             low, high = int(start["start_at"]), self._now().time
             while high - low > 1:
                 mid = (low + high) // 2
-                if self._readable_from(cfg, Timestamp(mid, 0)):
+                if self._readable_from(cfg, bson_timestamp(mid, 0)):
                     high = mid
                 else:
                     low = mid
-            start_ts = Timestamp(high, 0)
+            start_ts = bson_timestamp(high, 0)
             # Second `low` failed at increment 0; the oplog may still hold its tail.
-            if self._readable_from(cfg, Timestamp(low, MAX_INCREMENT)):
+            if self._readable_from(cfg, bson_timestamp(low, MAX_INCREMENT)):
                 bad, good = 0, MAX_INCREMENT
                 while good - bad > 1:
                     mid = (bad + good) // 2
-                    if self._readable_from(cfg, Timestamp(low, mid)):
+                    if self._readable_from(cfg, bson_timestamp(low, mid)):
                         good = mid
                     else:
                         bad = mid
-                start_ts = Timestamp(low, good)
+                start_ts = bson_timestamp(low, good)
             if self._now().time - start_ts.time < MIN_LOOKBACK_SECONDS:
                 raise RuntimeError(
                     f"The oplog of {cfg.namespace} does not reach back even {MIN_LOOKBACK_SECONDS} "
@@ -1767,7 +1835,7 @@ def register_lakeflow_source(spark):
         def _guard_decode(self, cfg: _TableConfig, fn):
             try:
                 return fn()
-            except (InvalidBSON, UnicodeDecodeError) as exc:
+            except decode_errors() as exc:
                 raise self._decode_error(cfg, exc) from exc
 
         @staticmethod

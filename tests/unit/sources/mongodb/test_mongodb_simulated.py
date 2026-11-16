@@ -325,3 +325,17 @@ def test_client_is_not_replaced_while_the_change_stream_is_open(fake, monkeypatc
     rows = list(records)
     assert [json.loads(r["document"])["v"] for r in rows] == [1, 1, 1]
     assert len(closes) == 1  # replaced once, when the batch opened its stream
+
+
+def test_snapshot_ingestion_uses_a_string_document(fake):
+    """apply_changes_from_snapshot compares whole rows; VARIANT cannot be compared."""
+    uri, db = fake
+    db.create_collection("c").insert_one({"_id": 1, "名前": "値🍣"})
+    conn = _connector(uri)
+    schema = conn.get_table_schema("c", {"ingestion_type": "snapshot"})
+    assert schema["document"].dataType.simpleString() == "string"
+    assert conn.get_table_schema("c", {})["document"].dataType.simpleString() == "variant"
+    with pytest.raises(ValueError, match="document_format=string"):
+        conn.get_table_schema("c", {"ingestion_type": "snapshot", "document_format": "variant"})
+    rows = list(conn.read_table("c", {}, {"ingestion_type": "snapshot"})[0])
+    assert json.loads(rows[0]["document"])["名前"] == "値🍣"

@@ -75,7 +75,7 @@ All tables have the same columns:
 | Column | Type | Description |
 |---|---|---|
 | `_id` | string | Primary key. An ObjectId becomes its 24-character hex string; any other type becomes canonical Extended JSON (a string `_id` `"abc"` is stored as `"\"abc\""`), so different BSON types never collide. |
-| `document` | variant | The full document as relaxed Extended JSON. `string` with `document_format=string`. |
+| `document` | variant | The full document as relaxed Extended JSON. `string` with `document_format=string`, and always with `ingestion_type=snapshot`. |
 | `_cdc_operation` | string | `snapshot`, `insert`, `update`, `replace` or `delete`. |
 | `_cdc_sequence` | string | Cursor field and `sequence_by` column: the change stream resume token (hex), which is ordered across the deployment. Snapshot rows carry the token taken before the snapshot started. |
 | `_cdc_cluster_time` | timestamp | Cluster time of the change. For snapshot rows, the time the snapshot started: the document is as of that time or later. |
@@ -146,7 +146,7 @@ These are set directly under each `table` object in the pipeline spec:
 | `start_mode` | `snapshot` | `snapshot`: initial load, then changes. `latest`: only changes from now on. `timestamp`: changes from `start_at_operation_time`. |
 | `start_at_operation_time` | | Epoch seconds, for `start_mode=timestamp`. Must be within the oplog window. |
 | `full_document` | `updateLookup` | `updateLookup` reads the current document for each update. `required` uses post-images (needs `changeStreamPreAndPostImages` on the collection) and gives the document as of the update, failing when one is missing. `whenAvailable` uses post-images when they exist and otherwise the current document. |
-| `document_format` | `variant` | `variant` or `string` (JSON text). |
+| `document_format` | `variant` (`string` for `ingestion_type=snapshot`) | `variant` or `string` (JSON text). `ingestion_type=snapshot` needs `string`: the snapshot is applied by comparing whole rows, and VARIANT values cannot be compared. |
 | `max_records_per_batch` | `10000` | Maximum rows per micro-batch. |
 | `snapshot_batch_size` | `10000` | Documents per snapshot page. |
 | `max_await_time_ms` | `1000` | How long one change stream poll waits for new events. |
@@ -175,6 +175,17 @@ Field names and collection names may contain any Unicode characters; they are pr
 
 ### Step 1: Clone/Copy the Source Connector Code
 Follow the Lakeflow Community Connector UI, which will guide you through setting up a pipeline using the selected source connector code.
+
+**Use a workspace pipeline, and add PyMongo to its environment.** This connector needs PyMongo, which is not in the serverless base environment. In a managed ingestion pipeline (the CLI's default `create_pipeline`), the data source runs in Python workers that have only the base environment: neither the connector wheel's dependencies nor packages added to `environment.dependencies` reach them, so the read fails with `No module named 'pymongo'`. A workspace pipeline works:
+
+```bash
+community-connector create_pipeline mongodb my_mongodb_pipeline \
+  -ps pipeline_spec.yaml -c main -t raw --use-workspace-pipeline
+```
+
+Then add `pymongo[aws]==4.19.0` (or another 4.x version) under the pipeline's **Environment → Dependencies** (`environment.dependencies`). Pin it with `==`: the dependency is passed to `pip install` unquoted, so a range such as `>=4.9,<5` fails to install. In a workspace pipeline the table options go under `table_configuration`, as in Step 2.
+
+If a `collection` value or another option contains characters outside the Basic Multilingual Plane (for example emoji), check the generated `ingest.py`: the CLI writes them as JSON surrogate escapes (`"\ud83c\udf63"`), which Python reads as an invalid string, and the pipeline fails with a Py4J error. Replace the pair with the character itself or with `\U0001f363`.
 
 ### Step 2: Configure Your Pipeline
 
@@ -228,6 +239,8 @@ Follow the Lakeflow Community Connector UI, which will guide you through setting
 | `temporary-service-credentials ... HTTP 403 ... workspace-access` | Give the service principal the workspace-access entitlement. |
 | `[INVALID_IDENTIFIER] The unquoted identifier source_...` | The `source_table` contains characters that cannot be part of a view name. Use an ASCII `source_table` and set `collection` to the real collection name. |
 | `ServerSelectionTimeoutError` / TLS handshake errors | The compute cannot reach MongoDB. Check the IP access list and the network path. |
+| `No module named 'pymongo'` | The pipeline runs without PyMongo: a managed ingestion pipeline, or a workspace pipeline without `pymongo` in its environment. See Step 1. |
+| `<=> does not support ordering on type "VARIANT"` | `ingestion_type=snapshot` with `document_format=variant` on an older version of this connector. Use `document_format=string`. |
 
 ## References
 

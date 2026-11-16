@@ -14,10 +14,8 @@ from __future__ import annotations
 
 import time
 from datetime import datetime, timezone
-from typing import Any, Iterator, Optional
+from typing import TYPE_CHECKING, Any, Iterator, Optional
 
-from bson.errors import InvalidBSON
-from bson.timestamp import Timestamp
 from pyspark.sql.types import StructType
 
 from databricks.labs.community_connector.interface import LakeflowConnect, SupportsNamespaces
@@ -32,6 +30,8 @@ from databricks.labs.community_connector.sources.mongodb.mongodb_utils import (
     CANONICAL,
     parse_bool,
     OFFSET_VERSION,
+    bson_timestamp,
+    decode_errors,
     dumps,
     encode_id,
     loads,
@@ -41,6 +41,9 @@ from databricks.labs.community_connector.sources.mongodb.mongodb_utils import (
     to_utc,
     token_data,
 )
+
+if TYPE_CHECKING:
+    from bson.timestamp import Timestamp
 
 INGESTION_TYPES = ("cdc_with_deletes", "cdc", "append", "snapshot")
 START_MODES = ("snapshot", "latest", "timestamp")
@@ -124,9 +127,20 @@ class _TableConfig:  # pylint: disable=too-many-instance-attributes,too-few-publ
         self.full_document = parse_choice(
             opts.get("full_document"), "updateLookup", "full_document", FULL_DOCUMENT_MODES
         )
+        # ingestion_type=snapshot is applied with apply_changes_from_snapshot,
+        # which compares whole rows, and VARIANT values cannot be compared
+        # ("<=> does not support ordering on type VARIANT"). So the document
+        # is a string there.
+        snapshot = self.ingestion_type == "snapshot"
         self.document_format = parse_choice(
-            opts.get("document_format"), "variant", "document_format", DOCUMENT_FORMATS
+            opts.get("document_format"), "string" if snapshot else "variant", "document_format",
+            DOCUMENT_FORMATS
         )
+        if snapshot and self.document_format == "variant":
+            raise ValueError(
+                "ingestion_type=snapshot needs document_format=string: the snapshot is applied "
+                "by comparing whole rows, and VARIANT values cannot be compared"
+            )
         self.max_records = parse_int(
             opts.get("max_records_per_batch"), DEFAULT_MAX_RECORDS_PER_BATCH,
             "max_records_per_batch"
@@ -224,7 +238,7 @@ class MongodbLakeflowConnect(LakeflowConnect, SupportsNamespaces):
         ``CLOCK_SKEW_SECONDS`` so that every change made before the trigger
         started is read in that trigger, even if the server clock runs ahead.
         """
-        return Timestamp(int(time.time()) + 1 + CLOCK_SKEW_SECONDS, 0)
+        return bson_timestamp(int(time.time()) + 1 + CLOCK_SKEW_SECONDS, 0)
 
     # --------------------------------------------------------------- catalog
 
@@ -329,8 +343,16 @@ class MongodbLakeflowConnect(LakeflowConnect, SupportsNamespaces):
         return bool(stats.get("sharded"))
 
     def get_table_schema(self, table_name: str, table_options: dict[str, str]) -> StructType:
-        cfg = self._config(table_name, table_options)
-        return table_schema(cfg.document_format)
+        # The schema is fixed; only the options decide it. Where PyMongo is
+        # installed, the collection is checked as well (unknown tables fail
+        # here). Managed ingestion asks for the schema in a Python worker that
+        # has only the base packages (see mongodb_utils): there the check is
+        # skipped and happens when the table is read.
+        try:
+            import pymongo  # pylint: disable=import-outside-toplevel,unused-import  # noqa: F401
+        except ImportError:
+            return table_schema(_TableConfig(self, table_name, table_options).document_format)
+        return table_schema(self._config(table_name, table_options).document_format)
 
     def read_table_metadata(self, table_name: str, table_options: dict[str, str]) -> dict:
         cfg = self._config(table_name, table_options)
@@ -518,7 +540,7 @@ class MongodbLakeflowConnect(LakeflowConnect, SupportsNamespaces):
         try:
             for doc in cursor:
                 yield self._snapshot_row(cfg, doc, token, snap_at)
-        except (InvalidBSON, UnicodeDecodeError) as exc:
+        except decode_errors() as exc:
             raise self._decode_error(cfg, exc) from exc
 
     def _snapshot_row(self, cfg: _TableConfig, doc: dict, token: str,
@@ -594,7 +616,7 @@ class MongodbLakeflowConnect(LakeflowConnect, SupportsNamespaces):
                         break
         except pymongo.errors.OperationFailure as exc:
             return iter([]), self._stream_failure(cfg, start, flow, exc, replay=end is not None)
-        except (InvalidBSON, UnicodeDecodeError) as exc:
+        except decode_errors() as exc:
             raise self._decode_error(cfg, exc) from exc
 
         if end is not None:
@@ -643,7 +665,7 @@ class MongodbLakeflowConnect(LakeflowConnect, SupportsNamespaces):
         if start.get("token"):
             kwargs["resume_after"] = {"_data": start["token"]}
         else:
-            kwargs["start_at_operation_time"] = Timestamp(int(start["start_at"]),
+            kwargs["start_at_operation_time"] = bson_timestamp(int(start["start_at"]),
                                                           int(start.get("start_at_inc", 0)))
         if flow == "upsert":
             kwargs["full_document"] = cfg.full_document
@@ -702,21 +724,21 @@ class MongodbLakeflowConnect(LakeflowConnect, SupportsNamespaces):
         low, high = int(start["start_at"]), self._now().time
         while high - low > 1:
             mid = (low + high) // 2
-            if self._readable_from(cfg, Timestamp(mid, 0)):
+            if self._readable_from(cfg, bson_timestamp(mid, 0)):
                 high = mid
             else:
                 low = mid
-        start_ts = Timestamp(high, 0)
+        start_ts = bson_timestamp(high, 0)
         # Second `low` failed at increment 0; the oplog may still hold its tail.
-        if self._readable_from(cfg, Timestamp(low, MAX_INCREMENT)):
+        if self._readable_from(cfg, bson_timestamp(low, MAX_INCREMENT)):
             bad, good = 0, MAX_INCREMENT
             while good - bad > 1:
                 mid = (bad + good) // 2
-                if self._readable_from(cfg, Timestamp(low, mid)):
+                if self._readable_from(cfg, bson_timestamp(low, mid)):
                     good = mid
                 else:
                     bad = mid
-            start_ts = Timestamp(low, good)
+            start_ts = bson_timestamp(low, good)
         if self._now().time - start_ts.time < MIN_LOOKBACK_SECONDS:
             raise RuntimeError(
                 f"The oplog of {cfg.namespace} does not reach back even {MIN_LOOKBACK_SECONDS} "
@@ -769,7 +791,7 @@ class MongodbLakeflowConnect(LakeflowConnect, SupportsNamespaces):
     def _guard_decode(self, cfg: _TableConfig, fn):
         try:
             return fn()
-        except (InvalidBSON, UnicodeDecodeError) as exc:
+        except decode_errors() as exc:
             raise self._decode_error(cfg, exc) from exc
 
     @staticmethod
