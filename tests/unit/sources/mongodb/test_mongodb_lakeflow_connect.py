@@ -9,12 +9,12 @@ in-process fake in ``fake_mongo.py``. Every client the connector builds
 first fetches temporary AWS keys through the simulated endpoints, so the
 suite exercises the authentication path as well.
 
-Record mode (``CONNECTOR_TEST_MODE=record`` with ``CONNECTOR_TEST_CONFIG_JSON``
+Live mode (``CONNECTOR_TEST_MODE=live`` with ``CONNECTOR_TEST_CONFIG_JSON``
 holding the same keys as ``replay_config``, for a real workspace) calls the
 workspace for the two HTTP endpoints and writes the validation and coverage
 reports under ``cassettes/``; the MongoDB side stays the fake. The raw
 cassette, which would hold the live token and keys, is deleted at teardown
-(in live mode too).
+(in record mode too).
 """
 
 import os
