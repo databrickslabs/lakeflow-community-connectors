@@ -34,6 +34,12 @@ endpoints:
       wrapper:
         records_key: lists
         extras: {hasMore: false, offset: 0, total: 0}
+  - path: /contacts/v1/lists
+    method: GET
+    handler: databricks.labs.community_connector.source_simulator.specs.hubspot.handlers.list_ids:serve_legacy_lists
+  - path: /crm/lists/2026-09/idmapping
+    method: POST
+    handler: databricks.labs.community_connector.source_simulator.specs.hubspot.handlers.list_ids:serve_list_id_mapping
   - path: /crm/lists/2026-09/{list_id}/memberships
     method: GET
     corpus: contact_list_memberships
