@@ -21,7 +21,7 @@ establish full-account completeness; Databricks pipeline validation remains pend
 | Parameter | Type | Required | Description | Example |
 |---|---|---|---|---|
 | `api_token` | string (secret) | Yes | Rootly API key with read access to the selected resources | `<ROOTLY_API_KEY>` |
-| `externalOptionsAllowList` | string | Yes | Complete list of supported source table options | `page_size` |
+| `externalOptionsAllowList` | string | Yes | Complete list of supported source table options | `page_size,max_records_per_batch` |
 
 ### Obtain a Rootly API Key
 
@@ -35,7 +35,7 @@ for current key types and permissions.
 ### Create a Unity Catalog Connection
 
 Follow the Lakeflow Community Connector flow from **Add Data**, select the Rootly connector code,
-and create or select a connection. Set `api_token` and set `externalOptionsAllowList` to `page_size`.
+and create or select a connection. Set `api_token` and set `externalOptionsAllowList` to `page_size,max_records_per_batch`.
 The standard Unity Catalog API can also create the connection. While this connector is awaiting
 upstream review, use the code from this branch rather than assuming Rootly appears in the catalog.
 
@@ -91,6 +91,7 @@ These options sit directly under each `table` in the pipeline specification.
 | Option | Required | Default | Description |
 |---|---|---|---|
 | `page_size` | No | `100` | Integer from 1 through 1,000; records requested per HTTP page. Incidents checkpoint after each page, so this also bounds each incident batch. |
+| `max_records_per_batch` | No | none | Positive integer; incidents only. Caps each incident batch by lowering the requested page size to `min(page_size, max_records_per_batch)`. Snapshot tables ignore it. |
 
 `page_size` does not cap the total run size. The six snapshot tables read every visible record;
 incidents fetch changes since the previous completed window. The default stays at 100 to keep

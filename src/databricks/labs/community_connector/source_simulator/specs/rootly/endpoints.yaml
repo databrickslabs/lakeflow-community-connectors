@@ -6,6 +6,11 @@ endpoints:
     corpus: incidents
     handler: databricks.labs.community_connector.source_simulator.specs.rootly.handlers:list_resources
     strict_params: true
+    # Future-dated clones must be excluded by the connector's
+    # filter[updated_at][lt]=<init_time> cap (applied by the handler).
+    synthesize_future_records:
+      cursor_field: attributes.updated_at
+      count: 3
     validation_cursor:
       request_param: "page[after]"
       response_path: meta.next_cursor

@@ -6,4 +6,4 @@ connection:
       required: true
       secret: true
       description: Rootly API key with permission to read the selected resources.
-external_options_allowlist: "page_size"
+external_options_allowlist: "page_size,max_records_per_batch"

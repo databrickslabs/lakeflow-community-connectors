@@ -206,3 +206,24 @@ def test_future_records_do_not_keep_available_now_running(connector, monkeypatch
     assert [r["id"] for r in rows] == ["past"]
     assert read(connector, offset, "1") == ([], offset)
     assert len(calls) == 1
+
+
+@pytest.mark.parametrize(
+    ("page_size", "max_records", "expected"), [("100", "3", "3"), ("2", "50", "2")]
+)
+def test_max_records_per_batch_caps_incident_page(
+    connector, transport, page_size, max_records, expected
+):
+    calls, replies, _ = transport
+    connector._init_time = CUTOFF
+    replies.append(response(page([incident("a")], next_cursor="more")))
+    options = {"page_size": page_size, "max_records_per_batch": max_records}
+    _, offset = connector.read_table("incidents", None, options)
+    assert calls[0][1]["params"]["page[size]"] == expected
+    assert offset["page_size"] == int(expected)
+
+
+@pytest.mark.parametrize("value", ["0", "-1", "many"])
+def test_invalid_max_records_per_batch_fails(connector, value):
+    with pytest.raises(ValueError, match="max_records_per_batch"):
+        connector.read_table("incidents", None, {"max_records_per_batch": value})

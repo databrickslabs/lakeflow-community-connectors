@@ -65,6 +65,17 @@ class RootlyLakeflowConnect(LakeflowConnect):
         if not 1 <= page_size <= 1000:
             raise ValueError("page_size must be an integer between 1 and 1000")
         if table_name == "incidents":
+            # Admission control: one incident page is one batch, so the
+            # standard max_records_per_batch option caps the server-side page.
+            max_records = table_options.get("max_records_per_batch")
+            if max_records is not None:
+                try:
+                    max_records = int(max_records)
+                except (TypeError, ValueError):
+                    raise ValueError("max_records_per_batch must be a positive integer") from None
+                if max_records < 1:
+                    raise ValueError("max_records_per_batch must be a positive integer")
+                page_size = min(page_size, max_records)
             return self._read_incidents(start_offset, page_size)
         # Full refreshes deliberately ignore any previous checkpoint. Returning
         # None marks a snapshot; the iterator streams pages without retaining rows.

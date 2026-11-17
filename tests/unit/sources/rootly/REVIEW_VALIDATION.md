@@ -40,3 +40,25 @@ Timestamp ties, restart/retry behavior, later-run updates, and run termination a
 synthetic data; no production records were changed to test them. Deletions are not tracked by
 incremental incident ingestion. Databricks pipeline smoke testing remains pending. Upstream fork
 CI requires a maintainer to authorize the latest commit with `safe-to-test` per CONTRIBUTING.md.
+
+## Live-mode simulator validation — 2026-11-16
+
+Self-review follow-up after adding `max_records_per_batch` admission control for incidents and
+`synthesize_future_records` on `/v1/incidents`. Run with `CONNECTOR_TEST_MODE=live` and a test
+credential supplied through macOS Keychain; GET requests only. Live mode uses `page_size=1000`
+(simulate mode keeps `2`) because the test account holds about 6,300 incidents, which must drain
+within `test_read_terminates`' 50-iteration cap. With `page_size=2` the termination test failed
+after 50 batches while the cursor was still advancing; that was test sizing, not a connector defect.
+
+- Live suite: **80 passed, 3 skipped**, including `test_read_terminates`.
+- Offline suites: 162 passed, 2 skipped (`tests/unit/sources/rootly`, `tests/unit/source_simulator`).
+- Validation report (`cassettes/TestRootlyConnector.json.validation.json`): **6 of 7 endpoints
+  validated, 0 mismatches**. `/v1/incidents` is reported **mismatched**: its 2 first-page calls match
+  the spec, but the 6 continuation calls could not be compared. The validator pairs a live
+  `page[after]` cursor with a synthetic one only while the 5-record synthetic corpus still has pages,
+  so it raises "synthetic corpus exhausted before live continuation" and then "unobserved live
+  continuation token". The live responses never reached the shape diff. The real limit is that
+  the corpus is too small for the whole-account incident drain; no response-shape drift was observed.
+- Coverage report: all 7 spec endpoints hit; incidents used both the initial and `page[after]` shapes.
+
+Raw recordings stay private and are not committed.
