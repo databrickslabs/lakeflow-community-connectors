@@ -1,0 +1,12 @@
+# Jetstream snapshot planning is JSON; segment reads are byte ranges of jss0.
+# Both endpoints use handlers because the declarative list simulator cannot
+# represent sealed checksums, ETags, or HTTP Range responses.
+endpoints:
+  - path: /xrpc/network.bsky.jetstream.planSnapshot
+    method: POST
+    corpus: archive
+    handler: databricks.labs.community_connector.source_simulator.specs.bluesky.handlers.archive:serve_plan
+  - path: /xrpc/network.bsky.jetstream.getSegment
+    method: GET
+    corpus: archive
+    handler: databricks.labs.community_connector.source_simulator.specs.bluesky.handlers.archive:serve_segment

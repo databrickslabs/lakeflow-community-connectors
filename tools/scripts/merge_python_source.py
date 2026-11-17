@@ -748,9 +748,14 @@ def merge_files(source_name: str, output_path: Optional[Path] = None) -> str:
         merged_lines.append("")
         merged_lines.append("")
 
-    # Start the register_lakeflow_source function
+    # Build the serializable source class without closing over SparkSession.
     merged_lines.append("def register_lakeflow_source(spark):")
     merged_lines.append('    """Register the Lakeflow Python source with Spark."""')
+    merged_lines.append("    spark.dataSource.register(_build_lakeflow_source())")
+    merged_lines.append("")
+    merged_lines.append("")
+    merged_lines.append("def _build_lakeflow_source():")
+    merged_lines.append('    """Build the source without capturing a driver-only SparkSession."""')
     merged_lines.append("")
 
     # Section 1: src/databricks/labs/community_connector/libs/utils.py code
@@ -873,8 +878,8 @@ def merge_files(source_name: str, output_path: Optional[Path] = None) -> str:
             merged_lines.append("")
     merged_lines.append("")
 
-    # Register the data source with Spark
-    merged_lines.append("\n    spark.dataSource.register(LakeflowSource)")
+    # Return the class to the public registration function above.
+    merged_lines.append("\n    return LakeflowSource")
     merged_lines.append("")
 
     merged_content = "\n".join(merged_lines)

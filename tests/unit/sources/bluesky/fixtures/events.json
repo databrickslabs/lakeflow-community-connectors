@@ -1,0 +1,9 @@
+[
+  {"seq": 1, "kind": 1, "did": "did:plc:alice", "collection": "app.bsky.feed.post", "rkey": "post1", "rev": "rev1", "payload": {"$type": "app.bsky.feed.post", "text": "hello", "createdAt": "2026-10-02T07:00:00Z"}},
+  {"seq": 2, "kind": 2, "did": "did:plc:alice", "collection": "app.bsky.feed.post", "rkey": "post1", "rev": "rev2", "indexed": 1700000000500000, "payload": {"$type": "app.bsky.feed.post", "text": "edited", "createdAt": "2026-10-02T07:00:00Z"}},
+  {"seq": 3, "kind": 3, "did": "did:plc:alice", "collection": "app.bsky.feed.post", "rkey": "post1", "rev": "rev3", "payload": null},
+  {"seq": 4, "kind": 4, "did": "did:plc:alice", "payload": {"did": "did:plc:alice", "handle": "alice.test", "seq": 44, "time": "2026-10-02T07:00:00Z"}},
+  {"seq": 5, "kind": 5, "did": "did:plc:alice", "payload": {"did": "did:plc:alice", "active": false, "status": "deleted", "seq": 45, "time": "2026-10-02T07:00:00Z"}},
+  {"seq": 6, "kind": 6, "did": "did:plc:alice", "payload": {"did": "did:plc:alice", "rev": "rev6", "seq": 46, "time": "2026-10-02T07:00:00Z"}},
+  {"seq": 7, "kind": 7, "did": "did:plc:bob", "collection": "app.bsky.feed.like", "rkey": "like1", "rev": "rev7", "payload": {"$type": "app.bsky.feed.like", "subject": {"uri": "at://did:plc:alice/app.bsky.feed.post/post1"}}}
+]
