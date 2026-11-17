@@ -295,8 +295,11 @@ option isolation require validation through the managed consumer.
 to `DECIMAL(38,18)` instead of `BIGINT`, preserving fractional values. This
 applies to every CRM object, including custom objects. Values may use at most
 20 integer digits and 18 fractional digits after removing trailing zeros.
-Invalid, nonfinite, or out-of-range values fail the read before checkpointing;
-they are not rounded or truncated. Property-history values remain strings and
+An exact long decimal expansion of a binary64 value is reduced to that float's
+shortest decimal representation when the result fits; this handles source values
+such as the long expansion of `0.1` without rounding arbitrary precise decimals.
+Invalid, nonfinite, or other out-of-range values fail before checkpointing.
+Property-history values remain strings and
 non-CRM resource schemas retain their explicit types.
 
 For an existing pipeline, inspect downstream numeric casts and plan a destination

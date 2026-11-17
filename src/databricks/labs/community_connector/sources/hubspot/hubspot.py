@@ -1449,21 +1449,45 @@ class HubspotLakeflowConnect(LakeflowConnect):
 
     @staticmethod
     def _decimal_property(value):
-        """Reject values which Spark decimal(38,18) would round or overflow."""
+        """Fit exact decimals and recognizable binary64 expansions into decimal(38,18)."""
         try:
             number = Decimal(str(value))
         except InvalidOperation as exc:
             raise ValueError("Invalid HubSpot numeric property") from exc
         if not number.is_finite():
             raise ValueError("Nonfinite HubSpot numeric property")
-        if number == 0:
+        def packed(candidate):
+            if candidate == 0:
+                return Decimal(0)
+            sign, digits, exponent = candidate.as_tuple()
+            digits = list(digits)
+            while digits and digits[-1] == 0:
+                digits.pop()
+                exponent += 1
+            scale = max(-exponent, 0)
+            integer_digits = max(len(digits) + exponent, 0)
+            return sign, digits, exponent, scale, integer_digits
+
+        parts = packed(number)
+        if parts == Decimal(0):
             return Decimal(0)
-        sign, digits, exponent = number.as_tuple()
-        digits = list(digits)
-        while digits[-1] == 0:
-            digits.pop()
-            exponent += 1
-        if max(-exponent, 0) > 18 or max(len(digits) + exponent, 0) > 20:
+        sign, digits, exponent, scale, integer_digits = parts
+        if scale > 18:
+            # HubSpot sometimes serializes a short binary floating-point value
+            # as its exact, long base-10 expansion. Normalize only when the
+            # input is exactly the expansion of that binary64 value; arbitrary
+            # high-precision decimals still fail rather than being rounded.
+            binary = float(number)
+            if Decimal.from_float(binary) != number:
+                raise ValueError("HubSpot numeric property exceeds decimal(38,18)")
+            shortest = Decimal(str(binary))
+            if not shortest.is_finite():
+                raise ValueError("HubSpot numeric property exceeds decimal(38,18)")
+            parts = packed(shortest)
+            if parts == Decimal(0):
+                return Decimal(0)
+            sign, digits, exponent, scale, integer_digits = parts
+        if scale > 18 or integer_digits > 20:
             raise ValueError("HubSpot numeric property exceeds decimal(38,18)")
         return Decimal((sign, tuple(digits), exponent))
 
