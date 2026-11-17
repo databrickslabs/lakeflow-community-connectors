@@ -241,6 +241,31 @@ def test_known_did_and_collection_namespace_include_matches_only(service):
     ]
 
 
+def test_collection_namespace_excludes_commit_outside_namespace(service):
+    from tests.unit.sources.bluesky.conftest import segment_bytes
+
+    outside = copy.deepcopy(service.events[0])
+    outside.update(
+        seq=8,
+        collection="app.bsky.graph.follow",
+        rkey="follow8",
+        rev="rev8",
+        payload={"$type": "app.bsky.graph.follow", "subject": "did:plc:bob"},
+    )
+    service.events.append(outside)
+    service.data, service.checksum = segment_bytes(service.events)
+    service.tip = 8
+
+    all_commits, _ = consume(make_connector({"kinds": "commit"}))
+    assert [row["seq"] for row in all_commits] == [1, 2, 3, 7, 8]
+
+    feed_commits, end = consume(
+        make_connector({"kinds": "commit", "collections": "app.bsky.feed.*"})
+    )
+    assert [row["seq"] for row in feed_commits] == [1, 2, 3, 7]
+    assert end["seq"] == 8
+
+
 def test_kinds_filter_is_sent_to_planner_and_applied_to_decoded_rows(service):
     rows, end = consume(make_connector({"kinds": "identity,account"}))
     assert [row["kind"] for row in rows] == ["identity", "account"]
@@ -531,6 +556,55 @@ def test_bad_plans_fail_closed(service, override):
     service.plan_override = override
     with pytest.raises(ProtocolError):
         consume(make_connector({}))
+
+
+def test_overlapping_planned_segments_fail_before_rows_are_returned(service):
+    def overlap(plan):
+        repeated = copy.deepcopy(plan["segments"][0])
+        repeated["index"] = 1
+        plan["segments"].append(repeated)
+
+    service.plan_override = overlap
+    with pytest.raises(ProtocolError, match="Overlapping or out-of-order archive events"):
+        consume(make_connector({}))
+
+
+def test_changed_sealed_tip_between_planner_pages_fails_closed(service):
+    calls = 0
+
+    def change_second_page(plan):
+        nonlocal calls
+        calls += 1
+        if calls == 3:  # Discovery, first planning page, then second planning page.
+            plan["sealedTipSeq"] -= 1
+
+    service.plan_override = change_second_page
+    with pytest.raises(ProtocolError, match="inconsistent bounds"):
+        consume(make_connector({}))
+    assert calls == 3
+
+
+def test_planner_page_limit_fails_closed(service, monkeypatch):
+    service.page_span = 1
+    monkeypatch.setattr("jetstream_lakehouse.reader.MAX_PAGES", 2)
+
+    with pytest.raises(ProtocolError, match="page limit"):
+        consume(make_connector({}))
+
+
+def test_incomplete_short_last_page_fails_closed(service):
+    calls = 0
+
+    def leave_last_page_incomplete(plan):
+        nonlocal calls
+        calls += 1
+        if calls == 4:  # Discovery plus three planning pages for sequences 1..7.
+            plan["plannedThroughSeq"] = 6
+
+    service.plan_override = leave_last_page_incomplete
+    with pytest.raises(ProtocolError, match="made no progress"):
+        consume(make_connector({}))
+    assert calls == 4
 
 
 def test_spark_adapter_end_to_end(service):
