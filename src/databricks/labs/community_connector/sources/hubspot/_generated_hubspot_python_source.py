@@ -890,17 +890,19 @@ def register_lakeflow_source(spark):
                         or data.get("status", "COMPLETE") != "COMPLETE"):
                     raise RuntimeError("Malformed HubSpot association GET collection")
                 for result in data["results"]:
-                    if not isinstance(result, dict) or not isinstance(result.get("associationTypes"), list):
+                    if not isinstance(result, dict):
                         raise RuntimeError("Malformed HubSpot association GET target")
                     object_id = _association_identifier(result.get("toObjectId"), "GET target ID")
-                    kinds = result["associationTypes"]
-                    if with_types and not kinds:
-                        targets.add((object_id, None, None, None))
-                    for kind in kinds:
-                        type_id, category, label = _association_edge(kind)
-                        if with_types:
+                    kinds = result.get("associationTypes")
+                    if not isinstance(kinds, list):
+                        raise RuntimeError("Malformed HubSpot association GET target")
+                    if with_types:
+                        if not kinds:
+                            targets.add((object_id, None, None, None))
+                        for kind in kinds:
+                            type_id, category, label = _association_edge(kind)
                             targets.add((object_id, type_id, category, label))
-                    if not with_types:
+                    else:
                         targets.add(object_id)
                 cursor = _association_next_cursor(data)
                 if cursor is None:
@@ -940,13 +942,12 @@ def register_lakeflow_source(spark):
                     if not isinstance(target, dict):
                         raise RuntimeError("Malformed HubSpot association target")
                     object_id = _association_identifier(target.get("toObjectId"), "target ID")
-                    kinds = target.get("associationTypes")
-                    if kinds is not None:
-                        if not isinstance(kinds, list):
+                    validated = []
+                    if with_types:
+                        kinds = target.get("associationTypes")
+                        if kinds is not None and not isinstance(kinds, list):
                             raise RuntimeError("Malformed HubSpot association type")
-                        validated = [_association_edge(kind) for kind in kinds]
-                    else:
-                        validated = []
+                        validated = [_association_edge(kind) for kind in (kinds or [])]
                     if with_types:
                         if not validated:
                             found.add((object_id, None, None, None))
@@ -1424,7 +1425,8 @@ def register_lakeflow_source(spark):
                     data = self._get("/contacts/v1/lists", params)
                 except RuntimeError as exc:
                     if offset is None and str(exc) in {
-                        "HubSpot non-CRM HTTP 404", "HubSpot non-CRM HTTP 410",
+                        "HubSpot non-CRM HTTP 403", "HubSpot non-CRM HTTP 404",
+                        "HubSpot non-CRM HTTP 410",
                     }:
                         return None
                     raise
@@ -1496,17 +1498,11 @@ def register_lakeflow_source(spark):
             self.read_table_metadata(table)
             if table == "contact_list_memberships":
                 return self._membership_rows()
+            legacy_by_list_id = {}
             if table in {"owners", "forms", "contact_lists"}:
                 sources = self._inventory(table)
                 if table == "contact_lists" and sources:
-                    legacy = self._legacy_by_list_id()
-                    sources = [
-                        {
-                            **source,
-                            "legacyListId": legacy.get(_non_crm_id(source.get("listId"))),
-                        }
-                        for source in sources
-                    ]
+                    legacy_by_list_id = self._legacy_by_list_id()
             elif table == "pipelines":
                 options = table_options or {}
                 if "pipeline_object_types" in options:
@@ -1543,6 +1539,8 @@ def register_lakeflow_source(spark):
             output = {}
             for source in sources:
                 row = self._row(table, source)
+                if table == "contact_lists":
+                    row["legacyListId"] = legacy_by_list_id.get(row["listId"])
                 identity = tuple(row[key] for key in NON_CRM_KEYS[table])
                 if identity in output and output[identity] != row:
                     raise RuntimeError("Conflicting duplicate HubSpot non-CRM identity")

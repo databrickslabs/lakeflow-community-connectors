@@ -98,6 +98,16 @@ def test_typed_edges_reject_malformed_types(generated, kind):
         helper.read("deals", "contacts", ["a"], with_types=True)
 
 
+@pytest.mark.parametrize("generated", [False, True])
+def test_id_only_mode_ignores_unconsumed_association_types(generated):
+    payload = result("a")
+    payload["to"] = [typed_target(
+        "2", {"typeId": "future", "category": "FUTURE_DEFINED"},
+    )]
+    helper, _, _ = reader(batch(payload), generated=generated)
+    assert helper.read("deals", "contacts", ["a"]) == {"a": ["2"]}
+
+
 def test_partial_207_like_payload_retries_only_missing_at_current_cursor():
     helper, post, sleep = reader(
         batch(result("a", [], "a1"), result("b")),

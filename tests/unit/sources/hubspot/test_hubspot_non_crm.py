@@ -381,13 +381,22 @@ def test_contact_lists_include_current_and_legacy_ids():
     assert post.call_args_list[1].args[2] == ["4836", "16", "999"]
 
 
-@pytest.mark.parametrize("status", [404, 410])
-def test_retired_legacy_catalog_leaves_legacy_id_empty(status):
+@pytest.mark.parametrize("status", [403, 404, 410])
+def test_unavailable_legacy_catalog_leaves_legacy_id_empty(status):
     read, post, _ = helper(list_page(contact_list("7856")))
     with patch(NON_CRM_TEST_GET, return_value=response(status=status)):
         rows = read.read_table("contact_lists", {})
     assert rows[0]["legacyListId"] is None
     assert post.call_count == 1
+
+
+def test_legacy_id_is_not_added_to_raw_contact_list_payload():
+    source = contact_list("7856")
+    read, _, _ = helper(list_page(source))
+    with patch(NON_CRM_TEST_GET, return_value=response(EMPTY_LEGACY_CATALOG)):
+        row = read.read_table("contact_lists", {})[0]
+    assert row["legacyListId"] is None
+    assert json.loads(row["payload"]) == source
 
 
 def test_incomplete_or_conflicting_legacy_mapping_fails():
