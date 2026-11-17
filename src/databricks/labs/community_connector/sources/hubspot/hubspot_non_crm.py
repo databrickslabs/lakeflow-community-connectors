@@ -381,7 +381,8 @@ class HubspotNonCrm:
                 data = self._get("/contacts/v1/lists", params)
             except RuntimeError as exc:
                 if offset is None and str(exc) in {
-                    "HubSpot non-CRM HTTP 404", "HubSpot non-CRM HTTP 410",
+                    "HubSpot non-CRM HTTP 403", "HubSpot non-CRM HTTP 404",
+                    "HubSpot non-CRM HTTP 410",
                 }:
                     return None
                 raise
@@ -453,17 +454,11 @@ class HubspotNonCrm:
         self.read_table_metadata(table)
         if table == "contact_list_memberships":
             return self._membership_rows()
+        legacy_by_list_id = {}
         if table in {"owners", "forms", "contact_lists"}:
             sources = self._inventory(table)
             if table == "contact_lists" and sources:
-                legacy = self._legacy_by_list_id()
-                sources = [
-                    {
-                        **source,
-                        "legacyListId": legacy.get(_non_crm_id(source.get("listId"))),
-                    }
-                    for source in sources
-                ]
+                legacy_by_list_id = self._legacy_by_list_id()
         elif table == "pipelines":
             options = table_options or {}
             if "pipeline_object_types" in options:
@@ -500,6 +495,8 @@ class HubspotNonCrm:
         output = {}
         for source in sources:
             row = self._row(table, source)
+            if table == "contact_lists":
+                row["legacyListId"] = legacy_by_list_id.get(row["listId"])
             identity = tuple(row[key] for key in NON_CRM_KEYS[table])
             if identity in output and output[identity] != row:
                 raise RuntimeError("Conflicting duplicate HubSpot non-CRM identity")

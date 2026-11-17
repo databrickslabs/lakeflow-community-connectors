@@ -13,6 +13,15 @@ from databricks.labs.community_connector.source_simulator.specs.hubspot.handlers
 )
 
 
+def _list_id_pairs(corpus: Any) -> list[tuple[str, str]]:
+    """Return distinct synthetic legacy/current IDs for each list fixture."""
+    return [
+        (str(1_000_000 + index), str(record["listId"]))
+        for index, record in enumerate(corpus.get("contact_lists") or [], start=1)
+        if isinstance(record, dict) and record.get("listId") is not None
+    ]
+
+
 def serve_legacy_lists(
     prep: PreparedRequest, spec: Any, corpus: Any
 ) -> Response:  # noqa: ARG001
@@ -20,11 +29,7 @@ def serve_legacy_lists(
     query = parse_qs(urlparse(prep.url or "").query)
     start = int(query.get("offset", ["0"])[0])
     count = int(query.get("count", ["20"])[0])
-    records = [
-        {"listId": str(record["listId"])}
-        for record in (corpus.get("contact_lists") or [])
-        if isinstance(record, dict) and record.get("listId") is not None
-    ]
+    records = [{"listId": legacy} for legacy, _ in _list_id_pairs(corpus)]
     page = records[start : start + count]
     next_offset = start + len(page)
     has_more = next_offset < len(records)
@@ -37,15 +42,11 @@ def serve_legacy_lists(
 def serve_list_id_mapping(
     prep: PreparedRequest, spec: Any, corpus: Any
 ) -> Response:  # noqa: ARG001
-    """Map fixture IDs identically and report IDs absent from the corpus."""
+    """Map synthetic legacy IDs to current IDs and report unknown values."""
     requested = _parse_id_list(prep.body)
-    known = {
-        str(record["listId"])
-        for record in (corpus.get("contact_lists") or [])
-        if isinstance(record, dict) and record.get("listId") is not None
-    }
+    known = dict(_list_id_pairs(corpus))
     mappings = [
-        {"listId": value, "legacyListId": value}
+        {"listId": known[value], "legacyListId": value}
         for value in requested
         if value in known
     ]
