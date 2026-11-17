@@ -174,6 +174,32 @@ Plain JSON — diffable in PRs, greppable, hand-editable.
 
 ## Non-deterministic query params
 
+### Opaque continuation tokens in live validation
+
+When a custom handler emits synthetic cursor tokens, a live token cannot index
+that synthetic corpus. An endpoint can opt into pairing the two continuations:
+
+```yaml
+validation_cursor:
+  request_param: "page[after]"  # also declare this parameter under params
+  response_path: meta.next_cursor
+```
+
+The live validator pairs tokens from each live/synthetic response, then replaces
+the token only in a copy of the next request sent to the synthetic handler. The
+real API request and connector behavior are unchanged. Pairings are scoped to
+the endpoint, request body and other query parameters, including page size;
+a new first-page request resets the chain. Unseen live tokens and continuation
+beyond the synthetic corpus produce mismatches. No arbitrary fallback page is
+used. Provide enough synthetic records for the pages exercised by the test.
+
+Response status, envelope and sampled record shapes are still compared on every
+page. As elsewhere in this validator, this does not compare record values or
+prove full-account completeness. Endpoints without this option retain their
+existing behavior.
+
+### Ignored parameters
+
 Connectors that compute request params from `datetime.now()`, UUIDs, or other
 non-deterministic sources will mismatch on replay. Declare those params on
 the test class so the matcher ignores them:

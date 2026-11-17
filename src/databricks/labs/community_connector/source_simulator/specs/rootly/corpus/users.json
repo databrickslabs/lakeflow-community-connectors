@@ -1,0 +1,157 @@
+[
+  {
+    "id": "1",
+    "type": "users",
+    "attributes": {
+      "email": "victor-758",
+      "first_name": "mike-144",
+      "last_name": "delta-545",
+      "full_name": "yankee-699",
+      "full_name_with_team": "quebec-101",
+      "time_zone": "november-279",
+      "created_at": "echo-853",
+      "updated_at": "tango-124",
+      "scim_managed": false,
+      "scim_external_id": "kilo-331",
+      "joined_via": "hotel-735"
+    },
+    "relationships": {
+      "role": {
+        "data": {
+          "id": "quebec-996",
+          "type": "oscar-606"
+        }
+      },
+      "on_call_role": {
+        "data": {
+          "id": "mike-964",
+          "type": "india-186"
+        }
+      }
+    }
+  },
+  {
+    "id": "2",
+    "type": "users",
+    "attributes": {
+      "email": "yankee-907",
+      "first_name": "juliet-165",
+      "last_name": "oscar-172",
+      "full_name": "victor-622",
+      "full_name_with_team": "bravo-728",
+      "time_zone": "bravo-437",
+      "created_at": "romeo-427",
+      "updated_at": "yankee-700",
+      "scim_managed": false,
+      "scim_external_id": "romeo-737",
+      "joined_via": "papa-155"
+    },
+    "relationships": {
+      "role": {
+        "data": {
+          "id": "charlie-365",
+          "type": "xray-899"
+        }
+      },
+      "on_call_role": {
+        "data": {
+          "id": "echo-166",
+          "type": "india-687"
+        }
+      }
+    }
+  },
+  {
+    "id": "3",
+    "type": "users",
+    "attributes": {
+      "email": "golf-584",
+      "first_name": "hotel-556",
+      "last_name": "quebec-222",
+      "full_name": "india-552",
+      "full_name_with_team": "kilo-487",
+      "time_zone": "foxtrot-965",
+      "created_at": "oscar-918",
+      "updated_at": "papa-881",
+      "scim_managed": true,
+      "scim_external_id": "tango-183",
+      "joined_via": "oscar-872"
+    },
+    "relationships": {
+      "role": {
+        "data": {
+          "id": "charlie-146",
+          "type": "yankee-715"
+        }
+      },
+      "on_call_role": {
+        "data": {
+          "id": "papa-340",
+          "type": "charlie-348"
+        }
+      }
+    }
+  },
+  {
+    "id": "4",
+    "type": "users",
+    "attributes": {
+      "email": "kilo-298",
+      "first_name": "juliet-358",
+      "last_name": "uniform-310",
+      "full_name": "bravo-944",
+      "full_name_with_team": "romeo-948",
+      "time_zone": "alpha-468",
+      "created_at": "charlie-855",
+      "updated_at": "bravo-793",
+      "scim_managed": true,
+      "scim_external_id": "november-175",
+      "joined_via": "papa-851"
+    },
+    "relationships": {
+      "role": {
+        "data": {
+          "id": "xray-907",
+          "type": "oscar-948"
+        }
+      },
+      "on_call_role": {
+        "data": {
+          "id": "yankee-211",
+          "type": "alpha-326"
+        }
+      }
+    }
+  },
+  {
+    "id": "5",
+    "type": "users",
+    "attributes": {
+      "email": "oscar-156",
+      "first_name": "alpha-254",
+      "last_name": "delta-452",
+      "full_name": "quebec-358",
+      "full_name_with_team": "papa-124",
+      "time_zone": "oscar-716",
+      "created_at": "juliet-754",
+      "updated_at": "foxtrot-201",
+      "scim_managed": true,
+      "scim_external_id": "golf-876",
+      "joined_via": "tango-759"
+    },
+    "relationships": {
+      "role": {
+        "data": {
+          "id": "zulu-423",
+          "type": "romeo-962"
+        }
+      },
+      "on_call_role": {
+        "data": {
+          "id": "tango-271",
+          "type": "november-678"
+        }
+      }
+    }
+  }
+]

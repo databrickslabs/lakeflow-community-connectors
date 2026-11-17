@@ -1,0 +1,92 @@
+{
+  "version": 1,
+  "generated_at": "2026-11-16T22:27:26.242269Z",
+  "endpoints": [
+    {
+      "method": "GET",
+      "spec_path": "/v1/escalation_policies",
+      "sample_url": "https://api.rootly.com/v1/escalation_policies?page%5Bsize%5D=1000&page%5Bnumber%5D=1",
+      "status": "validated",
+      "calls": 2,
+      "matched": 2,
+      "mismatched": 0,
+      "no_spec": 0,
+      "issues": []
+    },
+    {
+      "method": "GET",
+      "spec_path": "/v1/incidents",
+      "sample_url": "https://api.rootly.com/v1/incidents?page%5Bsize%5D=1000&sort=updated_at&filter%5Bupdated_at%5D%5Blt%5D=2026-11-16T22%3A26%3A15%2B00%3A00",
+      "status": "mismatched",
+      "calls": 8,
+      "matched": 2,
+      "mismatched": 6,
+      "no_spec": 0,
+      "issues": [
+        "handler raised ValueError: synthetic corpus exhausted before live continuation; extend corpus",
+        "handler raised ValueError: unobserved live continuation token"
+      ]
+    },
+    {
+      "method": "GET",
+      "spec_path": "/v1/schedules",
+      "sample_url": "https://api.rootly.com/v1/schedules?page%5Bsize%5D=1000&page%5Bnumber%5D=1",
+      "status": "validated",
+      "calls": 2,
+      "matched": 2,
+      "mismatched": 0,
+      "no_spec": 0,
+      "issues": []
+    },
+    {
+      "method": "GET",
+      "spec_path": "/v1/services",
+      "sample_url": "https://api.rootly.com/v1/services?page%5Bsize%5D=1000&page%5Bnumber%5D=1",
+      "status": "validated",
+      "calls": 2,
+      "matched": 2,
+      "mismatched": 0,
+      "no_spec": 0,
+      "issues": []
+    },
+    {
+      "method": "GET",
+      "spec_path": "/v1/severities",
+      "sample_url": "https://api.rootly.com/v1/severities?page%5Bsize%5D=1000&page%5Bnumber%5D=1",
+      "status": "validated",
+      "calls": 2,
+      "matched": 2,
+      "mismatched": 0,
+      "no_spec": 0,
+      "issues": []
+    },
+    {
+      "method": "GET",
+      "spec_path": "/v1/teams",
+      "sample_url": "https://api.rootly.com/v1/teams?page%5Bsize%5D=1000&page%5Bnumber%5D=1",
+      "status": "validated",
+      "calls": 2,
+      "matched": 2,
+      "mismatched": 0,
+      "no_spec": 0,
+      "issues": []
+    },
+    {
+      "method": "GET",
+      "spec_path": "/v1/users",
+      "sample_url": "https://api.rootly.com/v1/users?page%5Bsize%5D=1000&page%5Bnumber%5D=1",
+      "status": "validated",
+      "calls": 2,
+      "matched": 2,
+      "mismatched": 0,
+      "no_spec": 0,
+      "issues": []
+    }
+  ],
+  "summary": {
+    "endpoints_total": 7,
+    "endpoints_validated": 6,
+    "endpoints_mismatched": 1,
+    "endpoints_missing_spec": 0
+  }
+}
