@@ -145,6 +145,42 @@ def test_maximum_decimal_is_exact_at_consumer(generated):
 
 
 @pytest.mark.parametrize("generated", [False, True])
+@pytest.mark.parametrize("value,expected", [
+    (
+        "0.01000000000000000020816681711721685132943093776702880859375",
+        Decimal("0.01"),
+    ),
+    (
+        "0.1000000000000000055511151231257827021181583404541015625",
+        Decimal("0.1"),
+    ),
+])
+def test_exact_binary_float_expansion_uses_shortest_decimal(
+    generated, value, expected
+):
+    api = ActivityAPI("meetings", value)
+    with patch("requests.get", side_effect=api.get), patch(
+        "requests.post", side_effect=api.post
+    ):
+        _, schema, stream = consumer("meetings", generated)
+        rows, _ = stream.read({})
+        row = list(rows)[0]
+    _make_type_verifier(schema)(row)
+    assert row.properties.custom_decimal_metric == expected
+
+
+@pytest.mark.parametrize("generated", [False, True])
+def test_arbitrary_high_precision_decimal_is_not_rounded(generated):
+    api = ActivityAPI("meetings", "0.123456789012345678901234567890")
+    with patch("requests.get", side_effect=api.get), patch(
+        "requests.post", side_effect=api.post
+    ):
+        conn, _, _ = consumer("meetings", generated)
+        with pytest.raises((ValueError, RuntimeError), match="decimal"):
+            list(conn.read_table("meetings", {}, {"numeric_value_mode": "decimal"})[0])
+
+
+@pytest.mark.parametrize("generated", [False, True])
 def test_default_bigint_mode_does_not_apply_decimal_validation(generated):
     api = ActivityAPI("meetings", "NaN")
     with patch("requests.get", side_effect=api.get), patch("requests.post", side_effect=api.post):
