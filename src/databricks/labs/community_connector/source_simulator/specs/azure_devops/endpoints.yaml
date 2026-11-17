@@ -150,6 +150,7 @@ endpoints:
           count: 0
           isLastBatch: true
           nextLink: null
+          continuationToken: null
 
   - path: /{organization}/{project}/_apis/pipelines
     method: GET
@@ -168,6 +169,10 @@ endpoints:
       wrapper:
         records_key: value
         extras: {count: 0}
+    # Future-finished builds that the connector's _init_time cap must drop.
+    synthesize_future_records:
+      cursor_field: finishTime
+      count: 3
 
   - path: /{organization}/{project}/_apis/build/builds/{build_id}/timeline
     method: GET

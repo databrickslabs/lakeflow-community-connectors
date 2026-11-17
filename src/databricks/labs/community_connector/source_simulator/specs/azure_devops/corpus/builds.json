@@ -2,11 +2,21 @@
   {
     "id": 1000,
     "buildNumber": "victor-884",
-    "_links": {"self": {"href": "https://example.invalid/builds/1000"}},
+    "_links": {
+      "self": {
+        "href": "https://example.invalid/builds/1000"
+      }
+    },
     "appendCommitMessageToRunName": true,
     "buildNumberRevision": 1,
-    "logs": {"id": 1, "type": "Container", "url": "https://example.invalid/logs"},
-    "orchestrationPlan": {"planId": "00000000-0000-0000-0000-000000000000"},
+    "logs": {
+      "id": 1,
+      "type": "Container",
+      "url": "https://example.invalid/logs"
+    },
+    "orchestrationPlan": {
+      "planId": "00000000-0000-0000-0000-000000000000"
+    },
     "status": "victor-900",
     "result": "kilo-582",
     "queueTime": "lima-455",
@@ -65,7 +75,25 @@
     "uri": "lima-694",
     "url": "juliet-705",
     "organization": "xray-907",
-    "project_name": "zulu-332"
+    "project_name": "zulu-332",
+    "plans": [
+      {
+        "planId": "00000000-0000-0000-0000-000000000000"
+      }
+    ],
+    "project": {
+      "id": "00000000-0000-0000-0000-000000000000",
+      "name": "Project",
+      "state": "wellFormed"
+    },
+    "properties": {},
+    "templateParameters": {},
+    "triggerInfo": {},
+    "triggeredByBuild": {
+      "id": 1,
+      "buildNumber": "1"
+    },
+    "validationResults": []
   },
   {
     "id": 1001,
@@ -129,7 +157,25 @@
     "uri": "echo-291",
     "url": "foxtrot-421",
     "organization": "uniform-495",
-    "project_name": "xray-235"
+    "project_name": "xray-235",
+    "plans": [
+      {
+        "planId": "00000000-0000-0000-0000-000000000000"
+      }
+    ],
+    "project": {
+      "id": "00000000-0000-0000-0000-000000000000",
+      "name": "Project",
+      "state": "wellFormed"
+    },
+    "properties": {},
+    "templateParameters": {},
+    "triggerInfo": {},
+    "triggeredByBuild": {
+      "id": 1,
+      "buildNumber": "1"
+    },
+    "validationResults": []
   },
   {
     "id": 1002,
@@ -192,7 +238,25 @@
     "uri": "whiskey-987",
     "url": "bravo-486",
     "organization": "victor-525",
-    "project_name": "juliet-153"
+    "project_name": "juliet-153",
+    "plans": [
+      {
+        "planId": "00000000-0000-0000-0000-000000000000"
+      }
+    ],
+    "project": {
+      "id": "00000000-0000-0000-0000-000000000000",
+      "name": "Project",
+      "state": "wellFormed"
+    },
+    "properties": {},
+    "templateParameters": {},
+    "triggerInfo": {},
+    "triggeredByBuild": {
+      "id": 1,
+      "buildNumber": "1"
+    },
+    "validationResults": []
   },
   {
     "id": 1003,
@@ -255,7 +319,25 @@
     "uri": "hotel-144",
     "url": "india-472",
     "organization": "whiskey-211",
-    "project_name": "zulu-631"
+    "project_name": "zulu-631",
+    "plans": [
+      {
+        "planId": "00000000-0000-0000-0000-000000000000"
+      }
+    ],
+    "project": {
+      "id": "00000000-0000-0000-0000-000000000000",
+      "name": "Project",
+      "state": "wellFormed"
+    },
+    "properties": {},
+    "templateParameters": {},
+    "triggerInfo": {},
+    "triggeredByBuild": {
+      "id": 1,
+      "buildNumber": "1"
+    },
+    "validationResults": []
   },
   {
     "id": 1004,
@@ -318,6 +400,24 @@
     "uri": "charlie-993",
     "url": "hotel-525",
     "organization": "hotel-806",
-    "project_name": "kilo-895"
+    "project_name": "kilo-895",
+    "plans": [
+      {
+        "planId": "00000000-0000-0000-0000-000000000000"
+      }
+    ],
+    "project": {
+      "id": "00000000-0000-0000-0000-000000000000",
+      "name": "Project",
+      "state": "wellFormed"
+    },
+    "properties": {},
+    "templateParameters": {},
+    "triggerInfo": {},
+    "triggeredByBuild": {
+      "id": 1,
+      "buildNumber": "1"
+    },
+    "validationResults": []
   }
 ]

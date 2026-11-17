@@ -37,7 +37,8 @@
     "build_id": 1000,
     "build_finish_time": "2024-01-01T00:00:00Z",
     "organization": "mike-197",
-    "project_name": "echo-365"
+    "project_name": "echo-365",
+    "queueId": 1
   },
   {
     "id": "hotel-61-pk1",
@@ -84,7 +85,8 @@
     "build_id": 1001,
     "build_finish_time": "2024-01-01T01:00:00Z",
     "organization": "papa-619",
-    "project_name": "echo-368"
+    "project_name": "echo-368",
+    "queueId": 1
   },
   {
     "id": "delta-15-pk2",
@@ -120,7 +122,8 @@
     "build_id": 1002,
     "build_finish_time": "2024-01-01T02:00:00Z",
     "organization": "juliet-800",
-    "project_name": "quebec-861"
+    "project_name": "quebec-861",
+    "queueId": 1
   },
   {
     "id": "foxtrot--pk3",
@@ -156,7 +159,8 @@
     "build_id": 1003,
     "build_finish_time": "2024-01-01T03:00:00Z",
     "organization": "india-771",
-    "project_name": "quebec-756"
+    "project_name": "quebec-756",
+    "queueId": 1
   },
   {
     "id": "november-pk4",
@@ -198,6 +202,7 @@
     "build_id": 1004,
     "build_finish_time": "2024-01-01T04:00:00Z",
     "organization": "victor-379",
-    "project_name": "hotel-468"
+    "project_name": "hotel-468",
+    "queueId": 1
   }
 ]

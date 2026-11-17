@@ -2606,10 +2606,8 @@ def register_lakeflow_source(spark):
             duplicates in append tables. Builds finishing after the connector
             was created are left for the next run (``maxTime``).
 
-            With *limit*, paging stops once more than *limit* new builds are
-            held and the last one finishes later than the *limit*-th, so a batch
-            reads about one page instead of the whole backlog while builds tied
-            on finish time are never split.
+            With limit, a batch reads about one page instead of the
+            whole backlog while builds tied on finish time are never split.
             """
             params: dict[str, str] = {
                 "api-version": "7.1",
@@ -2645,9 +2643,7 @@ def register_lakeflow_source(spark):
                 "builds",
                 should_stop=enough,
             )
-            fresh = [
-                b for b in builds if is_fresh(b) and parse_ts(b["finishTime"]) <= self._init_time
-            ]
+            fresh = [b for b in builds if is_fresh(b) and parse_ts(b["finishTime"]) <= self._init_time]
             fresh.sort(key=lambda b: parse_ts(b["finishTime"]))
             return fresh
 
