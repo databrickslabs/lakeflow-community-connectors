@@ -17,6 +17,13 @@ def result(parent, targets=(), after=None):
     return value
 
 
+def typed_target(identity, *types):
+    return {
+        "toObjectId": identity,
+        "associationTypes": list(types),
+    }
+
+
 def batch(*results, status="COMPLETE", **extra):
     return {"status": status, "results": list(results), **extra}
 
@@ -52,6 +59,43 @@ def test_independent_cursors_reordered_parents_and_duplicate_targets():
         )
         assert call.args[3] == 0.11
     sleep.assert_not_called()
+
+
+@pytest.mark.parametrize("generated", [False, True])
+def test_typed_edges_preserve_every_valid_type(generated):
+    payload = result("a")
+    payload["to"] = [
+        typed_target(
+            "2",
+            {"typeId": 7, "category": "HUBSPOT_DEFINED", "label": None},
+            {"typeId": 9, "category": "USER_DEFINED", "label": "Decision maker"},
+        ),
+        typed_target("3"),
+    ]
+    helper, _, _ = reader(batch(payload), generated=generated)
+    assert helper.read("deals", "contacts", ["a"], with_types=True) == {
+        "a": [
+            {"id": "2", "typeId": 7, "category": "HUBSPOT_DEFINED", "label": None},
+            {"id": "2", "typeId": 9, "category": "USER_DEFINED", "label": "Decision maker"},
+            {"id": "3", "typeId": None, "category": None, "label": None},
+        ]
+    }
+
+
+@pytest.mark.parametrize("generated", [False, True])
+@pytest.mark.parametrize("kind", [
+    None,
+    {"typeId": True, "category": "HUBSPOT_DEFINED"},
+    {"typeId": -1, "category": "HUBSPOT_DEFINED"},
+    {"typeId": 1, "category": "PRIVATE"},
+    {"typeId": 1, "category": "USER_DEFINED", "label": []},
+])
+def test_typed_edges_reject_malformed_types(generated, kind):
+    payload = result("a")
+    payload["to"] = [typed_target("2", kind)]
+    helper, _, _ = reader(batch(payload), generated=generated)
+    with pytest.raises(RuntimeError, match="association type"):
+        helper.read("deals", "contacts", ["a"], with_types=True)
 
 
 def test_partial_207_like_payload_retries_only_missing_at_current_cursor():

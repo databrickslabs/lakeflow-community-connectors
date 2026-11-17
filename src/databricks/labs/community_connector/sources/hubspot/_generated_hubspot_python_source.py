@@ -617,6 +617,9 @@ def register_lakeflow_source(spark):
         "INVALID_AUTHENTICATION", "RATE_LIMITS", "INTERNAL_ERROR",
         "FORBIDDEN", "CONFLICT",
     })
+    ASSOCIATION_TYPE_CATEGORIES = frozenset({
+        "HUBSPOT_DEFINED", "INTEGRATOR_DEFINED", "USER_DEFINED", "WORK",
+    })
 
 
     def _association_error_labels(errors: list) -> tuple[str, str]:
@@ -654,6 +657,23 @@ def register_lakeflow_source(spark):
         raise RuntimeError(f"Malformed HubSpot association {kind}")
 
 
+    def _association_edge(kind: dict) -> tuple[int, str, str | None]:
+        """Return a validated association type, category and optional label."""
+        if (
+            not isinstance(kind, dict)
+            or type(kind.get("typeId")) is not int
+            or kind["typeId"] < 0
+            or kind.get("category") not in ASSOCIATION_TYPE_CATEGORIES
+        ):
+            raise RuntimeError("Malformed HubSpot association type")
+        label = kind.get("label")
+        if label in (None, ""):
+            label = None
+        elif not isinstance(label, str):
+            raise RuntimeError("Malformed HubSpot association type")
+        return kind["typeId"], kind["category"], label
+
+
     def _association_next_cursor(result: dict):
         if "paging" not in result:
             return None
@@ -684,8 +704,15 @@ def register_lakeflow_source(spark):
             self._sleep = sleep
             self._get = get
 
-        def read(self, from_type: str, to_type: str, parent_ids: list[str]) -> dict[str, list[str]]:
-            """Return sorted unique target IDs; retry omissions at their current cursor.
+        def read(
+            self,
+            from_type: str,
+            to_type: str,
+            parent_ids: list[str],
+            *,
+            with_types: bool = False,
+        ) -> dict[str, list]:
+            """Return sorted unique target IDs or typed edges.
 
             Five additional attempts are allowed for each unresolved parent/page.
             Successful pages reset that budget, so legitimate page counts are unlimited.
@@ -709,7 +736,7 @@ def register_lakeflow_source(spark):
                         for parent, cursor in pending.items()
                     ]
                     data = self._post("associations", url, {"inputs": inputs}, ASSOCIATION_MIN_INTERVAL_S)
-                    results = self._validate_results(data, pending)
+                    results = self._validate_results(data, pending, with_types=with_types)
                     errors = data.get("errors", [])
                     error_count = data.get("numErrors", 0)
                     if (not isinstance(errors, list) or isinstance(error_count, bool)
@@ -734,7 +761,9 @@ def register_lakeflow_source(spark):
                                     # GET and batch cursors are not interchangeable.
                                     # Complete fresh reads before replacing any old pages.
                                     reconciled = {
-                                        item: self._read_one(from_type, to_type, item)
+                                        item: self._read_one(
+                                            from_type, to_type, item, with_types=with_types
+                                        )
                                         for item in pending
                                     }
                                     targets.update(reconciled)
@@ -759,10 +788,10 @@ def register_lakeflow_source(spark):
                             retries[parent] += 1
                             unresolved.append(retries[parent])
                             continue
-                        ids, cursor = results[parent]
+                        found, cursor = results[parent]
                         if cursor is not None and cursor in seen[parent]:
                             raise RuntimeError("Repeated or cyclic HubSpot association cursor")
-                        targets[parent].update(ids)
+                        targets[parent].update(found)
                         if cursor is None:
                             del pending[parent]
                         else:
@@ -771,7 +800,30 @@ def register_lakeflow_source(spark):
                             retries[parent] = 0
                     if unresolved:
                         self._sleep(min(2.0 ** (max(unresolved) - 1), ASSOCIATION_MAX_BACKOFF_S))
-            return {parent: sorted(ids) for parent, ids in targets.items()}
+            if not with_types:
+                return {parent: sorted(ids) for parent, ids in targets.items()}
+
+            def edge(item):
+                object_id, type_id, category, label = item
+                return {
+                    "id": object_id,
+                    "typeId": type_id,
+                    "category": category,
+                    "label": label,
+                }
+
+            return {
+                parent: sorted(
+                    (edge(item) for item in found),
+                    key=lambda item: (
+                        item["id"],
+                        -1 if item["typeId"] is None else item["typeId"],
+                        item["category"] or "",
+                        item["label"] or "",
+                    ),
+                )
+                for parent, found in targets.items()
+            }
 
         @staticmethod
         def _empty_association_parents(data: dict) -> set:
@@ -823,7 +875,9 @@ def register_lakeflow_source(spark):
                         for error in errors)
             )
 
-        def _read_one(self, from_type: str, to_type: str, parent: str) -> set[str]:
+        def _read_one(
+            self, from_type: str, to_type: str, parent: str, *, with_types: bool = False
+        ) -> set:
             base = f"{self.base_url}/crm/objects/2026-09/{quote(from_type, safe='')}/{quote(parent, safe='')}"
             url = f"{base}/associations/{quote(to_type, safe='')}"
             targets, seen = set(), set()
@@ -838,14 +892,16 @@ def register_lakeflow_source(spark):
                 for result in data["results"]:
                     if not isinstance(result, dict) or not isinstance(result.get("associationTypes"), list):
                         raise RuntimeError("Malformed HubSpot association GET target")
-                    for kind in result["associationTypes"]:
-                        if (not isinstance(kind, dict) or type(kind.get("typeId")) is not int
-                                or kind["typeId"] < 0 or not isinstance(kind.get("category"), str)
-                                or kind["category"] not in {
-                                    "HUBSPOT_DEFINED", "INTEGRATOR_DEFINED", "USER_DEFINED", "WORK"
-                                }):
-                            raise RuntimeError("Malformed HubSpot association GET type")
-                    targets.add(_association_identifier(result.get("toObjectId"), "GET target ID"))
+                    object_id = _association_identifier(result.get("toObjectId"), "GET target ID")
+                    kinds = result["associationTypes"]
+                    if with_types and not kinds:
+                        targets.add((object_id, None, None, None))
+                    for kind in kinds:
+                        type_id, category, label = _association_edge(kind)
+                        if with_types:
+                            targets.add((object_id, type_id, category, label))
+                    if not with_types:
+                        targets.add(object_id)
                 cursor = _association_next_cursor(data)
                 if cursor is None:
                     break
@@ -864,7 +920,7 @@ def register_lakeflow_source(spark):
             return targets
 
         @staticmethod
-        def _validate_results(data, pending: dict) -> dict:
+        def _validate_results(data, pending: dict, *, with_types: bool = False) -> dict:
             if not isinstance(data, dict):
                 raise RuntimeError("Malformed HubSpot association batch")
             results = data.get("results", [])
@@ -879,12 +935,26 @@ def register_lakeflow_source(spark):
                     raise RuntimeError("Unrequested or duplicate HubSpot association parent")
                 if not isinstance(result.get("to"), list):
                     raise RuntimeError("Malformed HubSpot association target list")
-                ids = set()
+                found = set()
                 for target in result["to"]:
                     if not isinstance(target, dict):
                         raise RuntimeError("Malformed HubSpot association target")
-                    ids.add(_association_identifier(target.get("toObjectId"), "target ID"))
-                parsed[parent] = (ids, _association_next_cursor(result))
+                    object_id = _association_identifier(target.get("toObjectId"), "target ID")
+                    kinds = target.get("associationTypes")
+                    if kinds is not None:
+                        if not isinstance(kinds, list):
+                            raise RuntimeError("Malformed HubSpot association type")
+                        validated = [_association_edge(kind) for kind in kinds]
+                    else:
+                        validated = []
+                    if with_types:
+                        if not validated:
+                            found.add((object_id, None, None, None))
+                        for type_id, category, label in validated:
+                            found.add((object_id, type_id, category, label))
+                    else:
+                        found.add(object_id)
+                parsed[parent] = (found, _association_next_cursor(result))
             return parsed
 
 
@@ -2102,10 +2172,12 @@ def register_lakeflow_source(spark):
                     table_name, start_offset, end_offset, table_options
                 )
             if start_offset == end_offset:
-                if table_name not in NON_CRM_TABLES and "associations" in table_options:
+                if table_name not in NON_CRM_TABLES:
                     if table_name not in self.list_tables():
                         raise ValueError(f"Unsupported table: {table_name}")
-                    self._get_associations_for_object(table_name, table_options)
+                    if "associations" in table_options:
+                        self._get_associations_for_object(table_name, table_options)
+                    self._association_value_mode(table_options)
                 return iter([])
             if (table_name in self._ACTIVITY_BOOTSTRAP_TABLES
                     and not self._uses_snapshot(table_name, table_options)):
@@ -2266,7 +2338,8 @@ def register_lakeflow_source(spark):
         _TABLE_OPTION_KEYS = frozenset({
             "max_records_per_batch", "history_properties", "history_since",
             "history_lookback_minutes", "include_properties", "exclude_properties",
-            "associations", "association_sync_mode", "pipeline_object_types",
+            "associations", "association_sync_mode", "association_value_mode",
+            "pipeline_object_types",
         })
 
         @classmethod
@@ -2336,6 +2409,13 @@ def register_lakeflow_source(spark):
                 raise ValueError("association_sync_mode must be incremental or full_refresh")
             return mode
 
+        @staticmethod
+        def _association_value_mode(table_options: Dict[str, str] | None) -> str:
+            mode = (table_options or {}).get("association_value_mode", "ids")
+            if mode not in ("ids", "typed"):
+                raise ValueError("association_value_mode must be ids or typed")
+            return mode
+
         def get_table_schema(
             self, table_name: str, table_options: Dict[str, str]
         ) -> StructType:
@@ -2362,6 +2442,7 @@ def register_lakeflow_source(spark):
                 return self._history.get_table_schema()
             if "associations" in table_options:
                 self._get_associations_for_object(table_name, table_options)
+            self._association_value_mode(table_options)
 
             # Cache key includes the property filters — the schema is a function of
             # (table_name, table_options), so cached entries must not leak across
@@ -2425,6 +2506,7 @@ def register_lakeflow_source(spark):
                 return self._history.get_table_metadata()
             if "associations" in table_options:
                 self._get_associations_for_object(table_name, table_options)
+            self._association_value_mode(table_options)
 
             cache_key = self._options_cache_key(table_name, table_options)
             if cache_key in self._metadata_cache:
@@ -2454,6 +2536,7 @@ def register_lakeflow_source(spark):
                 opts.get("exclude_properties"),
                 opts.get("associations"),
                 cls._association_sync_mode(opts),
+                cls._association_value_mode(opts),
             )
 
         def _discover_table_schema(self, table_name: str, table_options: Dict[str, str]) -> StructType:
@@ -2489,6 +2572,7 @@ def register_lakeflow_source(spark):
                 cursor_property=config["cursor_property_field"],
             )
             associations = self._get_associations_for_object(table_name, table_options)
+            association_value_mode = self._association_value_mode(table_options)
 
             # Use cdc_with_deletes only for tables that support archived queries
             supports_deletes = config.get("supports_deletes", False)
@@ -2502,6 +2586,7 @@ def register_lakeflow_source(spark):
                 "cursor_property_field": config["cursor_property_field"],
                 "property_names": property_names,
                 "associations": associations,
+                "association_value_mode": association_value_mode,
                 "ingestion_type": ingestion_type,
             }
 
@@ -2522,6 +2607,7 @@ def register_lakeflow_source(spark):
             )
             property_by_name = {prop.get("name", ""): prop for prop in properties}
             associations = self._get_associations_for_object(table_name, table_options)
+            association_value_mode = self._association_value_mode(table_options)
 
             # Build base schema fields (these are always present for CRM objects)
             base_fields = [
@@ -2531,9 +2617,13 @@ def register_lakeflow_source(spark):
                 StructField("archived", BooleanType(), True),
             ]
 
-            # Add association fields based on configuration
+            association_type = (
+                self._typed_association_type()
+                if association_value_mode == "typed"
+                else ArrayType(StringType(), True)
+            )
             for association in associations:
-                base_fields.append(StructField(association, ArrayType(StringType()), True))
+                base_fields.append(StructField(association, association_type, True))
 
             # Build nested properties schema based on API response
             properties_fields = []
@@ -2661,6 +2751,7 @@ def register_lakeflow_source(spark):
                 return self._history.read_table(table_name, start_offset, table_options)
             if "associations" in table_options:
                 self._get_associations_for_object(table_name, table_options)
+            self._association_value_mode(table_options)
 
             start_offset = start_offset or {}
             if (table_name in self._ACTIVITY_BOOTSTRAP_TABLES
@@ -2691,6 +2782,7 @@ def register_lakeflow_source(spark):
             metadata = self.read_table_metadata(table_name, table_options)
             property_names = metadata.get("property_names", [])
             associations = metadata.get("associations", [])
+            association_value_mode = metadata.get("association_value_mode", "ids")
 
             def pages():
                 after = None
@@ -2731,10 +2823,16 @@ def register_lakeflow_source(spark):
                         recent_hashes.append(cursor_hash)
                         if len(recent_hashes) > self._SNAPSHOT_CURSOR_HISTORY:
                             recent_set.remove(recent_hashes.pop(0))
-                    self._hydrate_associations(table_name, records, associations)
+                    self._hydrate_associations(
+                        table_name, records, associations, association_value_mode
+                    )
                     for record in records:
                         yield self._transform_single_record(
-                            record, table_name, property_names, associations
+                            record,
+                            table_name,
+                            property_names,
+                            associations,
+                            association_value_mode,
                         )
                     previous_page_ids = page_ids
                     if next_after is None:
@@ -2842,6 +2940,7 @@ def register_lakeflow_source(spark):
             metadata = self.read_table_metadata(table_name, table_options)
             property_names = metadata.get("property_names", [])
             associations = metadata.get("associations", [])
+            association_value_mode = metadata.get("association_value_mode", "ids")
             max_records = self._parse_max_records(table_options)
             after = state["after"]
             cursor_hashes = list(state["cursor_hashes"])
@@ -2873,9 +2972,15 @@ def register_lakeflow_source(spark):
                     seen_ids.add(identity)
                 proof_records.extend(records)
 
-                self._hydrate_associations(table_name, records, associations)
+                self._hydrate_associations(
+                    table_name, records, associations, association_value_mode
+                )
                 rows.extend(self._transform_records(
-                    records, table_name, property_names, associations
+                    records,
+                    table_name,
+                    property_names,
+                    associations,
+                    association_value_mode,
                 ))
                 proof = {
                     "range_count": len(proof_records),
@@ -2946,6 +3051,7 @@ def register_lakeflow_source(spark):
                 raise ValueError(f"Unsupported table: {table_name}")
             if "associations" in table_options:
                 self._get_associations_for_object(table_name, table_options)
+            self._association_value_mode(table_options)
             if not self._get_object_config(table_name).get("supports_deletes", False):
                 return iter([]), start
             upper = self._archive_time(self._init_ts)
@@ -3010,6 +3116,7 @@ def register_lakeflow_source(spark):
             property_names = metadata.get("property_names", [])
             cursor_property_field = metadata.get("cursor_property_field")
             associations = metadata.get("associations", [])
+            association_value_mode = metadata.get("association_value_mode", "ids")
 
             # Only cap on the incremental path — full-refresh snapshots need
             # to drain everything in a single call to keep the snapshot atomic.
@@ -3090,10 +3197,16 @@ def register_lakeflow_source(spark):
 
                 # Neither embedded list responses nor Search establish complete
                 # relationships. Hydrate every selected parent before publishing it.
-                self._hydrate_associations(table_name, records, associations)
+                self._hydrate_associations(
+                    table_name, records, associations, association_value_mode
+                )
                 # Transform records
                 transformed_records = self._transform_records(
-                    records, table_name, property_names, associations
+                    records,
+                    table_name,
+                    property_names,
+                    associations,
+                    association_value_mode,
                 )
                 all_records.extend(transformed_records)
 
@@ -3117,17 +3230,31 @@ def register_lakeflow_source(spark):
             offset = {"updatedAt": latest_updated} if latest_updated else {}
             return all_records, offset
 
-        def _hydrate_associations(self, table_name: str, records: List[Dict], targets: List[str]) -> None:
+        def _hydrate_associations(
+            self,
+            table_name: str,
+            records: List[Dict],
+            targets: List[str],
+            association_value_mode: str = "ids",
+        ) -> None:
             if not targets or not records:
                 return
             from_type = self._get_api_object_type(table_name)
             parent_ids = [str(record["id"]) for record in records]
+            with_types = association_value_mode == "typed"
             for target in targets:
-                links = self._associations.read(from_type, self._get_api_object_type(target), parent_ids)
+                target_type = self._get_api_object_type(target)
+                if with_types:
+                    links = self._associations.read(
+                        from_type, target_type, parent_ids, with_types=True
+                    )
+                else:
+                    links = self._associations.read(from_type, target_type, parent_ids)
                 for record in records:
                     record["associations"] = record.get("associations") or {}
+                    values = links[str(record["id"])]
                     record["associations"][target] = {
-                        "results": [{"id": value} for value in links[str(record["id"])]]
+                        "results": values if with_types else [{"id": value} for value in values]
                     }
 
         def _fetch_full_refresh_batch(
@@ -3251,16 +3378,24 @@ def register_lakeflow_source(spark):
         def _transform_records(
             self, records: List[Dict], table_name: str, property_names=None,
             associations: List[str] | None = None,
+            association_value_mode: str = "ids",
         ) -> List[Dict]:
             """Transform HubSpot records by flattening properties and associations"""
             return [
-                self._transform_single_record(record, table_name, property_names, associations)
+                self._transform_single_record(
+                    record,
+                    table_name,
+                    property_names,
+                    associations,
+                    association_value_mode,
+                )
                 for record in records
             ]
 
         def _transform_single_record(
             self, record: Dict, table_name: str, property_names=None,
             associations: List[str] | None = None,
+            association_value_mode: str = "ids",
         ) -> Dict:
             """Transform a single HubSpot record"""
             transformed_record = {}
@@ -3278,7 +3413,8 @@ def register_lakeflow_source(spark):
             # Handle associations
             transformed_record.update(self._extract_associations(
                 record, associations if associations is not None else
-                self._get_associations_for_object(table_name)
+                self._get_associations_for_object(table_name),
+                association_value_mode,
             ))
 
             return transformed_record
@@ -3319,8 +3455,24 @@ def register_lakeflow_source(spark):
             return output
 
         @staticmethod
-        def _extract_associations(record: Dict, expected_associations: List[str]) -> Dict:
-            """Extract association IDs from record"""
+        def _typed_association_type() -> ArrayType:
+            return ArrayType(
+                StructType([
+                    StructField("id", StringType(), True),
+                    StructField("typeId", LongType(), True),
+                    StructField("category", StringType(), True),
+                    StructField("label", StringType(), True),
+                ]),
+                True,
+            )
+
+        @staticmethod
+        def _extract_associations(
+            record: Dict,
+            expected_associations: List[str],
+            association_value_mode: str = "ids",
+        ) -> Dict:
+            """Extract association IDs or typed edge values from a hydrated record."""
             associations_data = record.get("associations", {})
             result = {}
 
@@ -3329,13 +3481,26 @@ def register_lakeflow_source(spark):
                 if association_type in associations_data:
                     assoc_data = associations_data[association_type]
                     if isinstance(assoc_data, dict) and "results" in assoc_data:
-                        association_list = [
-                            item.get("id", "") for item in assoc_data["results"]
-                        ]
+                        values = assoc_data["results"]
                     elif isinstance(assoc_data, list):
+                        values = assoc_data
+                    else:
+                        values = []
+                    if association_value_mode == "typed":
+                        association_list = [
+                            {
+                                "id": item.get("id"),
+                                "typeId": item.get("typeId"),
+                                "category": item.get("category"),
+                                "label": item.get("label"),
+                            }
+                            for item in values
+                            if isinstance(item, dict)
+                        ]
+                    else:
                         association_list = [
                             str(item) if not isinstance(item, dict) else item.get("id", "")
-                            for item in assoc_data
+                            for item in values
                         ]
 
                 result[association_type] = association_list

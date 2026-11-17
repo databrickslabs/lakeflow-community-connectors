@@ -4,8 +4,45 @@ import json
 from unittest import mock
 
 import pytest
+from pyspark.sql.types import ArrayType, StringType, StructType, _make_type_verifier
 
 from tests.unit.sources.hubspot.test_hubspot_custom_objects import _connector_class
+
+
+@pytest.mark.parametrize("generated", [False, True])
+def test_association_value_mode_is_generic_and_schema_affecting(generated):
+    conn = _connector_class(generated)({"access_token": "constructor-only"})
+    with mock.patch.object(conn, "list_tables", return_value=["deals"]), mock.patch.object(
+        conn, "_get_object_properties", return_value=[]
+    ):
+        ids = conn.get_table_schema("deals", {"associations": "contacts"})["contacts"].dataType
+        typed = conn.get_table_schema("deals", {
+            "associations": "contacts", "association_value_mode": "typed"
+        })["contacts"].dataType
+        assert isinstance(ids, ArrayType) and isinstance(ids.elementType, StringType)
+        assert isinstance(typed, ArrayType) and isinstance(typed.elementType, StructType)
+        assert typed.elementType.fieldNames() == ["id", "typeId", "category", "label"]
+        assert conn.read_table_metadata("deals", {
+            "associations": "contacts", "association_value_mode": "typed"
+        })["association_value_mode"] == "typed"
+        record = {"id": "1", "properties": {}}
+        edge = {
+            "id": "2", "typeId": 7, "category": "USER_DEFINED", "label": "Primary"
+        }
+        with mock.patch.object(
+            conn._associations, "read", return_value={"1": [edge]}
+        ) as read:
+            conn._hydrate_associations("deals", [record], ["contacts"], "typed")
+        read.assert_called_once_with("deals", "contacts", ["1"], with_types=True)
+        row = conn._transform_single_record(
+            record, "deals", [], ["contacts"], "typed"
+        )
+        _make_type_verifier(conn.get_table_schema("deals", {
+            "associations": "contacts", "association_value_mode": "typed"
+        }))(row)
+        assert row["contacts"] == [edge]
+        with pytest.raises(ValueError, match="association_value_mode"):
+            conn.get_table_schema("deals", {"association_value_mode": "unknown"})
 
 
 @pytest.mark.parametrize("generated", [False, True])

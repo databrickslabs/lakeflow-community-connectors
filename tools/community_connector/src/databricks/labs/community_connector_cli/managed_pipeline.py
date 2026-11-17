@@ -245,7 +245,8 @@ def augment_full_pipeline_body(
 _HUBSPOT_TABLE_OPTION_KEYS = frozenset({
     "max_records_per_batch", "history_properties", "history_since",
     "history_lookback_minutes", "include_properties", "exclude_properties",
-    "association_sync_mode", "pipeline_object_types",
+    "associations", "association_sync_mode", "association_value_mode",
+    "pipeline_object_types",
 })
 
 
