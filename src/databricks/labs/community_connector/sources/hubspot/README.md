@@ -77,7 +77,7 @@ common fields. They do not use `max_records_per_batch` or property filters.
 | `owners` | `id` | Active and archived owners, including teams |
 | `pipelines` | `objectTypeId`, `id` | Pipelines and nested stages for configured object types |
 | `forms` | `id` | Active and archived forms |
-| `contact_lists` | `listId` | Contact lists with MANUAL, DYNAMIC, or SNAPSHOT processing type |
+| `contact_lists` | `listId` | Contact lists with current `listId` and mapped v1 `legacyListId`; the legacy value is null when HubSpot retires the v1 catalog or reports no mapping |
 | `contact_list_memberships` | `listId`, `recordId` | Current memberships of each discovered contact list |
 | `form_submissions` | `formId`, `conversionId` | Submissions for each discovered form |
 
