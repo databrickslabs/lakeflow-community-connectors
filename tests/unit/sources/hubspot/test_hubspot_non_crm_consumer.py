@@ -26,6 +26,19 @@ def test_snapshot_consumer_nested_rows_and_empty_rescan(generated, table):
     empty = False
 
     def response_for(url, **_kwargs):
+        if url.endswith("/contacts/v1/lists"):
+            rows = [] if empty else [
+                {"listId": row["listId"]} for row in fixtures["contact_lists"]
+            ]
+            return Mock(status_code=200, json=lambda: {"lists": rows, "has-more": False})
+        if url.endswith("/crm/lists/2026-09/idmapping"):
+            pairs = [] if empty else [
+                {"listId": row["listId"], "legacyListId": row["listId"]}
+                for row in fixtures["contact_lists"]
+            ]
+            return Mock(status_code=200, json=lambda: {
+                "legacyListIdsToIdsMapping": pairs, "missingLegacyListIds": [],
+            })
         if "/memberships" in url:
             name = "contact_list_memberships"
         elif "/submissions/forms/" in url:
@@ -63,6 +76,8 @@ def test_snapshot_consumer_nested_rows_and_empty_rescan(generated, table):
         assert all(payload[key] == value for key, value in fixtures[table][0].items())
         for key in metadata["primary_keys"]:
             assert rows[0][schema.fieldNames().index(key)] is not None
+        if table == "contact_lists":
+            assert rows[0][schema.fieldNames().index("legacyListId")] == fixtures[table][0]["listId"]
         empty = True
         assert list(reader.read(InputPartition(None))) == []
 

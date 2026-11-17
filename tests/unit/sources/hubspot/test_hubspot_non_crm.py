@@ -14,6 +14,7 @@ from databricks.labs.community_connector.sources.hubspot.hubspot_non_crm import 
 NON_CRM_TEST_GET = (
     "databricks.labs.community_connector.sources.hubspot.hubspot_non_crm.requests.get"
 )
+EMPTY_LEGACY_CATALOG = {"lists": [], "has-more": False}
 
 
 def page(*rows, after=None):
@@ -77,8 +78,10 @@ def test_lists_post_body_and_body_offset():
         list_page(contact_list(), offset=1, has_more=True, total=2),
         list_page(contact_list("2"), offset=2, total=2),
     )
-    rows = read.read_table("contact_lists", {})
+    with patch(NON_CRM_TEST_GET, return_value=response(EMPTY_LEGACY_CATALOG)):
+        rows = read.read_table("contact_lists", {})
     assert [r["listId"] for r in rows] == ["1", "2"]
+    assert [r["legacyListId"] for r in rows] == [None, None]
     first, second = post.call_args_list
     assert first.args == (
         "non_crm", "https://example.invalid/crm/lists/2026-09/search",
@@ -163,7 +166,8 @@ def test_pipeline_defaults_overrides_and_nested_lossless_payload():
 def test_consumer_schemas_and_lossless_fields(table, source):
     read, _, _ = helper(list_page(source) if table == "contact_lists" else page(source))
     if table == "contact_lists":
-        rows = read.read_table(table, {})
+        with patch(NON_CRM_TEST_GET, return_value=response(EMPTY_LEGACY_CATALOG)):
+            rows = read.read_table(table, {})
     else:
         with patch(NON_CRM_TEST_GET, side_effect=[response(page(source)), response(page())]):
             rows = read.read_table(table, {})
@@ -305,8 +309,9 @@ def test_conflicting_duplicate_identity_fails():
     read, _, _ = helper(
         list_page(contact_list(name="one"), contact_list(name="two"))
     )
-    with pytest.raises(RuntimeError, match="Conflicting duplicate"):
-        read.read_table("contact_lists", {})
+    with patch(NON_CRM_TEST_GET, return_value=response(EMPTY_LEGACY_CATALOG)):
+        with pytest.raises(RuntimeError, match="Conflicting duplicate"):
+            read.read_table("contact_lists", {})
 
 
 def test_injected_partition_cannot_overwrite_conflicting_source_identity():
@@ -335,3 +340,56 @@ def test_membership_schema_retains_timestamp_and_unknown_payload():
     assert rows[0]["recordId"] == "42"
     assert json.loads(rows[0]["payload"]) == source
     assert rows[0]["listId"] == "1"
+
+
+def test_contact_lists_include_current_and_legacy_ids():
+    read, post, _ = helper(
+        list_page(contact_list("7856"), contact_list("57")),
+        {
+            "legacyListIdsToIdsMapping": [
+                {"listId": "7856", "legacyListId": "4836"},
+                {"listId": "57", "legacyListId": "16"},
+            ],
+            "missingLegacyListIds": ["999"],
+        },
+    )
+    with patch(NON_CRM_TEST_GET, side_effect=[
+        response({"lists": [{"listId": 4836}], "has-more": True, "offset": 1}),
+        response({
+            "lists": [{"listId": "16"}, {"listId": 4836}, {"listId": "999"}],
+            "has-more": False,
+        }),
+    ]):
+        rows = read.read_table("contact_lists", {})
+    assert [(row["listId"], row["legacyListId"]) for row in rows] == [
+        ("7856", "4836"), ("57", "16"),
+    ]
+    assert post.call_args_list[1].args[1].endswith("/crm/lists/2026-09/idmapping")
+    assert post.call_args_list[1].args[2] == ["4836", "16", "999"]
+
+
+@pytest.mark.parametrize("status", [404, 410])
+def test_retired_legacy_catalog_leaves_legacy_id_empty(status):
+    read, post, _ = helper(list_page(contact_list("7856")))
+    with patch(NON_CRM_TEST_GET, return_value=response(status=status)):
+        rows = read.read_table("contact_lists", {})
+    assert rows[0]["legacyListId"] is None
+    assert post.call_count == 1
+
+
+def test_incomplete_or_conflicting_legacy_mapping_fails():
+    read, _, _ = helper(
+        list_page(contact_list("7856")),
+        {
+            "legacyListIdsToIdsMapping": [
+                {"listId": "7856", "legacyListId": "1"},
+                {"listId": "7856", "legacyListId": "2"},
+            ],
+            "missingLegacyListIds": [],
+        },
+    )
+    with patch(NON_CRM_TEST_GET, return_value=response({
+        "lists": [{"listId": "1"}, {"listId": "2"}], "has-more": False,
+    })):
+        with pytest.raises(RuntimeError, match="Conflicting HubSpot legacy list id"):
+            read.read_table("contact_lists", {})
