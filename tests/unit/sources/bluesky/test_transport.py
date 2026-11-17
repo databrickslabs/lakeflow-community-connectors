@@ -2,7 +2,6 @@ import io
 
 import pytest
 import requests
-from conftest import response
 from jetstream_lakehouse.errors import (
     ArchiveChanged,
     CursorTooOld,
@@ -13,6 +12,7 @@ from jetstream_lakehouse.errors import (
 from jetstream_lakehouse.transport import Transport
 
 from databricks.labs.community_connector.sources.bluesky.options import Options
+from tests.unit.sources.bluesky.conftest import response
 
 
 def test_transient_errors_reconnect(service):

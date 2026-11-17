@@ -28,6 +28,31 @@ def test_selection_normalization_and_table_override():
     assert options.with_table_options({"kinds": "commit"}).collections == options.collections
 
 
+@pytest.mark.parametrize(
+    "value, expected", [(True, True), (False, False), (" TRUE ", True), ("False", False)]
+)
+def test_boolean_payload_option_accepts_yaml_and_text_forms(value, expected):
+    assert Options.parse({"include_raw_payload": value}, {}).include_raw_payload is expected
+
+
+def test_forwarded_endpoint_is_compared_after_normalization():
+    options = Options.parse(
+        {"endpoint": "https://example.com/", "api_key": "token"},
+        {"endpoint": "https://example.com///", "api_key": "token", "tableName": "events"},
+    )
+
+    assert options.endpoint == "https://example.com"
+
+
+@pytest.mark.parametrize(
+    "table",
+    [{"endpoint": "https://other.example"}, {"api_key": "different-token"}],
+)
+def test_connection_settings_cannot_be_overridden(table):
+    with pytest.raises(ValueError, match="cannot be overridden"):
+        Options.parse({"endpoint": "https://example.com", "api_key": "token"}, table)
+
+
 def test_pydantic_enforces_constraints_without_exposing_secret():
     with pytest.raises(ValidationError) as error:
         Options.parse({"api_key": "private token", "max_retries": "9"}, {})

@@ -13,6 +13,11 @@ archive into a triggered Databricks Lakeflow pipeline. The source name is
   archive may allow anonymous reads.
 - A triggered pipeline. Continuous pipelines are not supported.
 
+The upstream PR includes a backward-compatible framework hook that checks for
+Trigger.AvailableNow before connector I/O. A DBR 19 Dedicated test on 2026-11-17
+completed three microbatches with `.trigger(availableNow=True)` using the generated
+source. Maintainer review and a full Lakeflow pipeline deployment remain pending.
+
 ## Setup
 
 ### Required connection parameters
@@ -81,7 +86,9 @@ explicit `scd_type`.
 
 ### Bluesky-specific `table_configuration` options
 
-All values are strings. Pydantic validates them before a read.
+Lakeflow commonly supplies strings; booleans from YAML and their textual
+`true`/`false` forms are accepted for `include_raw_payload`. Pydantic validates
+connector-owned values before a read. Framework metadata is left to Lakeflow.
 
 | Option | Required | Default | Description |
 | --- | --- | --- | --- |
@@ -89,7 +96,7 @@ All values are strings. Pydantic validates them before a read.
 | `collections` | No | all | Comma-separated collection NSIDs or namespace wildcards; applies to commits only. |
 | `kinds` | No | all | Comma-separated subset of `commit`, `identity`, `account`, `sync`. Must include `commit` when using `collections`. |
 | `dids` | No | all | Comma-separated repository DIDs. |
-| `max_events_per_refresh` | No | `10000` | Maximum sequence span per update, from 1 to 100,000. Filtering can yield fewer rows. |
+| `max_events_per_refresh` | No | `10000` | Maximum sequence span per microbatch, from 1 to 100,000. A run can contain multiple batches toward one fixed sealed target. Filtering can yield fewer rows. |
 | `request_timeout_seconds` | No | `20` | Per-request timeout, from 1 to 120 seconds. |
 | `refresh_timeout_seconds` | No | `120` | Planning/read budget, from 1 to 900 seconds. |
 | `max_retries` | No | `3` | Additional attempts for transient HTTP failures, from 0 to 8. |
@@ -109,7 +116,7 @@ All values are strings. Pydantic validates them before a read.
 ## How to run
 
 1. Install this source wheel, the matching Lakeflow Community Connectors
-   framework, and `jetstream-lakehouse==0.1.0` in a triggered pipeline. PySpark
+   framework, and the released `jetstream-lakehouse==0.2.0` from PyPI. PySpark
    comes from the Databricks runtime.
 2. Create the connection above and add `events` to your pipeline spec. For a
    narrow first run, select one collection and use a recent sealed sequence
@@ -133,12 +140,17 @@ All values are strings. Pydantic validates them before a read.
 ```
 
 3. Run a small update, inspect the table and checkpoint, then schedule further
-   triggered updates. Preserve the checkpoint and endpoint. The standalone
-   project includes a runnable [pipeline example](https://github.com/jesinity/lakeflow-connect-bluesky/blob/main/examples/ingest.py)
-   and [SQL for current posts](https://github.com/jesinity/lakeflow-connect-bluesky/blob/main/examples/posts.sql).
+   updates. One update can now process multiple bounded batches toward the run's
+   fixed sealed target. Preserve the checkpoint and endpoint. The standalone
+   project includes a runnable [pipeline example](https://github.com/jesinity/lakeflow-connect-bluesky/blob/integration/jetstream-lakehouse/examples/ingest.py)
+   and [SQL for current posts](https://github.com/jesinity/lakeflow-connect-bluesky/blob/integration/jetstream-lakehouse/examples/posts.sql).
 
 ### Best practices and troubleshooting
 
+- If a pinned archive generation disappears, use the
+  [compaction recovery runbook](compaction-recovery.md).
+  It preserves the existing table and checkpoint while recovery runs into a new
+  target.
 - Start with a small `max_events_per_refresh` and a recent sequence. Filters
   can produce an empty table update while still advancing the checkpoint.
 - Archive compaction can remove earlier events before the first read. Successful

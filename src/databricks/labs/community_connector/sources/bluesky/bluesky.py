@@ -1,7 +1,7 @@
 """Bounded raw archive ingestion through the current Lakeflow interfaces."""
 
 import json
-import re
+import logging
 from typing import Any, Iterator, Mapping
 
 from pyspark.sql.types import (
@@ -20,15 +20,18 @@ from databricks.labs.community_connector.interface.supports_partition import (
 )
 from databricks.labs.community_connector.sources.bluesky.errors import CursorTooOld, ProtocolError
 from databricks.labs.community_connector.sources.bluesky.jetstream_lakeflow_adapter import (
-    pinned_rows,
-    pinned_transport,
+    client_for_options,
+    lakeflow_row,
+    migrate_legacy_plan,
+    operation_context,
+    plan_from_json,
+    translated_errors,
 )
 from databricks.labs.community_connector.sources.bluesky.options import MAX_SEQ, Options
 
 MAX_PLAN_BYTES = 2 * 1024 * 1024
 MAX_BATCH_BYTES = 64 * 1024 * 1024
-# Connector safety cap for paginated plans, not a Jetstream API limit.
-MAX_PLAN_PAGES = 100
+LOGGER = logging.getLogger(__name__)
 
 
 class ArchiveValidator:
@@ -71,64 +74,9 @@ class ArchiveValidator:
             raise ProtocolError(f"Invalid {name}")
         return value
 
-    @staticmethod
-    def validate_segments(segments: Any) -> None:
-        """Check the shape, order, and bounds of planned segment descriptors.
-
-        Parameters
-        ----------
-        segments : Any
-            Untrusted ``segments`` value returned by the snapshot planner or
-            loaded from a saved checkpoint.
-
-        Raises
-        ------
-        ProtocolError
-            A descriptor or block range is malformed, unsupported, or out of
-            order.
-
-        Notes
-        -----
-        This checks plan metadata before any segment bytes are requested. The
-        package reader validates the sealed segment contents separately.
-        """
-        if not isinstance(segments, list):
-            raise ProtocolError("Invalid snapshot segments")
-        previous_index = -1
-        for entry in segments:
-            if not isinstance(entry, dict):
-                raise ProtocolError("Invalid snapshot segment entry")
-            if (
-                not re.fullmatch(r"seg_[0-9a-z]+\.jss", str(entry.get("name", "")))
-                or not re.fullmatch(r"[0-9a-f]{16}", str(entry.get("checksum", "")))
-                or entry.get("mode") not in ("segment", "blocks")
-            ):
-                raise ProtocolError("Unsupported snapshot segment descriptor")
-            idx = ArchiveValidator.sequence(entry.get("index"), "segment index")
-            if idx <= previous_index:
-                raise ProtocolError("Snapshot segments are not strictly ordered")
-            previous_index = idx
-            min_seq = ArchiveValidator.sequence(entry.get("minSeq"), "minSeq")
-            max_seq = ArchiveValidator.sequence(entry.get("maxSeq"), "maxSeq")
-            if min_seq > max_seq:
-                raise ProtocolError("Invalid segment sequence bounds")
-            if entry["mode"] == "blocks":
-                ranges = entry.get("blocks")
-                if not isinstance(ranges, list) or not ranges:
-                    raise ProtocolError("Missing snapshot block ranges")
-                previous = -1
-                for block in ranges:
-                    if not isinstance(block, dict):
-                        raise ProtocolError("Invalid block range")
-                    first = ArchiveValidator.sequence(block.get("first"), "first block")
-                    last = ArchiveValidator.sequence(block.get("last"), "last block")
-                    if first <= previous or first > last:
-                        raise ProtocolError("Invalid or overlapping snapshot block ranges")
-                    previous = last
-
 
 class BlueskyLakeflowConnect(LakeflowConnect, SupportsPartitionedStream):
-    """Read one bounded Jetstream archive refresh through Lakeflow Connect.
+    """Read a fixed Jetstream run target through bounded Lakeflow microbatches.
 
     Parameters
     ----------
@@ -140,18 +88,18 @@ class BlueskyLakeflowConnect(LakeflowConnect, SupportsPartitionedStream):
     ----------
     config : Options
         Configuration used for planning, filtering, and transport setup.
-    _refresh_high : int or None
-        Sealed sequence tip pinned for this connector instance.
-    _refresh_scope : str or None
-        Fingerprint of the configuration pinned for this refresh.
+    _run_target : int or None
+        Uncapped sealed sequence tip discovered once for this connector instance.
+    _run_scope : str or None
+        Fingerprint of the configuration pinned for this run.
 
     Notes
     -----
-    Create a fresh connector instance for each triggered pipeline refresh.
+    Each instance progresses through bounded batches toward its fixed run target.
     """
 
     def __init__(self, config: Options | Mapping[str, Any]) -> None:
-        """Create a connector for one bounded refresh.
+        """Create a connector for one archive run.
 
         Parameters
         ----------
@@ -165,8 +113,8 @@ class BlueskyLakeflowConnect(LakeflowConnect, SupportsPartitionedStream):
 
         Notes
         -----
-        The first planned window pins a sealed tip and configuration scope for
-        this instance. A later triggered refresh should use a new instance.
+        The first offset request discovers a sealed tip and configuration scope.
+        Later batches on this instance advance toward that fixed tip.
         """
         if isinstance(config, Mapping):
             config = Options.parse(config, {})
@@ -174,8 +122,12 @@ class BlueskyLakeflowConnect(LakeflowConnect, SupportsPartitionedStream):
             raise TypeError("config must be an Options instance or a mapping")
         super().__init__(config.to_options_dict())
         self.config = config
-        self._refresh_high: int | None = None
-        self._refresh_scope: str | None = None
+        self._run_target: int | None = None
+        self._run_scope: str | None = None
+
+    def requires_trigger_available_now(self) -> bool:
+        """Require the shared Spark reader's AvailableNow lifecycle callback."""
+        return True
 
     def _config(self, table_name: str, table_options: Mapping[str, Any]) -> Options:
         """Resolve and validate options for the single supported table.
@@ -293,13 +245,30 @@ class BlueskyLakeflowConnect(LakeflowConnect, SupportsPartitionedStream):
         """
         if not offset:
             return config.starting_cursor
-        if not isinstance(offset, dict) or offset.get("version") != 1:
+        if not isinstance(offset, dict) or offset.get("version") not in (1, 2):
             raise ValueError("Unsupported checkpoint version")
         if offset.get("scope") != config.fingerprint():
             raise ValueError(
                 "Checkpoint endpoint, start cursor, filters or payload settings changed"
             )
         return ArchiveValidator.sequence(offset.get("seq"), "checkpoint seq")
+
+    @staticmethod
+    def _archive_plan(offset: dict[str, Any], config: Options):
+        """Restore a v2 plan or deterministically migrate a pending v1 envelope."""
+        if not isinstance(offset.get("plan"), str) or len(offset["plan"]) > MAX_PLAN_BYTES:
+            raise ProtocolError("Invalid checkpoint plan")
+        after = ArchiveValidator.sequence(offset.get("after"), "checkpoint after")
+        through = ArchiveValidator.sequence(offset.get("seq"), "checkpoint seq")
+        if offset.get("version") == 1:
+            plan = migrate_legacy_plan(offset["plan"], config, after, through)
+        elif offset.get("version") == 2:
+            plan = plan_from_json(offset["plan"])
+        else:
+            raise ValueError("Unsupported checkpoint version")
+        if plan.after_seq != after or plan.through_seq != through:
+            raise ProtocolError("Checkpoint range does not match its saved plan")
+        return plan
 
     def latest_offset(
         self,
@@ -333,59 +302,51 @@ class BlueskyLakeflowConnect(LakeflowConnect, SupportsPartitionedStream):
 
         Notes
         -----
-        The first planner response pins the sealed tip for this instance.
-        Subsequent pages must reach that tip without extending the window.
-        Returning an offset does not commit it; Spark commits after the batch.
+        The connector discovers the uncapped sealed target once. Each later call
+        plans one sequence-bounded batch toward it. Returning an offset does not
+        commit it; Spark commits after the batch.
         """
         config = self._config(table_name, table_options)
         after = self._cursor(start_offset, config)
         scope = config.fingerprint()
-        if self._refresh_scope is not None and self._refresh_scope != scope:
-            raise ValueError("A connector instance cannot change its scope during a refresh")
-        self._refresh_scope = scope
-        if self._refresh_high is not None and after >= self._refresh_high:
+        if self._run_scope is not None and self._run_scope != scope:
+            raise ValueError("A connector instance cannot change its scope during a run")
+        self._run_scope = scope
+        if self._run_target is None:
+            with operation_context("Sealed-tip discovery", config, after), translated_errors():
+                self._run_target = client_for_options(config, MAX_BATCH_BYTES).sealed_tip(after)
+        if self._run_target < after:
+            raise CursorTooOld("Archive tip is behind checkpoint; endpoint may have reset")
+        if after >= self._run_target:
             return start_offset or {}
-        # A sequence window bounds the number of rows even before exact filtering.
-        before = self._refresh_high or min(after + config.max_events_per_refresh, MAX_SEQ)
-        if before == after:
+        batch_end = min(self._run_target, after + config.max_events_per_refresh)
+        with (
+            operation_context("Snapshot planning", config, after, batch_end),
+            translated_errors(),
+        ):
+            plan = client_for_options(config, MAX_BATCH_BYTES).plan_snapshot(after, batch_end)
+        if plan.through_seq <= after:
             return start_offset or {}
-        pages = []
-        through = after
-        with pinned_transport(config) as transport:
-            for _ in range(MAX_PLAN_PAGES):
-                page = transport.plan(through, before)
-                tip = ArchiveValidator.sequence(page.get("sealedTipSeq"), "sealedTipSeq")
-                covered = ArchiveValidator.sequence(
-                    page.get("plannedThroughSeq"), "plannedThroughSeq"
-                )
-                if tip < after:
-                    raise CursorTooOld("Archive tip is behind checkpoint; endpoint may have reset")
-                if tip > before or covered > tip or covered < through:
-                    raise ProtocolError("Snapshot planner returned inconsistent sequence bounds")
-                if self._refresh_high is None:
-                    self._refresh_high = tip
-                if tip != self._refresh_high:
-                    raise ProtocolError("Pinned archive tip changed during planning")
-                before = tip
-                ArchiveValidator.validate_segments(page.get("segments"))
-                pages.append({"after": through, "through": covered, "segments": page["segments"]})
-                if len(json.dumps(pages)) > MAX_PLAN_BYTES:
-                    raise ProtocolError("Snapshot plan too large; reduce max_events_per_refresh")
-                if covered == tip:
-                    break
-                if covered == through:
-                    raise ProtocolError("Snapshot planner made no progress")
-                through = covered
-            else:
-                raise ProtocolError("Snapshot planning exceeded the page limit")
-        if before == after:
-            return start_offset or {}
+        if plan.through_seq > batch_end:
+            raise ProtocolError("Snapshot plan exceeds the requested batch range")
+        with (
+            operation_context("Plan serialization", config, after, plan.through_seq),
+            translated_errors(),
+        ):
+            plan_json = plan.to_json()
+        LOGGER.info(
+            "Planned Bluesky batch after=%d through=%d target=%d sequence_lag=%d",
+            after,
+            plan.through_seq,
+            self._run_target,
+            self._run_target - plan.through_seq,
+        )
         return {
-            "version": 1,
+            "version": 2,
             "scope": scope,
-            "seq": before,
+            "seq": plan.through_seq,
             "after": after,
-            "plan": json.dumps(pages, separators=(",", ":")),
+            "plan": plan_json,
         }
 
     def get_partitions(
@@ -430,8 +391,13 @@ class BlueskyLakeflowConnect(LakeflowConnect, SupportsPartitionedStream):
         through = self._cursor(end_offset, config)
         if through == after:
             return []
-        if through < after or end_offset.get("after") != after:
+        if (
+            through < after
+            or end_offset.get("after") != after
+            or end_offset.get("version") not in (1, 2)
+        ):
             raise ValueError("Checkpoint range does not match the recorded plan")
+        self._archive_plan(end_offset, config)
         # A single partition keeps ordering and a single overall read time budget.
         # The mixin is used for replay correctness, not parallelism in this version.
         return [{"start": after, "end": end_offset}]
@@ -480,38 +446,26 @@ class BlueskyLakeflowConnect(LakeflowConnect, SupportsPartitionedStream):
             or after >= through
         ):
             raise ProtocolError("Invalid partition range")
-        if not isinstance(end.get("plan"), str) or len(end["plan"]) > MAX_PLAN_BYTES:
-            raise ProtocolError("Invalid checkpoint plan")
+        plan = self._archive_plan(end, config)
+        LOGGER.info("Reading Bluesky batch after=%d through=%d", after, through)
         try:
-            pages = json.loads(end["plan"])
+            with (
+                operation_context("Saved-plan read", config, after, through),
+                translated_errors(),
+            ):
+                batch = client_for_options(config, MAX_BATCH_BYTES).read_plan(plan)
         except ValueError:
-            raise ProtocolError("Invalid checkpoint plan") from None
-        if not isinstance(pages, list) or not pages or len(pages) > MAX_PLAN_PAGES:
-            raise ProtocolError("Invalid checkpoint pages")
-        covered = after
-        previous = after
-        with pinned_transport(config) as transport:
-            for page in pages:
-                if not isinstance(page, dict):
-                    raise ProtocolError("Invalid checkpoint page")
-                page_after = ArchiveValidator.sequence(page.get("after"), "page after")
-                page_through = ArchiveValidator.sequence(page.get("through"), "page through")
-                if page_after != covered or not covered < page_through <= through:
-                    raise ProtocolError("Discontinuous checkpoint plan")
-                segments = page.get("segments")
-                ArchiveValidator.validate_segments(segments)
-                for entry in segments:
-                    for event in pinned_rows(
-                        transport, entry, covered, page_through, config.include_raw_payload
-                    ):
-                        if event["seq"] <= previous:
-                            raise ProtocolError("Overlapping or out-of-order archive events")
-                        previous = event["seq"]
-                        if config.matches(event):
-                            yield event
-                covered = page_through
-            if covered != through:
-                raise ProtocolError("Incomplete checkpoint plan")
+            raise ProtocolError(
+                "Saved plan source scope does not match connector options"
+            ) from None
+        LOGGER.info(
+            "Read Bluesky batch after=%d through=%d rows=%d",
+            batch.after_seq,
+            batch.through_seq,
+            len(batch.events),
+        )
+        for event in batch.events:
+            yield lakeflow_row(event, config.include_raw_payload)
 
     def read_table(
         self,

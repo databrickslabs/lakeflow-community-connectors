@@ -16,4 +16,4 @@ The generator source and command were not retained in this repository, so the ex
 fixture provenance cannot be independently reproduced from this checkout alone.
 
 Regenerate only when intentionally adopting a new archive format. Record the new
-upstream revision and review decoded output. See the Bluesky source NOTICE for attribution.
+upstream revision and review decoded output. See the root NOTICE for attribution.

@@ -7,12 +7,12 @@ import cbor2
 import pytest
 import xxhash
 import zstandard
-from conftest import block_bytes
 from jetstream_lakehouse.archive import cid, decode_block, decode_payload, segment_events
 from jetstream_lakehouse.errors import ProtocolError
 from jetstream_lakehouse.transport import Transport
 
 from databricks.labs.community_connector.sources.bluesky.options import Options
+from tests.unit.sources.bluesky.conftest import block_bytes
 
 
 def reseal(service, change):

@@ -37,21 +37,6 @@ TABLE_OPTIONS = {
     "include_raw_payload",
 }
 CONNECTION_OPTIONS = {"endpoint", "api_key"}
-FRAMEWORK_OPTIONS = {
-    "tableName",
-    "table_name",
-    "source",
-    "connection_name",
-    "databricks.connection",
-    "externalOptionsAllowList",
-    "external_options_allowlist",
-    "operation",
-    "sourceName",
-    "auth_type",
-    "tableNameList",
-    "tableConfigs",
-    "isDeleteFlow",
-}
 
 
 class Options(BaseModel):
@@ -72,7 +57,7 @@ class Options(BaseModel):
     dids : tuple[str, ...]
         Repository DIDs selected for the read.
     max_events_per_refresh : int
-        Maximum sequence span planned for one refresh.
+        Maximum sequence span planned for one microbatch.
     request_timeout_seconds : int
         Per-request timeout limit.
     refresh_timeout_seconds : int
@@ -155,6 +140,10 @@ class Options(BaseModel):
     @field_validator("include_raw_payload", mode="before")
     @classmethod
     def validate_raw_payload(cls, value: Any) -> bool:
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, str) and value.strip().lower() in ("true", "false"):
+            return value.strip().lower() == "true"
         if value not in ("true", "false"):
             raise ValueError("include_raw_payload must be 'true' or 'false'")
         return value == "true"
@@ -170,15 +159,19 @@ class Options(BaseModel):
         # Spark lowercases keys in CaseInsensitiveDict, including framework options.
         connection = {key.lower(): value for key, value in connection.items()}
         table = {key.lower(): value for key, value in table.items()}
-        unknown = (set(connection) | set(table)) - (
-            TABLE_OPTIONS | CONNECTION_OPTIONS | {key.lower() for key in FRAMEWORK_OPTIONS}
-        )
-        if unknown:
-            raise ValueError("Unsupported connector option names")
         if set(table) & CONNECTION_OPTIONS:
             # Framework forwards merged connection options to read methods.
-            if any(table[k] != connection.get(k) for k in set(table) & CONNECTION_OPTIONS):
-                raise ValueError("Connection options cannot be overridden per table")
+            for key in set(table) & CONNECTION_OPTIONS:
+                connection_value = connection.get(key)
+                table_value = table[key]
+                if key == "endpoint" and connection_value is not None:
+                    try:
+                        connection_value = cls.validate_endpoint(connection_value)
+                        table_value = cls.validate_endpoint(table_value)
+                    except ValueError:
+                        raise ValueError("Invalid endpoint option") from None
+                if table_value != connection_value:
+                    raise ValueError(f"Connection option '{key}' cannot be overridden per table")
         values = {
             key: value
             for key, value in {**connection, **table}.items()

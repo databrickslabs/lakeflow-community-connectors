@@ -12,7 +12,7 @@ readme = "README.md"
 license = "Apache-2.0"
 dependencies = [
   "lakeflow-community-connectors>=0.1.0,<0.2",
-  "jetstream-lakehouse==0.1.0",
+  "jetstream-lakehouse==0.2.0",
   "pydantic>=2,<3",
   "requests>=2.28,<3",
 ]

@@ -41,20 +41,21 @@ may need multiple calls before `plannedThroughSeq` reaches its sealed tip.
 For `getSegment`, the reader sends `Range: bytes=<first>-<last>` and
 `If-Match: "<plan checksum>"`. It requires a matching ETag and valid
 `Content-Range`; a missing or changed pinned generation fails the read. The
-`jetstream-lakehouse==0.1.0` package validates jss0/v1 metadata, the xxh3
-checksum, Zstandard frame checksums, the block index, and DAG-CBOR payloads.
-It decodes the selected blocks only.
+The `jetstream-lakehouse==0.2.0` public client validates jss0/v1 metadata, the
+xxh3 checksum, Zstandard frame checksums, the block index, and DAG-CBOR payloads.
+It decodes the selected blocks only. The connector uses the released
+`jetstream-lakehouse==0.2.0` package from PyPI.
 
 ## Incremental and replay contract
 
-One `latest_offset` call plans at most `max_events_per_refresh` sequence
-positions and pins the first sealed tip for that connector instance. The
-checkpoint stores the candidate end sequence plus a serialized, checksummed
-plan. Spark commits it only after its Delta batch succeeds. `get_partitions`
-emits one ordered partition for that plan; `read_partition` replays precisely
-the recorded segments without replanning. An empty or fully filtered interval
-can still advance the sequence cursor. When the pinned tip is reached, the
-same offset is returned so a triggered pipeline terminates.
+The connector discovers an uncapped sealed target once per run. Each
+`latest_offset` call plans at most `max_events_per_refresh` sequence positions
+toward that fixed target. The checkpoint stores the candidate end sequence and
+serialized public `ArchivePlan`. Spark commits it only after its Delta batch
+succeeds. `get_partitions` emits one ordered partition for the plan;
+`read_partition` replays it without replanning. An empty or fully filtered
+interval can still advance the sequence cursor. New data sealed after discovery
+is left for a later run.
 
 Filtering is checked after decoding as well as in the planner. `collections`
 applies only to commit events and requires `commit` in `kinds`. `dids` and

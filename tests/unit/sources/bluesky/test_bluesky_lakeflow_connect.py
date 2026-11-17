@@ -5,10 +5,6 @@ is collected when copied into the upstream repository, where that harness is
 available. The local archive protocol tests remain independently runnable.
 """
 
-import pytest
-
-pytest.importorskip("tests.unit.sources.test_suite")
-
 from databricks.labs.community_connector.sources.bluesky.bluesky import BlueskyLakeflowConnect
 from tests.unit.sources.test_partition_suite import SupportsPartitionedStreamTests
 from tests.unit.sources.test_suite import LakeflowConnectTests

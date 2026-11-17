@@ -1,14 +1,17 @@
 """Characterize the published client's compatibility with Lakeflow rows."""
 
 import json
+import traceback
 
 import pytest
 from jetstream_lakehouse import Client, Config
+from jetstream_lakehouse import errors as library_errors
 
 from databricks.labs.community_connector.sources.bluesky.bluesky import BlueskyLakeflowConnect
 from databricks.labs.community_connector.sources.bluesky.errors import ProtocolError
 from databricks.labs.community_connector.sources.bluesky.jetstream_lakeflow_adapter import (
     lakeflow_row,
+    operation_context,
     translated_errors,
 )
 from databricks.labs.community_connector.sources.bluesky.options import Options
@@ -80,3 +83,32 @@ def test_published_snapshot_maps_protocol_errors(service):
     service.data = service.data[:-1] + bytes([service.data[-1] ^ 1])
     with pytest.raises(ProtocolError, match="checksum"):
         snapshot_rows(Options.parse({}, {}), 0, 64 * 1024 * 1024)
+
+
+def test_translated_error_hides_unsafe_cause_in_traceback():
+    try:
+        try:
+            raise RuntimeError("secret request token")
+        except RuntimeError as unsafe:
+            raise library_errors.ProtocolError("safe archive failure") from unsafe
+    except library_errors.ProtocolError as error:
+        with pytest.raises(ProtocolError) as caught:
+            with translated_errors():
+                raise error
+
+    rendered = "".join(traceback.format_exception(caught.value))
+    assert "safe archive failure" in rendered
+    assert "secret request token" not in rendered
+    assert caught.value.__cause__ is None
+
+
+def test_operation_context_adds_safe_stage_range_and_endpoint():
+    options = Options.parse({"endpoint": "https://archive.example", "api_key": "private-token"}, {})
+    with pytest.raises(ProtocolError) as caught:
+        with operation_context("Saved-plan read", options, 10, 20), translated_errors():
+            raise library_errors.ProtocolError("checksum mismatch")
+
+    message = str(caught.value)
+    assert "Saved-plan read" in message and "(10, 20]" in message
+    assert "https://archive.example" in message
+    assert "private-token" not in message
