@@ -1,0 +1,27 @@
+# MongoDB connector — HTTP surface.
+#
+# MongoDB itself speaks its own wire protocol (PyMongo), which this HTTP
+# simulator cannot stand in for; the connector's offline tests use the
+# in-process fake in tests/unit/sources/mongodb/fake_mongo.py for that.
+#
+# The connector's only HTTP calls are to the Databricks workspace when
+# auth_mode=aws_service_credential (MONGODB-AWS with temporary AWS keys
+# from a Unity Catalog service credential):
+#   1. POST {databricks_host}/oidc/v1/token
+#      OAuth M2M (client credentials) for the service principal.
+#   2. POST {databricks_host}/api/2.1/unity-catalog/temporary-service-credentials
+#      JSON body {"credential_name": ...}; returns aws_temp_credentials and
+#      expiration_time (epoch milliseconds).
+# Both return a single JSON object, so they use small handlers that fill
+# in the current time (a fixed expiry in the corpus would always be stale).
+
+endpoints:
+  - path: /oidc/v1/token
+    method: POST
+    corpus: oauth_token
+    handler: databricks.labs.community_connector.source_simulator.specs.mongodb.handlers.databricks:oauth_token
+
+  - path: /api/2.1/unity-catalog/temporary-service-credentials
+    method: POST
+    corpus: temporary_service_credentials
+    handler: databricks.labs.community_connector.source_simulator.specs.mongodb.handlers.databricks:temporary_service_credentials

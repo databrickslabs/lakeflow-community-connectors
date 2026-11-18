@@ -1,0 +1,133 @@
+# mongodb Community Connector Spec
+# This file defines the specification for the connector including
+# connection parameters and allowlist options.
+
+# ============================================================================
+# Connection Parameters
+# These are provided when creating the Unity Catalog connection.
+# ============================================================================
+display_name: MongoDB
+connection:
+  # ---------------------------------------------------------------------------
+  # Authentication Methods
+  # Choose ONE of the following. The method is also selected with auth_mode
+  # (uri, x509 or aws_service_credential); when auth_mode is not set, the
+  # connector picks the method whose required parameters are given.
+  # ---------------------------------------------------------------------------
+  auth_methods:
+    - name: uri
+      description: >
+        auth_mode=uri (the default). Authenticate with what connection_uri says, for
+        example a SCRAM user and password in the URI, or MONGODB-AWS with an instance
+        profile on classic dedicated compute (authMechanism=MONGODB-AWS&authSource=%24external
+        and no user in the URI).
+      parameters: []
+
+    - name: x509
+      description: >
+        auth_mode=x509. Authenticate with a client certificate (MONGODB-X509).
+      parameters:
+        - name: tls_certificate_key_pem
+          type: string
+          required: true
+          secret: true
+          description: >
+            PEM with the client certificate and private key.
+
+    - name: aws_service_credential
+      description: >
+        auth_mode=aws_service_credential. MONGODB-AWS with temporary AWS keys from a Unity
+        Catalog service credential, requested by a service principal. Use this on serverless
+        and standard access mode compute, where user code cannot reach the EC2 instance
+        metadata service.
+      parameters:
+        - name: aws_service_credential
+          type: string
+          required: true
+          description: >
+            Name of the Unity Catalog service credential (AWS IAM role). Create the Atlas
+            database user for that IAM role ARN.
+
+        - name: databricks_host
+          type: string
+          required: true
+          description: >
+            URL of the Databricks workspace that issues the temporary keys, normally the
+            workspace the pipeline runs in, for example
+            https://dbc-1234abcd-5678.cloud.databricks.com. The service principal's client
+            secret is sent to this host, so it must be a Databricks workspace URL on AWS
+            (*.cloud.databricks.com, *.cloud.databricks.us or *.cloud.databricks.mil);
+            other hosts are rejected.
+
+        - name: databricks_client_id
+          type: string
+          required: true
+          description: >
+            Application ID of the service principal. It needs the workspace-access
+            entitlement and ACCESS on the service credential. The connector requests its
+            OAuth token with the unity-catalog scope only.
+
+        - name: databricks_client_secret
+          type: string
+          required: true
+          secret: true
+          description: >
+            OAuth secret of that service principal. A secret limited to the unity-catalog
+            scope is enough. A service principal can hold up to five secrets, so rotate by
+            adding a new one before removing the old one.
+
+        - name: aws_refresh_margin_seconds
+          type: string
+          required: false
+          description: >
+            Request new temporary keys this many seconds before they expire: an integer
+            from 60 to 1800 (default 600).
+
+  # ---------------------------------------------------------------------------
+  # Common Parameters (shared across all authentication methods)
+  # ---------------------------------------------------------------------------
+  parameters:
+    - name: connection_uri
+      type: string
+      required: true
+      secret: true
+      description: >
+        MongoDB connection string (mongodb:// or mongodb+srv://). For auth_mode=uri it
+        carries the credentials; for x509 and aws_service_credential give the host part only.
+
+    - name: auth_mode
+      type: string
+      required: false
+      description: >
+        One of uri, x509, aws_service_credential (see the authentication methods). When
+        not set: aws_service_credential if aws_service_credential is given, x509 if
+        tls_certificate_key_pem is given, otherwise uri.
+
+    - name: database
+      type: string
+      required: false
+      description: >
+        Default database. When set, tables are the collections of this database.
+        Otherwise set the database table option or name tables "<database>.<collection>".
+
+    - name: tls_ca_pem
+      type: string
+      required: false
+      description: >
+        PEM of the CA that signed the server certificate, when it is not a public CA.
+
+    - name: unicode_decode_error_handler
+      type: string
+      required: false
+      description: >
+        strict (default) fails on strings that are not valid UTF-8; replace ingests them
+        with U+FFFD replacement characters.
+
+# ============================================================================
+# External Options Allowlist
+# These table-specific options must be included in the externalOptionsAllowList
+# parameter of the UC connection to allow them to be passed through.
+# Use a comma-separated string of option names.
+# If no table-specific options are needed, set to empty string or omit.
+# ============================================================================
+external_options_allowlist: "database,collection,ingestion_type,start_mode,start_at_operation_time,full_document,document_format,max_records_per_batch,snapshot_batch_size,max_await_time_ms,delete_lookback_seconds,idle_advance_seconds,assume_unique_id"
