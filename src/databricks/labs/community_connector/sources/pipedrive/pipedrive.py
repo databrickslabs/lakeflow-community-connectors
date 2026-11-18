@@ -10,7 +10,7 @@ Tables and read strategies
     activities                     cdc               v2, updated_since/until + sort update_time asc
     products                       cdc               v2, updated_since + sort (cap client-side)
     notes, leads                   cdc               v1, updated_since, id-sorted offset pages
-    deal_flow                      append            v1 per-deal change log, parent-incremental
+    deal_flow                      cdc (on id)       v1 per-deal change log, parent-incremental
     everything else                snapshot          full read
 
 Why not partitioned: Pipedrive enforces a strict per-token burst limit
@@ -43,6 +43,7 @@ from pyspark.sql.types import StructType
 
 from databricks.labs.community_connector.interface import LakeflowConnect
 from databricks.labs.community_connector.sources.pipedrive.pipedrive_schemas import (
+    DEAL_FLOW_PHASE_PATHS,
     DEAL_PARENT_PATHS,
     FIELD_TABLES,
     JSON_STRING_ARRAY_FIELDS,
@@ -76,6 +77,9 @@ DEFAULT_V2_LOOKBACK_SECONDS = 0
 # deal_flow selects parent deals updated since (cursor - lookback); entries are
 # then filtered by their own log_time, so a generous lookback is cheap insurance.
 DEFAULT_DEAL_FLOW_LOOKBACK_SECONDS = 3600
+# Clock-skew margin for the final deal_flow /deals re-scan, which starts from
+# the moment the /deals/archived phase began.
+DEAL_FLOW_RESCAN_SKEW_SECONDS = 300
 DEAL_PRODUCTS_BATCH = 100  # /api/v2/deals/products accepts at most 100 deal_ids
 
 DEALS_LIVE_STATUSES = "open,won,lost"
@@ -428,16 +432,34 @@ class PipedriveLakeflowConnect(LakeflowConnect):
     def _read_deal_flow(
         self, start_offset: Optional[dict], table_options: dict
     ) -> tuple[Iterator[dict], dict]:
-        """Append-only deal change log, read via parent-incremental deals.
+        """Deal change log, read via parent-incremental deals.
 
         Each trigger covers the log-time window ``(cursor, until]`` where
-        ``until`` is the init time.  Parent deals updated in
-        ``[cursor - lookback, until]`` are walked in ascending ``update_time``
-        order — first ``/deals`` then ``/deals/archived`` — and for each one the
-        flow entries inside the window are emitted.  The window is split across
-        micro-batches by deal (``max_records_per_batch`` is best-effort: a
-        deal's flow is never split).  In-progress offsets carry the phase and
-        the ``update_time`` of the next unprocessed deal.
+        ``until`` is the init time.  Parent deals updated since
+        ``cursor - lookback`` are walked in ascending ``update_time`` order in
+        three phases: ``/deals``, ``/deals/archived``, then ``/deals`` again
+        from the moment the archived phase began.  For each deal the flow
+        entries inside the window are emitted.
+
+        The parent query is deliberately *not* capped with ``updated_until``:
+        the walk spans many micro-batches (one 40-token call per deal), and a
+        deal edited or archived before the walk reaches it gets a fresh
+        ``update_time`` past ``until``.  Uncapped, such a deal just moves
+        further ahead in the sort (or into the not-yet-walked archived list)
+        and is still visited; capped, its window entries would be lost for
+        good.  The final ``/deals`` re-scan covers deals unarchived while the
+        archived list was being walked.  Entry rows are bounded client-side by
+        ``log_time <= until``.
+
+        A deal can therefore be visited twice in one window (edited after it
+        was processed).  Rows are immutable and keyed on ``id`` (``cdc``), so
+        a re-emitted row is an idempotent upsert; within one micro-batch,
+        repeated deals and entries are skipped outright.
+
+        The window is split across micro-batches by deal
+        (``max_records_per_batch`` is best-effort: a deal's flow is never
+        split).  In-progress offsets carry the phase, the ``update_time`` of
+        the next unprocessed deal and the re-scan start.
         """
         offset = start_offset or {}
         lookback = self._int_option(
@@ -448,6 +470,7 @@ class PipedriveLakeflowConnect(LakeflowConnect):
             until = offset["until"]
             phase = int(offset["phase"])
             deal_since = offset["deal_since"]
+            rescan_since = offset.get("rescan_since")
         else:
             lower = self._resolve_since(start_offset)
             if lower is None:
@@ -455,52 +478,74 @@ class PipedriveLakeflowConnect(LakeflowConnect):
             until = self._init_ts
             phase = 0
             deal_since = shift_ts(lower, -lookback) if lookback > 0 else lower
+            rescan_since = None
 
         max_records = self._int_option(
             table_options, "max_records_per_batch", DEFAULT_MAX_RECORDS_PER_BATCH, minimum=1
         )
-        params = {
-            "limit": V2_PAGE_MAX,
-            "sort_by": "update_time",
-            "sort_direction": "asc",
-            "updated_since": deal_since,
-            "updated_until": until,
-            "status": DEALS_ALL_STATUSES,
-        }
+        records, stopped_at = self._walk_deal_flow_phase(
+            DEAL_FLOW_PHASE_PATHS[phase], deal_since, (lower, until), max_records
+        )
 
-        records: list[dict] = []
-        last_deal_ts: Optional[str] = None
-        stopped_at: Optional[str] = None
-        for page in self._client.iter_v2_pages(DEAL_PARENT_PATHS[phase], params):
-            for deal in page:
-                deal_ts = record_cursor(deal) or deal_since
-                # Only stop between deals with different update_time values,
-                # so resuming from ``deal_since=deal_ts`` (inclusive) neither
-                # skips nor re-reads a deal.
-                if len(records) >= max_records and last_deal_ts and deal_ts > last_deal_ts:
-                    stopped_at = deal_ts
-                    break
-                records.extend(self._read_one_deal_flow(deal.get("id"), lower, until))
-                last_deal_ts = deal_ts
-            if stopped_at:
-                break
-
+        end_offset = {"cursor": lower, "until": until}
         if stopped_at:
-            end_offset = {"cursor": lower, "until": until, "phase": phase, "deal_since": stopped_at}
-        elif phase + 1 < len(DEAL_PARENT_PATHS):
-            restart = shift_ts(lower, -lookback) if lookback > 0 else lower
-            end_offset = {
-                "cursor": lower,
-                "until": until,
-                "phase": phase + 1,
-                "deal_since": restart,
-            }
+            end_offset.update(phase=phase, deal_since=stopped_at)
+            if rescan_since:
+                end_offset["rescan_since"] = rescan_since
+        elif phase == 0:
+            # Deals unarchived from here on re-enter /deals with an
+            # update_time at or after this instant; the final phase
+            # re-scans /deals from it.
+            end_offset.update(
+                phase=1,
+                deal_since=shift_ts(lower, -lookback) if lookback > 0 else lower,
+                rescan_since=shift_ts(now_utc(), -DEAL_FLOW_RESCAN_SKEW_SECONDS),
+            )
+        elif phase + 1 < len(DEAL_FLOW_PHASE_PATHS):
+            end_offset.update(phase=phase + 1, deal_since=rescan_since or until)
         else:
             end_offset = {"cursor": until}
 
         if start_offset and start_offset == end_offset:
             return iter([]), start_offset
         return iter(records), end_offset
+
+    def _walk_deal_flow_phase(
+        self, path: str, deal_since: str, window: tuple[str, str], max_records: int
+    ) -> tuple[list[dict], Optional[str]]:
+        """Walk one parent list (uncapped) and collect window entries.
+
+        Returns the entries and, if the batch filled up, the ``update_time`` of
+        the next unprocessed deal (``None`` once the list is exhausted).
+        """
+        params = {
+            "limit": V2_PAGE_MAX,
+            "sort_by": "update_time",
+            "sort_direction": "asc",
+            "updated_since": deal_since,
+            "status": DEALS_ALL_STATUSES,
+        }
+        records: list[dict] = []
+        seen_deals: set = set()
+        seen_entries: set = set()
+        last_deal_ts: Optional[str] = None
+        for page in self._client.iter_v2_pages(path, params):
+            for deal in page:
+                deal_ts = record_cursor(deal) or deal_since
+                # Only stop between deals with different update_time values,
+                # so resuming from ``deal_since=deal_ts`` (inclusive) never
+                # skips a deal.
+                if len(records) >= max_records and last_deal_ts and deal_ts > last_deal_ts:
+                    return records, deal_ts
+                last_deal_ts = deal_ts
+                if deal.get("id") in seen_deals:
+                    continue  # moved ahead in the sort within this batch
+                seen_deals.add(deal.get("id"))
+                for entry in self._read_one_deal_flow(deal.get("id"), *window):
+                    if entry.get("id") is None or entry["id"] not in seen_entries:
+                        seen_entries.add(entry.get("id"))
+                        records.append(entry)
+        return records, None
 
     def _read_one_deal_flow(self, deal_id, lower: str, until: str) -> list[dict]:
         if deal_id is None:

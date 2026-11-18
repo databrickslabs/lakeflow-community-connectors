@@ -561,7 +561,7 @@ DEAL_FLOW_SCHEMA = StructType(
 #   v1_snapshot     offset-paginated (or unpaginated) v1 list, full read
 #   projects        union of /projects and /projects/archived (v2 snapshot)
 #   deal_products   child of deals, batched by deal_ids (v2 snapshot)
-#   deal_flow       child of deals, one v1 call per changed deal (append)
+#   deal_flow       child of deals, one v1 call per changed deal (cdc on id)
 
 V2 = "/api/v2"
 V1 = "/v1"
@@ -742,7 +742,10 @@ TABLE_CONFIG: dict[str, dict] = {
         "kind": "deal_flow",
         "path": V1 + "/deals/{id}/flow",
         "schema": DEAL_FLOW_SCHEMA,
-        "ingestion_type": "append",
+        # Change-log rows are immutable and keyed on ``id``.  The parent walk
+        # can legitimately visit a deal twice in one window (edited / archived
+        # mid-walk), so re-emitted rows must upsert, not append.
+        "ingestion_type": "cdc",
         "cursor_field": "log_time",
     },
 }
@@ -755,6 +758,11 @@ TABLE_SCHEMAS: dict[str, StructType] = {
 
 # Parent tables that deal_products / deal_flow walk to collect deal IDs.
 DEAL_PARENT_PATHS: list[str] = [f"{V2}/deals", f"{V2}/deals/archived"]
+
+# deal_flow walks these in order.  The final /deals pass re-scans only deals
+# updated since the archived phase began, catching deals unarchived mid-walk
+# (they leave /deals/archived and re-enter the already-walked /deals list).
+DEAL_FLOW_PHASE_PATHS: list[str] = [f"{V2}/deals", f"{V2}/deals/archived", f"{V2}/deals"]
 
 # JSON-serialised columns per table (values are re-encoded with json.dumps).
 JSON_STRING_FIELDS: dict[str, tuple[str, ...]] = {

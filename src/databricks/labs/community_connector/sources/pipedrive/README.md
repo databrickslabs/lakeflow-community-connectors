@@ -57,7 +57,7 @@ The connector exposes a **static list** of 25 tables. Table names are lowercase 
 | `products` | Products | `cdc` | `id` | `update_time` |
 | `notes` | Notes | `cdc` | `id` | `update_time` |
 | `leads` | Active leads | `cdc` | `id` | `update_time` |
-| `deal_flow` | Change log of each deal (field changes, stage moves) | `append` | `id` | `log_time` |
+| `deal_flow` | Change log of each deal (field changes, stage moves) | `cdc` | `id` | `log_time` |
 | `leads_archived` | Archived leads | `snapshot` | `id` | n/a |
 | `pipelines` | Pipelines | `snapshot` | `id` | n/a |
 | `stages` | Pipeline stages | `snapshot` | `id` | n/a |
@@ -79,7 +79,7 @@ The connector exposes a **static list** of 25 tables. Table names are lowercase 
 
 - **`deals`, `deals_archived`, `persons`, `organizations`, `activities`, `products`** use the v2 API with `updated_since`, sorted by `update_time` ascending. Reads are bounded by the time the pipeline update started, so triggered runs terminate. Each micro-batch stops after roughly `max_records_per_batch` records and resumes from the last cursor. Boundary rows can be re-read; the primary-key upsert de-duplicates them. For `products`, the upper bound is applied client-side.
 - **`notes` and `leads`** use the v1 API with `updated_since`, sorted by `id`. Each micro-batch reads the whole range up to the start of the run, so `max_records_per_batch` does not apply. A one-hour lookback is applied by default.
-- **`deal_flow`** is append-only. It selects deals updated since the cursor (minus a one-hour lookback), then fetches each deal's change log and keeps entries whose `log_time` falls in the window. Batches split between deals, never inside one deal's log.
+- **`deal_flow`** selects deals updated since the cursor (minus a one-hour lookback), then fetches each deal's change log and keeps entries whose `log_time` falls in the window. It walks `/deals`, then the archived deals, then re-scans deals changed since the archived pass started. The deal query has no upper time bound, so a deal that is edited, archived or unarchived while a long walk is running is still visited. Such a deal can be visited twice. Change-log rows don't change and are upserted on `id`, so a second visit doesn't create duplicates. Batches split between deals, never inside one deal's log.
 - **Snapshot tables** are fully re-read on every run.
 
 ### Delete handling
@@ -113,7 +113,7 @@ These are set inside the `table_configuration` map alongside any source-specific
 
 | Option | Required | Description |
 |---|---|---|
-| `scd_type` | No | `SCD_TYPE_1` (default) or `SCD_TYPE_2`. Only applicable to tables with CDC or SNAPSHOT ingestion mode; APPEND_ONLY tables (`deal_flow`) do not support this option. |
+| `scd_type` | No | `SCD_TYPE_1` (default) or `SCD_TYPE_2`. Only applicable to tables with CDC or SNAPSHOT ingestion mode (every table in this connector). |
 | `primary_keys` | No | List of columns to override the connector's default primary keys |
 | `sequence_by` | No | Column used to order records for SCD Type 2 change tracking |
 | `cluster_by` | No | List of columns to cluster the destination Delta table by (Liquid Clustering). Consumed by the pipeline; not forwarded to the source. |

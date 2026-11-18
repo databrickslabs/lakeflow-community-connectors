@@ -662,7 +662,7 @@ from one table to the other. The same applies to leads (`leads` / `leads_archive
 | activity_types, currencies | `snapshot` | — | Small reference tables. |
 | deal_fields, person_fields, organization_fields, product_fields, activity_fields | `snapshot` | — | Metadata. |
 | deal_products | `snapshot` | — | Child of deals. Requires deal IDs, no time filter. |
-| deal_flow | `append` | `log_time` | Immutable change-log rows. Incremental by re-reading only deals whose `update_time` ≥ last cursor (from the deals / deals_archived incremental read) and keeping entries with `log_time` > cursor (client-side). Airbyte uses the same parent-incremental pattern. |
+| deal_flow | `cdc` (upsert on `id`) | `log_time` | Immutable change-log rows; upserted because the uncapped parent walk can revisit a deal edited mid-walk. Incremental by re-reading only deals whose `update_time` ≥ last cursor (from the deals / deals_archived incremental read) and keeping entries with `log_time` > cursor (client-side). Airbyte uses the same parent-incremental pattern. |
 
 ---
 
