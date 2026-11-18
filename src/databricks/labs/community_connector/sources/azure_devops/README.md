@@ -138,8 +138,8 @@ The connector defines the ingestion mode and primary key for each table:
 | `workitem_revisions`    | Historical changes to work items                       | `append`       | `id`, `rev`                                      | n/a                         |
 | `workitem_types`        | Work item type definitions and fields                  | `snapshot`     | `referenceName`, `project_name`                  | n/a                         |
 | `pipelines`             | Pipeline definitions                                   | `snapshot`     | `id`, `project_name`                             | n/a                         |
-| `builds`                | Completed pipeline runs                                | `append`       | `id`                                             | `finishTime`                |
-| `build_timeline`        | Stages, jobs, and steps of each completed pipeline run | `append`       | `build_id`, `id`                                 | `build_finish_time`         |
+| `builds`                | Completed pipeline runs                                | `cdc`          | `id`                                             | `finishTime`                |
+| `build_timeline`        | Stages, jobs, and steps of each completed pipeline run | `cdc`          | `build_id`, `id`                                 | `build_finish_time`         |
 
 ### Required and optional table options
 
@@ -166,6 +166,8 @@ Each table has different configuration requirements:
 | `build_timeline`        | None             | `project`, `definition_id`, `build_id`, `max_records_per_batch` | `build_id` (requires a project) reads one build's steps only. Otherwise reads steps of all newly completed builds. `max_records_per_batch` caps the number of **builds** read per batch. Builds whose timeline has been deleted by retention are skipped |
 
 **Pipeline steps**: `build_timeline` holds one row per timeline record. `type` is `Stage`, `Phase`, `Job`, `Task` (a pipeline step), or `Checkpoint`; `parentId` links each row to its parent, so steps nest under jobs and jobs under stages. Join to `builds` on `build_id = builds.id`.
+
+**Re-runs**: "Rerun failed jobs" keeps the build `id` but gives it a new `finishTime`, so the connector reads the build and its timeline again. Both tables are `cdc`, so `builds` is replaced and unchanged timeline rows are upserted onto themselves instead of duplicated. Stages, jobs, and steps that were re-run come back with new ids and `attempt` 2 or higher, so the failed attempt-1 rows from the earlier sync stay in `build_timeline` as history. To see only the latest attempt, keep the row with the highest `attempt` per `build_id` and `name` (or use `previousAttempts` to find superseded rows).
 
 **Important Notes**:
 
@@ -310,11 +312,11 @@ All table schemas preserve the nested JSON structure from the Azure DevOps API r
 - **Other**: `priority`, `keepForever`, `retainedByRelease`, `tags`, `parameters` (JSON string), `uri`, `url`
 - **Connector-derived**: `organization`, `project_name`
 
-#### `build_timeline` table (26 fields)
+#### `build_timeline` table (27 fields)
 - **Identity**: `id` (GUID string), `parentId`, `identifier`, `order`
 - **Kind**: `type` (Stage/Phase/Job/Task/Checkpoint), `name`
 - **Outcome**: `state` (pending/inProgress/completed), `result`, `resultCode`, `errorCount`, `warningCount`, `issues` (array of type/category/message structs)
-- **Timing**: `startTime`, `finishTime`, `lastModified`, `percentComplete`, `attempt`, `changeId`
+- **Timing**: `startTime`, `finishTime`, `lastModified`, `percentComplete`, `attempt`, `previousAttempts` (array of `attempt`/`timelineId`/`recordId` structs linking to earlier attempts), `changeId`
 - **Execution**: `task` (struct with the task `id`, `name`, `version`), `log` (struct pointing to the step's log), `workerName`
 - **URLs**: `url`
 - **Connector-derived**: `build_id`, `build_finish_time`, `organization`, `project_name`

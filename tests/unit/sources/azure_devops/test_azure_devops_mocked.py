@@ -574,7 +574,7 @@ def _build(build_id, finish):
 
 def test_builds_pages_by_continuation_header_and_drops_boundary(conn):
     """Header-token pagination is followed; the inclusive ``minTime``
-    boundary build is dropped so append tables don't duplicate it."""
+    boundary build is dropped so it isn't re-emitted."""
     conn._session.get.side_effect = [
         _response(
             json_body={"value": [_build(1, "2024-01-01T10:00:00.1234567Z")]},

@@ -793,6 +793,13 @@ def register_lakeflow_source(spark):
         ]
     )
 
+    TIMELINE_ATTEMPT_STRUCT = StructType(
+        [
+            StructField("attempt", LongType(), True),
+            StructField("timelineId", StringType(), True),
+            StructField("recordId", StringType(), True),
+        ]
+    )
 
     # =============================================================================
     # Table Schemas
@@ -1086,6 +1093,9 @@ def register_lakeflow_source(spark):
                 StructField("percentComplete", LongType(), True),
                 StructField("workerName", StringType(), True),
                 StructField("attempt", LongType(), True),
+                StructField(
+                    "previousAttempts", ArrayType(TIMELINE_ATTEMPT_STRUCT), True
+                ),
                 StructField("errorCount", LongType(), True),
                 StructField("warningCount", LongType(), True),
                 StructField("task", TIMELINE_TASK_STRUCT, True),
@@ -1175,12 +1185,12 @@ def register_lakeflow_source(spark):
         },
         "builds": {
             "primary_keys": ["id"],
-            "ingestion_type": "append",
+            "ingestion_type": "cdc",
             "cursor_field": "finishTime",
         },
         "build_timeline": {
             "primary_keys": ["build_id", "id"],
-            "ingestion_type": "append",
+            "ingestion_type": "cdc",
             "cursor_field": "build_finish_time",
         },
     }
