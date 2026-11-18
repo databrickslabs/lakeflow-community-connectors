@@ -489,7 +489,12 @@ class PipedriveLakeflowConnect(LakeflowConnect):
             end_offset = {"cursor": lower, "until": until, "phase": phase, "deal_since": stopped_at}
         elif phase + 1 < len(DEAL_PARENT_PATHS):
             restart = shift_ts(lower, -lookback) if lookback > 0 else lower
-            end_offset = {"cursor": lower, "until": until, "phase": phase + 1, "deal_since": restart}
+            end_offset = {
+                "cursor": lower,
+                "until": until,
+                "phase": phase + 1,
+                "deal_since": restart,
+            }
         else:
             end_offset = {"cursor": until}
 
@@ -506,12 +511,16 @@ class PipedriveLakeflowConnect(LakeflowConnect):
         try:
             for page in self._client.iter_v1_pages(path, params):
                 for item in page:
-                    if not isinstance(item, dict) or item.get("object", "dealChange") != "dealChange":
+                    if not isinstance(item, dict):
+                        continue
+                    if item.get("object", "dealChange") != "dealChange":
                         continue
                     entry = item.get("data")
                     if not isinstance(entry, dict):
                         continue
-                    log_ts = normalize_ts(entry.get("log_time")) or normalize_ts(item.get("timestamp"))
+                    log_ts = normalize_ts(entry.get("log_time")) or normalize_ts(
+                        item.get("timestamp")
+                    )
                     if log_ts is None or not lower < log_ts <= until:
                         continue
                     out.append(self._normalize("deal_flow", entry))
