@@ -1386,20 +1386,29 @@ def register_lakeflow_source(spark):
                 return False  # not allowed to tell; the README states the limitation
             return bool(stats.get("sharded"))
 
-        def get_table_schema(self, table_name: str, table_options: dict[str, str]) -> StructType:
-            # The schema is fixed; only the options decide it. Where PyMongo is
-            # installed, the collection is checked as well (unknown tables fail
-            # here). Managed ingestion asks for the schema in a Python worker that
-            # has only the base packages (see mongodb_utils): there the check is
-            # skipped and happens when the table is read.
+        def _static_config(self, table_name: str, table_options: dict[str, str]) -> _TableConfig:
+            """The table config for answers that depend only on the options.
+
+            The schema and the table metadata are fixed by the options. Where
+            PyMongo is installed, the collection is checked as well (unknown
+            tables fail here). Managed ingestion asks for both in Python processes
+            that have only the serverless base packages, not the pipeline's
+            dependencies: ``schema()`` while the graph loads, and the metadata as a
+            batch read on an executor (see mongodb_utils). There the check is
+            skipped; the change-stream reads, which run where the dependencies
+            are installed, check the collection again.
+            """
             try:
                 import pymongo  # pylint: disable=import-outside-toplevel,unused-import  # noqa: F401
             except ImportError:
-                return table_schema(_TableConfig(self, table_name, table_options).document_format)
-            return table_schema(self._config(table_name, table_options).document_format)
+                return _TableConfig(self, table_name, table_options)
+            return self._config(table_name, table_options)
+
+        def get_table_schema(self, table_name: str, table_options: dict[str, str]) -> StructType:
+            return table_schema(self._static_config(table_name, table_options).document_format)
 
         def read_table_metadata(self, table_name: str, table_options: dict[str, str]) -> dict:
-            cfg = self._config(table_name, table_options)
+            cfg = self._static_config(table_name, table_options)
             if cfg.ingestion_type == "append":
                 return {"cursor_field": CURSOR_FIELD, "ingestion_type": "append"}
             return {

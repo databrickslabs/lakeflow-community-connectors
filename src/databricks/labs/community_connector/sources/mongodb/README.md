@@ -176,14 +176,16 @@ Field names and collection names may contain any Unicode characters; they are pr
 ### Step 1: Clone/Copy the Source Connector Code
 Follow the Lakeflow Community Connector UI, which will guide you through setting up a pipeline using the selected source connector code.
 
-**Use a workspace pipeline, and add PyMongo to its environment.** This connector needs PyMongo, which is not in the serverless base environment. In a managed ingestion pipeline (the CLI's default `create_pipeline`), the data source runs in Python workers that have only the base environment: neither the connector wheel's dependencies nor packages added to `environment.dependencies` reach them, so the read fails with `No module named 'pymongo'`. A workspace pipeline works:
+**Managed ingestion pipelines** (the CLI's default `create_pipeline`): snapshot reads were checked end to end against Atlas, and change-stream reads get past the PyMongo import (checked with an unreachable host); a full change-stream run is still to be done. One platform issue to know about: currently the `connector_options` of the **last** table in the spec are applied to every table of the pipeline (seen on 2026-11-17: with an `append` table last, every table was created as `APPEND`). Until that is fixed, put tables that need different table options (`collection`, `ingestion_type`, ...) in separate pipelines, or use a workspace pipeline. A pipeline whose tables all use the same table options (or none) is not affected. PyMongo comes with the connector wheel; the connector answers the schema and table metadata without it, because managed ingestion asks for those in processes that do not have the pipeline's dependencies.
+
+**Workspace pipelines** (`--use-workspace-pipeline`) apply table options per table:
 
 ```bash
 community-connector create_pipeline mongodb my_mongodb_pipeline \
   -ps pipeline_spec.yaml -c main -t raw --use-workspace-pipeline
 ```
 
-Then add `pymongo[aws]==4.19.0` (or another 4.x version) under the pipeline's **Environment → Dependencies** (`environment.dependencies`). Pin it with `==`: the dependency is passed to `pip install` unquoted, so a range such as `>=4.9,<5` fails to install. In a workspace pipeline the table options go under `table_configuration`, as in Step 2.
+Then add `pymongo[aws]==4.19.0` (or another 4.x version) under the pipeline's **Environment → Dependencies** (`environment.dependencies`). Pin it with `==`: version ranges with a comma, such as `>=4.9,<5`, fail to install there. In a workspace pipeline the table options go under `table_configuration`, as in Step 2.
 
 If a `collection` value or another option contains characters outside the Basic Multilingual Plane (for example emoji), check the generated `ingest.py`: the CLI writes them as JSON surrogate escapes (`"\ud83c\udf63"`), which Python reads as an invalid string, and the pipeline fails with a Py4J error. Replace the pair with the character itself or with `\U0001f363`.
 
@@ -239,7 +241,8 @@ If a `collection` value or another option contains characters outside the Basic 
 | `temporary-service-credentials ... HTTP 403 ... workspace-access` | Give the service principal the workspace-access entitlement. |
 | `[INVALID_IDENTIFIER] The unquoted identifier source_...` | The `source_table` contains characters that cannot be part of a view name. Use an ASCII `source_table` and set `collection` to the real collection name. |
 | `ServerSelectionTimeoutError` / TLS handshake errors | The compute cannot reach MongoDB. Check the IP access list and the network path. |
-| `No module named 'pymongo'` | The pipeline runs without PyMongo: a managed ingestion pipeline, or a workspace pipeline without `pymongo` in its environment. See Step 1. |
+| `No module named 'pymongo'` | A workspace pipeline without `pymongo` in its environment, or an older version of this connector in a managed ingestion pipeline. See Step 1. |
+| Every table of a managed ingestion pipeline gets the same ingestion type or collection | The platform applies the last table's `connector_options` to all tables. See Step 1. |
 | `<=> does not support ordering on type "VARIANT"` | `ingestion_type=snapshot` with `document_format=variant` on an older version of this connector. Use `document_format=string`. |
 
 ## References

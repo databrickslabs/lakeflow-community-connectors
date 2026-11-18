@@ -7,8 +7,10 @@ dependencies: unpickling the source there failed with ``No module named
 merged source is pickled by value, so every ``bson`` / ``pymongo`` name that
 its classes reach through module globals is imported when it is unpickled.
 This test pickles the registered class and loads it in a subprocess where
-``bson`` and ``pymongo`` cannot be imported, then builds the source and its
-schema.
+``bson`` and ``pymongo`` cannot be imported, then builds the source and asks
+for its schema and table metadata: managed ingestion asks for both in
+processes without the pipeline's dependencies (``schema()`` while the graph
+loads, the metadata as a batch read on an executor).
 """
 
 import importlib.util
@@ -29,6 +31,8 @@ from pyspark import cloudpickle
 cls = cloudpickle.loads(sys.stdin.buffer.read())
 source = cls({"tableName": "orders", "connection_uri": "mongodb://h/", "database": "db"})
 print("FIELDS", ",".join(f.name for f in source.schema().fields))
+meta = source.lakeflow_connect.read_table_metadata("orders", {})
+print("META", meta["ingestion_type"], meta["primary_keys"])
 """
 
 
@@ -55,3 +59,4 @@ def test_merged_source_loads_without_pymongo():
     out = result.stdout.decode() + result.stderr.decode()
     assert result.returncode == 0, out[-2000:]
     assert "FIELDS _id,document,_cdc_operation" in out
+    assert "META cdc_with_deletes ['_id']" in out  # metadata reads run there too
