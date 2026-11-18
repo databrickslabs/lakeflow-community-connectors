@@ -1,0 +1,207 @@
+# Pipedrive simulator spec.
+#
+# Pipedrive wraps every list in {"success": true, "data": [...], "additional_data": {...}}:
+#   * v2 (/api/v2/...): cursor pagination via additional_data.next_cursor
+#   * v1 (/v1/...):     offset pagination via additional_data.pagination
+#                        {start, limit, more_items_in_collection, next_start}
+# Neither envelope fits the declarative pagination styles, so the paginated
+# endpoints use the custom handlers in handlers/pipedrive.py. They also model
+# updated_since / updated_until, sort_by / sort_direction (v2) and sort (v1),
+# deal status=deleted (is_deleted rows), /projects vs /projects/archived, and
+# the deal_ids / {id} joins for the deal child tables.
+#
+# Query params the connector sends (all handled or accepted by the handlers):
+#   v2 incremental: limit, cursor, sort_by, sort_direction, updated_since,
+#                   updated_until (not on /products), status (deals),
+#                   include_fields (accepted, ignored)
+#   v2 snapshot:    limit, cursor, status (projects, accepted)
+#   v1 lists:       start, limit, sort, updated_since (notes, leads)
+#   deal flow:      items, all_changes (accepted), start, limit
+#
+# synthesize_future_records on the incremental v2 endpoints clones a few rows
+# with update_time past now(): the connector must exclude them via
+# updated_until=<init time> (client-side for /products, which has no
+# updated_until) so termination tests converge.
+#
+# The unpaginated v1 reference endpoints are declarative.
+
+endpoints:
+  # ---- v2 deal children ----
+  # deal_products: deal_ids=<up to 100 comma-separated ids>, cursor paginated.
+  - path: /api/v2/deals/products
+    method: GET
+    corpus: deal_products
+    handler: databricks.labs.community_connector.source_simulator.specs.pipedrive.handlers.pipedrive:serve_deal_products
+
+  # ---- v2 incremental ----
+  - path: /api/v2/deals
+    method: GET
+    corpus: deals
+    handler: databricks.labs.community_connector.source_simulator.specs.pipedrive.handlers.pipedrive:serve_v2_list
+    synthesize_future_records:
+      cursor_field: update_time
+      count: 3
+
+  - path: /api/v2/deals/archived
+    method: GET
+    corpus: deals_archived
+    handler: databricks.labs.community_connector.source_simulator.specs.pipedrive.handlers.pipedrive:serve_v2_list
+    synthesize_future_records:
+      cursor_field: update_time
+      count: 3
+
+  - path: /api/v2/persons
+    method: GET
+    corpus: persons
+    handler: databricks.labs.community_connector.source_simulator.specs.pipedrive.handlers.pipedrive:serve_v2_list
+    synthesize_future_records:
+      cursor_field: update_time
+      count: 3
+
+  - path: /api/v2/organizations
+    method: GET
+    corpus: organizations
+    handler: databricks.labs.community_connector.source_simulator.specs.pipedrive.handlers.pipedrive:serve_v2_list
+    synthesize_future_records:
+      cursor_field: update_time
+      count: 3
+
+  - path: /api/v2/activities
+    method: GET
+    corpus: activities
+    handler: databricks.labs.community_connector.source_simulator.specs.pipedrive.handlers.pipedrive:serve_v2_list
+    synthesize_future_records:
+      cursor_field: update_time
+      count: 3
+
+  - path: /api/v2/products
+    method: GET
+    corpus: products
+    handler: databricks.labs.community_connector.source_simulator.specs.pipedrive.handlers.pipedrive:serve_v2_list
+    synthesize_future_records:
+      cursor_field: update_time
+      count: 3
+
+  # ---- v2 snapshot ----
+  - path: /api/v2/pipelines
+    method: GET
+    corpus: pipelines
+    handler: databricks.labs.community_connector.source_simulator.specs.pipedrive.handlers.pipedrive:serve_v2_list
+
+  - path: /api/v2/stages
+    method: GET
+    corpus: stages
+    handler: databricks.labs.community_connector.source_simulator.specs.pipedrive.handlers.pipedrive:serve_v2_list
+
+  - path: /api/v2/tasks
+    method: GET
+    corpus: tasks
+    handler: databricks.labs.community_connector.source_simulator.specs.pipedrive.handlers.pipedrive:serve_v2_list
+
+  # projects is the union of these two; both draw from the one corpus and the
+  # handler splits it on archive_time.
+  - path: /api/v2/projects
+    method: GET
+    corpus: projects
+    handler: databricks.labs.community_connector.source_simulator.specs.pipedrive.handlers.pipedrive:serve_v2_list
+
+  - path: /api/v2/projects/archived
+    method: GET
+    corpus: projects
+    handler: databricks.labs.community_connector.source_simulator.specs.pipedrive.handlers.pipedrive:serve_v2_list
+
+  # ---- v1 offset-paginated ----
+  # notes / leads are incremental via updated_since; the rest are snapshots.
+  - path: /v1/notes
+    method: GET
+    corpus: notes
+    handler: databricks.labs.community_connector.source_simulator.specs.pipedrive.handlers.pipedrive:serve_v1_list
+
+  - path: /v1/leads
+    method: GET
+    corpus: leads
+    handler: databricks.labs.community_connector.source_simulator.specs.pipedrive.handlers.pipedrive:serve_v1_list
+
+  - path: /v1/leads/archived
+    method: GET
+    corpus: leads_archived
+    handler: databricks.labs.community_connector.source_simulator.specs.pipedrive.handlers.pipedrive:serve_v1_list
+
+  - path: /v1/files
+    method: GET
+    corpus: files
+    handler: databricks.labs.community_connector.source_simulator.specs.pipedrive.handlers.pipedrive:serve_v1_list
+
+  - path: /v1/dealFields
+    method: GET
+    corpus: deal_fields
+    handler: databricks.labs.community_connector.source_simulator.specs.pipedrive.handlers.pipedrive:serve_v1_list
+
+  - path: /v1/personFields
+    method: GET
+    corpus: person_fields
+    handler: databricks.labs.community_connector.source_simulator.specs.pipedrive.handlers.pipedrive:serve_v1_list
+
+  - path: /v1/organizationFields
+    method: GET
+    corpus: organization_fields
+    handler: databricks.labs.community_connector.source_simulator.specs.pipedrive.handlers.pipedrive:serve_v1_list
+
+  - path: /v1/productFields
+    method: GET
+    corpus: product_fields
+    handler: databricks.labs.community_connector.source_simulator.specs.pipedrive.handlers.pipedrive:serve_v1_list
+
+  - path: /v1/activityFields
+    method: GET
+    corpus: activity_fields
+    handler: databricks.labs.community_connector.source_simulator.specs.pipedrive.handlers.pipedrive:serve_v1_list
+
+  # deal_flow: one call per deal; rows wrapped as
+  # {object: dealChange, timestamp, data: <row>}. Unknown deal -> JSON 404.
+  - path: /v1/deals/{id}/flow
+    method: GET
+    corpus: deal_flow
+    handler: databricks.labs.community_connector.source_simulator.specs.pipedrive.handlers.pipedrive:serve_deal_flow
+
+  # ---- v1 unpaginated reference endpoints (declarative) ----
+  - path: /v1/users
+    method: GET
+    corpus: users
+    response:
+      pagination_style: none
+      wrapper:
+        records_key: data
+        extras:
+          success: true
+          additional_data: null
+
+  - path: /v1/leadLabels
+    method: GET
+    corpus: lead_labels
+    response:
+      pagination_style: none
+      wrapper:
+        records_key: data
+        extras:
+          success: true
+
+  - path: /v1/activityTypes
+    method: GET
+    corpus: activity_types
+    response:
+      pagination_style: none
+      wrapper:
+        records_key: data
+        extras:
+          success: true
+
+  - path: /v1/currencies
+    method: GET
+    corpus: currencies
+    response:
+      pagination_style: none
+      wrapper:
+        records_key: data
+        extras:
+          success: true

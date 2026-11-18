@@ -1,0 +1,47 @@
+[
+  {
+    "id": 1000,
+    "name": "golf-245",
+    "order_nr": 24803,
+    "is_deleted": false,
+    "is_deal_probability_enabled": true,
+    "add_time": "quebec-223",
+    "update_time": "charlie-481"
+  },
+  {
+    "id": 1001,
+    "name": "juliet-333",
+    "order_nr": 98444,
+    "is_deleted": true,
+    "is_deal_probability_enabled": false,
+    "add_time": "romeo-714",
+    "update_time": "november-587"
+  },
+  {
+    "id": 1002,
+    "name": "romeo-213",
+    "order_nr": 71956,
+    "is_deleted": true,
+    "is_deal_probability_enabled": true,
+    "add_time": "echo-424",
+    "update_time": "india-430"
+  },
+  {
+    "id": 1003,
+    "name": "alpha-381",
+    "order_nr": 94184,
+    "is_deleted": true,
+    "is_deal_probability_enabled": false,
+    "add_time": "romeo-137",
+    "update_time": "juliet-120"
+  },
+  {
+    "id": 1004,
+    "name": "victor-791",
+    "order_nr": 19135,
+    "is_deleted": false,
+    "is_deal_probability_enabled": true,
+    "add_time": "kilo-358",
+    "update_time": "papa-992"
+  }
+]

@@ -1,0 +1,62 @@
+[
+  {
+    "id": 1000,
+    "name": "charlie-472",
+    "icon_key": "charlie-808",
+    "color": "zulu-175",
+    "order_nr": 59861,
+    "key_string": "kilo-557",
+    "active_flag": false,
+    "is_custom_flag": false,
+    "add_time": "quebec-795",
+    "update_time": "uniform-978"
+  },
+  {
+    "id": 1001,
+    "name": "yankee-553",
+    "icon_key": "quebec-933",
+    "color": "charlie-907",
+    "order_nr": 54939,
+    "key_string": "november-819",
+    "active_flag": true,
+    "is_custom_flag": true,
+    "add_time": "lima-492",
+    "update_time": "kilo-410"
+  },
+  {
+    "id": 1002,
+    "name": "yankee-930",
+    "icon_key": "yankee-924",
+    "color": "mike-458",
+    "order_nr": 15721,
+    "key_string": "foxtrot-997",
+    "active_flag": false,
+    "is_custom_flag": true,
+    "add_time": "quebec-268",
+    "update_time": "kilo-318"
+  },
+  {
+    "id": 1003,
+    "name": "zulu-461",
+    "icon_key": "lima-447",
+    "color": "golf-983",
+    "order_nr": 42394,
+    "key_string": "hotel-271",
+    "active_flag": false,
+    "is_custom_flag": true,
+    "add_time": "echo-583",
+    "update_time": "foxtrot-698"
+  },
+  {
+    "id": 1004,
+    "name": "november-375",
+    "icon_key": "hotel-487",
+    "color": "charlie-710",
+    "order_nr": 17901,
+    "key_string": "november-512",
+    "active_flag": false,
+    "is_custom_flag": true,
+    "add_time": "echo-978",
+    "update_time": "lima-947"
+  }
+]

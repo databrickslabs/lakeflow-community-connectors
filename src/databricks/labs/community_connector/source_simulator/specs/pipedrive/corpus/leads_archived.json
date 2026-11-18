@@ -1,0 +1,164 @@
+[
+  {
+    "id": "alpha-78-pk0",
+    "title": "xray-150",
+    "owner_id": 48930,
+    "creator_id": 46150,
+    "label_ids": [
+      "uniform-752"
+    ],
+    "person_id": 88143,
+    "organization_id": 66673,
+    "source_name": "xray-609",
+    "origin": "lima-725",
+    "origin_id": "charlie-466",
+    "channel": 82762,
+    "channel_id": "oscar-284",
+    "source_deal_id": 21454,
+    "is_archived": false,
+    "archive_reason": "foxtrot-760",
+    "archive_time": "echo-462",
+    "was_seen": false,
+    "value": {
+      "amount": 369.13,
+      "currency": "india-647"
+    },
+    "expected_close_date": "romeo-323",
+    "next_activity_id": 75159,
+    "add_time": "zulu-631",
+    "update_time": "lima-595",
+    "visible_to": "whiskey-507",
+    "cc_email": "oscar-488",
+    "5f1c0a2e9b7d4c3a8e6f1b2d0c9a7e5f3b1d8c6a": "custom-text-0",
+    "9e8d7c6b5a4f3e2d1c0b9a8f7e6d5c4b3a2f1e0d": 100
+  },
+  {
+    "id": "xray-965-pk1",
+    "title": "bravo-235",
+    "owner_id": 90481,
+    "creator_id": 76416,
+    "label_ids": [
+      "mike-130"
+    ],
+    "person_id": 27398,
+    "organization_id": 71497,
+    "source_name": "november-786",
+    "origin": "sierra-215",
+    "origin_id": "charlie-649",
+    "channel": 67207,
+    "channel_id": "foxtrot-507",
+    "source_deal_id": 99697,
+    "is_archived": false,
+    "archive_reason": "sierra-427",
+    "archive_time": "zulu-319",
+    "was_seen": true,
+    "value": {
+      "amount": 607.51,
+      "currency": "november-422"
+    },
+    "expected_close_date": "echo-895",
+    "next_activity_id": 53007,
+    "add_time": "romeo-166",
+    "update_time": "charlie-851",
+    "visible_to": "oscar-227",
+    "cc_email": "hotel-980"
+  },
+  {
+    "id": "golf-819-pk2",
+    "title": "tango-844",
+    "owner_id": 84324,
+    "creator_id": 2968,
+    "label_ids": [
+      "mike-738"
+    ],
+    "person_id": 10018,
+    "organization_id": 41248,
+    "source_name": "lima-826",
+    "origin": "bravo-131",
+    "origin_id": "xray-138",
+    "channel": 66691,
+    "channel_id": "oscar-103",
+    "source_deal_id": 959,
+    "is_archived": false,
+    "archive_reason": "alpha-280",
+    "archive_time": "echo-208",
+    "was_seen": true,
+    "value": {
+      "amount": 104.27,
+      "currency": "foxtrot-893"
+    },
+    "expected_close_date": "yankee-914",
+    "next_activity_id": 2869,
+    "add_time": "india-846",
+    "update_time": "charlie-330",
+    "visible_to": "oscar-259",
+    "cc_email": "sierra-159",
+    "5f1c0a2e9b7d4c3a8e6f1b2d0c9a7e5f3b1d8c6a": "custom-text-2",
+    "9e8d7c6b5a4f3e2d1c0b9a8f7e6d5c4b3a2f1e0d": 102
+  },
+  {
+    "id": "juliet-2-pk3",
+    "title": "golf-430",
+    "owner_id": 94032,
+    "creator_id": 59029,
+    "label_ids": [
+      "oscar-314",
+      "foxtrot-573"
+    ],
+    "person_id": 63498,
+    "organization_id": 53940,
+    "source_name": "zulu-842",
+    "origin": "alpha-384",
+    "origin_id": "sierra-516",
+    "channel": 8703,
+    "channel_id": "kilo-619",
+    "source_deal_id": 44647,
+    "is_archived": true,
+    "archive_reason": "juliet-950",
+    "archive_time": "delta-156",
+    "was_seen": false,
+    "value": {
+      "amount": 972.76,
+      "currency": "juliet-890"
+    },
+    "expected_close_date": "quebec-849",
+    "next_activity_id": 94915,
+    "add_time": "sierra-397",
+    "update_time": "romeo-930",
+    "visible_to": "romeo-846",
+    "cc_email": "bravo-224"
+  },
+  {
+    "id": "echo-271-pk4",
+    "title": "yankee-482",
+    "owner_id": 18662,
+    "creator_id": 79583,
+    "label_ids": [
+      "foxtrot-404"
+    ],
+    "person_id": 44448,
+    "organization_id": 87585,
+    "source_name": "zulu-692",
+    "origin": "xray-721",
+    "origin_id": "juliet-953",
+    "channel": 76231,
+    "channel_id": "victor-151",
+    "source_deal_id": 11430,
+    "is_archived": true,
+    "archive_reason": "echo-922",
+    "archive_time": "bravo-652",
+    "was_seen": false,
+    "value": {
+      "amount": 794.56,
+      "currency": "foxtrot-400"
+    },
+    "expected_close_date": "quebec-623",
+    "next_activity_id": 77279,
+    "add_time": "india-184",
+    "update_time": "mike-227",
+    "visible_to": "mike-852",
+    "cc_email": "quebec-261",
+    "5f1c0a2e9b7d4c3a8e6f1b2d0c9a7e5f3b1d8c6a": "custom-text-4",
+    "9e8d7c6b5a4f3e2d1c0b9a8f7e6d5c4b3a2f1e0d": 104
+  }
+]
