@@ -35,7 +35,15 @@
     "artifactId": "zulu-229",
     "organization": "romeo-667",
     "project_name": "whiskey-793",
-    "repository_id": "oscar-875"
+    "repository_id": "oscar-875",
+    "completionOptions": {},
+    "completionQueueTime": "2024-01-01T00:00:00Z",
+    "isDraft": false,
+    "repository": {
+      "id": "00000000-0000-0000-0000-000000000000",
+      "name": "repo"
+    },
+    "reviewers": []
   },
   {
     "pullRequestId": 32775,
@@ -73,7 +81,15 @@
     "artifactId": "xray-688",
     "organization": "romeo-162",
     "project_name": "november-807",
-    "repository_id": "juliet-769"
+    "repository_id": "juliet-769",
+    "completionOptions": {},
+    "completionQueueTime": "2024-01-01T00:00:00Z",
+    "isDraft": false,
+    "repository": {
+      "id": "00000000-0000-0000-0000-000000000000",
+      "name": "repo"
+    },
+    "reviewers": []
   },
   {
     "pullRequestId": 94194,
@@ -111,7 +127,15 @@
     "artifactId": "alpha-897",
     "organization": "oscar-814",
     "project_name": "tango-953",
-    "repository_id": "oscar-294"
+    "repository_id": "oscar-294",
+    "completionOptions": {},
+    "completionQueueTime": "2024-01-01T00:00:00Z",
+    "isDraft": false,
+    "repository": {
+      "id": "00000000-0000-0000-0000-000000000000",
+      "name": "repo"
+    },
+    "reviewers": []
   },
   {
     "pullRequestId": 48099,
@@ -149,6 +173,14 @@
     "artifactId": "xray-971",
     "organization": "echo-656",
     "project_name": "victor-249",
-    "repository_id": "bravo-284"
+    "repository_id": "bravo-284",
+    "completionOptions": {},
+    "completionQueueTime": "2024-01-01T00:00:00Z",
+    "isDraft": false,
+    "repository": {
+      "id": "00000000-0000-0000-0000-000000000000",
+      "name": "repo"
+    },
+    "reviewers": []
   }
 ]

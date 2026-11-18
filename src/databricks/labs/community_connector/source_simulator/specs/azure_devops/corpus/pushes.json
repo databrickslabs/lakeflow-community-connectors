@@ -13,7 +13,11 @@
     "refUpdates": [],
     "organization": "kilo-488",
     "project_name": "sierra-462",
-    "repository_id": "juliet-613"
+    "repository_id": "juliet-613",
+    "repository": {
+      "id": "00000000-0000-0000-0000-000000000000",
+      "name": "repo"
+    }
   },
   {
     "pushId": 95956,
@@ -29,7 +33,11 @@
     "refUpdates": [],
     "organization": "golf-390",
     "project_name": "tango-652",
-    "repository_id": "xray-331"
+    "repository_id": "xray-331",
+    "repository": {
+      "id": "00000000-0000-0000-0000-000000000000",
+      "name": "repo"
+    }
   },
   {
     "pushId": 94176,
@@ -51,7 +59,11 @@
     ],
     "organization": "zulu-961",
     "project_name": "hotel-417",
-    "repository_id": "papa-845"
+    "repository_id": "papa-845",
+    "repository": {
+      "id": "00000000-0000-0000-0000-000000000000",
+      "name": "repo"
+    }
   },
   {
     "pushId": 29347,
@@ -78,6 +90,10 @@
     ],
     "organization": "india-323",
     "project_name": "kilo-526",
-    "repository_id": "xray-722"
+    "repository_id": "xray-722",
+    "repository": {
+      "id": "00000000-0000-0000-0000-000000000000",
+      "name": "repo"
+    }
   }
 ]

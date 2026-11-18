@@ -64,7 +64,8 @@
       }
     },
     "organization": "sierra-868",
-    "project_name": "whiskey-733"
+    "project_name": "whiskey-733",
+    "validRemoteUrls": []
   },
   {
     "id": "echo-689-pk1",
@@ -131,7 +132,8 @@
       }
     },
     "organization": "lima-458",
-    "project_name": "foxtrot-748"
+    "project_name": "foxtrot-748",
+    "validRemoteUrls": []
   },
   {
     "id": "papa-716-pk2",
@@ -198,7 +200,8 @@
       }
     },
     "organization": "oscar-836",
-    "project_name": "xray-856"
+    "project_name": "xray-856",
+    "validRemoteUrls": []
   },
   {
     "id": "charlie--pk3",
@@ -265,6 +268,7 @@
       }
     },
     "organization": "yankee-634",
-    "project_name": "charlie-966"
+    "project_name": "charlie-966",
+    "validRemoteUrls": []
   }
 ]

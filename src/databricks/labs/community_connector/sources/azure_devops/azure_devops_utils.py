@@ -4,11 +4,15 @@ This module contains helper functions for API interaction, project/repo
 resolution, and the PR auto-discovery pattern used across multiple tables.
 """
 
+import logging
+import re
 import time
+from datetime import datetime, timezone
 from typing import Any, Callable
 
 import requests
 
+_LOG = logging.getLogger(__name__)
 
 RETRIABLE_STATUS_CODES = {429, 500, 502, 503, 504}
 MAX_RETRIES = 5
@@ -122,12 +126,95 @@ def fetch_prs(
         f"{base_url}/{project}/_apis/git/repositories"
         f"/{repo_id}/pullrequests"
     )
-    return api_get_list(
+    return api_get_list_skip_top(
         session,
         url,
         {"api-version": "7.1", "searchCriteria.status": "all"},
         "pullrequests",
     )
+
+
+def api_get_list_skip_top(
+    session: requests.Session,
+    url: str,
+    params: dict[str, str],
+    label: str,
+    top: int = 100,
+) -> list[dict]:
+    """GET a list endpoint that pages with ``$top``/``$skip``.
+
+    ADO returns at most 100 items when ``$top`` is omitted, so a single
+    request silently truncates large result sets.
+    """
+    items: list[dict] = []
+    skip = 0
+    while True:
+        page = api_get_list(
+            session, url, {**params, "$top": str(top), "$skip": str(skip)}, label
+        )
+        items.extend(page)
+        if len(page) < top:
+            return items
+        skip += top
+
+
+class ApiError(RuntimeError):
+    """Non-200 API response, keeping the HTTP status for callers."""
+
+    def __init__(self, message: str, status_code: int) -> None:
+        super().__init__(message)
+        self.status_code = status_code
+
+
+def api_get_list_paged(
+    session: requests.Session,
+    url: str,
+    params: dict[str, str],
+    label: str,
+    should_stop: Callable[[list[dict]], bool] | None = None,
+) -> list[dict]:
+    """GET a list endpoint that paginates via the continuation-token header.
+
+    Build and pipeline endpoints return the next-page token in the
+    ``x-ms-continuationtoken`` response header; it is passed back as the
+    ``continuationToken`` query parameter until the header is absent, or
+    until *should_stop* (called with all items so far) returns True.
+    """
+    items: list[dict] = []
+    page_params = dict(params)
+    while True:
+        response = request_with_retry(session, url, page_params)
+        if response.status_code != 200:
+            raise ApiError(
+                f"Azure DevOps API error for {label}: "
+                f"{response.status_code} {response.text}",
+                response.status_code,
+            )
+        items.extend(response.json().get("value", []))
+        token = response.headers.get("x-ms-continuationtoken")
+        if not token or (should_stop and should_stop(items)):
+            return items
+        page_params["continuationToken"] = token
+
+
+def parse_ts(value: str) -> datetime:
+    """Parse an Azure DevOps ISO 8601 timestamp into an aware datetime.
+
+    ADO emits up to 7 fractional digits and a trailing ``Z``, neither of
+    which ``datetime.fromisoformat`` accepts on Python < 3.11. Comparing
+    parsed values avoids lexicographic errors between e.g. ``...00Z`` and
+    ``...00.5Z``.
+    """
+    text = value.strip()
+    if text.endswith("Z"):
+        text = text[:-1] + "+00:00"
+    match = re.match(r"^(.*?)\.(\d+)(.*)$", text)
+    if match:
+        text = f"{match.group(1)}.{(match.group(2) + '000000')[:6]}{match.group(3)}"
+    dt = datetime.fromisoformat(text)
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt
 
 
 def nullify_empty(record: dict, *keys: str) -> None:
@@ -185,7 +272,8 @@ def for_each_pr(
                     prs = fetch_prs(
                         session, base_url, project, rid
                     )
-                except RuntimeError:
+                except RuntimeError as exc:
+                    _LOG.warning("Skipping PRs for %s/%s: %s", project, rid, exc)
                     continue
                 for pr in prs:
                     pid = pr.get("pullRequestId")
@@ -195,7 +283,10 @@ def for_each_pr(
                         all_records.extend(
                             callback(project, rid, pid)
                         )
-                    except RuntimeError:
+                    except RuntimeError as exc:
+                        _LOG.warning(
+                            "Skipping PR %s in %s/%s: %s", pid, project, rid, exc
+                        )
                         continue
 
     return all_records
