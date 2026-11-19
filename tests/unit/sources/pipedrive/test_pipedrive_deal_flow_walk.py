@@ -72,8 +72,8 @@ def _entry(entry_id, deal_id, log_time):
     return {"id": entry_id, "item_id": deal_id, "log_time": log_time}
 
 
-def _run_to_completion(connector, table_options, max_batches=100):
-    offset = {"cursor": LOWER}
+def _run_to_completion(connector, table_options, max_batches=100, start=None):
+    offset = start or {"cursor": LOWER}
     rows = []
     for _ in range(max_batches):
         records, end = connector.read_table("deal_flow", offset, table_options)
@@ -131,7 +131,7 @@ def test_deals_changed_mid_walk_keep_their_window_entries():
         {"api_token": "fake", "start_date": LOWER}
     )
     connector._client = client  # pylint: disable=protected-access
-    connector._init_ts = UNTIL  # pylint: disable=protected-access
+    connector._init_time = UNTIL  # pylint: disable=protected-access
 
     rows, final = _run_to_completion(
         connector, {"max_records_per_batch": "1", "lookback_seconds": "0"}
@@ -152,3 +152,38 @@ def test_deal_flow_is_upserted_on_id():
     assert metadata["ingestion_type"] == "cdc"
     assert metadata["primary_keys"] == ["id"]
     assert metadata["cursor_field"] == "log_time"
+
+
+def test_lookback_widens_the_entry_window_not_only_the_parent_walk():
+    """An entry logged just before the cursor is emitted when lookback covers it.
+
+    Regression for review finding: ``lookback_seconds`` used to widen only the
+    parent deal walk, so an entry logged shortly before the stored cursor was
+    still filtered out by ``log_time > cursor``.
+    """
+    cursor = "2024-03-01T00:00:00Z"
+    # A deal's update_time is at or after its newest flow entry.  The parent walk
+    # starts at cursor - lookback, so the deal is visited with 1h and skipped with 0.
+    deals = {1: {"id": 1, "update_time": "2024-03-02T00:00:00Z", "archived": False}}
+    flows = {
+        1: [
+            _entry(101, 1, "2024-02-29 23:30:00"),  # 30 min before cursor: inside 1h lookback
+            _entry(102, 1, "2024-02-29 22:30:00"),  # 1.5h before cursor: outside lookback
+            _entry(103, 1, "2024-03-02 00:00:00"),  # after cursor: always emitted
+        ]
+    }
+
+    def run(lookback):
+        connector = PipedriveLakeflowConnect({"api_token": "fake", "start_date": LOWER})
+        connector._client = _FakeClient(deals, flows, {})  # pylint: disable=protected-access
+        connector._init_time = UNTIL  # pylint: disable=protected-access
+        rows, final = _run_to_completion(
+            connector,
+            {"max_records_per_batch": "1", "lookback_seconds": str(lookback)},
+            start={"cursor": cursor},
+        )
+        assert final == {"cursor": UNTIL}
+        return {r["id"] for r in rows}
+
+    assert run(3600) == {101, 103}
+    assert run(0) == {103}

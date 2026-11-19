@@ -35,9 +35,10 @@ connection:
         per 2 seconds on the lowest plan).
 
 # Table-specific options accepted via table_options:
-#   max_records_per_batch - soft cap on records per micro-batch (v2 tables, deal_flow)
+#   max_records_per_batch - maximum records per micro-batch (deal_flow may exceed it:
+#                           a deal's change log is never split)
 #   page_size             - page size for incremental reads
-#   lookback_seconds      - seconds subtracted from the query lower bound on the
-#                           first read of each trigger
+#   lookback_seconds      - settle margin for incremental tables: a change is read once
+#                           it is this many seconds old (deal_flow: window widening)
 #   include_fields        - comma-separated optional fields to request (v2 tables)
 external_options_allowlist: "max_records_per_batch,page_size,lookback_seconds,include_fields"

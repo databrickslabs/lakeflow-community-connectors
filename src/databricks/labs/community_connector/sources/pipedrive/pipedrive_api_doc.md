@@ -40,7 +40,7 @@ Connection parameters:
 |---|---|---|
 | `api_token` | yes | Personal API token (secret). |
 | `company_domain` | no | Company subdomain, e.g. `mycompany`. If set, requests go to `https://mycompany.pipedrive.com`. Default host: `https://api.pipedrive.com`. |
-| `start_date` | no | Lower bound for the first incremental read (RFC 3339). Defaults to `2010-01-01T00:00:00Z` (Airbyte default). |
+| `start_date` | no | Lower bound for the first incremental read (RFC 3339). Defaults to `2010-01-01T00:00:00Z`. |
 
 Example authenticated requests:
 
@@ -107,7 +107,7 @@ complete list in scope.
 
 Note on field tables: v2 also has `GET /api/v2/{deal,person,organization,product,activity}Fields` (cursor
 paginated, keyed by `field_code`). It omits `id`, `add_time`, `update_time`, `active_flag` and the other v1 flags.
-v1 field endpoints are **not** marked deprecated and are what Airbyte reads (PK `key`), so v1 is the documented
+v1 field endpoints are **not** marked deprecated and are keyed by `key`, so v1 is the documented
 choice here. The v2 variant is an alternative if v1 is ever retired.
 
 ---
@@ -115,8 +115,7 @@ choice here. The v2 variant is an alternative if v1 is ever retired.
 ## **Object Schema**
 
 There is no schema-discovery API for entity tables. Schemas are static and listed below. They come from the
-official OpenAPI specs (`openapi.yaml` for v1, `openapi-v2.yaml` for v2) and were cross-checked against Airbyte's
-`manifest.yaml` schemas.
+official OpenAPI specs (`openapi.yaml` for v1, `openapi-v2.yaml` for v2).
 
 **Custom fields**: deals, persons, organizations, products and projects (v2) return custom field values in a
 `custom_fields` object keyed by a 40-character hash. Leads (v1) inherit **deal** custom fields and return them as
@@ -341,8 +340,8 @@ Optional `include_fields`: `next_activity_id`, `last_activity_id`, `open_deals_c
 | icon_url | str | |
 | is_you | bool | |
 | is_deleted | bool | |
-| is_admin | int | Airbyte schema only (0/1) |
-| signup_flow_variation | str | Airbyte schema only |
+| is_admin | int | Not in the official spec (0/1) |
+| signup_flow_variation | str | Not in the official spec |
 
 ### notes (v1)
 
@@ -394,7 +393,7 @@ Optional `include_fields`: `next_activity_id`, `last_activity_id`, `open_deals_c
 | source_deal_id | int | |
 | is_archived | bool | |
 | archive_reason | str | |
-| archive_time | ts | Airbyte schema |
+| archive_time | ts | Not in the official spec |
 | was_seen | bool | |
 | value | {amount: num, currency: str} | |
 | expected_close_date | date | |
@@ -547,13 +546,13 @@ Optional `include_fields`: `next_activity_id`, `last_activity_id`, `open_deals_c
 | searchable_flag | bool | |
 | filtering_allowed | bool | |
 | sortable_flag | bool | |
-| mandatory_flag | bool | Occasionally returned as object by Pipedrive (Airbyte allows bool/object). Store as string if not bool. |
+| mandatory_flag | bool | Occasionally returned as an object by Pipedrive. Store as string if not bool. |
 | options | [json] | e.g. `[{id, label, color?}]` for enum/set |
 | options_deleted | [json] | Present only if any deleted option exists |
 | is_subfield | bool | |
 | subfields | [json] | Present for address/monetary etc. |
 
-TBD: Airbyte's field schemas also list extra keys such as `json_column_flag`, `use_field`, `link`,
+TBD: responses can carry extra keys such as `json_column_flag`, `use_field`, `link`,
 `group_id`, `display_field`, `autocomplete`, `parent_id` and `projects_detail_visible_flag`, which the official
 spec does not document. The connector should tolerate unknown keys (drop them or put them in an overflow map).
 
@@ -586,7 +585,7 @@ spec does not document. The connector should tolerate unknown keys (drop them or
 ### deal_flow (v1, `items=dealChange`)
 
 The raw response is `data: [{object: "dealChange", timestamp: str, data: {...}}]`. Emit the inner `data` object as
-the row, as Airbyte does with `field_path: data/*/data`:
+the row (record path `data/*/data`):
 
 | Field | Type | Notes |
 |---|---|---|
@@ -643,8 +642,8 @@ from one table to the other. The same applies to leads (`leads` / `leads_archive
 
 | Table | Type | Cursor | Rationale |
 |---|---|---|---|
-| deals | `cdc_with_deletes` | `update_time` | Server-side `updated_since` + `sort_by=update_time`. With `status=open,won,lost,deleted`, soft-deleted deals (deleted ≤30 days ago) come back with `is_deleted=true` / `status=deleted`, and delete time updates `update_time`. Treat `is_deleted=true` as a delete. Deletions older than 30 days are permanently purged and are only caught by a full refresh. |
-| deals_archived | `cdc_with_deletes` | `update_time` | Same parameters as deals. |
+| deals | `cdc_with_deletes` | `update_time` | Server-side `updated_since` + `sort_by=update_time`. Upserts read live deals (`status=open,won,lost`). Deletes: `status=deleted` rows (soft-deleted ≤30 days ago, `is_deleted=true`), and deals that appear in `/api/v2/deals/archived` since the cursor (archived; id-only tombstones). Deletions older than 30 days are permanently purged and are only caught by a full refresh. |
+| deals_archived | `cdc_with_deletes` | `update_time` | Same parameters as deals. Deletes: `status=deleted` rows of `/api/v2/deals/archived` (client-side guard on `is_deleted` / `status`), and every live deal that appears in `/api/v2/deals` since the cursor (id-only tombstones). The second source cannot tell which deals were unarchived, so it tombstones every live deal edited in the window; harmless, but it can be a large share of deal edits. |
 | persons | `cdc` | `update_time` | `updated_since` + sort supported. No documented filter returns deleted persons, so deletes are not captured (`is_deleted` is kept as a column). |
 | organizations | `cdc` | `update_time` | Same as persons. |
 | activities | `cdc` | `update_time` | Same as persons. The schema has an `is_deleted` field, but no documented filter returns deleted activities (the v2 migration guide only says `is_deleted` replaced `is_active`). Decision: deletes are not captured. If a row with `is_deleted=true` does come back, it is upserted as a normal row and keeps the `is_deleted` column. A full refresh removes hard-deleted rows. |
@@ -653,16 +652,16 @@ from one table to the other. The same applies to leads (`leads` / `leads_archive
 | stages | `snapshot` | — | Small. No `updated_since` filter. |
 | users | `snapshot` | — | Small, not paginated. |
 | notes | `cdc` | `update_time` | v1 supports `updated_since`. No delete feed. |
-| leads | `cdc` | `update_time` | v1 supports `updated_since`. No delete feed. |
+| leads | `cdc_with_deletes` | `update_time` | v1 `updated_since` on `/v1/leads`. Archiving moves a lead to `/v1/leads/archived`, which is the delete stream: tombstones for archived leads with `update_time` in the range. Archiving must bump `update_time` (verify live). See Known Quirks for the undocumented filter on the archived endpoint. |
 | leads_archived | `snapshot` | — | `updated_since` is **not** documented for `/v1/leads/archived`. |
 | lead_labels | `snapshot` | — | Small, not paginated. |
-| files | `snapshot` | — | No server-side time filter. Airbyte filters `update_time` client-side after a full scan, which costs the same API calls as a snapshot. Optional: run as `cdc` with client-side filtering on `update_time` and a 1h lookback. |
+| files | `snapshot` | — | No server-side time filter. Filtering `update_time` client-side after a full scan would cost the same API calls as a snapshot. Optional: run as `cdc` with client-side filtering on `update_time` and the settle margin. |
 | projects | `snapshot` | — | No `updated_since` on projects endpoints. Use `status=open,completed,canceled,deleted` to include deleted projects. |
 | tasks | `snapshot` | — | No `updated_since`. |
 | activity_types, currencies | `snapshot` | — | Small reference tables. |
 | deal_fields, person_fields, organization_fields, product_fields, activity_fields | `snapshot` | — | Metadata. |
 | deal_products | `snapshot` | — | Child of deals. Requires deal IDs, no time filter. |
-| deal_flow | `cdc` (upsert on `id`) | `log_time` | Immutable change-log rows; upserted because the uncapped parent walk can revisit a deal edited mid-walk. Incremental by re-reading only deals whose `update_time` ≥ last cursor (from the deals / deals_archived incremental read) and keeping entries with `log_time` > cursor (client-side). Airbyte uses the same parent-incremental pattern. |
+| deal_flow | `cdc` (upsert on `id`) | `log_time` | Immutable change-log rows; upserted because the uncapped parent walk can revisit a deal edited mid-walk. Incremental by re-reading only deals whose `update_time` ≥ cursor − lookback (from the deals / deals_archived incremental read) and keeping entries with `cursor − lookback < log_time ≤ until` (client-side). |
 
 ---
 
@@ -684,15 +683,20 @@ from one table to the other. The same applies to leads (`leads` / `leads_archive
   Continue with `start=next_start` while `more_items_in_collection` is true.
 - Endpoints without pagination (`/v1/users`, `/v1/leadLabels`, `/v1/activityTypes`, `/v1/currencies`) return the
   whole list in one response.
-- For offset pagination on a mutable result set, sort by an **immutable** key (`sort=id ASC`) so that an edit during
-  the read cannot move a row onto an already-read page. Airbyte does this for leads, notes and files.
+- Incremental v1 lists (notes, leads, the leads delete stream) are walked by keyset: `sort=update_time ASC, id ASC`
+  with `updated_since=<last update_time read>` on every page, so a row changed or removed mid-walk does not shift
+  other rows. Only a tie group larger than a page is paged by offset inside that group, and each batch re-reads the
+  cursor's tie group, skipping the ids already read.
+- Snapshot walks use offset pagination with an **immutable** sort key so that an edit during the read cannot move a
+  row onto an already-read page: `id` for files, and `add_time` then `id` for `/v1/leads/archived` (lead
+  ids are UUIDs, so an insert could sort anywhere).
 
 ### Per-table read details
 
 | Table | Request | Incremental params |
 |---|---|---|
-| deals | `GET /api/v2/deals?limit=500&sort_by=update_time&sort_direction=asc&status=open,won,lost,deleted` | `updated_since=<cursor RFC3339>`; optionally `updated_until=<run start>` to cap the window |
-| deals_archived | `GET /api/v2/deals/archived?limit=500&sort_by=update_time&sort_direction=asc&status=open,won,lost,deleted` | same |
+| deals | `GET /api/v2/deals?limit=500&sort_by=update_time&sort_direction=asc&status=open,won,lost` (delete stream: `status=deleted`) | `updated_since=<cursor RFC3339>`; optionally `updated_until=<run start>` to cap the window |
+| deals_archived | `GET /api/v2/deals/archived?limit=500&sort_by=update_time&sort_direction=asc&status=open,won,lost` (delete stream: `status=deleted`) | same |
 | persons | `GET /api/v2/persons?limit=500&sort_by=update_time&sort_direction=asc` | `updated_since`, `updated_until` |
 | organizations | `GET /api/v2/organizations?limit=500&sort_by=update_time&sort_direction=asc` | `updated_since`, `updated_until` |
 | activities | `GET /api/v2/activities?limit=500&sort_by=update_time&sort_direction=asc` | `updated_since`, `updated_until` |
@@ -700,9 +704,10 @@ from one table to the other. The same applies to leads (`leads` / `leads_archive
 | pipelines | `GET /api/v2/pipelines?limit=500` | — |
 | stages | `GET /api/v2/stages?limit=500` | — |
 | users | `GET /v1/users` | — |
-| notes | `GET /v1/notes?limit=500&sort=id ASC` | `updated_since=<RFC3339>` |
-| leads | `GET /v1/leads?limit=500&sort=id ASC` | `updated_since=<ISO 8601>` |
-| leads_archived | `GET /v1/leads/archived?limit=500&sort=id ASC` | — |
+| notes | `GET /v1/notes?limit=500&sort=update_time ASC, id ASC` | `updated_since=<cursor>` (keyset) |
+| leads | `GET /v1/leads?limit=500&sort=update_time ASC, id ASC` | `updated_since=<cursor>` (keyset) |
+| leads (deletes) | `GET /v1/leads/archived?limit=500&sort=update_time ASC, id ASC` | `updated_since` is **not documented** for this endpoint. If the server ignores it, the response contains rows older than the cursor. The connector then restarts from the first row for that call and filters by cursor client-side, so the stream still terminates and emits tombstones, at the cost of a scan from the start in every micro-batch. |
+| leads_archived | `GET /v1/leads/archived?limit=500&sort=add_time ASC, id ASC` | — |
 | lead_labels | `GET /v1/leadLabels` | — |
 | files | `GET /v1/files?limit=100&sort=id ASC` | — (client-side optional) |
 | projects | `GET /api/v2/projects?limit=500&status=open,completed,canceled,deleted` **then** `GET /api/v2/projects/archived?limit=500&status=open,completed,canceled,deleted`; union, dedupe on `id` | — |
@@ -717,10 +722,14 @@ Incremental algorithm (v2 core entities, plus v1 notes and leads):
 
 1. `since = state.cursor or start_date`. Capture `until = now()` at run start and pass `updated_until` where
    supported. This bounds the window, so records updated mid-read go to the next run.
-2. Page through with `sort_by=update_time asc`.
-3. New cursor = max `update_time` seen (or `until`). `updated_since` is inclusive (`>=`), so boundary records are
-   re-read and de-duplicated by PK upsert. A small lookback (Airbyte uses 1h for v1 notes/leads) protects against
-   clock skew and late-committed writes.
+2. Page through with `sort_by=update_time asc` (v1: `sort=update_time ASC, id ASC`).
+3. Offset = `{cursor, ids}`: `cursor` is the newest `update_time` consumed and `ids` are the ids consumed at exactly
+   that second. A row is consumed iff its `update_time` is past the cursor, or equal to it with an id not in `ids`.
+   `updated_since` is inclusive (`>=`), so the cursor's second is re-read and the id set skips what was already read.
+   The upper bound is `until = start − lookback_seconds` (settle margin, 60 s for v2, 300 s for v1). It protects
+   against writes committed up to `lookback_seconds` after their `update_time`; rows newer than `until` wait for the
+   next run. A write that becomes visible later than the margin, with an `update_time` below the cursor, is missed
+   until a full refresh (inherent to any `updated_since` cursor).
 4. v2 timestamps are RFC 3339 (`2025-01-01T10:20:00Z`). v1 notes return `YYYY-MM-DD HH:MM:SS` (UTC) but accept
    RFC 3339 for `updated_since`. v1 leads return `YYYY-MM-DDTHH:MM:SS(.fff)Z`.
 
@@ -729,7 +738,9 @@ Deleted records:
 - `deals` / `deals_archived`: include `status=deleted` and you get soft-deleted deals (≤30 days) with
   `is_deleted=true`. Treat them as deletes.
 - `projects`: `status=deleted` includes deleted projects. A snapshot read reflects them via `status`.
-- persons, organizations, activities, products, notes, leads: no documented deleted-records feed. Hard deletes are
+- `leads`: archived leads (`/v1/leads/archived`) are tombstoned. Archiving is a move, not a delete, and the lead is
+  live again if unarchived.
+- persons, organizations, activities, products, notes: no documented deleted-records feed. Hard deletes are
   only detected by a full refresh. Soft-deleted entities are purged by Pipedrive 30 days after the last activity.
 - `pipelines`, `stages`: `is_deleted` flag on the row (snapshot).
 
@@ -738,11 +749,10 @@ Child-table reads:
 - `deal_products`: collect all deal IDs from `deals` and `deals_archived`, dedupe, chunk into groups of
   **≤100**, and call once per chunk (`deal_ids` is required, max 100).
 - `deal_flow`: one request per deal (cost 40 tokens each), offset-paginated. A 404 / 410 / 403 for a deal deleted
-  or hidden between the parent read and the child read should be skipped, not treated as fatal (Airbyte does
-  this).
+  or hidden between the parent read and the child read should be skipped, not treated as fatal.
 
 Optional tables (projects, tasks): if the company lacks the Projects add-on, the endpoints answer 402 / 403 / 415,
-or a JSON 404. Airbyte treats these as "skip table" (empty result) rather than failing. An HTML 404 means the route
+or a JSON 404. Treat these as "skip table" (empty result) rather than failing. An HTML 404 means the route
 is unknown and should fail.
 
 ### Rate limits
@@ -755,7 +765,7 @@ is unknown and should fail.
   notes / leads / files / leadLabels / activityTypes / currencies / *Fields = 20; v1 leads/archived = 40; v1
   deals/{id}/flow = 40. `deal_flow` is by far the most expensive table (one 40-token call per deal).
 - **Burst limit** (rolling 2 s window, per user/token): API token Lite 20, Growth 40, Premium 100, Ultimate 120
-  (OAuth apps 4× that). The plan is not known from config, so default to ≤20 requests / 2 s (Airbyte's floor).
+  (OAuth apps 4× that). The plan is not known from config, so default to ≤20 requests / 2 s (the lowest plan's limit).
 - Headers: `x-ratelimit-limit`, `x-ratelimit-remaining`, `x-ratelimit-reset` (seconds until window reset,
   **relative**, not epoch), `x-daily-requests-left`.
 - On 429: wait `x-ratelimit-reset` seconds (or exponential backoff) and retry. Repeated 429 floods can trigger a
@@ -777,7 +787,8 @@ is unknown and should fail.
 | UUID (lead IDs, lead label IDs, `source_lead_id`) | StringType | |
 | arrays of scalars (`label_ids`, `deal_ids`, `assignee_ids`) | ArrayType(Long / String) | |
 | nested objects (`address`, `location`, `value`, `emails[]`, `prices[]`) | StructType / ArrayType(StructType) | Fixed shapes listed above |
-| `custom_fields`, `options`, `subfields`, `additional_data`, mixed-type `old_value`/`new_value` | StringType (JSON-serialized) or MapType(String, String) | Shape varies per company |
+| `custom_fields`, `additional_data`, mixed-type `old_value`/`new_value` | StringType (JSON-serialized) or MapType(String, String) | Shape varies per company |
+| `options`, `options_deleted`, `subfields` (`*_fields` tables) | ArrayType(StringType), each element JSON-serialized | Heterogeneous objects; the connector keeps one JSON string per element |
 
 Special behaviours:
 
@@ -795,9 +806,10 @@ Special behaviours:
 ## **Known Quirks**
 
 - **Archived split**: `/api/v2/deals` excludes archived deals and `/api/v2/deals/archived` returns only archived
-  ones. Archiving a deal makes it disappear from `deals` without any delete signal there. Downstream consumers
-  should union the two tables (or the connector can treat both as one logical set).
-  Leads behave the same way (`/v1/leads` vs `/v1/leads/archived`).
+  ones. Archiving a deal removes it from `deals` with no signal there, and it appears in `deals_archived`. The
+  connector turns each move into a tombstone on the table it left, so each table ends up holding its own side.
+  Do not union the two tables: a deal that has just moved is in both until the delete stream runs, so a union
+  double counts it. Leads behave the same way (`/v1/leads` vs `/v1/leads/archived`).
 - **Deleted deals window**: `status=deleted` only returns deals deleted in the last 30 days.
 - **OAuth host**: OAuth calls must target the company `api_domain`. API token calls can use
   `https://api.pipedrive.com`. Not relevant for the chosen API token method, except that `company_domain` is
@@ -837,16 +849,13 @@ Special behaviours:
 | Official docs: Rate limiting | https://pipedrive.readme.io/docs/core-api-concepts-rate-limiting | 2026-11-18 | High | Daily token budget formula, burst limits per plan, rate-limit headers, 429 / Cloudflare 403 behaviour |
 | Official docs: Pagination | https://pipedrive.readme.io/docs/core-api-concepts-pagination | 2026-11-18 | High | v1 offset pagination (`additional_data.pagination.next_start`), v2 cursor pagination (`next_cursor`), limit default 100 / max 500 |
 | Official docs: v2 migration guide | https://pipedrive.readme.io/docs/pipedrive-api-v2-migration-guide | 2026-11-18 | High | Deleted-entity handling, RFC 3339 timestamps, `custom_fields` nesting, v1→v2 field renames |
-| Airbyte source-pipedrive manifest | https://github.com/airbytehq/airbyte/blob/master/airbyte-integrations/connectors/source-pipedrive/manifest.yaml | 2026-11-18 | Medium–High | Stream list, endpoint choice per table (v2 vs v1), PKs (`key` for field tables), cursor fields, `sort=id ASC` for offset streams, 1h lookback, deal_products batching (100 IDs), deal_flow record path `data/*/data` with `items=dealChange&all_changes=1`, projects union of `/projects` + `/projects/archived` with all statuses, error handling (skip 402/403/415 for projects/tasks, skip 404/410/403 for deal_flow children), burst budget 20 / 2 s, schemas for files, notes, leads, users, deal_flow |
-| Airbyte connector docs | https://github.com/airbytehq/airbyte/tree/master/airbyte-integrations/connectors/source-pipedrive | 2026-11-18 | Medium | Reference implementation (user-provided) |
 
 Conflict resolution:
 
-- **Field tables**: Airbyte and the v1 spec agree (`/v1/*Fields`, PK `key`). v2 field endpoints exist but have a
-  different shape. Chose v1 (official, not deprecated, matches the reference implementation).
+- **Field tables**: v1 (`/v1/*Fields`, PK `key`) and v2 field endpoints both exist with different shapes. Chose v1
+  (official, not deprecated).
 - **Persons `im`/`ims`**: the spec schema says `im`, the migration guide says `ims`. Accept both (see Known
   Quirks).
-- **Files incrementality**: Airbyte runs it as client-side incremental, but the official spec offers no time
-  filter. Documented as `snapshot`, with client-side cdc as an option.
+- **Files incrementality**: the official spec offers no time filter (client-side incremental is possible). Documented as `snapshot`, with client-side cdc as an option.
 - **`api_token` query parameter**: older community docs mention it, the current official auth page documents only
   the header. Chose the header (official).

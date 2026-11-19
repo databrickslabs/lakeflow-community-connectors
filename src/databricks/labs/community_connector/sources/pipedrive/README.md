@@ -7,7 +7,7 @@ This documentation describes how to configure and use the **Pipedrive** Lakeflow
 - **Pipedrive account**: A user with access to the data you want to ingest. The connector can only read records visible to the user who owns the API token.
 - **Personal API token**: Created in Pipedrive and supplied to the connector as `api_token`.
 - **Network access**: The environment running the connector must be able to reach `https://api.pipedrive.com` (or `https://<company_domain>.pipedrive.com`).
-- **Optional add-ons**: The `projects` and `tasks` tables need the Projects feature. If it is not enabled on your account, these tables return no rows instead of failing.
+- **Optional add-ons**: The `projects` and `tasks` tables need the Projects feature. If it is not enabled on your account, these tables return no rows and log a warning instead of failing.
 
 ## Setup
 
@@ -49,14 +49,14 @@ The connector exposes a **static list** of 25 tables. Table names are lowercase 
 
 | Table | Description | Ingestion Type | Primary Key | Cursor |
 |---|---|---|---|---|
-| `deals` | Open, won and lost deals | `cdc_with_deletes` | `id` | `update_time` |
+| `deals` | Live deals: open, won and lost, not archived | `cdc_with_deletes` | `id` | `update_time` |
 | `deals_archived` | Archived deals | `cdc_with_deletes` | `id` | `update_time` |
 | `persons` | Contacts | `cdc` | `id` | `update_time` |
 | `organizations` | Organizations | `cdc` | `id` | `update_time` |
 | `activities` | Activities (calls, meetings, tasks, and so on) | `cdc` | `id` | `update_time` |
 | `products` | Products | `cdc` | `id` | `update_time` |
 | `notes` | Notes | `cdc` | `id` | `update_time` |
-| `leads` | Active leads | `cdc` | `id` | `update_time` |
+| `leads` | Live (not archived) leads | `cdc_with_deletes` | `id` | `update_time` |
 | `deal_flow` | Change log of each deal (field changes, stage moves) | `cdc` | `id` | `log_time` |
 | `leads_archived` | Archived leads | `snapshot` | `id` | n/a |
 | `pipelines` | Pipelines | `snapshot` | `id` | n/a |
@@ -77,19 +77,25 @@ The connector exposes a **static list** of 25 tables. Table names are lowercase 
 
 ### Incremental behavior
 
-- **`deals`, `deals_archived`, `persons`, `organizations`, `activities`, `products`** use the v2 API with `updated_since`, sorted by `update_time` ascending. Reads are bounded by the time the pipeline update started, so triggered runs terminate. Each micro-batch stops after roughly `max_records_per_batch` records and resumes from the last cursor. Boundary rows can be re-read; the primary-key upsert de-duplicates them. For `products`, the upper bound is applied client-side.
-- **`notes` and `leads`** use the v1 API with `updated_since`, sorted by `id`. Each micro-batch reads the whole range up to the start of the run, so `max_records_per_batch` does not apply. A one-hour lookback is applied by default.
-- **`deal_flow`** selects deals updated since the cursor (minus a one-hour lookback), then fetches each deal's change log and keeps entries whose `log_time` falls in the window. It walks `/deals`, then the archived deals, then re-scans deals changed since the archived pass started. The deal query has no upper time bound, so a deal that is edited, archived or unarchived while a long walk is running is still visited. Such a deal can be visited twice. Change-log rows don't change and are upserted on `id`, so a second visit doesn't create duplicates. Batches split between deals, never inside one deal's log.
+- **`deals`, `deals_archived`, `persons`, `organizations`, `activities`, `products`** use the v2 API with `updated_since`, sorted by `update_time` ascending. Reads stop at the pipeline's start time minus `lookback_seconds` (the settle margin), so a change is read once it is at least that old and triggered runs terminate. The margin covers writes that Pipedrive commits up to `lookback_seconds` after their `update_time`; a write that becomes visible later than that, with an `update_time` older than the cursor, is not picked up until a full refresh. Each micro-batch holds at most `max_records_per_batch` records and resumes from the cursor. The cursor is the newest `update_time` read, plus the ids already read at that exact second, so rows that share a second are neither lost nor read twice. For `products`, the upper bound is applied client-side.
+- **`notes` and `leads`** use the v1 API with `updated_since`, sorted by `update_time` and then `id`. Every page request is keyed on the last `update_time` read, so a row archived, deleted or edited during a long walk cannot shift other rows out of the read (only rows inside one same-second group are re-read). Each micro-batch holds at most `max_records_per_batch` records. The settle margin defaults to five minutes for these tables.
+- **`deal_flow`** selects deals updated since the cursor (minus the lookback), then fetches each deal's change log and keeps entries whose `log_time` falls in the window (also widened by the lookback, so an entry logged just before the cursor is picked up). It walks `/deals`, then the archived deals, then re-scans deals changed since the archived pass started. The deal query has no upper time bound, so a deal that is edited, archived or unarchived while a long walk is running is still visited. Such a deal can be visited twice. Change-log rows don't change and are upserted on `id`, so a second visit doesn't create duplicates. Batches split between deals, never inside one deal's log.
 - **Snapshot tables** are fully re-read on every run.
 
 ### Delete handling
 
-`deals` and `deals_archived` support `cdc_with_deletes`. Deleted deals are detected through a separate read with `status=deleted`. Pipedrive keeps deleted deals for 30 days, so a deal must be seen as deleted within that window. Other tables do not propagate deletes. Snapshot tables replace their contents each run.
+`deals`, `deals_archived` and `leads` support `cdc_with_deletes`. Each has its own delete stream and offset, and emits tombstones that carry the primary key and `update_time`:
+
+- `deals`: deals with `status=deleted` (soft deletes, kept by Pipedrive for 30 days, so run the pipeline at least that often), and deals archived since the last run (they move to `deals_archived`).
+- `deals_archived`: archived deals with `status=deleted`, and deals unarchived since the last run (they move back to `deals`). The unarchive source lists every live deal edited since the last run, so this stream tombstones all of them, not only the unarchived ones. Expect it to carry a large share of deal edits.
+- `leads`: leads archived since the last run (they move to `leads_archived`). Pipedrive does not document `updated_since` for `/v1/leads/archived`. If the server ignores it, every micro-batch of that stream scans the archived leads from the start, which is correct but costs more requests.
+
+Tombstones for keys that are not in the table are harmless. Moves rely on archiving and unarchiving bumping `update_time`, and the `status=deleted` rows are re-checked client-side. Do not union `deals` and `deals_archived` to count deals: a deal that has just moved can appear in both until the delete stream runs. Other tables do not propagate deletes. Snapshot tables replace their contents each run.
 
 ### Special columns
 
 - **`custom_fields`** (deals, persons, organizations, products, projects, leads) is stored as a **JSON string**. Parse it downstream. Custom field keys are Pipedrive's hashed identifiers; use the `*_fields` tables to map keys to names.
-- `options`, `options_deleted` and `subfields` in the `*_fields` tables, and `old_value`, `new_value`, `additional_data` and `origin_id` in `deal_flow`, are also JSON strings.
+- `options`, `options_deleted` and `subfields` in the `*_fields` tables are `ARRAY<STRING>`, where each element is a JSON-encoded object. `old_value`, `new_value`, `additional_data` and `origin_id` in `deal_flow` are JSON strings.
 - `persons.emails`, `phones` and `im` are arrays of `{value, primary, label}`. `postal_address` is a struct.
 - Timestamps and dates are strings as returned by Pipedrive. Cast them downstream.
 - `deals` and `deals_archived` include `source_lead_id` by default.
@@ -124,23 +130,24 @@ All of these are optional and must be listed in `externalOptionsAllowList`.
 
 | Option | Applies to | Description |
 |---|---|---|
-| `max_records_per_batch` | `deals`, `deals_archived`, `persons`, `organizations`, `activities`, `products`, `deal_flow` | Soft cap on records per micro-batch. Default `5000`. |
+| `max_records_per_batch` | `deals`, `deals_archived`, `persons`, `organizations`, `activities`, `products`, `notes`, `leads`, `deal_flow` | Maximum records per micro-batch. Default `5000`. Exact for every table except `deal_flow`, where one deal's change log is never split, so a batch can exceed the cap. |
 | `page_size` | Incremental tables | Page size for incremental reads. Capped at 500 for v2 tables and at the endpoint maximum for v1 tables. |
-| `lookback_seconds` | Incremental tables | Seconds subtracted from the query lower bound on the first read of each trigger. The stored cursor is not shifted. Defaults: `0` for v2 tables, `3600` for `notes`, `leads` and `deal_flow`. |
+| `lookback_seconds` | Incremental tables | Settle margin: a change is read only once it is at least this many seconds old, which covers writes committed up to this long after their `update_time`. Raise it if your account sees later commits. For `deal_flow` it instead widens the log-time window backwards, so entries logged shortly before the cursor are re-read (rows are upserted on `id`). Defaults: `60` for v2 tables, `300` for `notes`, `leads` and the `leads` delete stream, `3600` for `deal_flow`. |
 | `include_fields` | v2 incremental tables | Comma-separated optional fields to request from the API. Defaults to `source_lead_id` for deals. |
 
 ## Data Type Mapping
 
 | Pipedrive type | Databricks type |
 |---|---|
-| Integer IDs (`id`, `owner_id`, `org_id`, and so on) | `BIGINT` |
+| Integer IDs (`id`, `owner_id`, `org_id`, and so on) | `BIGINT`. The exceptions are the lead `id` and the lead `label_ids`, which are UUID strings (`STRING`, `ARRAY<STRING>`). |
 | Decimal numbers (`value`, `probability`, `arr`, `mrr`, `acv`) | `DOUBLE` |
 | Boolean | `BOOLEAN` |
 | Text, timestamps, dates | `STRING` |
-| Lists of IDs (`label_ids`) | `ARRAY<BIGINT>` |
+| Lists of numeric IDs (`label_ids`, `deal_ids`, `assignee_ids`) | `ARRAY<BIGINT>` (`leads.label_ids` is `ARRAY<STRING>`) |
 | Contact entries (`emails`, `phones`, `im`) | `ARRAY<STRUCT<value, primary, label>>` |
 | Address | `STRUCT` |
-| Custom fields, field options, flow values | `STRING` (JSON) |
+| Custom fields and deal-flow values | `STRING` (JSON) |
+| Field options and subfields (`options`, `options_deleted`, `subfields`) | `ARRAY<STRING>`, each element JSON |
 
 ## How to Run
 
@@ -210,4 +217,3 @@ Follow the Lakeflow Community Connector UI, which will guide you through setting
 - [Pipedrive API reference](https://developers.pipedrive.com/docs/api/v1)
 - [Pipedrive API v2 overview and migration guide](https://pipedrive.readme.io/docs/pipedrive-api-v2)
 - [Pipedrive rate limiting](https://pipedrive.readme.io/docs/core-api-concepts-rate-limiting)
-- [Airbyte `source-pipedrive` connector](https://github.com/airbytehq/airbyte/tree/master/airbyte-integrations/connectors/source-pipedrive)

@@ -10,6 +10,8 @@ from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from typing import (
     Any,
+    Callable,
+    Iterable,
     Iterator,
     Optional,
     Sequence,
@@ -46,7 +48,10 @@ from pyspark.sql.types import (
     VariantType,
     VariantVal,
 )
+from urllib.parse import urlsplit
 import base64
+import heapq
+import logging
 import requests
 
 
@@ -1215,7 +1220,9 @@ def register_lakeflow_source(spark):
             "kind": "v1_incremental",
             "path": f"{V1}/leads",
             "schema": LEAD_SCHEMA,
-            "ingestion_type": "cdc",
+            # Archiving a lead moves it to leads_archived; those archive rows are
+            # the delete stream (see pipedrive.py read_table_deletes).
+            "ingestion_type": "cdc_with_deletes",
             "page_max": 500,
             "lead_custom_fields": True,
         },
@@ -1225,7 +1232,7 @@ def register_lakeflow_source(spark):
             "schema": LEAD_SCHEMA,
             "paginated": True,
             "page_max": 500,
-            "sort": "id ASC",
+            "sort": "add_time ASC, id ASC",
             "lead_custom_fields": True,
         },
         "lead_labels": {
@@ -1385,7 +1392,7 @@ def register_lakeflow_source(spark):
 
     # Pipedrive's burst limit is a rolling 2-second window per token.  The lowest
     # plan (Lite, API token) allows 20 requests / 2 s; the plan is not knowable
-    # from config, so default to that floor (same as Airbyte).
+    # from config, so default to that floor.
     BURST_WINDOW_SECONDS = 2.0
     DEFAULT_BURST_LIMIT = 20
 
@@ -1670,6 +1677,11 @@ def register_lakeflow_source(spark):
                 next_cursor = (body.get("additional_data") or {}).get("next_cursor")
                 if not next_cursor or not data:
                     return
+                if next_cursor == query.get("cursor"):
+                    # A repeated cursor would replay the same page forever.
+                    raise PipedriveAPIError(
+                        f"Pipedrive API GET {path} returned a next_cursor that did not advance"
+                    )
                 query["cursor"] = next_cursor
 
         def iter_v1_pages(self, path: str, params: dict) -> Iterator[list]:
@@ -1698,14 +1710,18 @@ def register_lakeflow_source(spark):
     # src/databricks/labs/community_connector/sources/pipedrive/pipedrive.py
     ########################################################
 
+    _LOG = logging.getLogger(__name__)
+
     V2_PAGE_MAX = 500
     DEFAULT_MAX_RECORDS_PER_BATCH = 5000
-    # v1 notes / leads: Airbyte applies a 1h lookback to guard against clock skew
-    # and late-committed writes.  v2 tables default to none.
-    DEFAULT_V1_LOOKBACK_SECONDS = 3600
-    DEFAULT_V2_LOOKBACK_SECONDS = 0
-    # deal_flow selects parent deals updated since (cursor - lookback); entries are
-    # then filtered by their own log_time, so a generous lookback is cheap insurance.
+    # Settle margin (``lookback_seconds``): a change is read once it is at least this
+    # old, so writes that commit late with an earlier update_time are not missed.
+    # v1 endpoints reflect writes more slowly, hence the larger default.
+    DEFAULT_V2_SETTLE_SECONDS = 60
+    DEFAULT_V1_SETTLE_SECONDS = 300
+    # v1 incremental lists: mutable update_time as the cursor, immutable id as tiebreak.
+    V1_INCREMENTAL_SORT = "update_time ASC, id ASC"
+    # deal_flow widens its log-time window backwards by this much (see _read_deal_flow).
     DEFAULT_DEAL_FLOW_LOOKBACK_SECONDS = 3600
     # Clock-skew margin for the final deal_flow /deals re-scan, which starts from
     # the moment the /deals/archived phase began.
@@ -1716,6 +1732,90 @@ def register_lakeflow_source(spark):
     DEALS_DELETED_STATUS = "deleted"
     DEALS_ALL_STATUSES = "open,won,lost,deleted"
     PROJECT_ALL_STATUSES = "open,completed,canceled,deleted"
+
+    # Delete sources for the deal tables, merged in update_time order.  Each entry is
+    # (source table, server status filter, kind):
+    #   DELETED  rows the source reports as deleted (soft delete, kept 30 days).
+    #            The status filter is only a request hint, so rows are re-checked.
+    #   MOVED    rows that left this table for its sibling (archived or unarchived).
+    #            Every such row is a tombstone; the sibling holds the live copy.
+    # The two sources never hold the same row at the same update_time, because a
+    # deal is either archived or not.  This is why one shared id set per cursor works.
+    _DELETED = "deleted"
+    _MOVED = "moved"
+    DEAL_DELETE_SOURCES: dict[str, tuple[tuple[str, str, str], ...]] = {
+        "deals": (
+            ("deals", DEALS_DELETED_STATUS, _DELETED),
+            ("deals_archived", DEALS_ALL_STATUSES, _MOVED),
+        ),
+        "deals_archived": (
+            ("deals_archived", DEALS_DELETED_STATUS, _DELETED),
+            ("deals", DEALS_ALL_STATUSES, _MOVED),
+        ),
+    }
+
+
+    def _is_deleted_row(raw: dict) -> bool:
+        """Check the row itself, not the request: a server that ignores ``status=deleted``
+        must not turn live deals into deletes."""
+        return raw.get("is_deleted") is True or raw.get("status") == DEALS_DELETED_STATUS
+
+
+    def _tombstone(raw: dict) -> Optional[dict]:
+        """Id-only delete record: the primary key plus the cursor field."""
+        if raw.get("id") is None:
+            return None
+        return {"id": raw["id"], "update_time": record_cursor(raw)}
+
+
+    def _offset(cursor: str, ids: list, start: int = 0) -> dict:
+        """Canonical time-cursor offset: empty ids and a zero start are omitted."""
+        offset: dict = {"cursor": cursor}
+        if ids:
+            offset["ids"] = ids
+        if start:
+            offset["start"] = start
+        return offset
+
+
+    def _page_data(body: dict) -> list:
+        data = body.get("data") or []
+        return data if isinstance(data, list) else [data]
+
+
+    def _older_than(raw: dict, since: str) -> bool:
+        rc = record_cursor(raw)
+        return rc is not None and rc < since
+
+
+    _PIPEDRIVE_HOST_RE = re.compile(r"[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.pipedrive\.com")
+
+
+    def _base_url_for_domain(company_domain: str) -> str:
+        """Accept ``mycompany``, ``mycompany.pipedrive.com`` or a full URL (any path)."""
+        text = company_domain if "://" in company_domain else f"https://{company_domain}"
+        host = (urlsplit(text).hostname or "").strip(".")
+        if not host:
+            raise ValueError(f"Invalid 'company_domain' {company_domain!r}")
+        if "." not in host:
+            host = f"{host}.pipedrive.com"
+        # Only a company subdomain of pipedrive.com: the API token is sent to this host.
+        if not _PIPEDRIVE_HOST_RE.fullmatch(host.lower()):
+            raise ValueError(
+                f"Invalid 'company_domain' {company_domain!r}: expected 'mycompany' or "
+                "'mycompany.pipedrive.com'"
+            )
+        return f"https://{host.lower()}"
+
+
+    def _log_optional_skip(table_name: str, exc: PipedriveAPIError) -> None:
+        # Status code only: the error text can echo response bodies.
+        _LOG.warning(
+            "Skipping optional Pipedrive table '%s': HTTP %s, so the feature is probably "
+            "not enabled for this account.",
+            table_name,
+            exc.status_code,
+        )
 
 
     class PipedriveLakeflowConnect(LakeflowConnect):
@@ -1728,14 +1828,7 @@ def register_lakeflow_source(spark):
                 raise ValueError("Pipedrive connector requires 'api_token' in options")
 
             company_domain = (options.get("company_domain") or "").strip()
-            if company_domain:
-                # Accept "mycompany", "mycompany.pipedrive.com" or a full URL.
-                host = company_domain.split("://", 1)[-1].strip("/")
-                if not host.endswith(".pipedrive.com"):
-                    host = f"{host}.pipedrive.com"
-                base_url = f"https://{host}"
-            else:
-                base_url = DEFAULT_BASE_URL
+            base_url = _base_url_for_domain(company_domain) if company_domain else DEFAULT_BASE_URL
 
             start_date = options.get("start_date") or DEFAULT_START_DATE
             normalized_start = normalize_ts(start_date)
@@ -1746,11 +1839,9 @@ def register_lakeflow_source(spark):
             burst_limit = int(options.get("burst_limit") or DEFAULT_BURST_LIMIT)
             self._client = PipedriveClient(api_token, base_url, burst_limit=burst_limit)
 
-            # Upper bound for every incremental read in this trigger.  Data changed
-            # after this instant is picked up by the next trigger (fresh instance).
-            self._init_ts = now_utc()
-            # Tables (and their delete streams) whose one-time lookback was applied.
-            self._lookback_applied: set[str] = set()
+            # Changes after this instant (less the settle margin) are read by the next
+            # trigger, which constructs a fresh instance.
+            self._init_time = now_utc()
 
         # ------------------------------------------------------------------ #
         # Interface: discovery / schema / metadata
@@ -1780,9 +1871,7 @@ def register_lakeflow_source(spark):
 
             if kind == "v2_incremental":
                 status = DEALS_LIVE_STATUSES if TABLE_CONFIG[table_name].get("deal_status") else None
-                return self._read_v2_incremental(
-                    table_name, start_offset, table_options, status=status, stream_key=table_name
-                )
+                return self._read_v2_incremental(table_name, start_offset, table_options, status=status)
             if kind == "v1_incremental":
                 return self._read_v1_incremental(table_name, start_offset, table_options)
             if kind == "deal_flow":
@@ -1800,23 +1889,27 @@ def register_lakeflow_source(spark):
         def read_table_deletes(
             self, table_name: str, start_offset: dict, table_options: dict[str, str]
         ) -> tuple[Iterator[dict], dict]:
-            """Soft-deleted deals (``status=deleted``, last 30 days) as delete tombstones.
+            """Delete tombstones for ``cdc_with_deletes`` tables, on their own offset.
 
-            Pipedrive keeps deleted deals for 30 days with ``is_deleted=true`` and a
-            bumped ``update_time``; ``status=deleted`` returns only those.  This is a
-            separate stream with its own offset, read with the same incremental
-            algorithm as ``read_table``.
+            Deals: ``status=deleted`` rows, plus rows that moved to the sibling table
+            (archived for ``deals``, unarchived for ``deals_archived``).  Leads: rows
+            that were archived (``/v1/leads/archived``).  Tombstones carry the primary
+            key and ``update_time`` only.
             """
             self._validate_table(table_name)
             if TABLE_CONFIG[table_name].get("ingestion_type") != "cdc_with_deletes":
                 raise ValueError(f"Table '{table_name}' does not support deleted records")
-            return self._read_v2_incremental(
-                table_name,
-                start_offset,
-                table_options or {},
-                status=DEALS_DELETED_STATUS,
-                stream_key=f"{table_name}::deletes",
-            )
+            table_options = table_options or {}
+            if table_name == "leads":
+                archived = TABLE_CONFIG["leads_archived"]
+                return self._read_v1_keyset(
+                    archived["path"],
+                    start_offset,
+                    table_options,
+                    page_max=archived.get("page_max", 500),
+                    emit=_tombstone,
+                )
+            return self._read_v2_deletes(table_name, start_offset, table_options)
 
         # ------------------------------------------------------------------ #
         # Helpers
@@ -1851,39 +1944,102 @@ def register_lakeflow_source(spark):
                 raise ValueError(f"Table option '{name}' must be an integer, got {raw!r}") from exc
             return max(minimum, value)
 
-        def _query_lower_bound(self, stream_key: str, since: str, lookback_seconds: int) -> str:
-            """Apply the lookback once per stream per trigger (never to the stored cursor)."""
-            if lookback_seconds <= 0 or stream_key in self._lookback_applied:
-                return since
-            self._lookback_applied.add(stream_key)
-            return shift_ts(since, -lookback_seconds)
-
         def _resolve_since(self, start_offset: Optional[dict]) -> Optional[str]:
-            """Starting cursor, or ``None`` if the stream already caught up to init time."""
+            """deal_flow's starting cursor, or ``None`` once it caught up to init time."""
             cursor = (start_offset or {}).get("cursor")
-            if cursor and cursor >= self._init_ts:
+            if cursor and cursor >= self._init_time:
                 return None
             return cursor or self._start_date
+
+        def _upper_bound(self, settle_seconds: int) -> str:
+            """Newest update_time a read may consume: init time less the settle margin."""
+            return shift_ts(self._init_time, -settle_seconds) if settle_seconds > 0 else self._init_time
+
+        def _time_state(self, start_offset: Optional[dict]) -> tuple[str, list, int]:
+            offset = start_offset or {}
+            cursor = offset.get("cursor") or self._start_date
+            return cursor, list(offset.get("ids") or []), int(offset.get("start") or 0)
+
+        @staticmethod
+        def _tagged(
+            raw_rows: Iterable[dict], cursor: str, emit: Callable[[dict], Optional[dict]]
+        ) -> Iterator[tuple]:
+            """Yield ``(update_time, id, raw_id, out)`` for one sorted stream.
+
+            Rows without a cursor or id, and rows below the committed cursor (a server
+            that ignored ``updated_since``), are dropped here.  ``out`` is the emitted
+            row, or None for a row that is consumed but filtered out.
+            """
+            for raw in raw_rows:
+                rc = record_cursor(raw)
+                if rc is None or raw.get("id") is None or rc < cursor:
+                    continue
+                yield rc, str(raw["id"]), raw["id"], emit(raw)
+
+        def _merge_scan(
+            self,
+            streams: list[Iterator[tuple]],
+            cursor: str,
+            ids: list,
+            until: str,
+            max_records: int,
+        ) -> tuple[list[dict], str, set, int, bool]:
+            """Consume the merged streams in ``(update_time, id)`` order.
+
+            A row is consumed when its update_time is past ``cursor``, or equal to it
+            with an id not yet recorded at the cursor.  Consumption stops at the first
+            row past ``until`` or right after the ``max_records``-th emitted row.
+            Returns ``(rows, cursor, ids_at_cursor, visits, capped)``.  ``visits``
+            counts the consumed rows at the final cursor, and ``capped`` tells whether
+            the batch was cut short by the cap rather than by reaching ``until``.
+            """
+            merged = heapq.merge(*streams, key=lambda item: (item[0], item[1]))
+            cur, at_cur, visits = cursor, set(ids), 0
+            rows: list[dict] = []
+            for rc, _, raw_id, out in merged:
+                if rc > until:
+                    return rows, cur, at_cur, visits, False
+                if rc > cur:
+                    cur, at_cur, visits = rc, set(), 0
+                visits += 1
+                if raw_id in at_cur:
+                    continue
+                at_cur.add(raw_id)
+                if out is not None:
+                    rows.append(out)
+                    if len(rows) >= max_records:
+                        return rows, cur, at_cur, visits, True
+            return rows, cur, at_cur, visits, False
+
+        @staticmethod
+        def _sorted_ids(ids: set) -> list:
+            return sorted(ids, key=str)
+
+        def _deleted_emitter(self, table_name: str) -> Callable[[dict], Optional[dict]]:
+            """Emit full rows from a ``status=deleted`` source, dropping any live row."""
+
+            def emit(raw: dict) -> Optional[dict]:
+                return self._normalize(table_name, raw) if _is_deleted_row(raw) else None
+
+            return emit
+
+        def _live_emitter(self, table_name: str, guard: bool) -> Callable[[dict], Optional[dict]]:
+            """Emit normalised rows; on a status-filtered (deals) list, drop deleted rows."""
+
+            def emit(raw: dict) -> Optional[dict]:
+                if guard and _is_deleted_row(raw):
+                    return None
+                return self._normalize(table_name, raw)
+
+            return emit
 
         # ------------------------------------------------------------------ #
         # v2 incremental (deals, deals_archived, persons, organizations,
         # activities, products)
         # ------------------------------------------------------------------ #
 
-        def _read_v2_incremental(
-            self,
-            table_name: str,
-            start_offset: Optional[dict],
-            table_options: dict,
-            *,
-            status: Optional[str],
-            stream_key: str,
-        ) -> tuple[Iterator[dict], dict]:
-            cfg = TABLE_CONFIG[table_name]
-            since = self._resolve_since(start_offset)
-            if since is None:
-                return iter([]), start_offset
-
+        def _v2_batch_sizes(self, table_options: dict) -> tuple[int, int]:
+            """``(max_records_per_batch, page_size)``; a page never exceeds the batch cap."""
             max_records = self._int_option(
                 table_options, "max_records_per_batch", DEFAULT_MAX_RECORDS_PER_BATCH, minimum=1
             )
@@ -1892,92 +2048,200 @@ def register_lakeflow_source(spark):
                 self._int_option(table_options, "page_size", V2_PAGE_MAX, minimum=1),
                 max_records,
             )
-            lookback = self._int_option(table_options, "lookback_seconds", DEFAULT_V2_LOOKBACK_SECONDS)
+            return max_records, page_size
 
-            params = {
+        @staticmethod
+        def _v2_params(
+            cfg: dict, table_options: dict, *, status: Optional[str], page_size: int, until: str
+        ) -> dict:
+            params: dict = {
                 "limit": page_size,
                 "sort_by": "update_time",
                 "sort_direction": "asc",
-                "updated_since": self._query_lower_bound(stream_key, since, lookback),
             }
             if cfg.get("supports_until"):
-                params["updated_until"] = self._init_ts
+                params["updated_until"] = until
             if status:
                 params["status"] = status
             include_fields = table_options.get("include_fields", cfg.get("default_include_fields"))
             if include_fields:
                 params["include_fields"] = include_fields
+            return params
 
-            records: list[dict] = []
-            last_cursor = since
-            for page in self._client.iter_v2_pages(cfg["path"], params):
-                reached_cap = False
-                for raw in page:
-                    rc = record_cursor(raw)
-                    if rc is not None and rc > self._init_ts:
-                        # Sorted ascending: everything after this is past the cap
-                        # (only reachable where updated_until isn't supported).
-                        reached_cap = True
-                        break
-                    records.append(self._normalize(table_name, raw))
-                    if rc is not None and rc > last_cursor:
-                        last_cursor = rc
-                if reached_cap:
-                    break
-                # Stop at a page boundary once the batch is full - but only after
-                # the cursor has moved past ``since``; otherwise a run of rows that
-                # share one update_time would never advance the offset.
-                if len(records) >= max_records and last_cursor > since:
-                    break
+        def _v2_rows(self, path: str, params: dict, since: str) -> Iterator[dict]:
+            """Every row of a v2 list from ``since``, page by page (lazy)."""
+            for page in self._client.iter_v2_pages(path, {**params, "updated_since": since}):
+                yield from page
 
-            end_offset = {"cursor": last_cursor}
-            if not records or (start_offset and start_offset == end_offset):
-                return iter([]), start_offset if start_offset else end_offset
-            return iter(records), end_offset
+        def _read_v2_incremental(
+            self, table_name: str, start_offset: Optional[dict], table_options: dict, *, status
+        ) -> tuple[Iterator[dict], dict]:
+            cfg = TABLE_CONFIG[table_name]
+            max_records, page_size = self._v2_batch_sizes(table_options)
+            until = self._upper_bound(
+                self._int_option(table_options, "lookback_seconds", DEFAULT_V2_SETTLE_SECONDS)
+            )
+            cursor, ids, _ = self._time_state(start_offset)
+            if cursor >= until:
+                return iter([]), start_offset or _offset(cursor, ids)
+
+            params = self._v2_params(
+                cfg, table_options, status=status, page_size=page_size, until=until
+            )
+            emit = self._live_emitter(table_name, guard=status is not None)
+            stream = self._tagged(self._v2_rows(cfg["path"], params, cursor), cursor, emit)
+            rows, cur, at_cur, _, _ = self._merge_scan([stream], cursor, ids, until, max_records)
+            return iter(rows), _offset(cur, self._sorted_ids(at_cur))
+
+        def _read_v2_deletes(
+            self, table_name: str, start_offset: Optional[dict], table_options: dict
+        ) -> tuple[Iterator[dict], dict]:
+            """Tombstones for a deal table: its delete sources merged by update_time."""
+            max_records, page_size = self._v2_batch_sizes(table_options)
+            until = self._upper_bound(
+                self._int_option(table_options, "lookback_seconds", DEFAULT_V2_SETTLE_SECONDS)
+            )
+            cursor, ids, _ = self._time_state(start_offset)
+            if cursor >= until:
+                return iter([]), start_offset or _offset(cursor, ids)
+
+            streams = []
+            for source_table, status, kind in DEAL_DELETE_SOURCES[table_name]:
+                src_cfg = TABLE_CONFIG[source_table]
+                params = self._v2_params(
+                    src_cfg, table_options, status=status, page_size=page_size, until=until
+                )
+                emit = _tombstone if kind == _MOVED else self._deleted_emitter(table_name)
+                streams.append(
+                    self._tagged(self._v2_rows(src_cfg["path"], params, cursor), cursor, emit)
+                )
+            rows, cur, at_cur, _, _ = self._merge_scan(streams, cursor, ids, until, max_records)
+            return iter(rows), _offset(cur, self._sorted_ids(at_cur))
 
         # ------------------------------------------------------------------ #
-        # v1 incremental (notes, leads)
+        # v1 incremental (notes, leads, leads_archived for deletes)
         # ------------------------------------------------------------------ #
 
         def _read_v1_incremental(
             self, table_name: str, start_offset: Optional[dict], table_options: dict
         ) -> tuple[Iterator[dict], dict]:
             cfg = TABLE_CONFIG[table_name]
-            since = self._resolve_since(start_offset)
-            if since is None:
-                return iter([]), start_offset
-
-            page_size = min(
-                cfg.get("page_max", 500),
-                self._int_option(table_options, "page_size", cfg.get("page_max", 500), minimum=1),
+            return self._read_v1_keyset(
+                cfg["path"],
+                start_offset,
+                table_options,
+                page_max=cfg.get("page_max", 500),
+                emit=lambda raw: self._normalize(table_name, raw),
             )
-            lookback = self._int_option(table_options, "lookback_seconds", DEFAULT_V1_LOOKBACK_SECONDS)
-            params = {
-                "limit": page_size,
-                "start": 0,
-                # Immutable sort key: an edit mid-read can't move a row onto an
-                # already-read offset page.
-                "sort": "id ASC",
-                "updated_since": self._query_lower_bound(table_name, since, lookback),
-            }
 
-            # The cursor is only safe once the whole id-sorted range is drained,
-            # so read every page in one micro-batch.
-            records: list[dict] = []
-            last_cursor = since
-            for page in self._client.iter_v1_pages(cfg["path"], params):
-                for raw in page:
-                    rc = record_cursor(raw)
-                    if rc is not None and rc > self._init_ts:
-                        continue  # changed after init: next trigger picks it up
-                    records.append(self._normalize(table_name, raw))
-                    if rc is not None and rc > last_cursor:
-                        last_cursor = rc
+        def _read_v1_keyset(
+            self,
+            path: str,
+            start_offset: Optional[dict],
+            table_options: dict,
+            *,
+            page_max: int,
+            emit: Callable[[dict], Optional[dict]],
+        ) -> tuple[Iterator[dict], dict]:
+            """Keyset walk of a v1 list by ``update_time``, resumable at any row.
 
-            end_offset = {"cursor": last_cursor}
-            if not records or (start_offset and start_offset == end_offset):
-                return iter([]), start_offset if start_offset else end_offset
-            return iter(records), end_offset
+            A batch starts at ``updated_since=cursor`` (inclusive), so only the
+            cursor's tie group is re-read, and the ``ids`` already emitted there are
+            skipped.  Pages inside the batch are re-anchored on the last update_time
+            read (see ``_v1_rows``).
+            """
+            max_records = self._int_option(
+                table_options, "max_records_per_batch", DEFAULT_MAX_RECORDS_PER_BATCH, minimum=1
+            )
+            page_size = min(
+                page_max,
+                self._int_option(table_options, "page_size", page_max, minimum=1),
+                max_records,
+            )
+            until = self._upper_bound(
+                self._int_option(table_options, "lookback_seconds", DEFAULT_V1_SETTLE_SECONDS)
+            )
+            cursor, ids, start = self._time_state(start_offset)
+            if cursor >= until:
+                return iter([]), start_offset or _offset(cursor, ids, start)
+
+            flags = {"fallback": False}
+            # Always resume at the start of the cursor's tie group and skip the ids
+            # already read there: a stored row count would skip a row if a read row
+            # in that group was edited or removed between batches.
+            stream = self._tagged(self._v1_rows(path, cursor, 0, page_size, flags), cursor, emit)
+            rows, cur, at_cur, visits, capped = self._merge_scan(
+                [stream], cursor, ids, until, max_records
+            )
+            del visits, capped  # position within a tie group comes from ``ids`` alone
+            return iter(rows), _offset(cur, self._sorted_ids(at_cur), 0)
+
+        def _v1_rows(
+            self, path: str, since: str, start: int, page_size: int, flags: dict
+        ) -> Iterator[dict]:
+            """Rows of a v1 list sorted by ``update_time, id`` from ``since`` (lazy).
+
+            ``flags["fallback"]`` is set when the server returns rows older than
+            ``since``, which means it ignored ``updated_since`` (seen on
+            ``/v1/leads/archived``).  The walk then restarts from the first row, and the
+            caller filters by cursor.  Detection happens before any row is yielded.
+            """
+
+            def request(anchor: str, at: int) -> dict:
+                return self._client.get_json(
+                    path,
+                    {
+                        "limit": page_size,
+                        "start": at,
+                        "sort": V1_INCREMENTAL_SORT,
+                        "updated_since": anchor,
+                    },
+                )
+
+            body = request(since, start)
+            if any(_older_than(raw, since) for raw in _page_data(body)):
+                flags["fallback"] = True
+                yield from self._v1_offset_scan(body, start, lambda at: request(since, at))
+                return
+            # Every page is re-anchored on the last update_time read, with ``start``
+            # counting only the rows already read at that instant.  A row that leaves
+            # the list (archived, deleted, edited past the cap) can then shift rows
+            # only inside one same-second tie group, never across the whole walk.
+            anchor, at = since, start
+            while True:
+                data = _page_data(body)
+                yield from data
+                pagination = (body.get("additional_data") or {}).get("pagination") or {}
+                if not pagination.get("more_items_in_collection") or not data:
+                    return
+                last = record_cursor(data[-1])
+                if last is None or last == anchor:
+                    at += len(data)
+                else:
+                    anchor = last
+                    at = sum(1 for raw in data if record_cursor(raw) == last)
+                body = request(anchor, at)
+
+        @staticmethod
+        def _v1_offset_scan(body: dict, start: int, request: Callable[[int], dict]) -> Iterator[dict]:
+            """Plain offset paging, for a server that ignores ``updated_since``."""
+            offset = start
+            if start:
+                offset = 0
+                body = request(0)
+            while True:
+                data = _page_data(body)
+                yield from data
+                pagination = (body.get("additional_data") or {}).get("pagination") or {}
+                if not pagination.get("more_items_in_collection") or not data:
+                    return
+                next_start = pagination.get("next_start")
+                if next_start is None:
+                    next_start = offset + len(data)
+                if int(next_start) <= offset:
+                    return  # defensive: never loop on a non-advancing offset
+                offset = int(next_start)
+                body = request(offset)
 
         # ------------------------------------------------------------------ #
         # Snapshots
@@ -1991,6 +2255,7 @@ def register_lakeflow_source(spark):
                         yield self._normalize(table_name, raw)
             except PipedriveAPIError as exc:
                 if cfg.get("optional") and self._is_feature_unavailable(exc):
+                    _log_optional_skip(table_name, exc)
                     return
                 raise
 
@@ -2021,6 +2286,7 @@ def register_lakeflow_source(spark):
                             yield self._normalize("projects", raw)
             except PipedriveAPIError as exc:
                 if self._is_feature_unavailable(exc):
+                    _log_optional_skip("projects", exc)
                     return
                 raise
 
@@ -2064,8 +2330,8 @@ def register_lakeflow_source(spark):
         ) -> tuple[Iterator[dict], dict]:
             """Deal change log, read via parent-incremental deals.
 
-            Each trigger covers the log-time window ``(cursor, until]`` where
-            ``until`` is the init time.  Parent deals updated since
+            Each trigger covers the log-time window ``(cursor - lookback, until]``
+            where ``until`` is the init time.  Parent deals updated since
             ``cursor - lookback`` are walked in ascending ``update_time`` order in
             three phases: ``/deals``, ``/deals/archived``, then ``/deals`` again
             from the moment the archived phase began.  For each deal the flow
@@ -2079,7 +2345,7 @@ def register_lakeflow_source(spark):
             and is still visited; capped, its window entries would be lost for
             good.  The final ``/deals`` re-scan covers deals unarchived while the
             archived list was being walked.  Entry rows are bounded client-side by
-            ``log_time <= until``.
+            ``cursor - lookback < log_time <= until``.
 
             A deal can therefore be visited twice in one window (edited after it
             was processed).  Rows are immutable and keyed on ``id`` (``cdc``), so
@@ -2105,16 +2371,19 @@ def register_lakeflow_source(spark):
                 lower = self._resolve_since(start_offset)
                 if lower is None:
                     return iter([]), start_offset
-                until = self._init_ts
+                until = self._init_time
                 phase = 0
                 deal_since = shift_ts(lower, -lookback) if lookback > 0 else lower
                 rescan_since = None
 
+            # Entries are filtered by log_time against the lookback-widened window
+            # on every batch, so a batch boundary never changes which entries count.
+            entry_lower = shift_ts(lower, -lookback) if lookback > 0 else lower
             max_records = self._int_option(
                 table_options, "max_records_per_batch", DEFAULT_MAX_RECORDS_PER_BATCH, minimum=1
             )
             records, stopped_at = self._walk_deal_flow_phase(
-                DEAL_FLOW_PHASE_PATHS[phase], deal_since, (lower, until), max_records
+                DEAL_FLOW_PHASE_PATHS[phase], deal_since, (entry_lower, until), max_records
             )
 
             end_offset = {"cursor": lower, "until": until}
@@ -2159,6 +2428,7 @@ def register_lakeflow_source(spark):
             seen_deals: set = set()
             seen_entries: set = set()
             last_deal_ts: Optional[str] = None
+            calls = skipped = 0
             for page in self._client.iter_v2_pages(path, params):
                 for deal in page:
                     deal_ts = record_cursor(deal) or deal_since
@@ -2166,20 +2436,37 @@ def register_lakeflow_source(spark):
                     # so resuming from ``deal_since=deal_ts`` (inclusive) never
                     # skips a deal.
                     if len(records) >= max_records and last_deal_ts and deal_ts > last_deal_ts:
+                        self._note_skipped_children(calls, skipped)
                         return records, deal_ts
                     last_deal_ts = deal_ts
                     if deal.get("id") in seen_deals:
                         continue  # moved ahead in the sort within this batch
                     seen_deals.add(deal.get("id"))
-                    for entry in self._read_one_deal_flow(deal.get("id"), *window):
+                    if deal.get("id") is not None:
+                        calls += 1
+                    entries, was_skipped = self._read_one_deal_flow(deal.get("id"), *window)
+                    skipped += was_skipped
+                    for entry in entries:
                         if entry.get("id") is None or entry["id"] not in seen_entries:
                             seen_entries.add(entry.get("id"))
                             records.append(entry)
+            self._note_skipped_children(calls, skipped)
             return records, None
 
-        def _read_one_deal_flow(self, deal_id, lower: str, until: str) -> list[dict]:
+        @staticmethod
+        def _note_skipped_children(calls: int, skipped: int) -> None:
+            """A batch whose every per-deal flow call was skipped gets no rows; say so."""
+            if calls and skipped == calls:
+                _LOG.warning(
+                    "deal_flow: all %d per-deal flow calls in this batch were skipped "
+                    "(the deals were deleted or hidden after the parent read).",
+                    calls,
+                )
+
+        def _read_one_deal_flow(self, deal_id, lower: str, until: str) -> tuple[list[dict], int]:
+            """Window entries of one deal, and whether the call was skipped (deal gone)."""
             if deal_id is None:
-                return []
+                return [], 0
             path = TABLE_CONFIG["deal_flow"]["path"].replace("{id}", str(deal_id))
             params = {"items": "dealChange", "all_changes": 1, "start": 0, "limit": 500}
             out: list[dict] = []
@@ -2202,9 +2489,9 @@ def register_lakeflow_source(spark):
             except PipedriveAPIError as exc:
                 # Deal deleted / hidden between the parent read and this call.
                 if exc.status_code in CHILD_SKIP_CODES and exc.is_json:
-                    return out
+                    return out, 1
                 raise
-            return out
+            return out, 0
 
 
     ########################################################

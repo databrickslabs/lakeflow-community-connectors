@@ -18,10 +18,11 @@
 #   v1 lists:       start, limit, sort, updated_since (notes, leads)
 #   deal flow:      items, all_changes (accepted), start, limit
 #
-# synthesize_future_records on the incremental v2 endpoints clones a few rows
-# with update_time past now(): the connector must exclude them via
-# updated_until=<init time> (client-side for /products, which has no
-# updated_until) so termination tests converge.
+# synthesize_future_records on the incremental endpoints (v2 deals, persons,
+# ..., and v1 notes / leads / leads/archived) clones a few rows with update_time
+# past now(): the connector must exclude them via updated_until=<init time>
+# (client-side for /products, which has no updated_until; client-side for the
+# v1 lists) so termination tests converge.
 #
 # The unpaginated v1 reference endpoints are declarative.
 
@@ -116,16 +117,25 @@ endpoints:
     method: GET
     corpus: notes
     handler: databricks.labs.community_connector.source_simulator.specs.pipedrive.handlers.pipedrive:serve_v1_list
+    synthesize_future_records:
+      cursor_field: update_time
+      count: 3
 
   - path: /v1/leads
     method: GET
     corpus: leads
     handler: databricks.labs.community_connector.source_simulator.specs.pipedrive.handlers.pipedrive:serve_v1_list
+    synthesize_future_records:
+      cursor_field: update_time
+      count: 3
 
   - path: /v1/leads/archived
     method: GET
     corpus: leads_archived
     handler: databricks.labs.community_connector.source_simulator.specs.pipedrive.handlers.pipedrive:serve_v1_list
+    synthesize_future_records:
+      cursor_field: update_time
+      count: 3
 
   - path: /v1/files
     method: GET

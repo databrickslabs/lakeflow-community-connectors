@@ -1,8 +1,8 @@
 """Static schemas, metadata and per-table read configuration for Pipedrive.
 
 Pipedrive has no schema-discovery API for its entity tables, so every schema
-here is static and taken from the official v1 / v2 OpenAPI specs (cross-checked
-against Airbyte's ``source-pipedrive`` manifest).  See ``pipedrive_api_doc.md``.
+here is static and taken from the official v1 / v2 OpenAPI specs.  See
+``pipedrive_api_doc.md``.
 
 Conventions:
 
@@ -642,7 +642,9 @@ TABLE_CONFIG: dict[str, dict] = {
         "kind": "v1_incremental",
         "path": f"{V1}/leads",
         "schema": LEAD_SCHEMA,
-        "ingestion_type": "cdc",
+        # Archiving a lead moves it to leads_archived; those archive rows are
+        # the delete stream (see pipedrive.py read_table_deletes).
+        "ingestion_type": "cdc_with_deletes",
         "page_max": 500,
         "lead_custom_fields": True,
     },
@@ -652,7 +654,7 @@ TABLE_CONFIG: dict[str, dict] = {
         "schema": LEAD_SCHEMA,
         "paginated": True,
         "page_max": 500,
-        "sort": "id ASC",
+        "sort": "add_time ASC, id ASC",
         "lead_custom_fields": True,
     },
     "lead_labels": {

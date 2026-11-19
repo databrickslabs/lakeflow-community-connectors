@@ -18,7 +18,7 @@ RETRIABLE_STATUS_CODES = frozenset({429, 500, 502, 503, 504})
 
 # Pipedrive's burst limit is a rolling 2-second window per token.  The lowest
 # plan (Lite, API token) allows 20 requests / 2 s; the plan is not knowable
-# from config, so default to that floor (same as Airbyte).
+# from config, so default to that floor.
 BURST_WINDOW_SECONDS = 2.0
 DEFAULT_BURST_LIMIT = 20
 
@@ -303,6 +303,11 @@ class PipedriveClient:
             next_cursor = (body.get("additional_data") or {}).get("next_cursor")
             if not next_cursor or not data:
                 return
+            if next_cursor == query.get("cursor"):
+                # A repeated cursor would replay the same page forever.
+                raise PipedriveAPIError(
+                    f"Pipedrive API GET {path} returned a next_cursor that did not advance"
+                )
             query["cursor"] = next_cursor
 
     def iter_v1_pages(self, path: str, params: dict) -> Iterator[list]:

@@ -20,4 +20,6 @@ class TestPipedriveConnector(LakeflowConnectTests):
     replay_config = {
         "api_token": "simulator-fake-api-token",
         "start_date": "2010-01-01T00:00:00Z",
+        "company_domain": "simulator",
+        "burst_limit": "20",
     }
