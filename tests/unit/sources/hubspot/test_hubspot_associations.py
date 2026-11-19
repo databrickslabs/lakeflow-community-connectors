@@ -3,11 +3,62 @@
 from unittest.mock import Mock, patch
 
 import pytest
+from pyspark.sql.types import ArrayType, StringType, StructType, _make_type_verifier
 
 from databricks.labs.community_connector.sources.hubspot.hubspot_associations import (
     ASSOCIATION_MAX_RETRIES,
     HubspotAssociations,
 )
+from tests.unit.sources.hubspot.test_hubspot_custom_objects import _connector_class
+
+
+@pytest.mark.parametrize("generated", [False, True])
+def test_association_value_mode_is_generic_and_schema_affecting(generated):
+    conn = _connector_class(generated)({"access_token": "constructor-only"})
+    with patch.object(conn, "list_tables", return_value=["deals"]), patch.object(
+        conn, "_get_object_properties", return_value=[]
+    ):
+        ids = conn.get_table_schema("deals", {"associations": "contacts"})[
+            "contacts"
+        ].dataType
+        typed = conn.get_table_schema(
+            "deals",
+            {"associations": "contacts", "association_value_mode": "typed"},
+        )["contacts"].dataType
+        assert isinstance(ids, ArrayType) and isinstance(ids.elementType, StringType)
+        assert isinstance(typed, ArrayType) and isinstance(typed.elementType, StructType)
+        assert typed.elementType.fieldNames() == ["id", "typeId", "category", "label"]
+        assert (
+            conn.read_table_metadata(
+                "deals",
+                {"associations": "contacts", "association_value_mode": "typed"},
+            )["association_value_mode"]
+            == "typed"
+        )
+        record = {"id": "1", "properties": {}}
+        edge = {
+            "id": "2",
+            "typeId": 7,
+            "category": "USER_DEFINED",
+            "label": "Primary",
+        }
+        with patch.object(
+            conn._associations, "read", return_value={"1": [edge]}
+        ) as read:
+            conn._hydrate_associations("deals", [record], ["contacts"], "typed")
+        read.assert_called_once_with("deals", "contacts", ["1"], with_types=True)
+        row = conn._transform_single_record(
+            record, "deals", [], ["contacts"], "typed"
+        )
+        _make_type_verifier(
+            conn.get_table_schema(
+                "deals",
+                {"associations": "contacts", "association_value_mode": "typed"},
+            )
+        )(row)
+        assert row["contacts"] == [edge]
+        with pytest.raises(ValueError, match="association_value_mode"):
+            conn.get_table_schema("deals", {"association_value_mode": "unknown"})
 
 
 def result(parent, targets=(), after=None):
@@ -230,25 +281,14 @@ def test_bad_requested_parents_fail_before_transport(parents):
 
 
 @pytest.mark.parametrize("http_status", [200, 207])
-def test_history_transport_handles_http_status_separately(http_status):
-    # Exercise the existing callback rather than duplicating HTTP handling here.
-    from databricks.labs.community_connector.sources.hubspot.hubspot_property_history import (
-        HubspotPropertyHistory,
-    )
-
-    transport = HubspotPropertyHistory(
-        "https://example.invalid", {}, "2030-01-01T00:00:00Z",
-        lambda _: [], lambda _: "",
-        sleep=lambda _: None,
-    )
+def test_connector_transport_handles_http_status_separately(http_status):
+    connector = transport_connector(False)
+    connector._http._sleep = Mock()
     limited = Mock(status_code=429, headers={"Retry-After": "0"})
     success = Mock(status_code=http_status)
     success.json.return_value = batch(result("a", ["2"]))
-    helper = HubspotAssociations("https://example.invalid", transport._post)
-    with patch(
-        "databricks.labs.community_connector.sources.hubspot.hubspot_property_history.requests.post",
-        side_effect=[limited, success],
-    ) as post:
+    helper = HubspotAssociations("https://example.invalid", connector._post_read)
+    with patch("requests.post", side_effect=[limited, success]) as post:
         assert helper.read("contacts", "companies", ["a"]) == {"a": ["2"]}
     assert post.call_count == 2
     assert post.call_args.kwargs["json"] == {"inputs": [{"id": "a"}]}
@@ -426,23 +466,23 @@ def transport_connector(generated):
 @pytest.mark.parametrize("generated", [False, True])
 def test_get_transport_429_is_bounded_and_reuses_shared_association_throttle(generated):
     connector = transport_connector(generated)
-    connector._history._throttle = Mock()
-    connector._history._sleep = Mock()
+    connector._http._throttle = Mock()
+    connector._http._sleep = Mock()
     limited = Mock(status_code=429, headers={"Retry-After": "999"})
     success = Mock(status_code=200)
     success.json.return_value = get_page("2")
     with patch("requests.get", side_effect=[limited, success]) as get:
         assert connector._get_association_page("associations", "https://example.invalid", {}, .11) == get_page("2")
     assert get.call_count == 2
-    connector._history._sleep.assert_called_once_with(30.0)
-    assert connector._history._throttle.call_count == 2
+    connector._http._sleep.assert_called_once_with(30.0)
+    assert connector._http._throttle.call_count == 2
     assert connector._associations._get == connector._get_association_page
-    connector._history._sleep.reset_mock()
+    connector._http._sleep.reset_mock()
     with patch("requests.get", return_value=limited) as get:
         with pytest.raises(RuntimeError, match="status=429"):
             connector._get_association_page("associations", "https://example.invalid", {}, .11)
     assert get.call_count == 6
-    assert connector._history._sleep.call_count == 5
+    assert connector._http._sleep.call_count == 5
 
 
 @pytest.mark.parametrize("generated", [False, True])
@@ -451,8 +491,8 @@ def test_get_transport_never_exposes_payload_url_or_chained_exception(generated,
     import requests
     import traceback
     connector = transport_connector(generated)
-    connector._history._throttle = Mock()
-    connector._history._sleep = Mock()
+    connector._http._throttle = Mock()
+    connector._http._sleep = Mock()
     response = Mock(status_code=failure if isinstance(failure, int) else 200, text="PRIVATE_BODY")
     response.json.side_effect = ValueError("PRIVATE_JSON")
     with patch("requests.get", **({"side_effect": requests.RequestException("PRIVATE_EXCEPTION")}
@@ -463,7 +503,7 @@ def test_get_transport_never_exposes_payload_url_or_chained_exception(generated,
     assert raised.value.__suppress_context__ or raised.value.__context__ is None
     assert "PRIVATE_EXCEPTION" not in "".join(traceback.format_exception(raised.value))
     if failure == "request":
-        assert connector._history._sleep.call_count == 5
+        assert connector._http._sleep.call_count == 5
 
 
 @pytest.mark.parametrize("generated", [False, True])

@@ -5,7 +5,6 @@ These tests cover object-table property filtering: schema, metadata, the
 options-aware caches, cursor-property retention, and read pass-through.
 """
 
-import json
 from pathlib import Path
 
 import pytest
@@ -85,17 +84,3 @@ def test_options_aware_caches_do_not_leak(connector):
     schema_all = connector.get_table_schema("companies", {})
     schema_filtered = connector.get_table_schema("companies", {"include_properties": "domain"})
     assert len(_property_fields(schema_all)) > len(_property_fields(schema_filtered))
-
-
-def test_history_table_honours_include_properties(connector):
-    """include_properties also bounds the history tables' propertiesWithHistory."""
-    corpus = json.loads((SPEC_DIR / "corpus" / "contacts_history.json").read_text())
-    all_props = set()
-    for r in corpus:
-        all_props.update(r["propertiesWithHistory"].keys())
-
-    opts = {"include_properties": sorted(all_props)[0]}
-    rows, _ = connector.read_table("contacts_property_history", {}, opts)
-    rows = list(rows)
-    assert rows
-    assert {r["property"] for r in rows} == {opts["include_properties"]}

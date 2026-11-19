@@ -10,7 +10,7 @@ from unittest.mock import Mock, patch
 from urllib.parse import urlparse
 
 import pytest
-from pyspark.sql.types import _make_type_verifier
+from pyspark.sql.types import DecimalType, LongType, _make_type_verifier
 
 from databricks.labs.community_connector.sources.hubspot import hubspot as module
 from databricks.labs.community_connector.sources.hubspot.hubspot import HubspotLakeflowConnect
@@ -69,8 +69,10 @@ class ActivityAPI:
         return Mock(status_code=200, json=lambda: copy.deepcopy(payload))
 
 
-def consumer(table, generated):
+def consumer(table, generated, numeric_value_mode="decimal"):
     options = {"access_token": "offline", "tableName": table}
+    if numeric_value_mode is not None:
+        options["numeric_value_mode"] = numeric_value_mode
     if generated:
         registry = Mock()
         path = Path(module.__file__).with_name("_generated_hubspot_python_source.py")
@@ -83,8 +85,37 @@ def consumer(table, generated):
         conn = HubspotLakeflowConnect(options)
         schema = conn.get_table_schema(table, options)
         stream = LakeflowStreamReader(options, schema, conn)
-    conn._history._sleep = lambda _: None
+    conn._http._sleep = lambda _: None
     return conn, schema, stream
+
+
+@pytest.mark.parametrize("generated", [False, True])
+def test_numeric_mode_is_backward_compatible_and_opt_in(generated):
+    api = ActivityAPI("meetings")
+    with patch("requests.get", side_effect=api.get), patch(
+        "requests.post", side_effect=api.post
+    ):
+        conn, legacy, _ = consumer("meetings", generated, None)
+        decimal = conn.get_table_schema(
+            "meetings", {"numeric_value_mode": "decimal"}
+        )
+
+    legacy_number = legacy["properties"].dataType["extra_decimal_metric"].dataType
+    decimal_number = decimal["properties"].dataType["extra_decimal_metric"].dataType
+    assert isinstance(legacy_number, LongType)
+    assert isinstance(decimal_number, DecimalType)
+    assert decimal_number.precision == 38 and decimal_number.scale == 18
+
+
+@pytest.mark.parametrize("generated", [False, True])
+def test_unknown_numeric_mode_fails_before_read(generated):
+    api = ActivityAPI("meetings")
+    with patch("requests.get", side_effect=api.get), patch(
+        "requests.post", side_effect=api.post
+    ):
+        conn, _, _ = consumer("meetings", generated, None)
+        with pytest.raises(ValueError, match="numeric_value_mode"):
+            conn.read_table("meetings", {}, {"numeric_value_mode": "float"})
 
 
 @pytest.mark.parametrize("generated", [False, True])
@@ -129,7 +160,9 @@ def test_unrepresentable_numeric_property_fails_before_checkpoint(generated, num
         conn, _, _ = consumer("meetings", generated)
         start = {"updatedAt": "2026-01-01T00:00:00.000Z"}
         with pytest.raises((ValueError, RuntimeError), match="numeric|decimal|number"):
-            list(conn.read_table("meetings", start, {})[0])
+            list(conn.read_table(
+                "meetings", start, {"numeric_value_mode": "decimal"}
+            )[0])
     assert start == {"updatedAt": "2026-01-01T00:00:00.000Z"}
 
 
@@ -172,7 +205,9 @@ def test_arbitrary_high_precision_decimal_is_not_rounded_through_float(generated
     with patch("requests.get", side_effect=api.get), patch("requests.post", side_effect=api.post):
         conn, _, _ = consumer("meetings", generated)
         with pytest.raises((ValueError, RuntimeError), match="decimal"):
-            list(conn.read_table("meetings", {}, {})[0])
+            list(conn.read_table(
+                "meetings", {}, {"numeric_value_mode": "decimal"}
+            )[0])
 
 
 @pytest.mark.parametrize("generated", [False, True])
@@ -181,5 +216,7 @@ def test_excluded_invalid_number_does_not_fail_read(generated):
     with patch("requests.get", side_effect=api.get), patch("requests.post", side_effect=api.post):
         conn, _, _ = consumer("meetings", generated)
         rows, end = conn.read_table("meetings", {}, {
-            "exclude_properties": "extra_decimal_metric"})
+            "exclude_properties": "extra_decimal_metric",
+            "numeric_value_mode": "decimal",
+        })
         assert len(list(rows)) == 1 and end == {}

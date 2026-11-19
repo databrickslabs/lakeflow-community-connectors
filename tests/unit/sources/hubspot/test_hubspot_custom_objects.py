@@ -44,7 +44,7 @@ def _connector_class(generated):
 
 
 @pytest.mark.parametrize("generated", [False, True])
-def test_custom_object_id_used_for_properties_snapshot_incremental_and_history(generated):
+def test_custom_object_id_used_for_properties_snapshot_and_incremental(generated):
     paths = []
     stamp = "2024-03-01T00:00:00.000Z"
     parent = {"id": "1", "updatedAt": stamp, "properties": {"vin": "example-vin"}}
@@ -64,34 +64,22 @@ def test_custom_object_id_used_for_properties_snapshot_incremental_and_history(g
         paths.append(path)
         if path == "/crm/objects/2026-09/2-12345/search":
             return _Response({"results": [parent]})
-        assert path == "/crm/objects/2026-09/2-12345/batch/read"
-        return _Response({"status": "COMPLETE", "results": [{
-            "id": "1",
-            "propertiesWithHistory": {"vin": [{"value": "example-vin", "timestamp": stamp}]},
-        }]})
+        raise AssertionError(path)
 
     with mock.patch("requests.get", side_effect=get), mock.patch("requests.post", side_effect=post):
         conn = _connector_class(generated)({"access_token": "test-only-token"})
-        conn._history._sleep = lambda _: None
+        conn._http._sleep = lambda _: None
         assert "cars" in conn.list_tables()
-        assert "cars_property_history" in conn.list_tables()
         schema = conn.get_table_schema("cars", {})
         assert schema["properties"].dataType.fieldNames() == ["vin", "hs_lastmodifieddate"]
         rows, _ = conn.read_table("cars", {}, {})
         assert list(rows)[0]["properties"]["vin"] == "example-vin"
         rows, _ = conn.read_table("cars", {"updatedAt": "2023-01-01T00:00:00.000Z"}, {})
         assert list(rows)[0]["id"] == "1"
-        rows, offset = conn.read_table("cars_property_history", {}, {})
-        assert [(r["object_id"], r["property"], r["value"]) for r in rows] == [
-            ("1", "vin", "example-vin"),
-        ]
-        assert offset["updatedAt"] == conn._history._init_ts
-        assert offset["history_scan"]["complete"] is True
     assert paths.count("/crm-object-schemas/2026-09/schemas") == 1
     assert "/crm/properties/2026-09/2-12345" in paths
     assert "/crm/objects/2026-09/2-12345" in paths
     assert "/crm/objects/2026-09/2-12345/search" in paths
-    assert "/crm/objects/2026-09/2-12345/batch/read" in paths
 
 
 @pytest.mark.parametrize("generated", [False, True])
@@ -302,7 +290,7 @@ def test_custom_associations_are_complete_in_snapshot_and_incremental(generated,
         return _Response({"status": "COMPLETE", "results": results[::-1]})
 
     conn = _connector_class(generated)({"access_token": "test-only-token"})
-    conn._history._sleep = lambda _: None
+    conn._http._sleep = lambda _: None
     start = {"updatedAt": "2023-01-01T00:00:00.000Z"} if incremental else {}
     with mock.patch("requests.get", side_effect=get), mock.patch("requests.post", side_effect=post):
         schema = conn.get_table_schema(table, {})
@@ -321,7 +309,7 @@ def test_custom_associations_are_complete_in_snapshot_and_incremental(generated,
 @pytest.mark.parametrize("generated", [False, True])
 def test_incomplete_associations_never_return_a_new_checkpoint(generated):
     conn = _connector_class(generated)({"access_token": "test-only-token"})
-    conn._history._sleep = lambda _: None
+    conn._http._sleep = lambda _: None
     conn._associations._sleep = lambda _: None
     stamp = "2024-03-01T00:00:00.000Z"
     start = {"updatedAt": "2023-01-01T00:00:00.000Z"}
@@ -380,27 +368,6 @@ def test_metadata_cache_respects_association_sync_mode(generated, first_snapshot
         for options in order + order:
             expected = "snapshot" if options else "cdc_with_deletes"
             assert conn.read_table_metadata("deals", options)["ingestion_type"] == expected
-
-
-@pytest.mark.parametrize("generated", [False, True])
-@pytest.mark.parametrize("status", ["PENDING", "PROCESSING", "CANCELED"])
-def test_noncomplete_history_batch_never_returns_a_checkpoint(generated, status):
-    conn = _connector_class(generated)({"access_token": "test-only-token"})
-    history = conn._history
-    history._sleep = lambda _: None
-    history._get_property_names = lambda _: ["email"]
-    stamp = "2024-03-01T00:00:00.000Z"
-    start = {"updatedAt": "2023-01-01T00:00:00.000Z"}
-    with mock.patch.object(history, "_search_changed", return_value=([
-        {"id": "1", "updatedAt": stamp},
-    ], None)), mock.patch.object(history, "_post", return_value={
-        "status": status, "results": [{"id": "1", "propertiesWithHistory": {
-            "email": [{"timestamp": stamp, "value": "example"}],
-        }}],
-    }):
-        with pytest.raises(RuntimeError, match="incomplete"):
-            history.read_table("contacts_property_history", start, {})
-    assert start == {"updatedAt": "2023-01-01T00:00:00.000Z"}
 
 
 @pytest.mark.parametrize("generated", [False, True])

@@ -60,7 +60,7 @@ def test_snapshot_consumer_nested_rows_and_empty_rescan(generated, table):
 
     conn = _connector_class(generated)({"access_token": "offline"})
     conn._non_crm._sleep = lambda _: None
-    conn._history._sleep = lambda _: None
+    conn._http._sleep = lambda _: None
     options = {"tableName": table, "pipeline_object_types": "0-3"}
     schema = conn.get_table_schema(table, options)
     metadata = conn.read_table_metadata(table, options)

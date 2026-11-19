@@ -54,13 +54,8 @@ discovery and incremental or snapshot synchronization:
 | `meetings` | `id` | – | contacts, companies, deals, tickets |
 | `tasks` | `id` | `updatedAt` | contacts, companies, deals, tickets |
 | `notes` | `id` | `updatedAt` | contacts, companies, deals, tickets |
-| `contacts_property_history` | `object_id`, `property`, `timestamp` | `timestamp` | – |
-| `companies_property_history` | `object_id`, `property`, `timestamp` | `timestamp` | – |
-| `deals_property_history` | `object_id`, `property`, `timestamp` | `timestamp` | – |
-| `tickets_property_history` | `object_id`, `property`, `timestamp` | `timestamp` | – |
-| `<custom_object>_property_history` | `object_id`, `property`, `timestamp` | `timestamp` | – |
 
-> **Note**: Table names are case-sensitive. Use the exact names shown above (lowercase with underscores). Custom objects are also supported and will be discovered automatically, each with a matching `<custom_object>_property_history` table.
+> **Note**: Table names are case-sensitive. Use the exact lowercase names shown above. Custom objects are discovered automatically.
 
 ### Resource snapshots
 
@@ -211,29 +206,6 @@ Property-history tables retain their own ingestion strategy.
 - **Incremental Strategy**: Cursor-based on `updatedAt`
 - **Schema**: All custom object properties discovered dynamically via HubSpot Properties API
 
-### Property History Tables
-
-`contacts_property_history`, `companies_property_history`, `deals_property_history`, `tickets_property_history`, and `<custom_object>_property_history` contain one row per historical value of each property, from HubSpot's `propertiesWithHistory`.
-
-- **Ingestion type**: `cdc` (upsert on the primary key, so rows that are read again by the lookback window are de-duplicated)
-- **Primary Key**: `object_id`, `property`, `timestamp`
-- **Cursor Field**: `timestamp`
-- **Schema**: `object_id`, `property`, `value`, `timestamp`, `source_type`, `source_id`, `source_label`, `updated_by_user_id`
-- **How it reads**: the Search API finds objects whose last-modified date changed since the last run (Search does not return history), then the Batch Read API (`POST /crm/objects/2026-09/{object}/batch/read`) fetches `propertiesWithHistory` for those objects, up to 50 IDs per call.
-- **Pagination and checkpoints**: Search sorts by numeric `hs_object_id` within a frozen modification-time window. Every page starts a new query with `hs_object_id GT <last hydrated ID>`, avoiding Search's 10,000-result paging window. Checkpoints retain the scan bounds, last ID, completion flag, parent count, and rolling parent-ID digest. Legacy `updatedAt` checkpoints remain readable. Admission can stop after a complete batch of parents, even within a timestamp group.
-- **Replay**: A new scan includes the configured lookback before the saved watermark. All selected parents' requested history is emitted, including entries older than that watermark, except where `history_since` explicitly excludes them. CDC keys deduplicate repeated history entries. Failed-batch recovery honors the recorded ending frontier and ignores admission limits. If Search membership changes during recovery, its parent count/digest check fails before returning rows.
-- **Rate limiting**: Search calls are paced below HubSpot's Search limit. Safe GET and read-only POST requests retry HTTP429/500/502/503 and request exceptions up to five times, honoring a valid bounded `Retry-After` value or using exponential backoff.
-- **Partial history responses**: Batch results must have status `COMPLETE`. Missing requested parent IDs are retried, including HTTP200/207 partial responses; unresolved parents fail the read before returning a checkpoint. Records deleted between Search and Batch Read are not silently discarded.
-
-Lookback provides bounded recovery: indexing delays longer than the configured
-window can still miss a parent. Search excludes archived objects. The selection
-window freezes parent modification times, but Batch Read returns current history,
-not a historical snapshot as of that upper bound. Numeric-ID ordering and managed
-pipeline recovery require live validation in the target account.
-
-- **Scopes**: the same `crm.objects.<object>.read` scope as the parent object.
-- **Known limitation**: changes that do not update the object's last-modified date (some calculated, rollup, or formula properties) are not detected until the object is next modified.
-
 ### Activity coverage and schema migration
 
 Calls, emails, meetings, tasks, and notes use their current CRM object APIs.
@@ -251,24 +223,7 @@ order. Large archive inventories can therefore increase request volume and
 memory use. Only archives returned within HubSpot's retention are observable;
 hard deletes and expired archives are not guaranteed.
 
-The initial active read for calls, emails, tasks, and notes is a resumable
-bootstrap. When `max_records_per_batch` is set, it stops only after a complete
-HubSpot page and saves the opaque `paging.next.after` cursor plus one frozen
-upper timestamp. It does not advance `updatedAt` until every page completes.
-After completion, CDC begins from that frozen boundary, so records observed
-beyond the boundary can be replayed safely as upserts. The versioned offset is
-bound to its table and includes the emitted membership count and digest,
-bounded cursor-history hashes, and a total page count. Exact Spark replays fail
-closed if the same cursor range returns different IDs or versions. Future
-boundaries and oversized cursors are rejected. Cycles within the recent
-64-cursor history fail immediately; longer cycles terminate at the
-100,000-page hard limit. The object-list API is not a point-in-time snapshot;
-concurrent changes can still move records between pages during a multi-batch
-scan. A keyset/Search bootstrap would be needed to eliminate that residual API
-ordering risk.
-
-Full-refresh association mode is a snapshot, not a resumable activity
-bootstrap. It drains all active pages in one batch-reader invocation and
+Full-refresh association mode drains all active pages in one batch-reader invocation and
 ignores `max_records_per_batch`, preserving authoritative snapshot membership.
 
 Meetings use complete active snapshots by default. HubSpot rejects archived
@@ -291,24 +246,13 @@ source changes can still affect what a complete enumeration observes. Snapshot
 reconciliation and mixed-object
 option isolation require validation through the managed consumer.
 
-**Breaking schema change:** CRM properties with HubSpot type `number` now map
-to `DECIMAL(38,18)` instead of `BIGINT`, preserving fractional values. This
-applies to every CRM object, including custom objects. Values may use at most
-20 integer digits and 18 fractional digits after removing trailing zeros.
-An exact long decimal expansion of a binary64 value is reduced to that float's
-shortest decimal representation when the result fits; this handles source values
-such as the long expansion of `0.1` without rounding arbitrary precise decimals.
-Invalid, nonfinite, or other out-of-range values fail before checkpointing.
-Property-history values remain strings and
-non-CRM resource schemas retain their explicit types.
-
-For an existing pipeline, inspect downstream numeric casts and plan a destination
-schema migration before upgrading. Validate a separate destination and fresh
-checkpoint first; follow the pipeline's supported schema-change or full-refresh
-procedure for the production cutover. Do not assume existing BIGINT columns or
-checkpoints migrate automatically. Local source/generated consumer tests cover
-exact decimals; managed runtime and Delta serialization remain a required live
-validation step.
+CRM properties with HubSpot type `number` retain the existing `BIGINT` schema by
+default. Set `numeric_value_mode=decimal` on a new destination to use
+`DECIMAL(38,18)` and preserve fractional values. In decimal mode, exact long
+binary64 expansions such as HubSpot's long form of `0.1` are reduced to the
+shortest representable decimal; invalid, nonfinite, and out-of-range values fail
+before checkpointing. Changing this option changes the destination schema, so
+use a fresh destination or a planned schema migration.
 
 ### Common Schema Structure
 All objects follow the same base structure:
@@ -352,12 +296,12 @@ first update. For example:
 connection_name: your_hubspot_connection
 objects:
   - table:
-      source_table: deals_property_history
-      destination_table: deals_property_history
+      source_table: deals
+      destination_table: deals_decimal
       connector_options:
         community_connector_options:
           options:
-            history_properties: "amount,dealstage"
+            numeric_value_mode: "decimal"
             max_records_per_batch: "60"
 ```
 
@@ -366,20 +310,18 @@ Python interface still receives these values as its `table_options` map.
 
 | Option | Applies to | Default | Description |
 |---|---|---|---|
-| `max_records_per_batch` | all incremental tables | no cap | Soft limit on records returned per microbatch. Initial calls/emails/tasks/notes bootstraps stop after complete HubSpot pages and persist the opaque page cursor without advancing the CDC watermark. History stops after complete parent batches and saves an ID frontier; one parent can exceed the cap. Incremental object reads drain parents sharing the last processed `updatedAt` before stopping. |
+| `max_records_per_batch` | incremental object tables | no cap | Soft limit on records returned per microbatch. Reads finish records sharing the last processed `updatedAt` before advancing the checkpoint. |
 | `association_sync_mode` | object tables | `incremental` | `incremental` refreshes selected changed parents. `full_refresh` uses snapshot ingestion and reconciles all current relationships on every update. Add this option to an existing UC connection's external options allowlist before using it. |
 | `association_value_mode` | object tables | `ids` | `ids` emits `array<string>` target IDs. `typed` emits `array<struct<id,typeId,category,label>>`. Changing modes changes the destination schema and requires a fresh destination or planned migration. |
+| `numeric_value_mode` | CRM object tables | `legacy` | `legacy` preserves the existing `BIGINT` schema. `decimal` emits `DECIMAL(38,18)` and normalizes exact binary64 expansions. Changing modes requires a fresh destination or planned migration. |
 | `pipeline_object_types` | `pipelines` | deals, tickets, tasks, discovered custom types | Comma-separated canonical object type IDs. Replaces the default partition inventory; each configured partition must succeed. |
-| `history_properties` | `*_property_history` | all properties | Comma-separated property names to fetch history for (e.g. `lifecyclestage,hs_lead_status,dealstage`). Recommended for portals with many properties, because requesting history for every property makes each Batch Read response larger. |
-| `include_properties` | CRM object and history tables | all properties | Comma-separated allowlist of properties to ingest. If set, only these discovered properties are read and exposed in the schema (unknown names are ignored, matching HubSpot's behavior). Required for objects with very many properties — full refresh fails with HTTP 414 once the request URL passes ~22,000 characters (objects with 1,000+ properties always exceed this). The object's cursor property is always retained. |
-| `exclude_properties` | CRM object and history tables | none | Comma-separated list of properties to drop from ingestion. Applied after `include_properties`. |
-| `history_since` | `*_property_history` | none | ISO-8601 timestamp (e.g. `2025-01-01T00:00:00Z`). Only objects modified on or after this time are read, and older history entries are dropped. Caps the initial backfill. |
-| `history_lookback_minutes` | `*_property_history` | `10` | Minutes subtracted from the saved watermark when starting a new history scan. Replays late-indexed parents within this window, including their older history entries. A resumed scan retains its original lower bound. Set to `0` to disable the time lookback. |
+| `include_properties` | CRM object tables | all properties | Comma-separated allowlist of properties to ingest. Unknown names are ignored. The object's cursor property is always retained. |
+| `exclude_properties` | CRM object tables | none | Comma-separated list of properties to drop after `include_properties` is applied. |
 
-`include_properties` / `exclude_properties` also apply to `*_property_history` tables (they bound which properties are requested in `propertiesWithHistory`; `history_properties` still narrows further for history reads). Two operational notes:
+Two operational notes:
 
 - Rows ingested before a filter change are not retroactively removed. To rebuild a table so its contents match the new filter, force a re-ingest (below).
-- **Forcing a re-ingest:** changing any connector option value on a table — even trivially, e.g. bumping `history_lookback_minutes` by 1 — recreates that table's ingestion flow and re-reads the source from the beginning with the new settings. This is the reliable way to rebuild a table after changing filters: on serverless managed ingestion, a full refresh alone re-processes from the pipeline's stored cursor and may not re-read the source for tables whose options did not change.
+- **Forcing a re-ingest:** changing a connector option recreates that table's ingestion flow and re-reads the source with the new settings. On serverless managed ingestion, a full refresh alone may resume from the pipeline's stored cursor.
 
 These options must be included in the connection's `externalOptionsAllowList` (see `connector_spec.yaml`).
 
@@ -414,45 +356,3 @@ Follow the Lakeflow Community Connector UI, which will guide you through setting
 
 **Error Handling:**
 The connector includes built-in error handling for common scenarios like rate limiting, network issues, and API errors. Check the pipeline logs for detailed error information and recommended actions.
-
-
-### Managed per-table option isolation
-
-The CLI repeats one `tableConfigs` JSON string on every explicit HubSpot table.
-It maps source table names to their complete connector option dictionaries. This
-preserves table-specific filters when native planning shares flat options across
-objects. For example:
-
-```json
-{"calls":{"include_properties":"hs_call_body"},"notes":{}}
-```
-
-With an envelope present, the selected entry is authoritative: `{}` means default
-options, and omitted keys never inherit another table's flat options. Missing
-entries, duplicate JSON keys, invalid shapes, and undeclared options fail with
-sanitized errors. Table names and property names retain their exact spelling.
-Only the envelope key accepts case-insensitive spelling for Spark options.
-Connection credentials and framework routing options cannot appear inside entries.
-`tableConfigs` is a framework connection allowlist option, not a nested HubSpot
-option; existing connections must allow it as well as the desired HubSpot options.
-
-The connector validates and retains a constructor envelope before virtual metadata
-parses it. This instance-scoped map remains authoritative when adapters extract
-an entry. A conflicting replacement map requires a new source instance. Without
-a constructor envelope, legacy flat options remain supported and individual SPI
-calls can supply their own complete maps. Resolution covers schema, metadata,
-reads, deletes, and replay, including history and non-CRM dispatch.
-
-CLI automatic normalization identifies HubSpot by explicit source name or an
-exact `lakeflow_community_connectors_hubspot` wheel filename in the final pipeline
-dependencies. Renamed/custom packages need explicit HubSpot identification. It
-supports explicit tables in the absent/default source schema; schema/report
-selectors are rejected because the CLI cannot enumerate their complete map
-locally. Other connectors retain their existing behavior.
-
-Local tests do not establish native managed transport: verify that the envelope
-and correct table identity reach both planning and execution. The current generic
-ingestion-agent dispatcher also loses case-insensitive routing when copying Spark
-options: a lowercased `tablename` is rejected as missing `tableName`. Direct agent
-calls with canonical routing keys and lowercased `tableconfigs` are covered; this
-connector change does not fix generic agent routing.

@@ -149,7 +149,7 @@ def test_each_snapshot_returns_current_set_including_empty(generated):
 
 
 @pytest.mark.parametrize("generated", [False, True])
-def test_meeting_strategy_does_not_change_other_objects_or_history(generated):
+def test_meeting_strategy_does_not_change_other_objects(generated):
     api = SnapshotAPI()
     with patch("requests.get", side_effect=api.get), patch("requests.post", side_effect=api.post):
         conn, _, _ = consumer("meetings", generated)
@@ -157,7 +157,6 @@ def test_meeting_strategy_does_not_change_other_objects_or_history(generated):
             assert conn.read_table_metadata(table, {})["ingestion_type"] == "cdc_with_deletes"
             assert conn.read_table_metadata(table, {"association_sync_mode": "full_refresh"})["ingestion_type"] == "snapshot"
             assert conn.read_table_metadata(table, {})["ingestion_type"] == "cdc_with_deletes"
-        assert conn.read_table_metadata("deals_property_history", {})["ingestion_type"] == "cdc"
         assert conn.read_table_metadata("meetings", {"association_sync_mode": "incremental"})["ingestion_type"] == "snapshot"
 
 

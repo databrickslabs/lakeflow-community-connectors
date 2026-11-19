@@ -8,9 +8,6 @@
 #   discover field types from the v3 results wrapper.
 # * ``read_table`` → GET ``/crm/objects/2026-09/{table}`` first call;
 #   POST ``/crm/objects/2026-09/{table}/search`` for incremental reads.
-# * ``{object}_property_history`` tables → POST ``.../search`` for changed IDs,
-#   then POST ``/crm/objects/2026-09/{object}/batch/read`` (custom handler) served
-#   from the ``{object}_history`` corpus.
 #
 # Response wrapper for listing endpoints: ``{"results": [...], "paging": {}}``
 # with paging empty so the connector terminates after one page.
@@ -130,10 +127,3 @@ endpoints:
   - path: /crm/objects/2026-09/notes/search
     method: POST
     handler: databricks.labs.community_connector.source_simulator.specs.hubspot.handlers.search:serve_search
-
-  # Batch read (POST) — used by the {object}_property_history tables to fetch
-  # propertiesWithHistory for the IDs found via search. Inputs live in the
-  # JSON body, so a custom handler filters the {object}_history corpus by ID.
-  - path: /crm/objects/2026-09/{object_type}/batch/read
-    method: POST
-    handler: databricks.labs.community_connector.source_simulator.specs.hubspot.handlers.batch_read:serve_batch_read

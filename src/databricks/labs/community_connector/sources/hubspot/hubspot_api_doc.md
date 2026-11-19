@@ -32,29 +32,14 @@ guaranteed account-wide budget when multiple pipelines share a token.
 
 ## Pagination
 
-HubSpot paginates with an opaque `paging.next.after` cursor. The
-connector follows it until either:
-1. The endpoint returns no `paging.next.after`, or
-2. The configured `max_records_per_batch` (admission control) is reached, in
-   which case a supported resumable scan stops after the current page and the
-   next microbatch resumes from the opaque cursor.
+HubSpot paginates with an opaque `paging.next.after` cursor. The connector
+follows it until the endpoint returns no continuation. Incremental Search reads
+may stop after a complete `updatedAt` group when `max_records_per_batch` is set;
+the next microbatch resumes from the timestamp checkpoint.
 
-Initial calls, emails, tasks, and notes reads persist that cursor with one
-frozen upper timestamp. Their `updatedAt` watermark remains unchanged until
-the object-list pass completes, then CDC starts from the frozen boundary.
-The versioned offset is bound to the table and records the emitted row count,
-a deterministic digest of `(id, updatedAt)` membership, a bounded history of
-cursor hashes, and a total page count. Replay must reproduce that exact range
-or fail closed. Future boundaries and oversized cursors are rejected. Cycles
-within the recent 64-cursor history fail immediately; longer cycles terminate
-at the 100,000-page hard limit. Object-list pagination is not a
-transactional snapshot during concurrent source changes, so records can still
-move between different pages while a multi-microbatch bootstrap is running.
-
-Snapshot ingestion, including `association_sync_mode=full_refresh`, does not
-use the resumable bootstrap offset. A snapshot drains every object-list page in
-one read and ignores `max_records_per_batch` so the batch reader cannot publish
-a truncated authoritative set.
+Snapshot ingestion, including `association_sync_mode=full_refresh`, drains every
+object-list page in one read and ignores `max_records_per_batch` so the batch
+reader cannot publish a truncated authoritative set.
 
 ## Tables
 
@@ -111,6 +96,10 @@ Property responses wrap fields in `results`. Custom schema discovery uses
 `GET /crm-object-schemas/2026-09/schemas`; returned directional association
 definitions resolve columns by canonical objectTypeId after collecting all schemas.
 
+HubSpot `number` properties use the existing `BIGINT` schema by default. The
+per-table `numeric_value_mode=decimal` option selects `DECIMAL(38,18)` for a new
+destination and normalizes exact long binary64 expansions before serialization.
+
 ## Complete association reads
 
 `POST /crm/associations/2026-09/{fromType}/{toType}/batch/read` receives
@@ -149,70 +138,10 @@ The high-value bound (`<init_ts>`) is captured once per connector instance to
 guarantee `Trigger.AvailableNow` termination — without it, the read window
 chases incoming updates forever.
 
-## Property history (`{object}_property_history`)
-
-HubSpot returns a property's previous values when it is listed in
-`propertiesWithHistory`. Which endpoints accept it (verified against
-HubSpot's OpenAPI specs for the CRM objects API):
-
-| Endpoint | `propertiesWithHistory` | Notes |
-|---|---|---|
-| `GET /crm/objects/2026-09/{type}/{id}` | yes (query) | one object |
-| `GET /crm/objects/2026-09/{type}` (list) | yes (query) | "will reduce the maximum number of [objects] that can be read by a single request"; long property lists hit URL-length limits |
-| `POST /crm/objects/2026-09/{type}/batch/read` | yes (body) | up to 100 IDs; may return `207` with per-ID errors |
-| `POST /crm/objects/2026-09/{type}/search` | **no** | request schema is `after`, `filterGroups`, `limit`, `properties`, `query`, `sorts` |
-
-Each history entry (`ValueWithTimestamp`) has `value`, `timestamp`,
-`sourceType` (required) and `sourceId`, `sourceLabel`, `updatedByUserId`
-(optional).
-
-### Read pattern
-
-1. Search a frozen parent modification-time range, sorted by numeric
-   `hs_object_id` ascending. Subsequent pages use `hs_object_id GT <last ID>` in
-   a fresh query, rather than increasing the request's paging `after`.
-2. Batch Read up to 50 parent IDs with `propertiesWithHistory`. Reconcile every
-   requested parent and require status `COMPLETE` before advancing the frontier.
-3. Emit each selected parent's history; only explicit `history_since` filters
-   history-entry timestamps. Parent selection bounds do not truncate old entries.
-
-Offsets retain `history_scan` version 1, lower/upper bounds, last fully hydrated
-`after_id`, `complete`, and cumulative `parent_count`/`parent_digest`. `updatedAt` advances to the frozen upper bound only
-when that scan completes. A completed scan returns no rows when read again in
-that trigger. A new trigger opens a fresh lookback window. Legacy timestamp-only
-offsets remain readable. Recovery uses the persisted ending bounds/frontier and
-ignores normal admission limits, and verifies the recorded parent membership
-before returning any rows, through the framework's optional
-`read_table_between_offsets` hook.
-
-### Limits that shape the implementation
-
-- Search: **5 requests/second per account**, max 200 results per page, max
-  **10,000 results per query** (paging past it returns 400). The reader spaces
-  search calls 250 ms apart and reanchors each query at the last numeric parent
-  ID. A timestamp group can span arbitrarily many bounded queries.
-- General burst limits for privately distributed apps: 100 requests / 10 s
-  (Free/Starter), 190 / 10 s (Professional/Enterprise), 250 / 10 s with the API
-  limit increase. Daily: 250k / 625k / 1M per account.
-- HTTP429/500/502/503 responses and request exceptions: retried up to 5 times
-  for safe GET and read-only POST requests. A valid `Retry-After` value is capped
-  at 30 seconds; otherwise retries use exponential backoff (1, 2, 4, 8, 16 s).
-  Permanent HTTP failures remain fatal and response bodies are not copied into
-  connector errors.
-
-### Known gaps (to confirm in live testing)
-
-- HubSpot does not document the per-request cap for batch read *with* history;
-  the reader uses 50 IDs per call.
-- Calculated / rollup properties may change without updating the object's
-  last-modified date (Airbyte documents this as cursor drift); such changes are
-  not picked up until the object is next modified.
-
 ## Property filtering (`include_properties` / `exclude_properties`)
 
-By default CRM object and history tables discover and request **all** properties. Two table
-options bound that set (both are applied to object tables and to
-`*_property_history` tables):
+By default CRM object tables discover and request **all** properties. Two table
+options bound that set:
 
 - `include_properties` — comma-separated allowlist; unknown names are ignored
   (HubSpot itself ignores unrecognised property names).
