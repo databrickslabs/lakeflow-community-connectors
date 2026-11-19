@@ -7,13 +7,15 @@
 #   * read_table(terms)            -> GET /datagovernance/catalog/terms
 #
 # Pagination:
-#   All three list endpoints wrap records in a ``value`` array and return a
-#   ``nextLink`` URL until the last page. The connector follows ``nextLink``
-#   (see ``next_link_paginate``). The simulator has no nextLink style, so we
-#   use ``pagination_style: none`` and return the whole corpus in one response
-#   with the ``value`` wrapper (and no ``nextLink``); the connector's loop
-#   terminates after one page when ``nextLink`` is absent — the same modeling
-#   the Collibra spec uses for its cursor endpoints.
+#   All three list endpoints wrap records in a ``value`` array. Verified live:
+#   ``dataProducts`` and ``terms`` page by ``skip``/``top`` and return NO
+#   ``nextLink`` (they return ``count``), so they are modelled as
+#   ``offset_limit`` (skip=offset, top=limit) to exercise multi-page reads.
+#   ``businessdomains`` continues via ``nextLink`` (``next_link_paginate``).
+#   The simulator has no nextLink style, so businessdomains uses
+#   ``pagination_style: none`` (whole corpus in one ``value`` page, no
+#   ``nextLink``) — the same modelling the Collibra spec uses for its cursor
+#   endpoints.
 #
 # Cursor / termination:
 #   The incremental cursor is ``systemData.lastModifiedAt`` (ISO-8601 UTC
@@ -36,36 +38,36 @@ endpoints:
       $skipToken:   {role: ignore}
       writeOnly:    {role: ignore}
 
-  # ---- /dataProducts (cdc, systemData.lastModifiedAt, skip/top -> nextLink) ----
+  # ---- /dataProducts (cdc, systemData.lastModifiedAt, skip/top offset paging) ----
   - path: "/datagovernance/catalog/dataProducts"
     method: GET
     corpus: data_products
     response:
-      pagination_style: none
+      pagination_style: offset_limit
       default_sort: "systemData.lastModifiedAt asc"
       wrapper: {records_key: value}
     params:
       api-version:  {role: ignore}
-      skip:         {role: ignore}
-      top:          {role: ignore}
+      skip:         {role: offset}
+      top:          {role: limit, default: 100, max: 1000}
       orderBy:      {role: ignore}
       domainId:     {role: filter, field: domain, op: eq}
     synthesize_future_records:
       cursor_field: systemData.lastModifiedAt
       count: 3
 
-  # ---- /terms (cdc, systemData.lastModifiedAt, skip/top -> nextLink) ----
+  # ---- /terms (cdc, systemData.lastModifiedAt, skip/top offset paging) ----
   - path: "/datagovernance/catalog/terms"
     method: GET
     corpus: terms
     response:
-      pagination_style: none
+      pagination_style: offset_limit
       default_sort: "systemData.lastModifiedAt asc"
       wrapper: {records_key: value}
     params:
       api-version:  {role: ignore}
-      skip:         {role: ignore}
-      top:          {role: ignore}
+      skip:         {role: offset}
+      top:          {role: limit, default: 100, max: 1000}
       orderBy:      {role: ignore}
       keyword:      {role: ignore}
       depth:        {role: ignore}

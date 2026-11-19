@@ -65,7 +65,19 @@ Gate: confirm all tests pass and validator drift is resolved.
 
 ---
 
-## Step 3 — Deployment (Optional)
+## Step 3 — Version and Prebuilt Wheel
+
+If Step 2 changed any packaged file under `{SRC}/` (`*.py`, `connector_spec.yaml`, `pyproject.toml`), follow "Choose the version" and "Build the prebuilt wheel" in `.claude/skills/build_connector_package/SKILL.md`. A connector that isn't on `master` yet keeps `0.1.0` and only needs the rebuild. Always finish with:
+
+```bash
+python tools/scripts/build_wheelhouse.py {source_name} --check --base origin/master
+```
+
+Gate: the check passes. Commit `{SRC}/` and `wheelhouse/{source_name}/` changes together, with the bump in the commit message.
+
+---
+
+## Step 4 — Deployment (Optional)
 
 Use `AskUserQuestion`: "Live tests pass. Proceed to deploy a pipeline?"
 Options: "Yes, deploy now" / "No, stop here".
@@ -81,6 +93,7 @@ Pass `source_name` with `use_local_source=true`. This is interactive — ask the
 Connector:  {source_name}
 Auth:       ✓ validated
 Tests:      ✓ all passed
+Version:    <x.y.z> (<unchanged | MAJOR | MINOR | PATCH>), wheel ✓ in sync
 Deployment: <deployed to <pipeline_name> | skipped>
 ```
 

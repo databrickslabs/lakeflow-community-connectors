@@ -25,3 +25,142 @@ Before applying `safe-to-test`, scan the diff for surfaces that execute in the p
 If anything looks off, do not label — ask the contributor to clean it up first. Once you apply `safe-to-test`, the labeled commit is executed on the protected runner with OIDC in scope; treat the click like merging unreviewed code into a privileged context, because that's what it is.
 
 Internal contributors pushing branches inside `databrickslabs/lakeflow-community-connectors` are not affected — their PRs run CI automatically on every push.
+
+## Prebuilt connector wheels (`wheelhouse/`)
+
+The Databricks managed ingestion wizard installs connectors from prebuilt wheels committed under `wheelhouse/`. When a pipeline is created, it sparse-checks out `wheelhouse/_framework/` and `wheelhouse/<source_name>/` and installs both wheels as pipeline dependencies, so they must stay in sync with the source.
+
+```
+wheelhouse/
+├── _framework/      # lakeflow_community_connectors-<version>-py3-none-any.whl
+└── <source_name>/   # lakeflow_community_connectors_<source_name>-<version>-py3-none-any.whl
+```
+
+`<version>` is the `version` in that package's `pyproject.toml`: the repo root for `_framework`, `src/databricks/labs/community_connector/sources/<source_name>/pyproject.toml` for a connector. Each directory holds **exactly one** wheel with its standard filename. Don't rename it: pip rejects wheels whose filename doesn't match their metadata. The directory is `wheelhouse/`, not `wheels/`, because `wheels/` is ignored by `.gitignore`.
+
+### Updating the wheels
+
+In the same PR as the change:
+
+1. Bump `version` in the affected `pyproject.toml` (see [Versioning](#versioning)).
+2. Rebuild:
+
+   ```bash
+   pip install build
+   python tools/scripts/build_wheelhouse.py <source_name>   # a connector
+   python tools/scripts/build_wheelhouse.py --framework     # the framework
+   ```
+
+   The script builds with `python -m build`, replaces the old wheel, and keeps the committed file when nothing that affects pipelines changed.
+3. Check the result against `master`:
+
+   ```bash
+   python tools/scripts/build_wheelhouse.py <source_name> --check --base origin/master
+   ```
+
+   It fails if a wheel is missing or stale, if its contents changed without a version bump, or if a connector's declared framework range excludes the framework version.
+
+What needs a rebuild:
+
+- **A connector:** any change to files packaged from `sources/<source_name>/`: `*.py`, `connector_spec.yaml`, `pyproject.toml`.
+- **The framework:** any change under `src/databricks/labs/community_connector/` outside `sources/` (`interface/`, `libs/`, `pipeline/`, `sparkpds/`), or to the root `pyproject.toml`. Every connector wheel depends on it, and it isn't published to PyPI.
+- **No rebuild:** tests, CI, repo docs, docs-only edits to a connector's `README.md` or `<source_name>_api_doc.md`, and the source simulator (`source_simulator/`, test-only). The next code change picks up the docs.
+
+Reviewers: wheels are binary and don't show up in the diff. Run the `--check --base origin/master` command above on the PR branch to confirm they match the source.
+
+## Versioning
+
+Connectors and the framework follow [semantic versioning](https://semver.org/) (`MAJOR.MINOR.PATCH`), starting at `0.1.0`. Each package has one version, in its `pyproject.toml`, and is bumped by the author in the PR that changes it. Bump once per PR, by the largest change in it, and never reuse a version: if `master` moved on, rebase and bump again on top of it. A revert is a new version too, classified by its own effect.
+
+### Connectors
+
+Decide by what an **existing pipeline** needs when it picks up the new wheel:
+
+**MAJOR**: at least one table needs a full refresh, or the user must change their connection or table configuration. Whether the change was planned or not:
+
+- Moving to a new version of the source API where fields or endpoints change
+- Changing a table's ingestion type (for example `snapshot` → `cdc`, or `cdc` → `cdc_with_deletes`)
+- Changing a primary key or cursor field
+- Renaming or removing a table, column, connection parameter, table option or auth method
+- Changing a column's type, changing a nested struct's shape incompatibly, or making a nullable column non-nullable
+- Making an optional connection parameter or table option required
+- Changing what existing values mean (units, time zones, what one row represents)
+- Changing a default in a way that changes which data is returned
+- Changing the offset format so an old checkpoint can't be read
+- Fixing a data-correctness bug where existing tables must be rebuilt to repair past data
+- Raising `requires-python`, or depending on a package version newer than supported runtimes provide
+
+**MINOR**: new capability, and existing pipelines keep working unchanged:
+
+- A new table, a new nullable column, or a new optional parameter, table option or auth method whose default keeps the old behavior
+- Deprecating something that keeps working (removal is a later MAJOR)
+- Adding a third-party dependency (call it out in the PR: workspaces with a restricted package mirror may need it)
+- Raising the framework minimum to use a new framework feature
+
+**PATCH**: fixes and internal changes with no visible effect on existing tables:
+
+- Bug fixes (pagination, retries, rate limits, auth refresh, error handling) and data-correctness fixes that don't need a rebuild of past data
+- Performance, logging and error-message improvements, refactors
+- Removing an unused dependency, widening a dependency range, or adding an upper cap such as `lakeflow-community-connectors>=0.1.0,<1.0`
+
+**No bump**: anything that doesn't need a rebuild (see the list above).
+
+Say in the PR description which bump you made and why. For a MAJOR bump, also say what users must do (run a full refresh of table `x`, rename option `y`, re-create the connection).
+
+### Framework
+
+The framework is the `lakeflow-community-connectors` package, built from the root `pyproject.toml` into `wheelhouse/_framework/`. Every pipeline installs it next to its connector wheel, so a framework change reaches every connector at once. Decide the bump by what **connectors** need, not by pipelines or tables.
+
+What counts as the framework:
+
+- `interface/`: `LakeflowConnect` and the `Supports*` mixins
+- `libs/`: helpers that connectors import
+- `pipeline/` and `sparkpds/`: the ingestion pipeline entry point and the Spark data source registration
+- the root `pyproject.toml`: `requires-python` and the framework's dependencies
+- `source_simulator/` ships in the wheel but is test-only, so changing it doesn't need a bump
+
+**MAJOR**: at least one connector must change to keep working.
+
+- Removing or renaming an interface method, a mixin, or a `libs/` helper that connectors import
+- Changing a method signature or return contract, for example adding a required argument or a required key in `read_table_metadata()`
+- Removing an `ingestion_type` value, or changing what an existing one means
+- Changing how offsets are passed to or stored for connectors
+- Changing the pipeline entry points or the data source registration that connectors rely on
+- Raising `requires-python`, or adding or tightening a dependency beyond what supported runtimes or existing connectors allow
+
+**MINOR**: connectors keep working unchanged, and there's new capability.
+
+- Adding an optional interface method with a default implementation (like `read_table_deletes()`)
+- Adding a new mixin, `libs/` helper, or `ingestion_type` value
+- Adding an optional argument or metadata key that has a default
+- Deprecating something that keeps working (removal is a later MAJOR)
+
+**PATCH**: fixes and internal changes connectors can't observe.
+
+- Bug fixes in `libs/`, `pipeline/` or `sparkpds/`
+- Performance, logging and error-message improvements, refactors
+- Removing an unused dependency, or widening a dependency range
+
+**No bump**: tests, CI, docs, and `source_simulator/` specs and corpus.
+
+#### Compatibility with connectors
+
+- Every connector declares the framework range it works with: `lakeflow-community-connectors>=<min>,<<next major>`, for example `>=0.1.0,<1.0`.
+- A connector raises `<min>` when it starts using a new framework feature, and bumps its own version (MINOR).
+- A connector bumps only when it changes itself, not because the framework did.
+- The wizard installs the framework and connector wheels from the same `master` revision, so every framework version on `master` must satisfy the range of every connector on `master`.
+
+#### Releasing a framework change
+
+1. Classify the change with the rules above and bump `version` in the root `pyproject.toml`.
+2. Rebuild with `python tools/scripts/build_wheelhouse.py --framework`. It checks every connector's declared range against the new version and fails on a mismatch.
+3. For each connector it reports:
+   - after a MINOR or PATCH, the connector pins below the new version: fix its range in the same PR.
+   - after a MAJOR, verify the connector against the new framework, change its code if needed, raise its cap to the next major (for example `<2.0`), and bump it by its own rules, all in the same PR. If the affected connectors can't all be updated, defer the framework release.
+4. Run `python tools/scripts/build_wheelhouse.py all --check --base origin/master` and confirm it passes.
+
+Examples:
+
+- **PATCH**: fix a retry helper in `libs/utils.py`. Framework `0.1.0` → `0.1.1`; no connector changes.
+- **MINOR**: add an optional mixin with a default. Framework `0.1.1` → `0.2.0`; connectors that adopt it raise their minimum to `>=0.2.0` and bump MINOR.
+- **MAJOR**: make `read_table_metadata()` require a new key. Framework `0.2.0` → `1.0.0`; in the same PR, every connector adds the key, moves its range to `>=1.0.0,<2.0`, and bumps (PATCH, or MAJOR if its tables are affected).
