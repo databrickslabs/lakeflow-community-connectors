@@ -204,7 +204,7 @@ pipeline_spec = {
 ingest(spark, pipeline_spec)
 ```
 
-To scope a table, pass table options (and make sure each option is in the connection's `externalOptionsAllowList`). Multi-value options (`type_public_ids`, `resource_ids`, `role_ids`) take a comma-separated string; the connector sends each value as a repeated query parameter, which is what Collibra expects. Attribute type public IDs are instance-specific; look them up in Collibra under Settings → Operating Model → Attribute Types.
+To scope a table, pass table options (and make sure each option is in the connection's `externalOptionsAllowList`). Multi-value options (`type_public_ids`, `resource_ids`, `role_ids`) take a comma-separated string; the connector sends each value as a repeated query parameter, which is what Collibra expects. An option that holds only separators (for example `" , "`) fails the read with a `ValueError` instead of silently ingesting unfiltered. Attribute type public IDs are instance-specific; look them up in Collibra under Settings → Operating Model → Attribute Types.
 
 Where the options go depends on how the pipeline was created.
 
