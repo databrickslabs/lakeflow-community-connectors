@@ -1,0 +1,47 @@
+[
+  {
+    "id": 1000,
+    "code": "sierra-502",
+    "name": "golf-802",
+    "decimal_points": 30386,
+    "symbol": "india-769",
+    "active_flag": false,
+    "is_custom_flag": false
+  },
+  {
+    "id": 1001,
+    "code": "romeo-486",
+    "name": "alpha-410",
+    "decimal_points": 11193,
+    "symbol": "romeo-680",
+    "active_flag": false,
+    "is_custom_flag": false
+  },
+  {
+    "id": 1002,
+    "code": "kilo-117",
+    "name": "golf-144",
+    "decimal_points": 72337,
+    "symbol": "whiskey-143",
+    "active_flag": true,
+    "is_custom_flag": true
+  },
+  {
+    "id": 1003,
+    "code": "victor-799",
+    "name": "kilo-308",
+    "decimal_points": 47225,
+    "symbol": "whiskey-816",
+    "active_flag": false,
+    "is_custom_flag": false
+  },
+  {
+    "id": 1004,
+    "code": "india-936",
+    "name": "papa-763",
+    "decimal_points": 85322,
+    "symbol": "bravo-440",
+    "active_flag": false,
+    "is_custom_flag": true
+  }
+]

@@ -1,0 +1,158 @@
+[
+  {
+    "key": "foxtrot--pk0",
+    "id": 86997,
+    "name": "echo-660",
+    "order_nr": 74614,
+    "field_type": "sierra-120",
+    "add_time": "november-848",
+    "update_time": "tango-334",
+    "last_updated_by_user_id": 77345,
+    "created_by_user_id": 34611,
+    "active_flag": false,
+    "edit_flag": true,
+    "index_visible_flag": false,
+    "details_visible_flag": true,
+    "add_visible_flag": false,
+    "important_flag": false,
+    "bulk_edit_allowed": true,
+    "searchable_flag": true,
+    "filtering_allowed": false,
+    "sortable_flag": true,
+    "mandatory_flag": "bravo-663",
+    "options": [
+      "november-956",
+      "mike-288"
+    ],
+    "options_deleted": [],
+    "is_subfield": false,
+    "subfields": [
+      "golf-753"
+    ]
+  },
+  {
+    "key": "charlie--pk1",
+    "id": 51166,
+    "name": "juliet-599",
+    "order_nr": 90212,
+    "field_type": "romeo-100",
+    "add_time": "charlie-974",
+    "update_time": "foxtrot-199",
+    "last_updated_by_user_id": 6725,
+    "created_by_user_id": 60781,
+    "active_flag": false,
+    "edit_flag": true,
+    "index_visible_flag": true,
+    "details_visible_flag": true,
+    "add_visible_flag": true,
+    "important_flag": false,
+    "bulk_edit_allowed": true,
+    "searchable_flag": false,
+    "filtering_allowed": false,
+    "sortable_flag": true,
+    "mandatory_flag": "delta-826",
+    "options": [
+      "echo-956"
+    ],
+    "options_deleted": [
+      "india-218",
+      "uniform-472"
+    ],
+    "is_subfield": false,
+    "subfields": [
+      "india-534"
+    ]
+  },
+  {
+    "key": "juliet-3-pk2",
+    "id": 14092,
+    "name": "quebec-304",
+    "order_nr": 74093,
+    "field_type": "delta-416",
+    "add_time": "charlie-643",
+    "update_time": "foxtrot-867",
+    "last_updated_by_user_id": 66296,
+    "created_by_user_id": 58107,
+    "active_flag": false,
+    "edit_flag": false,
+    "index_visible_flag": false,
+    "details_visible_flag": false,
+    "add_visible_flag": false,
+    "important_flag": true,
+    "bulk_edit_allowed": false,
+    "searchable_flag": true,
+    "filtering_allowed": false,
+    "sortable_flag": true,
+    "mandatory_flag": "whiskey-557",
+    "options": [],
+    "options_deleted": [
+      "xray-361"
+    ],
+    "is_subfield": true,
+    "subfields": [
+      "zulu-353"
+    ]
+  },
+  {
+    "key": "kilo-319-pk3",
+    "id": 28141,
+    "name": "foxtrot-138",
+    "order_nr": 11176,
+    "field_type": "delta-758",
+    "add_time": "alpha-847",
+    "update_time": "tango-210",
+    "last_updated_by_user_id": 2010,
+    "created_by_user_id": 70033,
+    "active_flag": false,
+    "edit_flag": false,
+    "index_visible_flag": true,
+    "details_visible_flag": false,
+    "add_visible_flag": false,
+    "important_flag": true,
+    "bulk_edit_allowed": false,
+    "searchable_flag": false,
+    "filtering_allowed": true,
+    "sortable_flag": true,
+    "mandatory_flag": "lima-853",
+    "options": [],
+    "options_deleted": [],
+    "is_subfield": true,
+    "subfields": [
+      "mike-517"
+    ]
+  },
+  {
+    "key": "foxtrot--pk4",
+    "id": 16767,
+    "name": "oscar-179",
+    "order_nr": 972,
+    "field_type": "alpha-392",
+    "add_time": "alpha-641",
+    "update_time": "uniform-812",
+    "last_updated_by_user_id": 37972,
+    "created_by_user_id": 84743,
+    "active_flag": false,
+    "edit_flag": true,
+    "index_visible_flag": true,
+    "details_visible_flag": true,
+    "add_visible_flag": false,
+    "important_flag": false,
+    "bulk_edit_allowed": true,
+    "searchable_flag": true,
+    "filtering_allowed": false,
+    "sortable_flag": true,
+    "mandatory_flag": "juliet-529",
+    "options": [
+      "oscar-221",
+      "papa-938"
+    ],
+    "options_deleted": [
+      "bravo-727",
+      "yankee-416"
+    ],
+    "is_subfield": false,
+    "subfields": [
+      "india-429"
+    ]
+  }
+]
