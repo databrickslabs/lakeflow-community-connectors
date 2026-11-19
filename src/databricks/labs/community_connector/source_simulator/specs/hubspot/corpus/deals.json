@@ -2,16 +2,18 @@
   {
     "id": "1000",
     "createdAt": "2024-01-01T00:00:00Z",
-    "updatedAt": "2024-02-01T00:00:00Z",
+    "updatedAt": "2026-10-06T21:55:09.945Z",
     "archived": false,
-    "properties": {"name": "Sample"},
+    "properties": {
+      "name": "Sample"
+    },
     "companies": [],
     "contacts": []
   },
   {
     "id": "1001",
     "createdAt": "2024-01-02T00:00:00Z",
-    "updatedAt": "2024-02-02T00:00:00Z",
+    "updatedAt": "2026-10-06T21:55:00.978Z",
     "archived": false,
     "properties": null,
     "companies": [],
@@ -20,7 +22,7 @@
   {
     "id": "1002",
     "createdAt": "2024-01-03T00:00:00Z",
-    "updatedAt": "2024-02-03T00:00:00Z",
+    "updatedAt": "2026-10-06T21:54:59.203Z",
     "archived": false,
     "properties": null,
     "companies": [],
@@ -29,7 +31,7 @@
   {
     "id": "1003",
     "createdAt": "2024-01-04T00:00:00Z",
-    "updatedAt": "2024-02-04T00:00:00Z",
+    "updatedAt": "2026-10-06T21:54:28.777Z",
     "archived": false,
     "properties": null,
     "companies": [],
