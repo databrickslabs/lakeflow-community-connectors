@@ -102,28 +102,46 @@ endpoints:
   # Search models time/ID filters, ordering, and bounded paging.
   - path: /crm/objects/2026-09/contacts/search
     method: POST
+    corpus: contacts
     handler: databricks.labs.community_connector.source_simulator.specs.hubspot.handlers.search:serve_search
+    synthesize_future_records: {cursor_field: updatedAt, count: 3}
   - path: /crm/objects/2026-09/companies/search
     method: POST
+    corpus: companies
     handler: databricks.labs.community_connector.source_simulator.specs.hubspot.handlers.search:serve_search
+    synthesize_future_records: {cursor_field: updatedAt, count: 3}
   - path: /crm/objects/2026-09/deals/search
     method: POST
+    corpus: deals
     handler: databricks.labs.community_connector.source_simulator.specs.hubspot.handlers.search:serve_search
+    synthesize_future_records: {cursor_field: updatedAt, count: 3}
   - path: /crm/objects/2026-09/tickets/search
     method: POST
+    corpus: tickets
     handler: databricks.labs.community_connector.source_simulator.specs.hubspot.handlers.search:serve_search
+    synthesize_future_records: {cursor_field: updatedAt, count: 3}
   - path: /crm/objects/2026-09/calls/search
     method: POST
+    corpus: calls
     handler: databricks.labs.community_connector.source_simulator.specs.hubspot.handlers.search:serve_search
+    synthesize_future_records: {cursor_field: updatedAt, count: 3}
   - path: /crm/objects/2026-09/emails/search
     method: POST
+    corpus: emails
     handler: databricks.labs.community_connector.source_simulator.specs.hubspot.handlers.search:serve_search
+    synthesize_future_records: {cursor_field: updatedAt, count: 3}
   - path: /crm/objects/2026-09/meetings/search
     method: POST
+    corpus: meetings
     handler: databricks.labs.community_connector.source_simulator.specs.hubspot.handlers.search:serve_search
+    synthesize_future_records: {cursor_field: updatedAt, count: 3}
   - path: /crm/objects/2026-09/tasks/search
     method: POST
+    corpus: tasks
     handler: databricks.labs.community_connector.source_simulator.specs.hubspot.handlers.search:serve_search
+    synthesize_future_records: {cursor_field: updatedAt, count: 3}
   - path: /crm/objects/2026-09/notes/search
     method: POST
+    corpus: notes
     handler: databricks.labs.community_connector.source_simulator.specs.hubspot.handlers.search:serve_search
+    synthesize_future_records: {cursor_field: updatedAt, count: 3}

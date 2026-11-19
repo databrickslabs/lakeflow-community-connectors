@@ -16,9 +16,14 @@ from pyspark.sql.types import (
 )
 
 from databricks.labs.community_connector.interface import LakeflowConnect
-from databricks.labs.community_connector.sources.hubspot.hubspot_associations import HubspotAssociations
+from databricks.labs.community_connector.sources.hubspot.hubspot_associations import (
+    HubspotAssociations,
+)
 from databricks.labs.community_connector.sources.hubspot.hubspot_http import HubspotHttpClient
-from databricks.labs.community_connector.sources.hubspot.hubspot_non_crm import NON_CRM_TABLES, HubspotNonCrm
+from databricks.labs.community_connector.sources.hubspot.hubspot_non_crm import (
+    NON_CRM_TABLES,
+    HubspotNonCrm,
+)
 
 
 def _parse_property_list(raw: str | None) -> List[str] | None:
@@ -196,13 +201,14 @@ class HubspotLakeflowConnect(LakeflowConnect):
             kind=kind,
             min_interval=min_interval,
         )
-        if response.status_code == 200:
-            try:
-                return response.json()
-            except ValueError:
-                raise RuntimeError("Malformed HubSpot association GET JSON") from None
         if response.status_code != 200:
-            raise RuntimeError(f"HubSpot association GET failed (status={response.status_code})")
+            raise RuntimeError(
+                f"HubSpot association GET failed (status={response.status_code})"
+            )
+        try:
+            return response.json()
+        except ValueError:
+            raise RuntimeError("Malformed HubSpot association GET JSON") from None
 
     def _custom_api_types(self) -> List[str]:
         self._discover_custom_objects(require_access=True)
@@ -252,22 +258,12 @@ class HubspotLakeflowConnect(LakeflowConnect):
         if not isinstance(schemas, list):
             raise RuntimeError("Malformed HubSpot schema discovery results")
         names_by_type = {v: k for k, v in self._STANDARD_OBJECT_TYPES.items()}
-        custom_types = {}
-        for schema in schemas:
-            if not isinstance(schema, dict):
-                raise RuntimeError("Malformed HubSpot custom schema")
-            object_type, name = schema.get("objectTypeId"), schema.get("name")
-            if object_type in self._STANDARD_OBJECT_TYPES.values():
-                continue
-            if not isinstance(object_type, str) or not object_type.startswith("2-") or not isinstance(name, str) or not name:
-                raise RuntimeError("HubSpot custom schema requires name and objectTypeId")
-            alias = name.lower()
-            if alias in self._object_config or alias in NON_CRM_TABLES or alias in custom_types or object_type in names_by_type:
-                raise RuntimeError("HubSpot custom schema has a conflicting identity")
-            custom_types[alias] = object_type
-            names_by_type[object_type] = alias
+        custom_types = self._custom_type_map(schemas, names_by_type)
 
-        configs = {name: {**config, "associations": list(config["associations"])} for name, config in self._object_config.items()}
+        configs = {
+            name: {**config, "associations": list(config["associations"])}
+            for name, config in self._object_config.items()
+        }
         # Custom objects do support archived listing (verified live: the
         # `archived=true` object listing returns records with `archived` and
         # `archivedAt`, plus requested properties). Without a delete flow an
@@ -315,7 +311,8 @@ class HubspotLakeflowConnect(LakeflowConnect):
                     raise RuntimeError("HubSpot association column conflicts with a base field")
                 discovered[source].add(target)
         for name, targets in discovered.items():
-            configs[name]["associations"].extend(sorted(targets - set(configs[name]["associations"])))
+            existing = set(configs[name]["associations"])
+            configs[name]["associations"].extend(sorted(targets - existing))
         # Commit discovery atomically: failures must not leave a partial graph.
         self._custom_object_types = custom_types
         self._custom_object_configs = {name: configs[name] for name in custom_types}
@@ -328,6 +325,33 @@ class HubspotLakeflowConnect(LakeflowConnect):
         self._metadata_cache.clear()
         return list(self._custom_objects)
 
+    def _custom_type_map(self, schemas: list, names_by_type: dict) -> dict:
+        custom_types = {}
+        for schema in schemas:
+            if not isinstance(schema, dict):
+                raise RuntimeError("Malformed HubSpot custom schema")
+            object_type, name = schema.get("objectTypeId"), schema.get("name")
+            if object_type in self._STANDARD_OBJECT_TYPES.values():
+                continue
+            if (
+                not isinstance(object_type, str)
+                or not object_type.startswith("2-")
+                or not isinstance(name, str)
+                or not name
+            ):
+                raise RuntimeError("HubSpot custom schema requires name and objectTypeId")
+            alias = name.lower()
+            if (
+                alias in self._object_config
+                or alias in NON_CRM_TABLES
+                or alias in custom_types
+                or object_type in names_by_type
+            ):
+                raise RuntimeError("HubSpot custom schema has a conflicting identity")
+            custom_types[alias] = object_type
+            names_by_type[object_type] = alias
+        return custom_types
+
     def _get_api_object_type(self, table_name: str) -> str:
         """Keep public table names stable, but address custom types by HubSpot ID."""
         if table_name not in self._object_config:
@@ -336,7 +360,10 @@ class HubspotLakeflowConnect(LakeflowConnect):
 
     def _get_object_config(self, table_name: str) -> Dict:
         """Get configuration for a specific object type"""
-        return self._object_config.get(table_name, self._custom_object_configs.get(table_name, self._default_object_config))
+        fallback = self._custom_object_configs.get(
+            table_name, self._default_object_config
+        )
+        return self._object_config.get(table_name, fallback)
 
     @staticmethod
     def _association_sync_mode(table_options: Dict[str, str] | None) -> str:
@@ -463,7 +490,10 @@ class HubspotLakeflowConnect(LakeflowConnect):
     def _uses_snapshot(cls, table_name: str, table_options: Dict[str, str] | None) -> bool:
         # HubSpot rejects archived-object paging for MEETING_EVENT (0-47).
         # Complete active snapshots preserve current-state removal reconciliation.
-        return table_name == "meetings" or cls._association_sync_mode(table_options) == "full_refresh"
+        return (
+            table_name == "meetings"
+            or cls._association_sync_mode(table_options) == "full_refresh"
+        )
 
     @classmethod
     def _options_cache_key(cls, table_name: str, table_options: Dict[str, str] | None) -> tuple:
@@ -818,7 +848,9 @@ class HubspotLakeflowConnect(LakeflowConnect):
         checkpoint = self._archive_time(start["updatedAt"]) if "updatedAt" in start else None
         if checkpoint is not None and checkpoint >= upper:
             return iter([]), start
-        properties = self.read_table_metadata(table_name, table_options).get("property_names", [])
+        properties = self.read_table_metadata(table_name, table_options).get(
+            "property_names", []
+        )
         rows, seen_ids, seen_cursors = [], {}, set()
         after = None
         while True:
@@ -831,7 +863,11 @@ class HubspotLakeflowConnect(LakeflowConnect):
                 if not isinstance(record, dict) or record.get("archived") is not True:
                     raise RuntimeError("Malformed HubSpot archive record")
                 raw_id = record.get("id")
-                if isinstance(raw_id, bool) or not isinstance(raw_id, (str, int)) or not str(raw_id).strip():
+                if (
+                    isinstance(raw_id, bool)
+                    or not isinstance(raw_id, (str, int))
+                    or not str(raw_id).strip()
+                ):
                     raise RuntimeError("Malformed HubSpot archive identity")
                 identity = str(raw_id)
                 archived = self._archive_time(record.get("archivedAt"))
@@ -849,7 +885,9 @@ class HubspotLakeflowConnect(LakeflowConnect):
                     [],
                     numeric_value_mode=self._numeric_value_mode(table_options),
                 )
-                row["updatedAt"] = archived.isoformat(timespec="milliseconds").replace("+00:00", "Z")
+                row["updatedAt"] = archived.isoformat(
+                    timespec="milliseconds"
+                ).replace("+00:00", "Z")
                 rows.append(row)
             if next_after is None:
                 break
@@ -930,17 +968,7 @@ class HubspotLakeflowConnect(LakeflowConnect):
                     if cursor in snapshot_cursors:
                         raise RuntimeError("HubSpot snapshot pagination cursor repeated")
                     snapshot_cursors.add(cursor)
-                for record in records:
-                    if not isinstance(record, dict):
-                        raise RuntimeError("Malformed HubSpot snapshot record")
-                    identity = record.get("id")
-                    if (isinstance(identity, bool) or not isinstance(identity, (str, int))
-                            or not str(identity).strip() or record.get("archived", False) is not False):
-                        raise RuntimeError("Malformed HubSpot active snapshot identity")
-                    identity = str(identity)
-                    if identity in snapshot_ids:
-                        raise RuntimeError("Duplicate HubSpot snapshot identity")
-                    snapshot_ids.add(identity)
+                self._validate_snapshot_records(records, snapshot_ids)
 
             if not records:
                 if incremental and after:
@@ -995,6 +1023,24 @@ class HubspotLakeflowConnect(LakeflowConnect):
 
         offset = {"updatedAt": latest_updated} if latest_updated else {}
         return all_records, offset
+
+    @staticmethod
+    def _validate_snapshot_records(records: List[Dict], snapshot_ids: set) -> None:
+        for record in records:
+            if not isinstance(record, dict):
+                raise RuntimeError("Malformed HubSpot snapshot record")
+            identity = record.get("id")
+            if (
+                isinstance(identity, bool)
+                or not isinstance(identity, (str, int))
+                or not str(identity).strip()
+                or record.get("archived", False) is not False
+            ):
+                raise RuntimeError("Malformed HubSpot active snapshot identity")
+            identity = str(identity)
+            if identity in snapshot_ids:
+                raise RuntimeError("Duplicate HubSpot snapshot identity")
+            snapshot_ids.add(identity)
 
     def _hydrate_associations(
         self,

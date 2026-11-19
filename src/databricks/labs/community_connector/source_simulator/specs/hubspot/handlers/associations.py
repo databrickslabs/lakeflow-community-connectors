@@ -6,6 +6,9 @@ from databricks.labs.community_connector.source_simulator.specs.hubspot.handlers
     _build_response,
     _parse_body,
 )
+from databricks.labs.community_connector.source_simulator.specs.hubspot.handlers.search import (
+    _unique_synthetic_ids,
+)
 
 
 def serve_associations(prep, spec, corpus):  # pylint: disable=unused-argument
@@ -13,7 +16,10 @@ def serve_associations(prep, spec, corpus):  # pylint: disable=unused-argument
     if not match:
         return _build_response(prep, status=404, payload={"message": "unknown path"})
     from_type, to_type = match.groups()
-    parents = {str(record["id"]): record for record in corpus.get(from_type) or []}
+    parents = {
+        str(record["id"]): record
+        for record in _unique_synthetic_ids(list(corpus.get(from_type) or []))
+    }
     results = []
     for item in _parse_body(prep.body).get("inputs", []):
         parent_id = str(item["id"])

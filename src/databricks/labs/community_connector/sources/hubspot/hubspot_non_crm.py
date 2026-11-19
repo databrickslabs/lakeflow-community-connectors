@@ -138,7 +138,8 @@ class HubspotNonCrm:
                 "configuration", "displayOptions", "fieldGroups", "legalConsentOptions",
             ]) + _non_crm_fields(["archived"], BooleanType()),
             "contact_lists": _non_crm_fields([
-                "listId", "legacyListId", "name", "objectTypeId", "processingType", "processingStatus",
+                "listId", "legacyListId", "name", "objectTypeId",
+                "processingType", "processingStatus",
                 "createdAt", "updatedAt", "additionalProperties",
             ]) + _non_crm_fields(["listVersion"], LongType()),
             "contact_list_memberships": _non_crm_fields([
@@ -202,23 +203,9 @@ class HubspotNonCrm:
                 raise RuntimeError("Incomplete HubSpot non-CRM page")
             state["pages"] += 1
             if offset_paging:
-                has_more = data.get("hasMore")
-                next_offset = data.get("offset")
-                total = data.get("total")
-                if (
-                    not isinstance(has_more, bool)
-                    or not isinstance(next_offset, int)
-                    or isinstance(next_offset, bool)
-                    or next_offset < 0
-                    or not isinstance(total, int)
-                    or isinstance(total, bool)
-                    or total < 0
-                ):
-                    raise RuntimeError("Malformed HubSpot list offset paging")
-                if has_more and (
-                    not data[records_key] or next_offset <= offset
-                ):
-                    raise RuntimeError("Non-advancing HubSpot list offset")
+                has_more, next_offset = self._list_page_offset(
+                    data, data[records_key], offset
+                )
                 next_cursor = None
             else:
                 has_more = False
@@ -243,6 +230,27 @@ class HubspotNonCrm:
             if next_cursor is None:
                 return
             cursor = next_cursor
+
+    @staticmethod
+    def _list_page_offset(data, records, offset):
+        has_more = data.get("hasMore")
+        next_offset = data.get("offset")
+        total = data.get("total")
+        valid_offset = (
+            isinstance(next_offset, int)
+            and not isinstance(next_offset, bool)
+            and next_offset >= 0
+        )
+        valid_total = (
+            isinstance(total, int)
+            and not isinstance(total, bool)
+            and total >= 0
+        )
+        if not isinstance(has_more, bool) or not valid_offset or not valid_total:
+            raise RuntimeError("Malformed HubSpot list offset paging")
+        if has_more and (not records or next_offset <= offset):
+            raise RuntimeError("Non-advancing HubSpot list offset")
+        return has_more, next_offset
 
     def _pages(
         self,
@@ -305,34 +313,29 @@ class HubspotNonCrm:
                             ) from err
                         parents.append(identity)
                     for identity in parents:
-                        route = (
-                            f"/crm/lists/2026-09/{quote(identity, safe='')}/memberships"
-                        )
-                        for membership_page in self._page_batches(
-                            route, {"limit": 100}, state=state
-                        ):
-                            for source in membership_page:
-                                source = _non_crm_with_identity(
-                                    source, "listId", identity
-                                )
-                                row = self._row("contact_list_memberships", source)
-                                key = tuple(
-                                    row[name]
-                                    for name in NON_CRM_KEYS[
-                                        "contact_list_memberships"
-                                    ]
-                                )
-                                try:
-                                    seen.execute(
-                                        "INSERT INTO memberships VALUES (?, ?)", key
-                                    )
-                                except sqlite3.IntegrityError as err:
-                                    raise RuntimeError(
-                                        "Duplicate HubSpot non-CRM identity across snapshot"
-                                    ) from err
-                                yield row
+                        yield from self._membership_pages(seen, identity, state)
             finally:
                 seen.close()
+
+    def _membership_pages(self, seen, identity, state):
+        route = f"/crm/lists/2026-09/{quote(identity, safe='')}/memberships"
+        for membership_page in self._page_batches(
+            route, {"limit": 100}, state=state
+        ):
+            for source in membership_page:
+                source = _non_crm_with_identity(source, "listId", identity)
+                row = self._row("contact_list_memberships", source)
+                key = tuple(
+                    row[name]
+                    for name in NON_CRM_KEYS["contact_list_memberships"]
+                )
+                try:
+                    seen.execute("INSERT INTO memberships VALUES (?, ?)", key)
+                except sqlite3.IntegrityError as err:
+                    raise RuntimeError(
+                        "Duplicate HubSpot non-CRM identity across snapshot"
+                    ) from err
+                yield row
 
     def _inventory(self, table):
         if table in {"owners", "forms"}:

@@ -10,6 +10,26 @@ from databricks.labs.community_connector.source_simulator.specs.hubspot.handlers
 )
 
 
+def _unique_synthetic_ids(records):
+    """Give future-record clones stable IDs without hiding real duplicates."""
+    used = {str(record.get("id")) for record in records}
+    numeric = [int(value) for value in used if value.isdigit()]
+    next_id = max(numeric, default=0) + 1
+    seen = set()
+    output = []
+    for record in records:
+        identity = str(record.get("id"))
+        if identity in seen:
+            while str(next_id) in used:
+                next_id += 1
+            record = {**record, "id": str(next_id)}
+            used.add(str(next_id))
+            next_id += 1
+        seen.add(identity)
+        output.append(record)
+    return output
+
+
 def _search_value(record, field):
     if field == "hs_object_id":
         return int(record["id"])
@@ -63,7 +83,8 @@ def serve_objects(prep, spec, corpus):  # pylint: disable=unused-argument
     table = parsed.path.rstrip("/").rsplit("/", 1)[-1]
     query = parse_qs(parsed.query)
     archived = query.get("archived", ["false"])[0].lower() == "true"
-    records = [record for record in (corpus.get(table) or [])
+    records = _unique_synthetic_ids(list(corpus.get(table) or []))
+    records = [record for record in records
                if bool(record.get("archived", False)) == archived]
     start = int(query.get("after", ["0"])[0])
     limit = int(query.get("limit", ["100"])[0])
