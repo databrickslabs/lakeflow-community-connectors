@@ -128,7 +128,7 @@ def test_unrepresentable_numeric_property_fails_before_checkpoint(generated, num
         conn, _, _ = consumer("meetings", generated)
         start = {"updatedAt": "2026-01-01T00:00:00.000Z"}
         with pytest.raises((ValueError, RuntimeError), match="numeric|decimal|number"):
-            conn.read_table("meetings", start, {})
+            conn.read_table("meetings", start, {"numeric_value_mode": "decimal"})
     assert start == {"updatedAt": "2026-01-01T00:00:00.000Z"}
 
 

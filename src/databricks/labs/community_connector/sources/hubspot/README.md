@@ -165,6 +165,20 @@ These are set inside the `table_configuration` map alongside any source-specific
 
 The association options above are optional source-specific table configurations.
 
+### Activity reliability and numeric values
+
+Activity incrementals finish every record sharing the current timestamp before
+advancing their checkpoint. Archive reads drain the complete frozen window, and
+meetings use complete active snapshots because HubSpot does not support their
+archive listing. Read-only GETs and POSTs retry `429`, `500`, `502`, and `503`
+up to five times and honor `Retry-After`.
+
+Numeric properties remain `BIGINT` by default for backward compatibility. Set
+`numeric_value_mode=decimal` to use `DECIMAL(38,18)`. Exact values that fit stay
+exact; recognizable long binary-float expansions such as HubSpot's long form of
+`0.1` normalize to their shortest representation. Other overflow, nonfinite,
+or malformed values fail before checkpointing.
+
 ## How to Run
 
 ### Step 1: Clone/Copy the Source Connector Code
