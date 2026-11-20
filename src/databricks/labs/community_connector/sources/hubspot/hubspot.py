@@ -241,7 +241,11 @@ class HubspotLakeflowConnect(LakeflowConnect):
             ):
                 raise RuntimeError("HubSpot custom schema requires name and objectTypeId")
             alias = name.lower()
-            if alias in self._object_config or alias in custom_types or object_type in names_by_type:
+            if (
+                alias in self._object_config
+                or alias in custom_types
+                or object_type in names_by_type
+            ):
                 raise RuntimeError("HubSpot custom schema has a conflicting identity")
             custom_types[alias] = object_type
             names_by_type[object_type] = alias

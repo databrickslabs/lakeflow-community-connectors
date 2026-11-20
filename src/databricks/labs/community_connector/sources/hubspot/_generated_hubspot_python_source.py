@@ -621,7 +621,9 @@ def register_lakeflow_source(spark):
         categories, codes = set(), set()
 
         def label(value):
-            return value if isinstance(value, str) and value in ASSOCIATION_SAFE_ERROR_LABELS else "UNKNOWN"
+            if isinstance(value, str) and value in ASSOCIATION_SAFE_ERROR_LABELS:
+                return value
+            return "UNKNOWN"
 
         for error in errors:
             if not isinstance(error, dict):
@@ -729,7 +731,9 @@ def register_lakeflow_source(spark):
                         {"id": parent, **({"after": cursor} if cursor is not None else {})}
                         for parent, cursor in pending.items()
                     ]
-                    data = self._post("associations", url, {"inputs": inputs}, ASSOCIATION_MIN_INTERVAL_S)
+                    data = self._post(
+                        "associations", url, {"inputs": inputs}, ASSOCIATION_MIN_INTERVAL_S
+                    )
                     results = self._validate_results(data, pending, with_types=with_types)
                     errors = data.get("errors", [])
                     error_count = data.get("numErrors", 0)
@@ -872,7 +876,9 @@ def register_lakeflow_source(spark):
         def _read_one(
             self, from_type: str, to_type: str, parent: str, *, with_types: bool = False
         ) -> set:
-            base = f"{self.base_url}/crm/objects/2026-09/{quote(from_type, safe='')}/{quote(parent, safe='')}"
+            encoded_from = quote(from_type, safe="")
+            encoded_parent = quote(parent, safe="")
+            base = f"{self.base_url}/crm/objects/2026-09/{encoded_from}/{encoded_parent}"
             url = f"{base}/associations/{quote(to_type, safe='')}"
             targets, seen = set(), set()
             cursor = None
@@ -884,7 +890,9 @@ def register_lakeflow_source(spark):
                         or data.get("status", "COMPLETE") != "COMPLETE"):
                     raise RuntimeError("Malformed HubSpot association GET collection")
                 for result in data["results"]:
-                    if not isinstance(result, dict) or not isinstance(result.get("associationTypes"), list):
+                    if not isinstance(result, dict) or not isinstance(
+                        result.get("associationTypes"), list
+                    ):
                         raise RuntimeError("Malformed HubSpot association GET target")
                     object_id = _association_identifier(
                         result.get("toObjectId"), "GET target ID"
@@ -906,8 +914,12 @@ def register_lakeflow_source(spark):
                 seen.add(cursor)
             if not targets:
                 # An empty collection cannot establish that the parent still exists.
-                obj = self._get("associations", base, {"properties": "hs_object_id", "archived": "false"},
-                                ASSOCIATION_MIN_INTERVAL_S)
+                obj = self._get(
+                    "associations",
+                    base,
+                    {"properties": "hs_object_id", "archived": "false"},
+                    ASSOCIATION_MIN_INTERVAL_S,
+                )
                 if (not isinstance(obj, dict) or obj.get("archived") is not False
                         or any(key in obj for key in ("errors", "numErrors", "category"))
                         or obj.get("status", "COMPLETE") != "COMPLETE"
@@ -1181,7 +1193,11 @@ def register_lakeflow_source(spark):
                 ):
                     raise RuntimeError("HubSpot custom schema requires name and objectTypeId")
                 alias = name.lower()
-                if alias in self._object_config or alias in custom_types or object_type in names_by_type:
+                if (
+                    alias in self._object_config
+                    or alias in custom_types
+                    or object_type in names_by_type
+                ):
                     raise RuntimeError("HubSpot custom schema has a conflicting identity")
                 custom_types[alias] = object_type
                 names_by_type[object_type] = alias

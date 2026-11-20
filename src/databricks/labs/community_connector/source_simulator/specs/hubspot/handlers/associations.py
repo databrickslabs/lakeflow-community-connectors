@@ -23,8 +23,9 @@ def serve_associations(prep, spec, corpus):  # pylint: disable=unused-argument
         links = (parent.get("associations") or {}).get(to_type, parent.get(to_type, []))
         if isinstance(links, dict):
             links = links.get("results", [])
-        results.append({
-            "from": {"id": parent_id},
-            "to": [{"toObjectId": str(link["id"] if isinstance(link, dict) else link)} for link in links],
-        })
+        targets = [
+            {"toObjectId": str(link["id"] if isinstance(link, dict) else link)}
+            for link in links
+        ]
+        results.append({"from": {"id": parent_id}, "to": targets})
     return _build_response(prep, status=200, payload={"status": "COMPLETE", "results": results})
