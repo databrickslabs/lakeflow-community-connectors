@@ -1,4 +1,5 @@
 import json
+import math
 import time
 from datetime import datetime, timezone
 from typing import Dict, Iterator, List, Tuple
@@ -18,6 +19,13 @@ from databricks.labs.community_connector.interface import LakeflowConnect
 from databricks.labs.community_connector.sources.hubspot.hubspot_associations import (
     HubspotAssociations,
 )
+
+HUBSPOT_SCHEMA_ROUTES = (
+    "/crm-object-schemas/2026-09/schemas",
+    "/crm/v3/schemas",
+)
+HUBSPOT_SCHEMA_MAX_RETRIES = 5
+HUBSPOT_SCHEMA_MAX_BACKOFF_S = 30.0
 
 
 class HubspotLakeflowConnect(LakeflowConnect):
@@ -206,15 +214,47 @@ class HubspotLakeflowConnect(LakeflowConnect):
 
         return standard_tables
 
+    @staticmethod
+    def _schema_retry_delay(response, attempt: int) -> float:
+        retry_after = (getattr(response, "headers", None) or {}).get("Retry-After")
+        if retry_after is not None:
+            try:
+                seconds = float(retry_after)
+                if math.isfinite(seconds) and seconds >= 0:
+                    return min(seconds, HUBSPOT_SCHEMA_MAX_BACKOFF_S)
+            except (TypeError, ValueError):
+                pass
+        return min(2.0 ** attempt, HUBSPOT_SCHEMA_MAX_BACKOFF_S)
+
+    def _get_custom_schemas(self):
+        last_status = None
+        for route_index, route in enumerate(HUBSPOT_SCHEMA_ROUTES):
+            url = self.base_url + route
+            for attempt in range(HUBSPOT_SCHEMA_MAX_RETRIES + 1):
+                response = requests.get(url, headers=self.auth_header, timeout=60)
+                last_status = response.status_code
+                if last_status in {200, 403}:
+                    return response
+                if last_status in {404, 410} and route_index == 0:
+                    break
+                if last_status == 429 or 500 <= last_status < 600:
+                    if attempt < HUBSPOT_SCHEMA_MAX_RETRIES:
+                        time.sleep(self._schema_retry_delay(response, attempt))
+                        continue
+                raise RuntimeError(
+                    f"HubSpot schema discovery failed: HTTP {last_status}"
+                )
+        raise RuntimeError(f"HubSpot schema discovery failed: HTTP {last_status}")
+
     def _discover_custom_objects(self) -> List[str]:
         """
         Discover custom objects from HubSpot CRM schemas API
         """
         if self._custom_objects is not None:
             return list(self._custom_objects)
-        url = f"{self.base_url}/crm-object-schemas/2026-09/schemas"
-        resp = requests.get(url, headers=self.auth_header, timeout=60)
+        resp = self._get_custom_schemas()
         if resp.status_code == 403:
+            self._custom_objects = []
             return []
         if resp.status_code != 200:
             raise RuntimeError(
