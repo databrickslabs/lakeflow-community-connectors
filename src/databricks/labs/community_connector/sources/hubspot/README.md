@@ -51,6 +51,22 @@ The HubSpot connector supports the following CRM objects with dynamic schema dis
 
 > **Note**: Table names are case-sensitive. Use the exact names shown above (lowercase with underscores). Custom objects are also supported and will be discovered automatically.
 
+### Custom objects and associations
+
+Custom tables keep their lowercase schema names while API requests use HubSpot's
+canonical `objectTypeId`. Directional schema definitions add association columns
+for standard, custom, and self relationships. Association batch reads page each
+parent independently and fail before checkpointing if a response is incomplete.
+
+Association columns are ID arrays by default. Source-specific table options can
+change that behavior:
+
+| Option | Values | Behavior |
+|---|---|---|
+| `associations` | omitted, empty, or comma-separated names | Fetch all discovered targets, none, or the named subset. Unknown names fail validation. |
+| `association_value_mode` | `ids` (default), `typed` | Emit `array<string>` IDs or structs containing `id`, `typeId`, `category`, and `label`. |
+| `association_sync_mode` | `incremental` (default), `full_refresh` | Refresh relationships with changed parents or rescan all parents as a snapshot so removals can be reconciled. |
+
 ### Object Details
 
 ### Standard CRM Objects
@@ -147,7 +163,7 @@ These are set inside the `table_configuration` map alongside any source-specific
 | `primary_keys` | No | List of columns to override the connector's default primary keys |
 | `sequence_by` | No | Column used to order records for SCD Type 2 change tracking |
 
-This connector does not require any source-specific table configuration options.
+The association options above are optional source-specific table configurations.
 
 ## How to Run
 

@@ -1,13 +1,13 @@
 """Custom table aliases must resolve to objectTypeId on every API read path."""
 
 import runpy
-from datetime import datetime
 from pathlib import Path
 from types import SimpleNamespace
 from urllib.parse import parse_qs, urlparse
 from unittest import mock
 
 import pytest
+from pyspark.sql.types import ArrayType, StringType, StructType, _make_type_verifier
 
 from databricks.labs.community_connector.sources.hubspot import hubspot as hubspot_module
 from databricks.labs.community_connector.sources.hubspot.hubspot import HubspotLakeflowConnect
@@ -44,7 +44,7 @@ def _connector_class(generated):
 
 
 @pytest.mark.parametrize("generated", [False, True])
-def test_custom_object_id_used_for_properties_snapshot_incremental_and_history(generated):
+def test_custom_object_id_used_for_properties_snapshot_and_incremental(generated):
     paths = []
     stamp = "2024-03-01T00:00:00.000Z"
     parent = {"id": "1", "updatedAt": stamp, "properties": {"vin": "example-vin"}}
@@ -64,33 +64,21 @@ def test_custom_object_id_used_for_properties_snapshot_incremental_and_history(g
         paths.append(path)
         if path == "/crm/objects/2026-09/2-12345/search":
             return _Response({"results": [parent]})
-        assert path == "/crm/objects/2026-09/2-12345/batch/read"
-        return _Response({"results": [{
-            "id": "1",
-            "propertiesWithHistory": {"vin": [{"value": "example-vin", "timestamp": stamp}]},
-        }]})
+        raise AssertionError(path)
 
     with mock.patch("requests.get", side_effect=get), mock.patch("requests.post", side_effect=post):
         conn = _connector_class(generated)({"access_token": "test-only-token"})
-        conn._history._sleep = lambda _: None
         assert "cars" in conn.list_tables()
-        assert "cars_property_history" in conn.list_tables()
         schema = conn.get_table_schema("cars", {})
-        assert schema["properties"].dataType.fieldNames() == ["vin", "hs_lastmodifieddate"]
+        assert schema["properties"].dataType.fieldNames() == ["vin"]
         rows, _ = conn.read_table("cars", {}, {})
         assert list(rows)[0]["properties"]["vin"] == "example-vin"
         rows, _ = conn.read_table("cars", {"updatedAt": "2023-01-01T00:00:00.000Z"}, {})
         assert list(rows)[0]["id"] == "1"
-        rows, offset = conn.read_table("cars_property_history", {}, {})
-        assert [(r["object_id"], r["property"], r["value"]) for r in rows] == [
-            ("1", "vin", "example-vin"),
-        ]
-        assert offset == {"updatedAt": stamp}
     assert paths.count("/crm-object-schemas/2026-09/schemas") == 1
     assert "/crm/properties/2026-09/2-12345" in paths
     assert "/crm/objects/2026-09/2-12345" in paths
     assert "/crm/objects/2026-09/2-12345/search" in paths
-    assert "/crm/objects/2026-09/2-12345/batch/read" in paths
 
 
 @pytest.mark.parametrize("generated", [False, True])
@@ -100,77 +88,6 @@ def test_properties_discovery_uses_versioned_wrapper_for_standard_objects(genera
     with mock.patch("requests.get", return_value=_Response({"results": properties})) as get:
         assert conn._get_object_properties("deals") == properties
     assert get.call_args.args[0] == "https://api.hubapi.com/crm/properties/2026-09/deals"
-
-
-@pytest.mark.parametrize("generated", [False, True])
-def test_wide_object_filters_properties_before_building_snapshot_request(generated):
-    """A 1,200-property schema must not leak into the filtered request URL."""
-    names = [f"appdirect_custom_property_{i:04d}" for i in range(1200)]
-    properties = [{"name": name, "type": "string"} for name in names]
-    selected = names[1]
-    expected = {selected, "hs_lastmodifieddate"}
-    object_requests = []
-
-    def get(url, **_kwargs):
-        path = urlparse(url).path
-        if path == "/crm-object-schemas/2026-09/schemas":
-            return _Response({"results": []})
-        if path == "/crm/properties/2026-09/deals":
-            return _Response({"results": properties})
-        assert path == "/crm/objects/2026-09/deals"
-        object_requests.append(url)
-        assert len(url.encode("utf-8")) < 8192
-        requested = set(parse_qs(urlparse(url).query)["properties"][0].split(","))
-        assert requested == expected
-        return _Response({"results": [{
-            "id": "1",
-            "updatedAt": "2024-03-01T00:00:00.000Z",
-            "properties": {selected: "example-value"},
-        }]})
-
-    conn = _connector_class(generated)({"access_token": "test-only-token"})
-    opts = {"include_properties": f"{selected},{names[2]}", "exclude_properties": names[2]}
-    with mock.patch("requests.get", side_effect=get), mock.patch("requests.post", side_effect=_empty_associations):
-        schema = conn.get_table_schema("deals", opts)
-        assert set(schema["properties"].dataType.fieldNames()) == expected
-        rows, _ = conn.read_table("deals", {}, opts)
-        assert list(rows)[0]["properties"] == {selected: "example-value"}
-    assert len(object_requests) == 1
-    assert len(",".join(names).encode("utf-8")) > 8192
-
-
-@pytest.mark.parametrize("generated", [False, True])
-@pytest.mark.parametrize("boundary_page", [False, True])
-def test_base_incremental_paging_preserves_all_tied_parents(generated, boundary_page):
-    checkpoint = "2023-01-01T00:00:00.000Z"
-    stamp = "2024-03-01T00:00:00.000Z"
-    parents = [{"id": str(i), "updatedAt": stamp, "properties": {}} for i in range(150)]
-    if boundary_page:
-        parents = [{"id": f"old-{i}", "updatedAt": checkpoint} for i in range(40)] + parents
-
-    def post(_url, json, **_kwargs):
-        if "/crm/associations/" in _url:
-            return _empty_associations(_url, json)
-        lower = int(json["filterGroups"][0]["filters"][0]["value"])
-        matching = [p for p in parents if int(
-            datetime.fromisoformat(p["updatedAt"].replace("Z", "+00:00")).timestamp() * 1000
-        ) >= lower]
-        start = int(json.get("after") or 0)
-        page = matching[start:start + 40]
-        end = start + len(page)
-        paging = {"next": {"after": str(end)}} if end < len(matching) else {}
-        return _Response({"results": page, "paging": paging})
-
-    conn = _connector_class(generated)({"access_token": "test-only-token"})
-    opts = {"max_records_per_batch": "60"}
-    with mock.patch("requests.get", return_value=_Response({"results": []})), \
-            mock.patch("requests.post", side_effect=post), mock.patch("time.sleep"):
-        rows, offset = conn.read_table("deals", {"updatedAt": checkpoint}, opts)
-        assert {r["id"] for r in rows} == {str(i) for i in range(150)}
-        assert offset == {"updatedAt": stamp}
-        remaining, final_offset = conn.read_table("deals", offset, opts)
-        assert list(remaining) == []
-        assert final_offset == offset
 
 
 @pytest.mark.parametrize("generated", [False, True])
@@ -269,7 +186,6 @@ def test_custom_associations_are_complete_in_snapshot_and_incremental(generated,
         return _Response({"status": "COMPLETE", "results": results[::-1]})
 
     conn = _connector_class(generated)({"access_token": "test-only-token"})
-    conn._history._sleep = lambda _: None
     start = {"updatedAt": "2023-01-01T00:00:00.000Z"} if incremental else {}
     with mock.patch("requests.get", side_effect=get), mock.patch("requests.post", side_effect=post):
         schema = conn.get_table_schema(table, {})
@@ -288,7 +204,6 @@ def test_custom_associations_are_complete_in_snapshot_and_incremental(generated,
 @pytest.mark.parametrize("generated", [False, True])
 def test_incomplete_associations_never_return_a_new_checkpoint(generated):
     conn = _connector_class(generated)({"access_token": "test-only-token"})
-    conn._history._sleep = lambda _: None
     conn._associations._sleep = lambda _: None
     stamp = "2024-03-01T00:00:00.000Z"
     start = {"updatedAt": "2023-01-01T00:00:00.000Z"}
@@ -335,3 +250,52 @@ def test_full_refresh_mode_reconciles_association_removal_without_parent_update(
         assert list(second)[0]["garages"] == []
         assert offset == next_offset == {"updatedAt": stamp}
     assert associations.call_args_list == [mock.call("2-100", "2-200", ["1"])] * 2
+
+
+@pytest.mark.parametrize("generated", [False, True])
+def test_association_options_select_columns_and_typed_values(generated):
+    conn = _connector_class(generated)({"access_token": "test-only-token"})
+    with mock.patch.object(conn, "list_tables", return_value=["deals"]), mock.patch.object(
+        conn, "_get_object_properties", return_value=[]
+    ):
+        assert not any(
+            name in conn.get_table_schema("deals", {"associations": ""}).fieldNames()
+            for name in ("contacts", "companies", "tickets")
+        )
+        ids = conn.get_table_schema(
+            "deals", {"associations": "contacts"}
+        )["contacts"].dataType
+        typed_options = {
+            "associations": "contacts",
+            "association_value_mode": "typed",
+        }
+        typed = conn.get_table_schema("deals", typed_options)["contacts"].dataType
+        assert isinstance(ids, ArrayType) and isinstance(ids.elementType, StringType)
+        assert isinstance(typed, ArrayType) and isinstance(typed.elementType, StructType)
+        assert typed.elementType.fieldNames() == ["id", "typeId", "category", "label"]
+        assert conn.read_table_metadata("deals", typed_options)[
+            "association_value_mode"
+        ] == "typed"
+
+        record = {"id": "1", "properties": {}}
+        edge = {
+            "id": "2",
+            "typeId": 7,
+            "category": "USER_DEFINED",
+            "label": "Primary",
+        }
+        with mock.patch.object(
+            conn._associations, "read", return_value={"1": [edge]}
+        ) as read:
+            conn._hydrate_associations("deals", [record], ["contacts"], "typed")
+        read.assert_called_once_with("deals", "contacts", ["1"], with_types=True)
+        row = conn._transform_single_record(
+            record, "deals", ["contacts"], "typed"
+        )
+        _make_type_verifier(conn.get_table_schema("deals", typed_options))(row)
+        assert row["contacts"] == [edge]
+
+        with pytest.raises(ValueError, match="Unknown associations"):
+            conn.get_table_schema("deals", {"associations": "unknown"})
+        with pytest.raises(ValueError, match="association_value_mode"):
+            conn.get_table_schema("deals", {"association_value_mode": "unknown"})

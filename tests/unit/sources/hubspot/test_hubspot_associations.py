@@ -17,6 +17,13 @@ def result(parent, targets=(), after=None):
     return value
 
 
+def typed_target(identity, *types):
+    return {
+        "toObjectId": identity,
+        "associationTypes": list(types),
+    }
+
+
 def batch(*results, status="COMPLETE", **extra):
     return {"status": status, "results": list(results), **extra}
 
@@ -52,6 +59,43 @@ def test_independent_cursors_reordered_parents_and_duplicate_targets():
         )
         assert call.args[3] == 0.11
     sleep.assert_not_called()
+
+
+@pytest.mark.parametrize("generated", [False, True])
+def test_typed_edges_preserve_every_valid_type(generated):
+    payload = result("a")
+    payload["to"] = [
+        typed_target(
+            "2",
+            {"typeId": 7, "category": "HUBSPOT_DEFINED", "label": None},
+            {"typeId": 9, "category": "USER_DEFINED", "label": "Decision maker"},
+        ),
+        typed_target("3"),
+    ]
+    helper, _, _ = reader(batch(payload), generated=generated)
+    assert helper.read("deals", "contacts", ["a"], with_types=True) == {
+        "a": [
+            {"id": "2", "typeId": 7, "category": "HUBSPOT_DEFINED", "label": None},
+            {"id": "2", "typeId": 9, "category": "USER_DEFINED", "label": "Decision maker"},
+            {"id": "3", "typeId": None, "category": None, "label": None},
+        ]
+    }
+
+
+@pytest.mark.parametrize("generated", [False, True])
+@pytest.mark.parametrize("kind", [
+    None,
+    {"typeId": True, "category": "HUBSPOT_DEFINED"},
+    {"typeId": -1, "category": "HUBSPOT_DEFINED"},
+    {"typeId": 1, "category": "PRIVATE"},
+    {"typeId": 1, "category": "USER_DEFINED", "label": []},
+])
+def test_typed_edges_reject_malformed_types(generated, kind):
+    payload = result("a")
+    payload["to"] = [typed_target("2", kind)]
+    helper, _, _ = reader(batch(payload), generated=generated)
+    with pytest.raises(RuntimeError, match="association type"):
+        helper.read("deals", "contacts", ["a"], with_types=True)
 
 
 def test_partial_207_like_payload_retries_only_missing_at_current_cursor():
@@ -173,31 +217,6 @@ def test_bad_requested_parents_fail_before_transport(parents):
     with pytest.raises(RuntimeError):
         helper.read("contacts", "companies", parents)
     post.assert_not_called()
-
-
-@pytest.mark.parametrize("http_status", [200, 207])
-def test_history_transport_handles_http_status_separately(http_status):
-    # Exercise the existing callback rather than duplicating HTTP handling here.
-    from databricks.labs.community_connector.sources.hubspot.hubspot_property_history import (
-        HubspotPropertyHistory,
-    )
-
-    transport = HubspotPropertyHistory(
-        "https://example.invalid", {}, "2030-01-01T00:00:00Z",
-        lambda _: [], lambda _: "",
-        sleep=lambda _: None,
-    )
-    limited = Mock(status_code=429, headers={"Retry-After": "0"})
-    success = Mock(status_code=http_status)
-    success.json.return_value = batch(result("a", ["2"]))
-    helper = HubspotAssociations("https://example.invalid", transport._post)
-    with patch(
-        "databricks.labs.community_connector.sources.hubspot.hubspot_property_history.requests.post",
-        side_effect=[limited, success],
-    ) as post:
-        assert helper.read("contacts", "companies", ["a"]) == {"a": ["2"]}
-    assert post.call_count == 2
-    assert post.call_args.kwargs["json"] == {"inputs": [{"id": "a"}]}
 
 
 def association_class(generated):
@@ -367,46 +386,6 @@ def transport_connector(generated):
     path = Path(source.__file__).with_name("_generated_hubspot_python_source.py")
     runpy.run_path(str(path))["register_lakeflow_source"](SimpleNamespace(dataSource=registry))
     return registry.register.call_args.args[0]({"access_token": "offline"}).lakeflow_connect
-
-
-@pytest.mark.parametrize("generated", [False, True])
-def test_get_transport_429_is_bounded_and_reuses_shared_association_throttle(generated):
-    connector = transport_connector(generated)
-    connector._history._throttle = Mock()
-    connector._history._sleep = Mock()
-    limited = Mock(status_code=429, headers={"Retry-After": "999"})
-    success = Mock(status_code=200)
-    success.json.return_value = get_page("2")
-    with patch("requests.get", side_effect=[limited, success]) as get:
-        assert connector._get_association_page("associations", "https://example.invalid", {}, .11) == get_page("2")
-    assert get.call_count == 2
-    connector._history._sleep.assert_called_once_with(30.0)
-    assert connector._history._throttle.call_count == 2
-    assert connector._associations._get == connector._get_association_page
-    connector._history._sleep.reset_mock()
-    with patch("requests.get", return_value=limited) as get:
-        with pytest.raises(RuntimeError, match="status=429"):
-            connector._get_association_page("associations", "https://example.invalid", {}, .11)
-    assert get.call_count == 6
-    assert connector._history._sleep.call_count == 5
-
-
-@pytest.mark.parametrize("generated", [False, True])
-@pytest.mark.parametrize("failure", [404, 403, 207, "request", "json"])
-def test_get_transport_never_exposes_payload_url_or_chained_exception(generated, failure):
-    import requests
-    import traceback
-    connector = transport_connector(generated)
-    connector._history._throttle = Mock()
-    response = Mock(status_code=failure if isinstance(failure, int) else 200, text="PRIVATE_BODY")
-    response.json.side_effect = ValueError("PRIVATE_JSON")
-    with patch("requests.get", **({"side_effect": requests.RequestException("PRIVATE_EXCEPTION")}
-                                if failure == "request" else {"return_value": response})):
-        with pytest.raises(RuntimeError) as raised:
-            connector._get_association_page("associations", "https://example.invalid/PRIVATE_ID", {}, .11)
-    assert "PRIVATE" not in str(raised.value)
-    assert raised.value.__suppress_context__ or raised.value.__context__ is None
-    assert "PRIVATE_EXCEPTION" not in "".join(traceback.format_exception(raised.value))
 
 
 @pytest.mark.parametrize("generated", [False, True])

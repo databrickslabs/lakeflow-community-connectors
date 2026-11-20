@@ -17,6 +17,9 @@ ASSOCIATION_SAFE_ERROR_LABELS = frozenset({
     "INVALID_AUTHENTICATION", "RATE_LIMITS", "INTERNAL_ERROR",
     "FORBIDDEN", "CONFLICT",
 })
+ASSOCIATION_TYPE_CATEGORIES = frozenset({
+    "HUBSPOT_DEFINED", "INTEGRATOR_DEFINED", "USER_DEFINED", "WORK",
+})
 
 
 def _association_error_labels(errors: list) -> tuple[str, str]:
@@ -54,6 +57,23 @@ def _association_identifier(value, kind: str) -> str:
     raise RuntimeError(f"Malformed HubSpot association {kind}")
 
 
+def _association_edge(kind: dict) -> tuple[int, str, str | None]:
+    """Return a validated association type, category and optional label."""
+    if (
+        not isinstance(kind, dict)
+        or type(kind.get("typeId")) is not int
+        or kind["typeId"] < 0
+        or kind.get("category") not in ASSOCIATION_TYPE_CATEGORIES
+    ):
+        raise RuntimeError("Malformed HubSpot association type")
+    label = kind.get("label")
+    if label in (None, ""):
+        label = None
+    elif not isinstance(label, str):
+        raise RuntimeError("Malformed HubSpot association type")
+    return kind["typeId"], kind["category"], label
+
+
 def _association_next_cursor(result: dict):
     if "paging" not in result:
         return None
@@ -84,8 +104,15 @@ class HubspotAssociations:
         self._sleep = sleep
         self._get = get
 
-    def read(self, from_type: str, to_type: str, parent_ids: list[str]) -> dict[str, list[str]]:
-        """Return sorted unique target IDs; retry omissions at their current cursor.
+    def read(
+        self,
+        from_type: str,
+        to_type: str,
+        parent_ids: list[str],
+        *,
+        with_types: bool = False,
+    ) -> dict[str, list]:
+        """Return sorted unique target IDs or typed edges.
 
         Five additional attempts are allowed for each unresolved parent/page.
         Successful pages reset that budget, so legitimate page counts are unlimited.
@@ -109,7 +136,7 @@ class HubspotAssociations:
                     for parent, cursor in pending.items()
                 ]
                 data = self._post("associations", url, {"inputs": inputs}, ASSOCIATION_MIN_INTERVAL_S)
-                results = self._validate_results(data, pending)
+                results = self._validate_results(data, pending, with_types=with_types)
                 errors = data.get("errors", [])
                 error_count = data.get("numErrors", 0)
                 if (not isinstance(errors, list) or isinstance(error_count, bool)
@@ -134,7 +161,9 @@ class HubspotAssociations:
                                 # GET and batch cursors are not interchangeable.
                                 # Complete fresh reads before replacing any old pages.
                                 reconciled = {
-                                    item: self._read_one(from_type, to_type, item)
+                                    item: self._read_one(
+                                        from_type, to_type, item, with_types=with_types
+                                    )
                                     for item in pending
                                 }
                                 targets.update(reconciled)
@@ -159,10 +188,10 @@ class HubspotAssociations:
                         retries[parent] += 1
                         unresolved.append(retries[parent])
                         continue
-                    ids, cursor = results[parent]
+                    found, cursor = results[parent]
                     if cursor is not None and cursor in seen[parent]:
                         raise RuntimeError("Repeated or cyclic HubSpot association cursor")
-                    targets[parent].update(ids)
+                    targets[parent].update(found)
                     if cursor is None:
                         del pending[parent]
                     else:
@@ -171,7 +200,30 @@ class HubspotAssociations:
                         retries[parent] = 0
                 if unresolved:
                     self._sleep(min(2.0 ** (max(unresolved) - 1), ASSOCIATION_MAX_BACKOFF_S))
-        return {parent: sorted(ids) for parent, ids in targets.items()}
+        if not with_types:
+            return {parent: sorted(ids) for parent, ids in targets.items()}
+
+        def edge(item):
+            object_id, type_id, category, label = item
+            return {
+                "id": object_id,
+                "typeId": type_id,
+                "category": category,
+                "label": label,
+            }
+
+        return {
+            parent: sorted(
+                (edge(item) for item in found),
+                key=lambda item: (
+                    item["id"],
+                    -1 if item["typeId"] is None else item["typeId"],
+                    item["category"] or "",
+                    item["label"] or "",
+                ),
+            )
+            for parent, found in targets.items()
+        }
 
     @staticmethod
     def _empty_association_parents(data: dict) -> set:
@@ -223,7 +275,9 @@ class HubspotAssociations:
                     for error in errors)
         )
 
-    def _read_one(self, from_type: str, to_type: str, parent: str) -> set[str]:
+    def _read_one(
+        self, from_type: str, to_type: str, parent: str, *, with_types: bool = False
+    ) -> set:
         base = f"{self.base_url}/crm/objects/2026-09/{quote(from_type, safe='')}/{quote(parent, safe='')}"
         url = f"{base}/associations/{quote(to_type, safe='')}"
         targets, seen = set(), set()
@@ -238,14 +292,18 @@ class HubspotAssociations:
             for result in data["results"]:
                 if not isinstance(result, dict) or not isinstance(result.get("associationTypes"), list):
                     raise RuntimeError("Malformed HubSpot association GET target")
-                for kind in result["associationTypes"]:
-                    if (not isinstance(kind, dict) or type(kind.get("typeId")) is not int
-                            or kind["typeId"] < 0 or not isinstance(kind.get("category"), str)
-                            or kind["category"] not in {
-                                "HUBSPOT_DEFINED", "INTEGRATOR_DEFINED", "USER_DEFINED", "WORK"
-                            }):
-                        raise RuntimeError("Malformed HubSpot association GET type")
-                targets.add(_association_identifier(result.get("toObjectId"), "GET target ID"))
+                object_id = _association_identifier(
+                    result.get("toObjectId"), "GET target ID"
+                )
+                kinds = result["associationTypes"]
+                if with_types and not kinds:
+                    targets.add((object_id, None, None, None))
+                for kind in kinds:
+                    type_id, category, label = _association_edge(kind)
+                    if with_types:
+                        targets.add((object_id, type_id, category, label))
+                if not with_types:
+                    targets.add(object_id)
             cursor = _association_next_cursor(data)
             if cursor is None:
                 break
@@ -264,7 +322,7 @@ class HubspotAssociations:
         return targets
 
     @staticmethod
-    def _validate_results(data, pending: dict) -> dict:
+    def _validate_results(data, pending: dict, *, with_types: bool = False) -> dict:
         if not isinstance(data, dict):
             raise RuntimeError("Malformed HubSpot association batch")
         results = data.get("results", [])
@@ -279,10 +337,26 @@ class HubspotAssociations:
                 raise RuntimeError("Unrequested or duplicate HubSpot association parent")
             if not isinstance(result.get("to"), list):
                 raise RuntimeError("Malformed HubSpot association target list")
-            ids = set()
+            found = set()
             for target in result["to"]:
                 if not isinstance(target, dict):
                     raise RuntimeError("Malformed HubSpot association target")
-                ids.add(_association_identifier(target.get("toObjectId"), "target ID"))
-            parsed[parent] = (ids, _association_next_cursor(result))
+                object_id = _association_identifier(
+                    target.get("toObjectId"), "target ID"
+                )
+                kinds = target.get("associationTypes")
+                if kinds is not None:
+                    if not isinstance(kinds, list):
+                        raise RuntimeError("Malformed HubSpot association type")
+                    validated = [_association_edge(kind) for kind in kinds]
+                else:
+                    validated = []
+                if with_types:
+                    if not validated:
+                        found.add((object_id, None, None, None))
+                    for type_id, category, label in validated:
+                        found.add((object_id, type_id, category, label))
+                else:
+                    found.add(object_id)
+            parsed[parent] = (found, _association_next_cursor(result))
         return parsed
