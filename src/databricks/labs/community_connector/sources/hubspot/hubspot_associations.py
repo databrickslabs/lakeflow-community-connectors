@@ -61,10 +61,12 @@ def _association_identifier(value, kind: str) -> str:
 
 def _association_edge(kind: dict) -> tuple[int, str, str | None]:
     """Return a validated association type, category and optional label."""
+    type_id = kind.get("typeId") if isinstance(kind, dict) else None
     if (
         not isinstance(kind, dict)
-        or type(kind.get("typeId")) is not int
-        or kind["typeId"] < 0
+        or not isinstance(type_id, int)
+        or isinstance(type_id, bool)
+        or type_id < 0
         or kind.get("category") not in ASSOCIATION_TYPE_CATEGORIES
     ):
         raise RuntimeError("Malformed HubSpot association type")
@@ -106,7 +108,7 @@ class HubspotAssociations:
         self._sleep = sleep
         self._get = get
 
-    def read(
+    def read(  # pylint: disable=too-many-locals,too-many-nested-blocks,too-many-statements
         self,
         from_type: str,
         to_type: str,
@@ -274,7 +276,8 @@ class HubspotAssociations:
             data.get("status") == "COMPLETE"
             and isinstance(data.get("results"), list)
             and isinstance(errors, list) and bool(errors)
-            and type(count) is int and count == len(errors)
+            and isinstance(count, int) and not isinstance(count, bool)
+            and count == len(errors)
             and all(isinstance(error, dict) and error.get("category") == "OBJECT_NOT_FOUND"
                     for error in errors)
         )
