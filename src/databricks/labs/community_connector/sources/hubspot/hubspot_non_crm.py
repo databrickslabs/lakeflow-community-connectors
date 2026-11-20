@@ -87,6 +87,10 @@ def _non_crm_fields(names, dtype=None):
     return [StructField(name, dtype or StringType(), True) for name in names]
 
 
+def _nonnegative_int(value) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool) and value >= 0
+
+
 class HubspotNonCrm:
     """Read all partitions and pages before returning a snapshot."""
 
@@ -138,7 +142,8 @@ class HubspotNonCrm:
                 "configuration", "displayOptions", "fieldGroups", "legalConsentOptions",
             ]) + _non_crm_fields(["archived"], BooleanType()),
             "contact_lists": _non_crm_fields([
-                "listId", "legacyListId", "name", "objectTypeId", "processingType", "processingStatus",
+                "listId", "legacyListId", "name", "objectTypeId",
+                "processingType", "processingStatus",
                 "createdAt", "updatedAt", "additionalProperties",
             ]) + _non_crm_fields(["listVersion"], LongType()),
             "contact_list_memberships": _non_crm_fields([
@@ -207,12 +212,8 @@ class HubspotNonCrm:
                 total = data.get("total")
                 if (
                     not isinstance(has_more, bool)
-                    or not isinstance(next_offset, int)
-                    or isinstance(next_offset, bool)
-                    or next_offset < 0
-                    or not isinstance(total, int)
-                    or isinstance(total, bool)
-                    or total < 0
+                    or not _nonnegative_int(next_offset)
+                    or not _nonnegative_int(total)
                 ):
                     raise RuntimeError("Malformed HubSpot list offset paging")
                 if has_more and (
@@ -272,6 +273,7 @@ class HubspotNonCrm:
             # Keep only the current list parent while its membership pages drain.
             "count": 1,
         }
+        # pylint: disable=too-many-nested-blocks
         with tempfile.TemporaryDirectory(prefix="hubspot-membership-") as directory:
             seen = sqlite3.connect(f"{directory}/seen.sqlite3")
             try:
@@ -333,6 +335,7 @@ class HubspotNonCrm:
                                 yield row
             finally:
                 seen.close()
+        # pylint: enable=too-many-nested-blocks
 
     def _inventory(self, table):
         if table in {"owners", "forms"}:
