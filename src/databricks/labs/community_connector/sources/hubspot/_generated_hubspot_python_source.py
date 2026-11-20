@@ -893,21 +893,21 @@ def register_lakeflow_source(spark):
                         or data.get("status", "COMPLETE") != "COMPLETE"):
                     raise RuntimeError("Malformed HubSpot association GET collection")
                 for result in data["results"]:
-                    if not isinstance(result, dict) or not isinstance(
-                        result.get("associationTypes"), list
-                    ):
+                    if not isinstance(result, dict):
                         raise RuntimeError("Malformed HubSpot association GET target")
                     object_id = _association_identifier(
                         result.get("toObjectId"), "GET target ID"
                     )
-                    kinds = result["associationTypes"]
-                    if with_types and not kinds:
-                        targets.add((object_id, None, None, None))
-                    for kind in kinds:
-                        type_id, category, label = _association_edge(kind)
-                        if with_types:
+                    kinds = result.get("associationTypes")
+                    if not isinstance(kinds, list):
+                        raise RuntimeError("Malformed HubSpot association GET target")
+                    if with_types:
+                        if not kinds:
+                            targets.add((object_id, None, None, None))
+                        for kind in kinds:
+                            type_id, category, label = _association_edge(kind)
                             targets.add((object_id, type_id, category, label))
-                    if not with_types:
+                    else:
                         targets.add(object_id)
                 cursor = _association_next_cursor(data)
                 if cursor is None:
@@ -953,13 +953,12 @@ def register_lakeflow_source(spark):
                     object_id = _association_identifier(
                         target.get("toObjectId"), "target ID"
                     )
-                    kinds = target.get("associationTypes")
-                    if kinds is not None:
-                        if not isinstance(kinds, list):
+                    validated = []
+                    if with_types:
+                        kinds = target.get("associationTypes")
+                        if kinds is not None and not isinstance(kinds, list):
                             raise RuntimeError("Malformed HubSpot association type")
-                        validated = [_association_edge(kind) for kind in kinds]
-                    else:
-                        validated = []
+                        validated = [_association_edge(kind) for kind in (kinds or [])]
                     if with_types:
                         if not validated:
                             found.add((object_id, None, None, None))
