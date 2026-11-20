@@ -1275,7 +1275,7 @@ def register_lakeflow_source(spark):
 
             return standard_tables
 
-        def _discover_custom_objects(self) -> List[str]:
+        def _discover_custom_objects(self) -> List[str]:  # pylint: disable=too-many-statements
             """
             Discover custom objects from HubSpot CRM schemas API
             """
@@ -1831,7 +1831,7 @@ def register_lakeflow_source(spark):
                 time.sleep(0.1)
             return iter(rows), {"updatedAt": self._init_ts}
 
-        def _read_data(
+        def _read_data(  # pylint: disable=too-many-statements
             self, table_name: str, start_offset: dict = None, incremental: bool = False,
             table_options: Dict[str, str] = None
         ):
