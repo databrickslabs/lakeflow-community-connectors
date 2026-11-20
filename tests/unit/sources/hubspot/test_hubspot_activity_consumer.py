@@ -100,7 +100,11 @@ def test_nonempty_activity_fields_survive_reader(table, incremental, generated):
         start = {"updatedAt": "2026-01-01T00:00:00.000Z"} if incremental else {}
         rows, end = stream.read(start)
         rows = list(rows)
-    assert len(rows) == 1 and end != start
+    assert len(rows) == 1
+    if table == "meetings":
+        assert end == {}
+    else:
+        assert end != start
     _make_type_verifier(schema)(rows[0])
     properties = rows[0].properties.asDict()
     assert properties["custom_decimal_metric"] == Decimal("42.125")
@@ -128,7 +132,9 @@ def test_unrepresentable_numeric_property_fails_before_checkpoint(generated, num
         conn, _, _ = consumer("meetings", generated)
         start = {"updatedAt": "2026-01-01T00:00:00.000Z"}
         with pytest.raises((ValueError, RuntimeError), match="numeric|decimal|number"):
-            conn.read_table("meetings", start, {"numeric_value_mode": "decimal"})
+            list(conn.read_table(
+                "meetings", start, {"numeric_value_mode": "decimal"}
+            )[0])
     assert start == {"updatedAt": "2026-01-01T00:00:00.000Z"}
 
 
@@ -187,4 +193,4 @@ def test_default_bigint_mode_does_not_apply_decimal_validation(generated):
         conn, _, _ = consumer("meetings", generated, numeric_value_mode="bigint")
         rows, end = conn.read_table("meetings", {}, {
             "numeric_value_mode": "bigint"})
-        assert len(list(rows)) == 1 and end
+        assert len(list(rows)) == 1 and end == {}

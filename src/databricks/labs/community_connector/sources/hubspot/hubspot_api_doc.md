@@ -54,6 +54,22 @@ connector follows it until either:
 Custom objects discovered via `GET /crm/v3/schemas` are exposed as additional
 tables using the same patterns as the standard objects above.
 
+### Resource snapshot tables
+
+| Table | Endpoint(s) | Primary key |
+|---|---|---|
+| `owners` | `GET /crm/owners/2026-09` | `id` |
+| `pipelines` | `GET /crm/v3/pipelines/{objectTypeId}` | `objectTypeId`, `id` |
+| `forms` | `GET /marketing/v3/forms` | `id` |
+| `contact_lists` | `POST /crm/lists/2026-09/search`; optional v1 ID mapping | `listId` |
+| `contact_list_memberships` | list search plus `GET /crm/lists/2026-09/{listId}/memberships` | `listId`, `recordId` |
+| `form_submissions` | forms plus `GET /form-integrations/v1/submissions/forms/{formId}` | `formId`, `conversionId` |
+
+These endpoints are drained as complete snapshots without a Lakeflow continuation
+offset. Pages are emitted incrementally to bound connector memory, but any
+malformed, repeated, inaccessible, or failed page aborts the task before the
+snapshot can be committed as complete.
+
 ### Cursor property mapping
 
 The search API filters on the property-level cursor field, which differs from

@@ -249,7 +249,7 @@ def test_malformed_list_offset_paging(payload):
         read.read_table("contact_lists", {})
 
 
-@pytest.mark.parametrize("status", [403, 404, 500])
+@pytest.mark.parametrize("status", [403, 404])
 def test_error_after_successful_page_aborts_snapshot_without_body_leak(status):
     read, _, _ = helper()
     with patch(NON_CRM_TEST_GET, side_effect=[

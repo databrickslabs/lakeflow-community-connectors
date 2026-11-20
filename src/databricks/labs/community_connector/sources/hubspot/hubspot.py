@@ -158,6 +158,7 @@ class HubspotLakeflowConnect(LakeflowConnect):
             self.auth_header,
             self._custom_api_types,
             self._post_association_read,
+            http=self._http,
         )
 
     def _custom_api_types(self) -> List[str]:

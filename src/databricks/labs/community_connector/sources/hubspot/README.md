@@ -51,6 +51,29 @@ The HubSpot connector supports the following CRM objects with dynamic schema dis
 
 > **Note**: Table names are case-sensitive. Use the exact names shown above (lowercase with underscores). Custom objects are also supported and will be discovered automatically.
 
+### Resource snapshots
+
+These additive tables read complete snapshots. Each page is yielded before the
+next request, while the batch fails closed if a partition or later page cannot be
+read. The snapshot consumer reconciles removals only after the complete read
+succeeds.
+
+| Table | Primary key | Coverage |
+|---|---|---|
+| `owners` | `id` | Active and archived owners |
+| `pipelines` | `objectTypeId`, `id` | Pipelines and nested stages |
+| `forms` | `id` | Active and archived forms |
+| `contact_lists` | `listId` | Lists with current and, when available, legacy IDs |
+| `contact_list_memberships` | `listId`, `recordId` | Current membership for every discovered contact list |
+| `form_submissions` | `formId`, `conversionId` | Submissions for every discovered form |
+
+Resource snapshots ignore `max_records_per_batch`, because stopping early would
+publish an incomplete current set. `pipeline_object_types` may provide an
+explicit comma-separated set such as `0-3,0-5`; otherwise the connector reads
+the built-in pipeline types plus discovered custom objects. Missing permissions
+fail the selected snapshot. The optional legacy-list lookup may instead leave
+`legacyListId` null when HubSpot returns 403, 404, or 410.
+
 ### Custom objects and associations
 
 Custom tables keep their lowercase schema names while API requests use HubSpot's

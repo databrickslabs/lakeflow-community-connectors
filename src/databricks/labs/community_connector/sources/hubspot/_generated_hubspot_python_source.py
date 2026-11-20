@@ -51,8 +51,11 @@ from pyspark.sql.types import (
 )
 from urllib.parse import quote
 import base64
+import hashlib
 import math
 import requests
+import sqlite3
+import tempfile
 
 
 def register_lakeflow_source(spark):
@@ -1081,10 +1084,526 @@ def register_lakeflow_source(spark):
 
 
     ########################################################
+    # src/databricks/labs/community_connector/sources/hubspot/hubspot_non_crm.py
+    ########################################################
+
+    NON_CRM_TABLES = (
+        "owners", "pipelines", "forms", "contact_lists",
+        "contact_list_memberships", "form_submissions",
+    )
+    NON_CRM_MAX_RETRIES = HUBSPOT_MAX_RETRIES
+    NON_CRM_TIMEOUT_S = HUBSPOT_REQUEST_TIMEOUT_S
+    NON_CRM_MIN_INTERVAL_S = 0.11
+    LEGACY_LIST_PAGE = 250
+    LEGACY_MAP_BATCH = 10_000
+    NON_CRM_CURSOR_HISTORY = 64
+    NON_CRM_MAX_PAGES = 100_000
+    NON_CRM_MAX_CURSOR_BYTES = 4096
+    NON_CRM_PIPELINE_TYPES = {
+        "0-3", "0-5", "0-27", "0-421", "0-410", "0-136", "0-420",
+        "0-123", "0-970", "0-162", "0-115",
+    }
+    NON_CRM_KEYS = {
+        "owners": ["id"], "pipelines": ["objectTypeId", "id"], "forms": ["id"],
+        "contact_lists": ["listId"], "contact_list_memberships": ["listId", "recordId"],
+        "form_submissions": ["formId", "conversionId"],
+    }
+
+
+    def _non_crm_id(value):
+        if isinstance(value, int) and not isinstance(value, bool) and value >= 0:
+            return str(value)
+        if isinstance(value, str) and value and value.strip() == value:
+            return value
+        raise RuntimeError("Malformed HubSpot non-CRM identity or cursor")
+
+
+    def _non_crm_json(value):
+        return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+
+
+    def _non_crm_after(data):
+        if "paging" not in data:
+            return None
+        paging = data["paging"]
+        if not isinstance(paging, dict):
+            raise RuntimeError("Malformed HubSpot non-CRM paging")
+        if "next" not in paging:
+            return None
+        nxt = paging["next"]
+        if not isinstance(nxt, dict) or "after" not in nxt:
+            raise RuntimeError("Malformed HubSpot non-CRM next page")
+        cursor = _non_crm_id(nxt["after"])
+        if len(cursor.encode("utf-8")) > NON_CRM_MAX_CURSOR_BYTES:
+            raise RuntimeError("Malformed HubSpot non-CRM identity or cursor")
+        return cursor
+
+
+    def _non_crm_with_identity(source, field, identity):
+        if field in source:
+            if _non_crm_id(source[field]) != identity:
+                raise RuntimeError("Conflicting HubSpot non-CRM partition identity")
+            return dict(source)
+        return {**source, field: identity}
+
+
+    def _non_crm_fields(names, dtype=None):
+        return [StructField(name, dtype or StringType(), True) for name in names]
+
+
+    class HubspotNonCrm:
+        """Read all partitions and pages before returning a snapshot."""
+
+        _MAX_PAGES = NON_CRM_MAX_PAGES
+        _CURSOR_HISTORY = NON_CRM_CURSOR_HISTORY
+
+        def __init__(self, base_url, auth_header, custom_types: Callable, post: Callable,
+                     sleep: Callable = time.sleep, http=None):
+            self.base_url = base_url.rstrip("/")
+            self.auth_header = auth_header
+            self._custom_types = custom_types
+            self._post = post
+            self._sleep = sleep
+            self._http = http or HubspotHttpClient(auth_header, sleep=sleep)
+
+        @staticmethod
+        def list_tables() -> list[str]:
+            return list(NON_CRM_TABLES)
+
+        @staticmethod
+        def read_table_metadata(table) -> dict:
+            if table not in NON_CRM_KEYS:
+                raise ValueError("Unknown HubSpot non-CRM table")
+            return {"primary_keys": list(NON_CRM_KEYS[table]), "cursor_field": None,
+                    "ingestion_type": "snapshot"}
+
+        @staticmethod
+        def get_table_schema(table) -> StructType:
+            HubspotNonCrm.read_table_metadata(table)
+            team = StructType(_non_crm_fields(["id", "name"]) +
+                              _non_crm_fields(["primary"], BooleanType()))
+            stage = StructType(_non_crm_fields(["id", "label", "createdAt", "updatedAt"]) +
+                               _non_crm_fields(["displayOrder"], LongType()) +
+                               _non_crm_fields(["metadata"], MapType(StringType(), StringType())))
+            value = StructType(_non_crm_fields(["name", "value"]))
+            fields = {
+                "owners": _non_crm_fields([
+                    "id", "email", "firstName", "lastName", "type", "userId",
+                    "userIdIncludingInactive", "createdAt", "updatedAt",
+                ]) + _non_crm_fields(["archived"], BooleanType()) +
+                    _non_crm_fields(["teams"], ArrayType(team)),
+                "pipelines": _non_crm_fields([
+                    "objectTypeId", "id", "label", "createdAt", "updatedAt",
+                ]) + _non_crm_fields(["displayOrder"], LongType()) +
+                    _non_crm_fields(["archived"], BooleanType()) +
+                    _non_crm_fields(["stages"], ArrayType(stage)),
+                "forms": _non_crm_fields([
+                    "id", "name", "formType", "createdAt", "updatedAt", "archivedAt",
+                    "configuration", "displayOptions", "fieldGroups", "legalConsentOptions",
+                ]) + _non_crm_fields(["archived"], BooleanType()),
+                "contact_lists": _non_crm_fields([
+                    "listId", "legacyListId", "name", "objectTypeId", "processingType", "processingStatus",
+                    "createdAt", "updatedAt", "additionalProperties",
+                ]) + _non_crm_fields(["listVersion"], LongType()),
+                "contact_list_memberships": _non_crm_fields([
+                    "listId", "recordId", "membershipTimestamp",
+                ]),
+                "form_submissions": _non_crm_fields(["formId", "conversionId", "pageUrl"]) +
+                    _non_crm_fields(["submittedAt"], LongType()) +
+                    _non_crm_fields(["values"], ArrayType(value)),
+            }
+            return StructType(fields[table] + _non_crm_fields(["payload"]))
+
+        def _get(self, route, params):
+            response = self._http.get(
+                self.base_url + route,
+                operation="non-CRM GET",
+                params=params,
+                kind="non_crm",
+                min_interval=NON_CRM_MIN_INTERVAL_S,
+            )
+            if response.status_code != 200:
+                raise RuntimeError(f"HubSpot non-CRM HTTP {response.status_code}")
+            try:
+                return response.json()
+            except ValueError:
+                raise RuntimeError("Malformed HubSpot non-CRM JSON") from None
+
+        @staticmethod
+        def _page_state():
+            return {"pages": 0, "recent_hashes": [], "recent_set": set()}
+
+        def _page_batches(
+            self,
+            route,
+            params=None,
+            body=None,
+            state=None,
+            records_key="results",
+            offset_paging=False,
+        ):
+            cursor = None
+            offset = 0
+            state = state or self._page_state()
+            while True:
+                if state["pages"] >= self._MAX_PAGES:
+                    raise RuntimeError("HubSpot non-CRM snapshot exceeded the page limit")
+                arguments = dict(body if body is not None else (params or {}))
+                if offset_paging and offset:
+                    arguments["offset"] = offset
+                elif cursor is not None:
+                    arguments["after"] = cursor
+                if body is None:
+                    data = self._get(route, arguments)
+                else:
+                    data = self._post("non_crm", self.base_url + route, arguments,
+                                      NON_CRM_MIN_INTERVAL_S)
+                if not isinstance(data, dict) or not isinstance(data.get(records_key), list):
+                    raise RuntimeError("Malformed HubSpot non-CRM results")
+                if any(not isinstance(row, dict) for row in data[records_key]):
+                    raise RuntimeError("Malformed HubSpot non-CRM result")
+                if data.get("errors") or data.get("status") in {"PENDING", "PROCESSING", "CANCELED"}:
+                    raise RuntimeError("Incomplete HubSpot non-CRM page")
+                state["pages"] += 1
+                if offset_paging:
+                    has_more = data.get("hasMore")
+                    next_offset = data.get("offset")
+                    total = data.get("total")
+                    if (
+                        not isinstance(has_more, bool)
+                        or not isinstance(next_offset, int)
+                        or isinstance(next_offset, bool)
+                        or next_offset < 0
+                        or not isinstance(total, int)
+                        or isinstance(total, bool)
+                        or total < 0
+                    ):
+                        raise RuntimeError("Malformed HubSpot list offset paging")
+                    if has_more and (
+                        not data[records_key] or next_offset <= offset
+                    ):
+                        raise RuntimeError("Non-advancing HubSpot list offset")
+                    next_cursor = None
+                else:
+                    has_more = False
+                    next_offset = 0
+                    next_cursor = _non_crm_after(data)
+                if not offset_paging and next_cursor is not None:
+                    cursor_hash = hashlib.sha256(
+                        f"{route}\0{next_cursor}".encode("utf-8")
+                    ).hexdigest()
+                    if cursor_hash in state["recent_set"]:
+                        raise RuntimeError("Repeated or cyclic HubSpot non-CRM cursor")
+                    state["recent_set"].add(cursor_hash)
+                    state["recent_hashes"].append(cursor_hash)
+                    if len(state["recent_hashes"]) > self._CURSOR_HISTORY:
+                        state["recent_set"].remove(state["recent_hashes"].pop(0))
+                yield data[records_key]
+                if offset_paging:
+                    if not has_more:
+                        return
+                    offset = next_offset
+                    continue
+                if next_cursor is None:
+                    return
+                cursor = next_cursor
+
+        def _pages(
+            self,
+            route,
+            params=None,
+            body=None,
+            records_key="results",
+            offset_paging=False,
+        ):
+            rows = []
+            for page in self._page_batches(
+                route,
+                params,
+                body,
+                records_key=records_key,
+                offset_paging=offset_paging,
+            ):
+                rows.extend(page)
+            return rows
+
+        def _membership_rows(self):
+            state = self._page_state()
+            inventory_body = {
+                "objectTypeId": "0-1",
+                "processingTypes": ["MANUAL", "DYNAMIC", "SNAPSHOT"],
+                "additionalProperties": [],
+                # Keep only the current list parent while its membership pages drain.
+                "count": 1,
+            }
+            with tempfile.TemporaryDirectory(prefix="hubspot-membership-") as directory:
+                seen = sqlite3.connect(f"{directory}/seen.sqlite3")
+                try:
+                    seen.execute("CREATE TABLE parents (list_id TEXT PRIMARY KEY)")
+                    seen.execute(
+                        "CREATE TABLE memberships ("
+                        "list_id TEXT, record_id TEXT, PRIMARY KEY (list_id, record_id))"
+                    )
+                    for inventory_page in self._page_batches(
+                        "/crm/lists/2026-09/search",
+                        body=inventory_body,
+                        state=state,
+                        records_key="lists",
+                        offset_paging=True,
+                    ):
+                        parents = []
+                        for parent_source in inventory_page:
+                            if parent_source.get("objectTypeId") != "0-1":
+                                raise RuntimeError(
+                                    "Non-contact list in HubSpot contact-list inventory"
+                                )
+                            parent = self._row("contact_lists", parent_source)
+                            if parent.get("processingStatus") != "COMPLETE":
+                                raise RuntimeError("HubSpot list membership is not COMPLETE")
+                            identity = parent["listId"]
+                            try:
+                                seen.execute("INSERT INTO parents VALUES (?)", (identity,))
+                            except sqlite3.IntegrityError as err:
+                                raise RuntimeError(
+                                    "Duplicate HubSpot list identity across snapshot"
+                                ) from err
+                            parents.append(identity)
+                        for identity in parents:
+                            route = (
+                                f"/crm/lists/2026-09/{quote(identity, safe='')}/memberships"
+                            )
+                            for membership_page in self._page_batches(
+                                route, {"limit": 100}, state=state
+                            ):
+                                for source in membership_page:
+                                    source = _non_crm_with_identity(
+                                        source, "listId", identity
+                                    )
+                                    row = self._row("contact_list_memberships", source)
+                                    key = tuple(
+                                        row[name]
+                                        for name in NON_CRM_KEYS[
+                                            "contact_list_memberships"
+                                        ]
+                                    )
+                                    try:
+                                        seen.execute(
+                                            "INSERT INTO memberships VALUES (?, ?)", key
+                                        )
+                                    except sqlite3.IntegrityError as err:
+                                        raise RuntimeError(
+                                            "Duplicate HubSpot non-CRM identity across snapshot"
+                                        ) from err
+                                    yield row
+                finally:
+                    seen.close()
+
+        def _inventory(self, table):
+            if table in {"owners", "forms"}:
+                route = "/crm/owners/2026-09" if table == "owners" else "/marketing/v3/forms"
+                rows = []
+                for archived in (False, True):
+                    params = {"archived": str(archived).lower(), "limit": 100}
+                    if table == "forms":
+                        params["formTypes"] = "all"
+                    for source in self._pages(route, params):
+                        row = dict(source)
+                        row.setdefault("archived", archived)
+                        rows.append(row)
+                return rows
+            rows = self._pages(
+                "/crm/lists/2026-09/search",
+                body={
+                    "objectTypeId": "0-1",
+                    "processingTypes": ["MANUAL", "DYNAMIC", "SNAPSHOT"],
+                    "additionalProperties": [],
+                    "count": 500,
+                },
+                records_key="lists",
+                offset_paging=True,
+            )
+            for row in rows:
+                if row.get("objectTypeId") != "0-1":
+                    raise RuntimeError("Non-contact list in HubSpot contact-list inventory")
+            return rows
+
+        def _legacy_list_catalog(self):
+            """Return v1 list IDs, or None when HubSpot has retired the catalog."""
+            offset = None
+            seen = set()
+            identities = []
+            known = set()
+            while True:
+                params = {"count": LEGACY_LIST_PAGE}
+                if offset is not None:
+                    params["offset"] = offset
+                try:
+                    data = self._get("/contacts/v1/lists", params)
+                except RuntimeError as exc:
+                    if offset is None and str(exc) in {
+                        "HubSpot non-CRM HTTP 403", "HubSpot non-CRM HTTP 404",
+                        "HubSpot non-CRM HTTP 410",
+                    }:
+                        return None
+                    raise
+                if not isinstance(data, dict) or not isinstance(data.get("lists"), list):
+                    raise RuntimeError("Malformed HubSpot legacy list catalog")
+                for source in data["lists"]:
+                    if not isinstance(source, dict):
+                        raise RuntimeError("Malformed HubSpot legacy list catalog")
+                    identity = _non_crm_id(source.get("listId"))
+                    if identity not in known:
+                        known.add(identity)
+                        identities.append(identity)
+                has_more = data.get("has-more")
+                if not isinstance(has_more, bool):
+                    raise RuntimeError("Malformed HubSpot legacy list catalog")
+                if not has_more:
+                    return identities
+                nxt = data.get("offset")
+                if isinstance(nxt, bool) or not isinstance(nxt, (int, str)) or str(nxt) == "":
+                    raise RuntimeError("Malformed HubSpot legacy list catalog")
+                token = str(nxt)
+                if token in seen:
+                    raise RuntimeError("Repeated or cyclic HubSpot legacy list catalog")
+                seen.add(token)
+                offset = nxt
+
+        def _legacy_by_list_id(self):
+            """Map current v3 list IDs to their corresponding v1 IDs."""
+            legacy_ids = self._legacy_list_catalog()
+            if not legacy_ids:
+                return {}
+            mapping = {}
+            for start in range(0, len(legacy_ids), LEGACY_MAP_BATCH):
+                requested = legacy_ids[start : start + LEGACY_MAP_BATCH]
+                data = self._post(
+                    "non_crm",
+                    self.base_url + "/crm/lists/2026-09/idmapping",
+                    requested,
+                    NON_CRM_MIN_INTERVAL_S,
+                )
+                if not isinstance(data, dict):
+                    raise RuntimeError("Malformed HubSpot list id mapping")
+                pairs = data.get("legacyListIdsToIdsMapping")
+                missing = data.get("missingLegacyListIds")
+                if not isinstance(pairs, list) or not isinstance(missing, list):
+                    raise RuntimeError("Malformed HubSpot list id mapping")
+                accounted = set()
+                for pair in pairs:
+                    if not isinstance(pair, dict):
+                        raise RuntimeError("Malformed HubSpot list id mapping")
+                    current = _non_crm_id(pair.get("listId"))
+                    legacy = _non_crm_id(pair.get("legacyListId"))
+                    if legacy not in requested or legacy in accounted:
+                        raise RuntimeError("Unexpected HubSpot legacy list id mapping")
+                    accounted.add(legacy)
+                    if current in mapping and mapping[current] != legacy:
+                        raise RuntimeError("Conflicting HubSpot legacy list id")
+                    mapping[current] = legacy
+                for value in missing:
+                    legacy = _non_crm_id(value)
+                    if legacy not in requested or legacy in accounted:
+                        raise RuntimeError("Unexpected HubSpot missing legacy list id")
+                    accounted.add(legacy)
+                if accounted != set(requested):
+                    raise RuntimeError("Incomplete HubSpot list id mapping")
+            return mapping
+
+        def read_table(self, table, table_options=None) -> list[dict]:
+            self.read_table_metadata(table)
+            if table == "contact_list_memberships":
+                return self._membership_rows()
+            legacy_by_list_id = {}
+            if table in {"owners", "forms", "contact_lists"}:
+                sources = self._inventory(table)
+                if table == "contact_lists" and sources:
+                    legacy_by_list_id = self._legacy_by_list_id()
+            elif table == "pipelines":
+                options = table_options or {}
+                if "pipeline_object_types" in options:
+                    types = options["pipeline_object_types"].split(",")
+                    types = [value.strip() for value in types]
+                else:
+                    types = ["0-3", "0-5", "0-27", *self._custom_types()]
+                sources = []
+                for object_type in dict.fromkeys(types):
+                    object_type = _non_crm_id(object_type)
+                    if object_type not in NON_CRM_PIPELINE_TYPES and not (
+                        object_type.startswith("2-") and object_type[2:].isdigit()
+                    ):
+                        raise ValueError("Unsupported HubSpot pipeline object type")
+                    for source in self._pages(f"/crm/pipelines/2026-09/{object_type}"):
+                        sources.append(_non_crm_with_identity(source, "objectTypeId", object_type))
+            else:
+                inventory_table = "forms" if table == "form_submissions" else "contact_lists"
+                parents = self.read_table(inventory_table, {})
+                sources = []
+                for parent in parents:
+                    if table == "contact_list_memberships":
+                        if parent.get("processingStatus") == "PROCESSING":
+                            raise RuntimeError("HubSpot list membership is still PROCESSING")
+                        identity = parent["listId"]
+                        route = f"/crm/lists/2026-09/{quote(identity, safe='')}/memberships"
+                        field, limit = "listId", 100
+                    else:
+                        identity = parent["id"]
+                        route = f"/form-integrations/v1/submissions/forms/{quote(identity, safe='')}"
+                        field, limit = "formId", 50
+                    for source in self._pages(route, {"limit": limit}):
+                        sources.append(_non_crm_with_identity(source, field, identity))
+            output = {}
+            for source in sources:
+                row = self._row(table, source)
+                if table == "contact_lists":
+                    row["legacyListId"] = legacy_by_list_id.get(row["listId"])
+                identity = tuple(row[key] for key in NON_CRM_KEYS[table])
+                if identity in output and output[identity] != row:
+                    raise RuntimeError("Conflicting duplicate HubSpot non-CRM identity")
+                output[identity] = row
+            return list(output.values())
+
+        def _row(self, table, source):
+            row = {field.name: source.get(field.name) for field in self.get_table_schema(table)}
+            for key in NON_CRM_KEYS[table]:
+                row[key] = _non_crm_id(source.get(key))
+            for key in ("userId", "userIdIncludingInactive"):
+                if key in row and row[key] is not None:
+                    row[key] = _non_crm_id(row[key])
+            for key in ("configuration", "displayOptions", "fieldGroups",
+                        "legalConsentOptions", "additionalProperties"):
+                if key in source:
+                    row[key] = _non_crm_json(source[key])
+            for key in ("teams", "stages", "values"):
+                if key not in row or row[key] is None:
+                    continue
+                if not isinstance(row[key], list) or any(not isinstance(v, dict) for v in row[key]):
+                    raise RuntimeError("Malformed HubSpot non-CRM nested array")
+                nested = []
+                for value in row[key]:
+                    value = dict(value)
+                    if key in {"teams", "stages"}:
+                        value["id"] = _non_crm_id(value.get("id"))
+                    if key == "stages" and value.get("metadata") is not None:
+                        if not isinstance(value["metadata"], dict):
+                            raise RuntimeError("Malformed HubSpot pipeline stage metadata")
+                        value["metadata"] = {
+                            k: v if isinstance(v, str) else _non_crm_json(v)
+                            for k, v in value["metadata"].items()
+                        }
+                    nested.append(value)
+                row[key] = nested
+            row["payload"] = _non_crm_json(source)
+            return row
+
+
+    ########################################################
     # src/databricks/labs/community_connector/sources/hubspot/hubspot.py
     ########################################################
 
     class HubspotLakeflowConnect(LakeflowConnect):
+        _SNAPSHOT_CURSOR_HISTORY = 64
+        _SNAPSHOT_MAX_PAGES = 100_000
         _STANDARD_OBJECT_TYPES = {
             "contacts": "0-1",
             "companies": "0-2",
@@ -1206,6 +1725,17 @@ def register_lakeflow_source(spark):
                 self._post_association_read,
                 get=self._get_association_page,
             )
+            self._non_crm = HubspotNonCrm(
+                self.base_url,
+                self.auth_header,
+                self._custom_api_types,
+                self._post_association_read,
+                http=self._http,
+            )
+
+        def _custom_api_types(self) -> List[str]:
+            self._discover_custom_objects(require_access=True)
+            return list(self._custom_object_types.values())
 
         def _post_association_read(
             self, kind: str, url: str, body: dict, min_interval: float
@@ -1273,9 +1803,11 @@ def register_lakeflow_source(spark):
             # Add dynamic discovery of custom objects
             standard_tables.extend(self._discover_custom_objects())
 
-            return standard_tables
+            return standard_tables + self._non_crm.list_tables()
 
-        def _discover_custom_objects(self) -> List[str]:  # pylint: disable=too-many-statements
+        def _discover_custom_objects(  # pylint: disable=too-many-statements
+            self, require_access: bool = False
+        ) -> List[str]:
             """
             Discover custom objects from HubSpot CRM schemas API
             """
@@ -1283,7 +1815,7 @@ def register_lakeflow_source(spark):
                 return list(self._custom_objects)
             url = f"{self.base_url}/crm-object-schemas/2026-09/schemas"
             resp = self._http.get(url, operation="schema discovery GET")
-            if resp.status_code == 403:
+            if resp.status_code == 403 and not require_access:
                 return []
             if resp.status_code != 200:
                 raise RuntimeError(
@@ -1315,6 +1847,7 @@ def register_lakeflow_source(spark):
                 alias = name.lower()
                 if (
                     alias in self._object_config
+                    or alias in NON_CRM_TABLES
                     or alias in custom_types
                     or object_type in names_by_type
                 ):
@@ -1458,6 +1991,8 @@ def register_lakeflow_source(spark):
             Returns:
                 A StructType object representing the schema of the table.
             """
+            if table_name in NON_CRM_TABLES:
+                return self._non_crm.get_table_schema(table_name)
             supported_tables = self.list_tables()
             if table_name not in supported_tables:
                 raise ValueError(
@@ -1510,6 +2045,8 @@ def register_lakeflow_source(spark):
                         - "cdc": capture incremental changes
                         - "append": incremental append
             """
+            if table_name in NON_CRM_TABLES:
+                return self._non_crm.read_table_metadata(table_name)
             supported_tables = self.list_tables()
             if table_name not in supported_tables:
                 raise ValueError(
@@ -1724,6 +2261,8 @@ def register_lakeflow_source(spark):
             Returns:
                 Tuple of (records, new_offset)
             """
+            if table_name in NON_CRM_TABLES:
+                return iter(self._non_crm.read_table(table_name, table_options)), {}
             supported_tables = self.list_tables()
             if table_name not in supported_tables:
                 raise ValueError(
@@ -1736,8 +2275,7 @@ def register_lakeflow_source(spark):
                 start_offset is not None and start_offset.get("updatedAt") is not None
             )
             if self._uses_snapshot(table_name, table_options):
-                is_incremental = False
-                start_offset = {}
+                return self._read_snapshot(table_name, table_options), {}
 
             return self._read_data(
                 table_name,
@@ -1745,6 +2283,92 @@ def register_lakeflow_source(spark):
                 incremental=is_incremental,
                 table_options=table_options,
             )
+
+        def _read_snapshot(
+            self, table_name: str, table_options: Dict[str, str]
+        ) -> Iterator[dict]:
+            """Yield complete active-object pages while retaining bounded state."""
+            metadata = self.read_table_metadata(table_name, table_options)
+            property_names = metadata.get("property_names", [])
+            associations = metadata.get("associations", [])
+            association_value_mode = metadata.get("association_value_mode", "ids")
+            numeric_value_mode = metadata.get("numeric_value_mode", "bigint")
+
+            def pages():
+                after = None
+                recent_hashes = []
+                recent_set = set()
+                previous_page_ids = set()
+                page_count = 0
+                while True:
+                    if page_count >= self._SNAPSHOT_MAX_PAGES:
+                        raise RuntimeError("HubSpot snapshot exceeded the page limit")
+                    records, next_after = self._fetch_full_refresh_batch(
+                        table_name,
+                        property_names,
+                        associations,
+                        after,
+                        archived=False,
+                    )
+                    page_count += 1
+                    if not records and next_after is not None:
+                        raise RuntimeError("Empty HubSpot snapshot page has pagination")
+                    page_ids = set()
+                    for record in records:
+                        if not isinstance(record, dict):
+                            raise RuntimeError("Malformed HubSpot snapshot record")
+                        identity = record.get("id")
+                        if (
+                            isinstance(identity, bool)
+                            or not isinstance(identity, (str, int))
+                            or not str(identity).strip()
+                            or record.get("archived", False) is not False
+                        ):
+                            raise RuntimeError(
+                                "Malformed HubSpot active snapshot identity"
+                            )
+                        identity = str(identity)
+                        if identity in page_ids:
+                            raise RuntimeError(
+                                "Duplicate HubSpot snapshot identity in page"
+                            )
+                        page_ids.add(identity)
+                    if page_ids & previous_page_ids:
+                        raise RuntimeError("Duplicate HubSpot snapshot identity across pages")
+                    if next_after is not None:
+                        cursor_hash = hashlib.sha256(
+                            str(next_after).encode("utf-8")
+                        ).hexdigest()
+                        if cursor_hash in recent_set:
+                            raise RuntimeError(
+                                "HubSpot snapshot pagination cursor repeated"
+                            )
+                        recent_set.add(cursor_hash)
+                        recent_hashes.append(cursor_hash)
+                        if len(recent_hashes) > self._SNAPSHOT_CURSOR_HISTORY:
+                            recent_set.remove(recent_hashes.pop(0))
+                    self._hydrate_associations(
+                        table_name,
+                        records,
+                        associations,
+                        association_value_mode,
+                    )
+                    for record in records:
+                        yield self._transform_single_record(
+                            record,
+                            table_name,
+                            associations,
+                            association_value_mode,
+                            property_names,
+                            numeric_value_mode,
+                        )
+                    previous_page_ids = page_ids
+                    if next_after is None:
+                        return
+                    after = next_after
+                    time.sleep(0.1)
+
+            return pages()
 
         @staticmethod
         def _archive_time(value):
@@ -1761,6 +2385,8 @@ def register_lakeflow_source(spark):
         def read_table_deletes(self, table_name, start_offset, table_options):
             """Drain the frozen archive window before advancing its checkpoint."""
             start = start_offset or {}
+            if table_name in NON_CRM_TABLES:
+                return iter([]), start
             if table_name not in self.list_tables():
                 raise ValueError(f"Unsupported table: {table_name}")
             if not self._get_object_config(table_name).get("supports_deletes", False):
