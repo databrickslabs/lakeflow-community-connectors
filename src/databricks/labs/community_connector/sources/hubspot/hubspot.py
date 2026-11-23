@@ -231,7 +231,17 @@ class HubspotLakeflowConnect(LakeflowConnect):
         for route_index, route in enumerate(HUBSPOT_SCHEMA_ROUTES):
             url = self.base_url + route
             for attempt in range(HUBSPOT_SCHEMA_MAX_RETRIES + 1):
-                response = requests.get(url, headers=self.auth_header, timeout=60)
+                try:
+                    response = requests.get(
+                        url, headers=self.auth_header, timeout=60
+                    )
+                except (requests.ConnectionError, requests.Timeout) as error:
+                    if attempt < HUBSPOT_SCHEMA_MAX_RETRIES:
+                        time.sleep(self._schema_retry_delay(None, attempt))
+                        continue
+                    raise RuntimeError(
+                        "HubSpot schema discovery request failed"
+                    ) from error
                 last_status = response.status_code
                 if last_status in {200, 403}:
                     return response

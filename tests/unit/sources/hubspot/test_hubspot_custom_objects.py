@@ -7,6 +7,7 @@ from urllib.parse import parse_qs, urlparse
 from unittest import mock
 
 import pytest
+import requests
 from pyspark.sql.types import ArrayType, StringType, StructType, _make_type_verifier
 
 from databricks.labs.community_connector.sources.hubspot import hubspot as hubspot_module
@@ -37,6 +38,43 @@ def test_schema_discovery_retries_transient_statuses(generated, status):
         assert conn.list_tables()[-1] == "notes"
     assert get.call_count == 2
     sleep.assert_called_once_with(0.0)
+
+
+@pytest.mark.parametrize("generated", [False, True])
+@pytest.mark.parametrize("error_type", [requests.ConnectionError, requests.Timeout])
+def test_schema_discovery_retries_transient_network_errors(generated, error_type):
+    conn = _connector_class(generated)({"access_token": "test-only-token"})
+    responses = [
+        error_type("transient schema discovery failure"),
+        _Response({"results": []}),
+    ]
+    with mock.patch("requests.get", side_effect=responses) as get, mock.patch(
+        "time.sleep"
+    ) as sleep:
+        assert conn.list_tables()[-1] == "notes"
+    assert get.call_count == 2
+    sleep.assert_called_once_with(1.0)
+
+
+@pytest.mark.parametrize("generated", [False, True])
+@pytest.mark.parametrize("error_type", [requests.ConnectionError, requests.Timeout])
+def test_schema_discovery_exhausts_network_error_retries(generated, error_type):
+    conn = _connector_class(generated)({"access_token": "test-only-token"})
+    with mock.patch(
+        "requests.get",
+        side_effect=error_type("persistent schema discovery failure"),
+    ) as get, mock.patch("time.sleep") as sleep:
+        with pytest.raises(RuntimeError, match="request failed") as exc_info:
+            conn.list_tables()
+    assert isinstance(exc_info.value.__cause__, error_type)
+    assert get.call_count == 6
+    assert sleep.call_args_list == [
+        mock.call(1.0),
+        mock.call(2.0),
+        mock.call(4.0),
+        mock.call(8.0),
+        mock.call(16.0),
+    ]
 
 
 @pytest.mark.parametrize("generated", [False, True])
