@@ -1,0 +1,50 @@
+[
+  {
+    "id": "echo-137",
+    "bodyStyleClass": "yankee-824",
+    "footer": "alpha-632",
+    "header": "whiskey-960",
+    "langDir": "delta-786",
+    "locale": "zulu-204",
+    "scripts": "romeo-597",
+    "styles": "delta-329",
+    "template": "quebec-101",
+    "ui5BaseThemeRootUrl": "xray-360"
+  },
+  {
+    "id": "papa-862",
+    "bodyStyleClass": "sierra-730",
+    "footer": "india-197",
+    "header": "victor-400",
+    "langDir": "alpha-370",
+    "locale": "uniform-265",
+    "scripts": "delta-692",
+    "styles": "india-888",
+    "template": "india-897",
+    "ui5BaseThemeRootUrl": "foxtrot-197"
+  },
+  {
+    "id": "lima-586",
+    "bodyStyleClass": "zulu-151",
+    "footer": "mike-964",
+    "header": "victor-846",
+    "langDir": "oscar-628",
+    "locale": "echo-699",
+    "scripts": "tango-890",
+    "styles": "juliet-971",
+    "template": "november-551",
+    "ui5BaseThemeRootUrl": "quebec-913"
+  },
+  {
+    "id": "quebec-983",
+    "bodyStyleClass": "golf-579",
+    "footer": "quebec-936",
+    "header": "golf-486",
+    "langDir": "yankee-482",
+    "locale": "echo-821",
+    "scripts": "oscar-856",
+    "styles": "xray-895",
+    "template": "lima-789",
+    "ui5BaseThemeRootUrl": "yankee-767"
+  }
+]

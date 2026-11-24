@@ -1,0 +1,50 @@
+[
+  {
+    "webid": "oscar-508",
+    "name": "yankee-313",
+    "description": "romeo-818",
+    "path": "mike-557",
+    "type": "kilo-997",
+    "default_units_name": "quebec-349",
+    "data_reference_plugin": "delta-296",
+    "is_configuration_item": true,
+    "elementtemplate_webid": "papa-853",
+    "assetdatabase_webid": "victor-411"
+  },
+  {
+    "webid": "victor-323",
+    "name": "xray-299",
+    "description": "mike-429",
+    "path": "india-127",
+    "type": "uniform-191",
+    "default_units_name": "india-303",
+    "data_reference_plugin": "india-910",
+    "is_configuration_item": true,
+    "elementtemplate_webid": "victor-998",
+    "assetdatabase_webid": "xray-257"
+  },
+  {
+    "webid": "golf-788",
+    "name": "mike-351",
+    "description": "uniform-911",
+    "path": "echo-367",
+    "type": "romeo-790",
+    "default_units_name": "foxtrot-117",
+    "data_reference_plugin": "mike-419",
+    "is_configuration_item": false,
+    "elementtemplate_webid": "zulu-547",
+    "assetdatabase_webid": "zulu-169"
+  },
+  {
+    "webid": "bravo-811",
+    "name": "papa-483",
+    "description": "golf-513",
+    "path": "india-529",
+    "type": "victor-111",
+    "default_units_name": "mike-406",
+    "data_reference_plugin": "zulu-958",
+    "is_configuration_item": false,
+    "elementtemplate_webid": "delta-890",
+    "assetdatabase_webid": "india-484"
+  }
+]

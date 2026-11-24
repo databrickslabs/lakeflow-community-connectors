@@ -1,0 +1,37 @@
+[
+  {
+    "table_webid": "whiskey-690",
+    "row_index": 51222,
+    "columns": {
+      "key_0": "lima-694",
+      "key_1": "mike-441"
+    },
+    "ingestion_timestamp": "2024-01-01T11:09:52Z"
+  },
+  {
+    "table_webid": "juliet-477",
+    "row_index": 18140,
+    "columns": {
+      "key_0": "romeo-384",
+      "key_1": "zulu-853"
+    },
+    "ingestion_timestamp": "2024-01-03T05:53:17Z"
+  },
+  {
+    "table_webid": "papa-845",
+    "row_index": 72685,
+    "columns": {
+      "key_0": "november-233",
+      "key_1": "lima-616"
+    },
+    "ingestion_timestamp": "2024-01-15T19:32:45Z"
+  },
+  {
+    "table_webid": "november-206",
+    "row_index": 49474,
+    "columns": {
+      "key_0": "echo-255"
+    },
+    "ingestion_timestamp": "2024-01-02T01:20:04Z"
+  }
+]

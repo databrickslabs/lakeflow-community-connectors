@@ -1,0 +1,54 @@
+[
+  {
+    "OnboardingGoalActivity_activityId": 57890,
+    "OnboardingGoalCategory_externalCode": 97322,
+    "OnboardingNewHireActivitiesStep_processStepId": 3104,
+    "OnboardingProcess_onboardingProcessId": 50497,
+    "goalId": 34345,
+    "createdBy": "delta-260",
+    "createdDateTime": "yankee-292",
+    "lastModifiedBy": "xray-620",
+    "lastModifiedDateTime": "alpha-385",
+    "mdfSystemRecordStatus": "hotel-160",
+    "text": "yankee-922"
+  },
+  {
+    "OnboardingGoalActivity_activityId": 13282,
+    "OnboardingGoalCategory_externalCode": 34829,
+    "OnboardingNewHireActivitiesStep_processStepId": 72236,
+    "OnboardingProcess_onboardingProcessId": 29118,
+    "goalId": 449,
+    "createdBy": "juliet-591",
+    "createdDateTime": "xray-493",
+    "lastModifiedBy": "juliet-301",
+    "lastModifiedDateTime": "kilo-885",
+    "mdfSystemRecordStatus": "tango-923",
+    "text": "zulu-272"
+  },
+  {
+    "OnboardingGoalActivity_activityId": 81747,
+    "OnboardingGoalCategory_externalCode": 49842,
+    "OnboardingNewHireActivitiesStep_processStepId": 66483,
+    "OnboardingProcess_onboardingProcessId": 46004,
+    "goalId": 20871,
+    "createdBy": "charlie-255",
+    "createdDateTime": "whiskey-437",
+    "lastModifiedBy": "india-222",
+    "lastModifiedDateTime": "echo-508",
+    "mdfSystemRecordStatus": "kilo-428",
+    "text": "xray-861"
+  },
+  {
+    "OnboardingGoalActivity_activityId": 29736,
+    "OnboardingGoalCategory_externalCode": 57089,
+    "OnboardingNewHireActivitiesStep_processStepId": 96241,
+    "OnboardingProcess_onboardingProcessId": 13873,
+    "goalId": 47529,
+    "createdBy": "hotel-274",
+    "createdDateTime": "kilo-370",
+    "lastModifiedBy": "golf-176",
+    "lastModifiedDateTime": "whiskey-506",
+    "mdfSystemRecordStatus": "victor-548",
+    "text": "golf-732"
+  }
+]

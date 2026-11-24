@@ -1,0 +1,34 @@
+[
+  {
+    "interviewOverallAssessmentId": 56513,
+    "interviewRefId": 81000,
+    "overallRating": "romeo-306",
+    "averageRating": 903.99,
+    "type": "bravo-934",
+    "comments": "hotel-723"
+  },
+  {
+    "interviewOverallAssessmentId": 99487,
+    "interviewRefId": 57844,
+    "overallRating": "victor-656",
+    "averageRating": 904.61,
+    "type": "hotel-538",
+    "comments": "foxtrot-147"
+  },
+  {
+    "interviewOverallAssessmentId": 45252,
+    "interviewRefId": 36416,
+    "overallRating": "delta-184",
+    "averageRating": 307.73,
+    "type": "mike-911",
+    "comments": "echo-254"
+  },
+  {
+    "interviewOverallAssessmentId": 85263,
+    "interviewRefId": 71147,
+    "overallRating": "india-616",
+    "averageRating": 434.96,
+    "type": "tango-592",
+    "comments": "november-622"
+  }
+]

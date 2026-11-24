@@ -1,0 +1,31 @@
+[
+  {
+    "login": "yyoli-db",
+    "id": 113948208,
+    "node_id": "U_kgDOBsq2MA",
+    "avatar_url": "https://avatars.githubusercontent.com/u/113948208?v=4",
+    "gravatar_id": "",
+    "url": "https://api.github.com/users/yyoli-db",
+    "html_url": "https://github.com/yyoli-db",
+    "followers_url": "https://api.github.com/users/yyoli-db/followers",
+    "following_url": "https://api.github.com/users/yyoli-db/following{/other_user}",
+    "gists_url": "https://api.github.com/users/yyoli-db/gists{/gist_id}",
+    "starred_url": "https://api.github.com/users/yyoli-db/starred{/owner}{/repo}",
+    "subscriptions_url": "https://api.github.com/users/yyoli-db/subscriptions",
+    "organizations_url": "https://api.github.com/users/yyoli-db/orgs",
+    "repos_url": "https://api.github.com/users/yyoli-db/repos",
+    "events_url": "https://api.github.com/users/yyoli-db/events{/privacy}",
+    "received_events_url": "https://api.github.com/users/yyoli-db/received_events",
+    "type": "User",
+    "user_view_type": "public",
+    "site_admin": false,
+    "permissions": {
+      "admin": true,
+      "maintain": true,
+      "push": true,
+      "triage": true,
+      "pull": true
+    },
+    "role_name": "admin"
+  }
+]

@@ -1,0 +1,30 @@
+[
+  {
+    "personIdExternal": "sierra-189",
+    "userId": "alpha-345",
+    "homeAssignment": "echo-687",
+    "plannedEndDate": "juliet-887",
+    "startDate": "alpha-553"
+  },
+  {
+    "personIdExternal": "whiskey-276",
+    "userId": "india-673",
+    "homeAssignment": "hotel-480",
+    "plannedEndDate": "india-574",
+    "startDate": "romeo-403"
+  },
+  {
+    "personIdExternal": "zulu-218",
+    "userId": "november-695",
+    "homeAssignment": "delta-720",
+    "plannedEndDate": "lima-730",
+    "startDate": "bravo-543"
+  },
+  {
+    "personIdExternal": "golf-173",
+    "userId": "zulu-944",
+    "homeAssignment": "delta-333",
+    "plannedEndDate": "oscar-485",
+    "startDate": "golf-980"
+  }
+]

@@ -1,0 +1,58 @@
+[
+  {
+    "code": "india-615",
+    "effectiveStartDate": "bravo-284",
+    "createdBy": "papa-316",
+    "createdDateTime": "echo-126",
+    "currency": "juliet-525",
+    "externalName_defaultValue": "kilo-683",
+    "externalName_en_US": "zulu-636",
+    "lastModifiedBy": "lima-465",
+    "lastModifiedDateTime": "kilo-362",
+    "numericCountryCode": 16683,
+    "status": "lima-761",
+    "twoCharCountryCode": "yankee-786"
+  },
+  {
+    "code": "kilo-510",
+    "effectiveStartDate": "juliet-401",
+    "createdBy": "india-868",
+    "createdDateTime": "juliet-164",
+    "currency": "zulu-851",
+    "externalName_defaultValue": "papa-254",
+    "externalName_en_US": "hotel-967",
+    "lastModifiedBy": "tango-118",
+    "lastModifiedDateTime": "lima-315",
+    "numericCountryCode": 80653,
+    "status": "lima-483",
+    "twoCharCountryCode": "november-782"
+  },
+  {
+    "code": "tango-602",
+    "effectiveStartDate": "victor-506",
+    "createdBy": "oscar-651",
+    "createdDateTime": "tango-580",
+    "currency": "quebec-141",
+    "externalName_defaultValue": "november-227",
+    "externalName_en_US": "echo-733",
+    "lastModifiedBy": "romeo-753",
+    "lastModifiedDateTime": "charlie-579",
+    "numericCountryCode": 47719,
+    "status": "romeo-177",
+    "twoCharCountryCode": "golf-934"
+  },
+  {
+    "code": "victor-613",
+    "effectiveStartDate": "sierra-973",
+    "createdBy": "victor-895",
+    "createdDateTime": "lima-621",
+    "currency": "delta-738",
+    "externalName_defaultValue": "sierra-216",
+    "externalName_en_US": "uniform-131",
+    "lastModifiedBy": "oscar-732",
+    "lastModifiedDateTime": "victor-483",
+    "numericCountryCode": 21578,
+    "status": "hotel-957",
+    "twoCharCountryCode": "romeo-903"
+  }
+]

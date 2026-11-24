@@ -1,0 +1,60 @@
+# remberg Community Connector Spec
+# This file defines the specification for the connector including
+# connection parameters and allowlist options.
+
+# ============================================================================
+# Connection Parameters
+# These are provided when creating the Unity Catalog connection.
+# remberg uses a static API key sent in an HTTP header literally named
+# 'authorization' (no Bearer prefix) — see the official OpenAPI security
+# scheme. Keys are created under Settings > Data > API in the remberg web
+# app and expire after one year by default.
+# ============================================================================
+display_name: remberg
+connection:
+  parameters:
+    - name: api_key
+      type: string
+      required: true
+      secret: true
+      description: >
+        remberg API key, created under Settings > Data > API in the remberg
+        web app ("Add API Key"). The key inherits the access rights of the
+        user who created it and expires after one year by default. Store as
+        a Databricks secret rather than inline.
+
+    - name: base_url
+      type: string
+      required: false
+      description: >
+        Base URL of the remberg public API, without a trailing slash.
+        Defaults to 'https://api.remberg.de'. Override only if remberg
+        provides you a different regional or staging host.
+
+# ============================================================================
+# External Options Allowlist
+# These table-specific options must be included in the externalOptionsAllowList
+# parameter of the UC connection to allow them to be passed through.
+# Use a comma-separated string of option names.
+#
+# Options actually read by the connector implementation:
+#   - start_timestamp         Lower bound (ISO-8601 UTC) for the very first
+#                             sync of a CDC table (assets, work_orders,
+#                             tickets, work_requests, organizations, parts).
+#                             Default: unbounded (full backfill up to the
+#                             trigger's init time).
+#   - lookback_seconds        Seconds subtracted from the stored cursor at
+#                             read time to re-capture records whose updatedAt
+#                             moved while a range was being paginated
+#                             (default 300). Applied at read time only —
+#                             never stored.
+#   - limit                   Page size for the page/limit list endpoints.
+#                             Default 1000 (the server maximum; server
+#                             default would be 20).
+#   - max_records_per_batch   Opt-in per-microbatch cap on emitted rows from
+#                             CDC tables, applied at page granularity. The
+#                             bounded updatedAt range stays pinned in the
+#                             offset while split across microbatches.
+#                             Default: drain the range in one microbatch.
+# ============================================================================
+external_options_allowlist: "start_timestamp,lookback_seconds,limit,max_records_per_batch"

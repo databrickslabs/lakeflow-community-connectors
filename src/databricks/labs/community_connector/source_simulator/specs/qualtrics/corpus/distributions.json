@@ -1,0 +1,182 @@
+[
+  {
+    "id": "romeo-82-pk0",
+    "parent_distribution_id": "uniform-251",
+    "owner_id": "lima-961",
+    "organization_id": "lima-735",
+    "request_type": "oscar-147",
+    "request_status": "uniform-708",
+    "send_date": "kilo-367",
+    "created_date": "zulu-493",
+    "modified_date": "victor-957",
+    "headers": {
+      "from_email": "foxtrot-853",
+      "from_name": "bravo-257",
+      "reply_to_email": "juliet-954",
+      "subject": "charlie-549"
+    },
+    "recipients": {
+      "mailing_list_id": "bravo-311",
+      "contact_id": "november-539",
+      "library_id": "kilo-825",
+      "sample_id": "delta-541"
+    },
+    "message": {
+      "library_id": "juliet-613",
+      "message_id": "romeo-265",
+      "message_type": "zulu-459"
+    },
+    "survey_link": {
+      "survey_id": "juliet-964",
+      "expiration_date": "kilo-242",
+      "link_type": "papa-480"
+    },
+    "stats": {
+      "sent": 76686,
+      "failed": 28787,
+      "started": 4078,
+      "bounced": 5075,
+      "opened": 84732,
+      "skipped": 83804,
+      "finished": 18408,
+      "complaints": 27864,
+      "blocked": 39049
+    },
+    "sentDate": "2024-01-01T00:00:00Z"
+  },
+  {
+    "id": "whiskey--pk1",
+    "parent_distribution_id": "golf-578",
+    "owner_id": "sierra-840",
+    "organization_id": "golf-416",
+    "request_type": "whiskey-832",
+    "request_status": "echo-459",
+    "send_date": "lima-252",
+    "created_date": "papa-518",
+    "modified_date": "xray-100",
+    "headers": {
+      "from_email": "romeo-350",
+      "from_name": "yankee-637",
+      "reply_to_email": "yankee-185",
+      "subject": "zulu-920"
+    },
+    "recipients": {
+      "mailing_list_id": "zulu-354",
+      "contact_id": "india-376",
+      "library_id": "charlie-396",
+      "sample_id": "uniform-605"
+    },
+    "message": {
+      "library_id": "golf-625",
+      "message_id": "golf-145",
+      "message_type": "alpha-101"
+    },
+    "survey_link": {
+      "survey_id": "lima-841",
+      "expiration_date": "golf-723",
+      "link_type": "yankee-511"
+    },
+    "stats": {
+      "sent": 65410,
+      "failed": 99715,
+      "started": 35849,
+      "bounced": 40209,
+      "opened": 51986,
+      "skipped": 86710,
+      "finished": 35109,
+      "complaints": 14584,
+      "blocked": 43072
+    },
+    "sentDate": "2024-01-01T01:00:00Z"
+  },
+  {
+    "id": "uniform--pk2",
+    "parent_distribution_id": "uniform-191",
+    "owner_id": "charlie-702",
+    "organization_id": "romeo-471",
+    "request_type": "zulu-499",
+    "request_status": "victor-626",
+    "send_date": "golf-414",
+    "created_date": "romeo-596",
+    "modified_date": "xray-218",
+    "headers": {
+      "from_email": "foxtrot-841",
+      "from_name": "delta-133",
+      "reply_to_email": "bravo-509",
+      "subject": "xray-590"
+    },
+    "recipients": {
+      "mailing_list_id": "juliet-243",
+      "contact_id": "delta-697",
+      "library_id": "lima-283",
+      "sample_id": "quebec-642"
+    },
+    "message": {
+      "library_id": "whiskey-325",
+      "message_id": "bravo-442",
+      "message_type": "oscar-307"
+    },
+    "survey_link": {
+      "survey_id": "oscar-491",
+      "expiration_date": "golf-895",
+      "link_type": "charlie-506"
+    },
+    "stats": {
+      "sent": 74932,
+      "failed": 36839,
+      "started": 89502,
+      "bounced": 70522,
+      "opened": 35860,
+      "skipped": 98243,
+      "finished": 65991,
+      "complaints": 96523,
+      "blocked": 22769
+    },
+    "sentDate": "2024-01-01T02:00:00Z"
+  },
+  {
+    "id": "victor-4-pk3",
+    "parent_distribution_id": "kilo-789",
+    "owner_id": "tango-453",
+    "organization_id": "whiskey-928",
+    "request_type": "juliet-129",
+    "request_status": "quebec-630",
+    "send_date": "tango-251",
+    "created_date": "quebec-266",
+    "modified_date": "charlie-293",
+    "headers": {
+      "from_email": "delta-903",
+      "from_name": "romeo-251",
+      "reply_to_email": "alpha-607",
+      "subject": "kilo-997"
+    },
+    "recipients": {
+      "mailing_list_id": "bravo-761",
+      "contact_id": "november-746",
+      "library_id": "victor-669",
+      "sample_id": "papa-284"
+    },
+    "message": {
+      "library_id": "alpha-420",
+      "message_id": "foxtrot-472",
+      "message_type": "victor-874"
+    },
+    "survey_link": {
+      "survey_id": "romeo-590",
+      "expiration_date": "alpha-839",
+      "link_type": "romeo-576"
+    },
+    "stats": {
+      "sent": 95113,
+      "failed": 5349,
+      "started": 40414,
+      "bounced": 58081,
+      "opened": 99479,
+      "skipped": 94095,
+      "finished": 52951,
+      "complaints": 50475,
+      "blocked": 49828
+    },
+    "sentDate": "2024-01-01T03:00:00Z"
+  }
+]

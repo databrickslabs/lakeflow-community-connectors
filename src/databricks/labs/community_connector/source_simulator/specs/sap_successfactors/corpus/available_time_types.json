@@ -1,0 +1,42 @@
+[
+  {
+    "externalCode": "golf-180",
+    "externalName": "november-481",
+    "unit": "foxtrot-196",
+    "undeterminedEndDateAllowed": false,
+    "leaveOfAbsence": false,
+    "mainAbsenceTimeType": true,
+    "flexibleRequestingAllowed": true,
+    "allowedFractions": "xray-190"
+  },
+  {
+    "externalCode": "papa-805",
+    "externalName": "zulu-250",
+    "unit": "tango-939",
+    "undeterminedEndDateAllowed": true,
+    "leaveOfAbsence": true,
+    "mainAbsenceTimeType": false,
+    "flexibleRequestingAllowed": false,
+    "allowedFractions": "whiskey-109"
+  },
+  {
+    "externalCode": "kilo-666",
+    "externalName": "delta-873",
+    "unit": "foxtrot-844",
+    "undeterminedEndDateAllowed": false,
+    "leaveOfAbsence": true,
+    "mainAbsenceTimeType": true,
+    "flexibleRequestingAllowed": false,
+    "allowedFractions": "lima-655"
+  },
+  {
+    "externalCode": "hotel-673",
+    "externalName": "uniform-925",
+    "unit": "romeo-942",
+    "undeterminedEndDateAllowed": false,
+    "leaveOfAbsence": true,
+    "mainAbsenceTimeType": false,
+    "flexibleRequestingAllowed": false,
+    "allowedFractions": "bravo-802"
+  }
+]

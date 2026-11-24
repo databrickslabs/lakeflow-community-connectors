@@ -1,0 +1,121 @@
+[
+  {
+    "id": "charlie--pk0",
+    "counter": "kilo-831",
+    "status": "tango-942",
+    "relatedAssetId": "charlie-645",
+    "assetStatus": "papa-564",
+    "description": "foxtrot-568",
+    "declineReason": "tango-795",
+    "externalReference": "victor-733",
+    "relatedWorkOrderId": "charlie-184",
+    "failureTypeIds": [
+      "delta-971",
+      "delta-270"
+    ],
+    "failureTypes": [
+      {
+        "id": "delta-517",
+        "reference": "foxtrot-698"
+      },
+      {
+        "id": "hotel-247",
+        "reference": "whiskey-765"
+      }
+    ],
+    "createdAt": "2024-01-08T15:25:52Z",
+    "updatedAt": "2024-01-01T00:00:00Z",
+    "approvedAt": "2024-01-08T14:19:23Z",
+    "completedAt": "2024-01-01T21:51:34Z"
+  },
+  {
+    "id": "delta-85-pk1",
+    "counter": "golf-318",
+    "status": "papa-896",
+    "relatedAssetId": "victor-732",
+    "assetStatus": "victor-269",
+    "description": "uniform-359",
+    "declineReason": "tango-210",
+    "externalReference": "whiskey-163",
+    "relatedWorkOrderId": "papa-396",
+    "failureTypeIds": [
+      "golf-230",
+      "tango-974"
+    ],
+    "failureTypes": [
+      {
+        "id": "kilo-225",
+        "reference": "foxtrot-897"
+      },
+      {
+        "id": "india-551",
+        "reference": "zulu-491"
+      }
+    ],
+    "createdAt": "2024-01-31T21:40:43Z",
+    "updatedAt": "2024-01-01T01:00:00Z",
+    "approvedAt": "2024-01-30T07:08:35Z",
+    "completedAt": "2024-01-14T20:15:38Z"
+  },
+  {
+    "id": "whiskey--pk2",
+    "counter": "india-115",
+    "status": "kilo-336",
+    "relatedAssetId": "yankee-458",
+    "assetStatus": "tango-117",
+    "description": "papa-108",
+    "declineReason": "oscar-919",
+    "externalReference": "echo-805",
+    "relatedWorkOrderId": "hotel-175",
+    "failureTypeIds": [],
+    "failureTypes": [],
+    "createdAt": "2024-01-08T10:51:58Z",
+    "updatedAt": "2024-01-01T02:00:00Z",
+    "approvedAt": "2024-01-28T10:52:34Z",
+    "completedAt": "2024-01-17T11:56:22Z"
+  },
+  {
+    "id": "mike-848-pk3",
+    "counter": "victor-843",
+    "status": "papa-234",
+    "relatedAssetId": "uniform-181",
+    "assetStatus": "quebec-967",
+    "description": "delta-978",
+    "declineReason": "lima-786",
+    "externalReference": "delta-411",
+    "relatedWorkOrderId": "victor-129",
+    "failureTypeIds": [
+      "mike-826"
+    ],
+    "failureTypes": [
+      {
+        "id": "quebec-343",
+        "reference": "xray-274"
+      }
+    ],
+    "createdAt": "2024-01-27T16:18:24Z",
+    "updatedAt": "2024-01-01T03:00:00Z",
+    "approvedAt": "2024-01-06T08:18:05Z",
+    "completedAt": "2024-01-28T08:52:44Z"
+  },
+  {
+    "id": "india-60-pk4",
+    "counter": "golf-884",
+    "status": "whiskey-121",
+    "relatedAssetId": "delta-871",
+    "assetStatus": "golf-347",
+    "description": "mike-124",
+    "declineReason": "uniform-215",
+    "externalReference": "whiskey-237",
+    "relatedWorkOrderId": "india-681",
+    "failureTypeIds": [
+      "oscar-345",
+      "mike-753"
+    ],
+    "failureTypes": [],
+    "createdAt": "2024-01-15T10:16:10Z",
+    "updatedAt": "2024-01-01T04:00:00Z",
+    "approvedAt": "2024-01-09T03:38:22Z",
+    "completedAt": "2024-01-01T12:13:53Z"
+  }
+]

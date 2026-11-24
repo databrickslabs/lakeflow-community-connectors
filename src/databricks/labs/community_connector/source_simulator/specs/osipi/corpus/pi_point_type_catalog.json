@@ -1,0 +1,22 @@
+[
+  {
+    "point_type": "alpha-672",
+    "engineering_units": "zulu-125",
+    "count_points": 91921
+  },
+  {
+    "point_type": "sierra-837",
+    "engineering_units": "foxtrot-862",
+    "count_points": 48606
+  },
+  {
+    "point_type": "yankee-643",
+    "engineering_units": "hotel-940",
+    "count_points": 54119
+  },
+  {
+    "point_type": "kilo-243",
+    "engineering_units": "golf-719",
+    "count_points": 47327
+  }
+]

@@ -1,0 +1,339 @@
+[
+  {
+    "id": "tango-88-pk0",
+    "name": "quebec-766",
+    "description": "mike-562",
+    "domain": "quebec-227",
+    "status": "quebec-548",
+    "parentId": "victor-225",
+    "isLeaf": false,
+    "acronyms": [
+      "charlie-903",
+      "golf-323"
+    ],
+    "contacts": {
+      "owner": [
+        {
+          "id": "xray-864",
+          "description": "bravo-528"
+        },
+        {
+          "id": "xray-767",
+          "description": "quebec-324"
+        }
+      ],
+      "expert": [
+        {
+          "id": "oscar-480",
+          "description": "november-474"
+        }
+      ],
+      "databaseAdmin": [
+        {
+          "id": "lima-146",
+          "description": "kilo-404"
+        },
+        {
+          "id": "quebec-956",
+          "description": "lima-208"
+        }
+      ]
+    },
+    "resources": [
+      {
+        "name": "papa-658",
+        "url": "yankee-747"
+      }
+    ],
+    "managedAttributes": [
+      {
+        "name": "echo-782",
+        "value": "yankee-903",
+        "isRequired": false
+      },
+      {
+        "name": "xray-452",
+        "value": "delta-265",
+        "isRequired": false
+      }
+    ],
+    "systemData": {
+      "createdAt": "alpha-115",
+      "createdBy": "xray-624",
+      "lastModifiedAt": "2024-01-01T00:00:00Z",
+      "lastModifiedBy": "victor-432",
+      "expiredAt": "november-643",
+      "expiredBy": "bravo-397",
+      "provisioningState": "echo-607"
+    },
+    "purview_tenant_id": "mike-991"
+  },
+  {
+    "id": "romeo-81-pk1",
+    "name": "zulu-567",
+    "description": "alpha-578",
+    "domain": "yankee-228",
+    "status": "bravo-710",
+    "parentId": "golf-966",
+    "isLeaf": true,
+    "acronyms": [],
+    "contacts": {
+      "owner": [
+        {
+          "id": "uniform-902",
+          "description": "romeo-287"
+        },
+        {
+          "id": "foxtrot-452",
+          "description": "echo-554"
+        }
+      ],
+      "expert": [],
+      "databaseAdmin": [
+        {
+          "id": "november-327",
+          "description": "bravo-635"
+        },
+        {
+          "id": "zulu-779",
+          "description": "zulu-484"
+        }
+      ]
+    },
+    "resources": [
+      {
+        "name": "golf-711",
+        "url": "whiskey-599"
+      }
+    ],
+    "managedAttributes": [
+      {
+        "name": "bravo-790",
+        "value": "foxtrot-450",
+        "isRequired": false
+      },
+      {
+        "name": "echo-205",
+        "value": "hotel-163",
+        "isRequired": true
+      }
+    ],
+    "systemData": {
+      "createdAt": "delta-598",
+      "createdBy": "golf-466",
+      "lastModifiedAt": "2024-01-01T01:00:00Z",
+      "lastModifiedBy": "lima-829",
+      "expiredAt": "zulu-173",
+      "expiredBy": "india-465",
+      "provisioningState": "papa-446"
+    },
+    "purview_tenant_id": "juliet-281"
+  },
+  {
+    "id": "oscar-56-pk2",
+    "name": "sierra-285",
+    "description": "oscar-549",
+    "domain": "mike-772",
+    "status": "sierra-336",
+    "parentId": "echo-716",
+    "isLeaf": true,
+    "acronyms": [
+      "lima-514",
+      "india-916"
+    ],
+    "contacts": {
+      "owner": [
+        {
+          "id": "juliet-391",
+          "description": "alpha-493"
+        },
+        {
+          "id": "oscar-627",
+          "description": "alpha-590"
+        }
+      ],
+      "expert": [
+        {
+          "id": "xray-806",
+          "description": "xray-431"
+        }
+      ],
+      "databaseAdmin": []
+    },
+    "resources": [
+      {
+        "name": "foxtrot-841",
+        "url": "juliet-708"
+      },
+      {
+        "name": "echo-317",
+        "url": "golf-760"
+      }
+    ],
+    "managedAttributes": [
+      {
+        "name": "alpha-795",
+        "value": "echo-153",
+        "isRequired": true
+      },
+      {
+        "name": "november-453",
+        "value": "romeo-809",
+        "isRequired": true
+      }
+    ],
+    "systemData": {
+      "createdAt": "oscar-475",
+      "createdBy": "victor-500",
+      "lastModifiedAt": "2024-01-01T02:00:00Z",
+      "lastModifiedBy": "charlie-420",
+      "expiredAt": "oscar-316",
+      "expiredBy": "quebec-133",
+      "provisioningState": "charlie-266"
+    },
+    "purview_tenant_id": "delta-154"
+  },
+  {
+    "id": "golf-319-pk3",
+    "name": "victor-483",
+    "description": "delta-171",
+    "domain": "lima-774",
+    "status": "tango-351",
+    "parentId": "romeo-753",
+    "isLeaf": false,
+    "acronyms": [
+      "quebec-201"
+    ],
+    "contacts": {
+      "owner": [
+        {
+          "id": "golf-945",
+          "description": "november-823"
+        }
+      ],
+      "expert": [],
+      "databaseAdmin": [
+        {
+          "id": "delta-466",
+          "description": "delta-263"
+        }
+      ]
+    },
+    "resources": [
+      {
+        "name": "lima-139",
+        "url": "echo-744"
+      }
+    ],
+    "managedAttributes": [],
+    "systemData": {
+      "createdAt": "mike-349",
+      "createdBy": "yankee-921",
+      "lastModifiedAt": "2024-01-01T03:00:00Z",
+      "lastModifiedBy": "alpha-310",
+      "expiredAt": "foxtrot-241",
+      "expiredBy": "charlie-269",
+      "provisioningState": "kilo-384"
+    },
+    "purview_tenant_id": "india-458"
+  },
+  {
+    "id": "bravo-59-pk4",
+    "name": "sierra-241",
+    "description": "romeo-537",
+    "domain": "bravo-467",
+    "status": "foxtrot-872",
+    "parentId": "oscar-773",
+    "isLeaf": false,
+    "acronyms": [
+      "delta-690",
+      "lima-924"
+    ],
+    "contacts": {
+      "owner": [
+        {
+          "id": "alpha-629",
+          "description": "charlie-347"
+        }
+      ],
+      "expert": [
+        {
+          "id": "tango-155",
+          "description": "kilo-479"
+        },
+        {
+          "id": "tango-350",
+          "description": "alpha-610"
+        }
+      ],
+      "databaseAdmin": [
+        {
+          "id": "victor-716",
+          "description": "hotel-900"
+        }
+      ]
+    },
+    "resources": [
+      {
+        "name": "bravo-341",
+        "url": "delta-168"
+      },
+      {
+        "name": "kilo-179",
+        "url": "quebec-896"
+      }
+    ],
+    "managedAttributes": [],
+    "systemData": {
+      "createdAt": "whiskey-771",
+      "createdBy": "yankee-812",
+      "lastModifiedAt": "2024-01-01T04:00:00Z",
+      "lastModifiedBy": "india-563",
+      "expiredAt": "uniform-431",
+      "expiredBy": "november-374",
+      "provisioningState": "november-970"
+    },
+    "purview_tenant_id": "kilo-100"
+  },
+  {
+    "id": "delta-51-pk5",
+    "name": "victor-696",
+    "description": "uniform-957",
+    "domain": "victor-940",
+    "status": "whiskey-919",
+    "parentId": "kilo-356",
+    "isLeaf": true,
+    "acronyms": [
+      "romeo-959",
+      "foxtrot-645"
+    ],
+    "contacts": {
+      "owner": [
+        {
+          "id": "tango-710",
+          "description": "november-913"
+        }
+      ],
+      "expert": [],
+      "databaseAdmin": []
+    },
+    "resources": [],
+    "managedAttributes": [
+      {
+        "name": "uniform-462",
+        "value": "lima-339",
+        "isRequired": true
+      }
+    ],
+    "systemData": {
+      "createdAt": "xray-929",
+      "createdBy": "alpha-441",
+      "lastModifiedAt": "2024-01-01T05:00:00Z",
+      "lastModifiedBy": "romeo-300",
+      "expiredAt": "lima-514",
+      "expiredBy": "lima-933",
+      "provisioningState": "mike-560"
+    },
+    "purview_tenant_id": "uniform-879"
+  }
+]

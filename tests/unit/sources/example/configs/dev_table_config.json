@@ -1,0 +1,16 @@
+{
+    "orders": {
+        "max_records_per_batch": "500"
+    },
+    "users": {
+        "max_records_per_batch": "500"
+    },
+    "events": {
+        "max_records_per_batch": "500",
+        "limit": "50"
+    },
+    "metrics": {
+        "max_records_per_batch": "500",
+        "window_seconds": "7200"
+    }
+}

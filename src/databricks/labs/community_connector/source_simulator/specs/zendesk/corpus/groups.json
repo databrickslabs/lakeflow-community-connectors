@@ -1,0 +1,46 @@
+[
+  {
+    "id": 1000,
+    "url": "victor-902",
+    "name": "lima-876",
+    "deleted": false,
+    "created_at": "juliet-534",
+    "updated_at": "romeo-742",
+    "description": "kilo-481",
+    "default": false,
+    "is_public": false
+  },
+  {
+    "id": 1001,
+    "url": "zulu-483",
+    "name": "india-495",
+    "deleted": false,
+    "created_at": "delta-151",
+    "updated_at": "golf-744",
+    "description": "india-139",
+    "default": false,
+    "is_public": true
+  },
+  {
+    "id": 1002,
+    "url": "kilo-557",
+    "name": "delta-220",
+    "deleted": false,
+    "created_at": "mike-512",
+    "updated_at": "xray-454",
+    "description": "oscar-674",
+    "default": true,
+    "is_public": true
+  },
+  {
+    "id": 1003,
+    "url": "zulu-157",
+    "name": "oscar-105",
+    "deleted": false,
+    "created_at": "victor-474",
+    "updated_at": "mike-433",
+    "description": "xray-521",
+    "default": false,
+    "is_public": false
+  }
+]

@@ -1,0 +1,39 @@
+[
+  {
+    "id": "oscar-983",
+    "email": "papa-887",
+    "first_name": "golf-377",
+    "last_name": "uniform-662",
+    "custom_fields": {},
+    "href": "oscar-982"
+  },
+  {
+    "id": "echo-213",
+    "email": "xray-472",
+    "first_name": "romeo-152",
+    "last_name": "lima-123",
+    "custom_fields": {
+      "key_0": "mike-754",
+      "key_1": "juliet-768"
+    },
+    "href": "zulu-654"
+  },
+  {
+    "id": "alpha-327",
+    "email": "tango-829",
+    "first_name": "delta-666",
+    "last_name": "victor-867",
+    "custom_fields": {
+      "key_0": "alpha-301"
+    },
+    "href": "tango-647"
+  },
+  {
+    "id": "quebec-412",
+    "email": "uniform-765",
+    "first_name": "xray-826",
+    "last_name": "lima-199",
+    "custom_fields": {},
+    "href": "charlie-148"
+  }
+]

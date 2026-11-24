@@ -1,0 +1,26 @@
+[
+  {
+    "permType": "alpha-928",
+    "targetUserId": "whiskey-469",
+    "permStringValue": "echo-323",
+    "hasPermission": true
+  },
+  {
+    "permType": "uniform-148",
+    "targetUserId": "uniform-668",
+    "permStringValue": "lima-887",
+    "hasPermission": false
+  },
+  {
+    "permType": "charlie-629",
+    "targetUserId": "zulu-733",
+    "permStringValue": "juliet-552",
+    "hasPermission": true
+  },
+  {
+    "permType": "november-822",
+    "targetUserId": "bravo-239",
+    "permStringValue": "india-626",
+    "hasPermission": false
+  }
+]

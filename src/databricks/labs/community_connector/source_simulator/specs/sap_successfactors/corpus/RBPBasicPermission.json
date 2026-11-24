@@ -1,0 +1,26 @@
+[
+  {
+    "permissionId": 66311,
+    "permissionType": "india-527",
+    "permissionStringValue": "bravo-264",
+    "permissionLongValue": 35088
+  },
+  {
+    "permissionId": 19798,
+    "permissionType": "victor-578",
+    "permissionStringValue": "zulu-954",
+    "permissionLongValue": 62093
+  },
+  {
+    "permissionId": 86428,
+    "permissionType": "india-411",
+    "permissionStringValue": "mike-518",
+    "permissionLongValue": 23358
+  },
+  {
+    "permissionId": 19493,
+    "permissionType": "oscar-956",
+    "permissionStringValue": "papa-730",
+    "permissionLongValue": 6039
+  }
+]

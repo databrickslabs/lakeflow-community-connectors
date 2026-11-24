@@ -1,0 +1,10 @@
+[
+  {"date": "2026-06-14", "count": 4, "segment": "new"},
+  {"date": "2026-06-15", "count": 5, "segment": "returning"},
+  {"date": "2026-06-16", "count": 4, "segment": "paying"},
+  {"date": "2026-06-17", "count": 4, "segment": "organic"},
+  {"date": "2026-06-18", "count": 4, "segment": "all"},
+  {"date": "2026-06-19", "count": 5, "segment": "new"},
+  {"date": "2026-06-20", "count": 4, "segment": "returning"},
+  {"date": "2026-06-21", "count": 4, "segment": "paying"}
+]

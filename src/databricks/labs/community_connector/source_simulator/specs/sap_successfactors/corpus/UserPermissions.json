@@ -1,0 +1,50 @@
+[
+  {
+    "userId": 98335,
+    "username": 97309,
+    "firstName": 54075,
+    "lastName": 24386,
+    "email": 72513,
+    "department": 64667,
+    "division": 70561,
+    "location": 12816,
+    "jobCode": 91980,
+    "status": 42453
+  },
+  {
+    "userId": 16032,
+    "username": 46664,
+    "firstName": 82261,
+    "lastName": 8882,
+    "email": 569,
+    "department": 21348,
+    "division": 1825,
+    "location": 21179,
+    "jobCode": 99926,
+    "status": 33715
+  },
+  {
+    "userId": 86665,
+    "username": 74271,
+    "firstName": 77933,
+    "lastName": 11335,
+    "email": 97022,
+    "department": 56002,
+    "division": 27685,
+    "location": 74535,
+    "jobCode": 27352,
+    "status": 79370
+  },
+  {
+    "userId": 62493,
+    "username": 81970,
+    "firstName": 76788,
+    "lastName": 41230,
+    "email": 78076,
+    "department": 88401,
+    "division": 46280,
+    "location": 86744,
+    "jobCode": 50981,
+    "status": 95752
+  }
+]

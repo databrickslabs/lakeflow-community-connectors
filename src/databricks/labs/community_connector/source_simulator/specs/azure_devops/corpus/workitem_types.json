@@ -1,0 +1,128 @@
+[
+  {
+    "name": "november-424",
+    "referenceName": "mike-845",
+    "description": "charlie-814",
+    "color": "mike-640",
+    "icon": {
+      "id": "papa-257",
+      "url": "papa-844"
+    },
+    "isDisabled": false,
+    "fields": [
+      {
+        "referenceName": "hotel-435",
+        "name": "romeo-274",
+        "type": "bravo-434",
+        "readOnly": false,
+        "required": true,
+        "defaultValue": "romeo-728",
+        "helpText": "alpha-695"
+      },
+      {
+        "referenceName": "kilo-599",
+        "name": "zulu-865",
+        "type": "papa-620",
+        "readOnly": false,
+        "required": true,
+        "defaultValue": "kilo-128",
+        "helpText": "delta-841"
+      }
+    ],
+    "states": [
+      {
+        "name": "victor-924",
+        "color": "victor-802",
+        "category": "kilo-554"
+      }
+    ],
+    "url": "oscar-141",
+    "organization": "victor-887",
+    "project_name": "alpha-757"
+  },
+  {
+    "name": "kilo-516",
+    "referenceName": "xray-164",
+    "description": "delta-387",
+    "color": "charlie-177",
+    "icon": {
+      "id": "charlie-514",
+      "url": "mike-729"
+    },
+    "isDisabled": true,
+    "fields": [],
+    "states": [
+      {
+        "name": "kilo-729",
+        "color": "bravo-736",
+        "category": "foxtrot-866"
+      }
+    ],
+    "url": "charlie-965",
+    "organization": "sierra-802",
+    "project_name": "alpha-503"
+  },
+  {
+    "name": "delta-140",
+    "referenceName": "xray-169",
+    "description": "alpha-710",
+    "color": "yankee-111",
+    "icon": {
+      "id": "papa-390",
+      "url": "lima-825"
+    },
+    "isDisabled": false,
+    "fields": [
+      {
+        "referenceName": "foxtrot-482",
+        "name": "romeo-513",
+        "type": "alpha-124",
+        "readOnly": true,
+        "required": true,
+        "defaultValue": "echo-640",
+        "helpText": "oscar-287"
+      }
+    ],
+    "states": [],
+    "url": "quebec-366",
+    "organization": "delta-972",
+    "project_name": "romeo-776"
+  },
+  {
+    "name": "mike-314",
+    "referenceName": "sierra-767",
+    "description": "sierra-799",
+    "color": "whiskey-944",
+    "icon": {
+      "id": "xray-516",
+      "url": "juliet-465"
+    },
+    "isDisabled": false,
+    "fields": [
+      {
+        "referenceName": "yankee-297",
+        "name": "golf-857",
+        "type": "echo-567",
+        "readOnly": false,
+        "required": true,
+        "defaultValue": "uniform-650",
+        "helpText": "papa-263"
+      }
+    ],
+    "states": [
+      {
+        "name": "whiskey-420",
+        "color": "uniform-230",
+        "category": "whiskey-241"
+      },
+      {
+        "name": "juliet-898",
+        "color": "mike-221",
+        "category": "uniform-324"
+      }
+    ],
+    "url": "zulu-328",
+    "organization": "yankee-903",
+    "project_name": "foxtrot-725"
+  }
+]

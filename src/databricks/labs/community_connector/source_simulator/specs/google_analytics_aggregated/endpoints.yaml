@@ -1,0 +1,26 @@
+# Google Analytics Data API v1beta.
+#
+# Two hosts:
+# * https://oauth2.googleapis.com/token — service account JWT-bearer flow
+# * https://analyticsdata.googleapis.com/v1beta/...
+
+endpoints:
+  # OAuth token (service account JWT exchange).
+  - path: /token
+    method: POST
+    corpus: oauth_token
+    response: {single_entity: true, pagination_style: none}
+
+  # Property metadata — dimensions and metrics catalog.
+  - path: /v1beta/properties/{property_id}/metadata
+    method: GET
+    corpus: metadata
+    response: {single_entity: true, pagination_style: none}
+
+  # runReport — POST whose body's dimensions/metrics determine the response
+  # shape, so a static corpus can't satisfy it. The handler reads the body,
+  # builds matching headers, and emits stub rows. It also enforces the GA4
+  # ``dateRanges <= 4`` limit by returning 400 when exceeded.
+  - path: /v1beta/properties/{property_id}:runReport
+    method: POST
+    handler: databricks.labs.community_connector.source_simulator.specs.google_analytics_aggregated.handlers.run_report:serve_run_report

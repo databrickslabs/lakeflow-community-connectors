@@ -1,0 +1,62 @@
+[
+  {
+    "activityRecordId": "uniform-548",
+    "name": "hotel-305",
+    "goalId": 14901,
+    "devGoalId": 45836,
+    "statusRecordId": "foxtrot-259",
+    "subjectUserAssignmentUuid": "whiskey-360",
+    "meetingOwnerAssignmentUuid": "delta-240",
+    "isAchievement": true,
+    "achievementDate": "bravo-688",
+    "createdDate": "quebec-890",
+    "lastModifiedDate": "lima-575",
+    "createdBy": "oscar-794",
+    "lastModifiedBy": "delta-338"
+  },
+  {
+    "activityRecordId": "papa-849",
+    "name": "zulu-421",
+    "goalId": 53469,
+    "devGoalId": 47472,
+    "statusRecordId": "mike-815",
+    "subjectUserAssignmentUuid": "yankee-260",
+    "meetingOwnerAssignmentUuid": "zulu-839",
+    "isAchievement": true,
+    "achievementDate": "mike-476",
+    "createdDate": "golf-636",
+    "lastModifiedDate": "mike-625",
+    "createdBy": "romeo-805",
+    "lastModifiedBy": "delta-912"
+  },
+  {
+    "activityRecordId": "lima-282",
+    "name": "juliet-541",
+    "goalId": 86450,
+    "devGoalId": 22312,
+    "statusRecordId": "tango-519",
+    "subjectUserAssignmentUuid": "oscar-809",
+    "meetingOwnerAssignmentUuid": "echo-195",
+    "isAchievement": false,
+    "achievementDate": "india-945",
+    "createdDate": "quebec-561",
+    "lastModifiedDate": "oscar-390",
+    "createdBy": "tango-938",
+    "lastModifiedBy": "lima-448"
+  },
+  {
+    "activityRecordId": "alpha-557",
+    "name": "golf-123",
+    "goalId": 90751,
+    "devGoalId": 21328,
+    "statusRecordId": "echo-153",
+    "subjectUserAssignmentUuid": "charlie-402",
+    "meetingOwnerAssignmentUuid": "papa-659",
+    "isAchievement": true,
+    "achievementDate": "oscar-294",
+    "createdDate": "uniform-959",
+    "lastModifiedDate": "hotel-784",
+    "createdBy": "foxtrot-918",
+    "lastModifiedBy": "lima-701"
+  }
+]

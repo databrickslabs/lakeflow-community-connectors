@@ -2,6 +2,22 @@
 
 This directory contains utility scripts for the Lakeflow Community Connectors project.
 
+## build_wheelhouse.py
+
+Builds the prebuilt wheels under `wheelhouse/` that the Databricks managed ingestion wizard installs, and checks that they match the source. See `CONTRIBUTING.md` (Prebuilt connector wheels, Versioning).
+
+```bash
+python3 tools/scripts/build_wheelhouse.py <source_name>     # rebuild one connector
+python3 tools/scripts/build_wheelhouse.py --framework       # rebuild the framework
+python3 tools/scripts/build_wheelhouse.py all               # every connector and the framework
+
+# Don't write; fail if a wheel is missing, stale, changed without a version bump vs master,
+# or if a connector's framework range excludes the framework version
+python3 tools/scripts/build_wheelhouse.py <source_name> --check --base origin/master
+```
+
+A committed wheel is kept when nothing that affects pipelines changed (docs, the README text in `METADATA`, the build tool version, and the test-only source simulator are ignored), so rebuilding unchanged code doesn't churn binaries.
+
 ## merge_python_source.py
 
 Merges multiple source files into a single deployable Python file. This is useful for creating standalone source connectors that can be deployed without the full project structure.
@@ -12,14 +28,14 @@ By default, the merged file is saved as `_generated_{source_name}_python_source.
 
 The script combines three essential components into one file:
 
-1. **libs/utils.py** - Parsing utilities for converting JSON data to PySpark types
-2. **sources/{source_name}/{source_name}.py** - The source connector implementation (LakeflowConnect class)
-3. **pipeline/lakeflow_python_source.py** - PySpark DataSource registration code
+1. **src/databricks/labs/community_connector/libs/utils.py** - Parsing utilities for converting JSON data to PySpark types
+2. **src/databricks/labs/community_connector/sources/{source_name}/{source_name}.py** - The source connector implementation (LakeflowConnect class)
+3. **src/databricks/labs/community_connector/sparkpds/lakeflow_datasource.py** - PySpark DataSource registration code
 
 ### Usage
 
 ```bash
-# Basic usage - saves to sources/{source_name}/_generated_{source_name}_python_source.py
+# Basic usage - saves to src/databricks/labs/community_connector/sources/{source_name}/_generated_{source_name}_python_source.py
 python3 tools/scripts/merge_python_source.py <source_name>
 
 # Regenerate all sources at once (saves to default location, -o is not supported)
@@ -32,10 +48,10 @@ python3 tools/scripts/merge_python_source.py <source_name> -o <output_file>
 ### Examples
 
 ```bash
-# Merge Zendesk source (saves to sources/zendesk/_generated_zendesk_python_source.py)
+# Merge Zendesk source (saves to src/databricks/labs/community_connector/sources/zendesk/_generated_zendesk_python_source.py)
 python3 tools/scripts/merge_python_source.py zendesk
 
-# Merge Example source (saves to sources/example/_generated_example_python_source.py)
+# Merge Example source (saves to src/databricks/labs/community_connector/sources/example/_generated_example_python_source.py)
 python3 tools/scripts/merge_python_source.py example
 
 # Regenerate all sources (auto-discovers connectors, saves to default locations)
@@ -48,7 +64,7 @@ python3 tools/scripts/merge_python_source.py zendesk -o output/zendesk_merged.py
 ### Requirements
 
 - Python 3.6 or higher (use `python3` command if your system has both Python 2 and 3)
-- The source must exist in `sources/{source_name}/{source_name}.py`
+- The source must exist in `src/databricks/labs/community_connector/sources/{source_name}/{source_name}.py`
 
 ### Output Format
 
@@ -75,25 +91,25 @@ def register_lakeflow_source(spark):
     """Register the Lakeflow Python source with Spark."""
 
     ########################################################
-    # libs/utils.py
+    # src/databricks/labs/community_connector/libs/utils.py
     ########################################################
 
     def parse_value(value, field_type):
         # ... content from libs/utils.py ...
     
     ########################################################
-    # sources/{source_name}/{source_name}.py
+    # src/databricks/labs/community_connector/sources/{source_name}/{source_name}.py
     ########################################################
 
     class LakeflowConnect:
         # ... content from sources/{source_name}/{source_name}.py ...
 
     ########################################################
-    # pipeline/lakeflow_python_source.py
+    # src/databricks/labs/community_connector/sparkpds/lakeflow_datasource.py
     ########################################################
 
     class LakeflowSource(DataSource):
-        # ... content from pipeline/lakeflow_python_source.py ...
+        # ... content from sparkpds/lakeflow_datasource.py ...
     
     # Register the data source with Spark
     spark.dataSource.register(LakeflowSource)

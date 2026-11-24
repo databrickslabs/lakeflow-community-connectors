@@ -1,0 +1,70 @@
+[
+  {
+    "id": "november-931",
+    "survey_id": "golf-385",
+    "name": "alpha-318",
+    "type": "yankee-307",
+    "status": "delta-232",
+    "redirect_url": "yankee-647",
+    "thank_you_page": {
+      "is_enabled": false,
+      "message": "oscar-564"
+    },
+    "response_count": 29137,
+    "date_created": "india-141",
+    "date_modified": "oscar-324",
+    "url": "india-728",
+    "href": "victor-315"
+  },
+  {
+    "id": "bravo-390",
+    "survey_id": "papa-678",
+    "name": "tango-894",
+    "type": "november-744",
+    "status": "zulu-768",
+    "redirect_url": "sierra-987",
+    "thank_you_page": {
+      "is_enabled": true,
+      "message": "hotel-705"
+    },
+    "response_count": 24662,
+    "date_created": "romeo-755",
+    "date_modified": "november-599",
+    "url": "alpha-144",
+    "href": "bravo-114"
+  },
+  {
+    "id": "mike-357",
+    "survey_id": "delta-146",
+    "name": "victor-148",
+    "type": "xray-958",
+    "status": "uniform-148",
+    "redirect_url": "whiskey-720",
+    "thank_you_page": {
+      "is_enabled": true,
+      "message": "romeo-172"
+    },
+    "response_count": 35823,
+    "date_created": "yankee-884",
+    "date_modified": "uniform-454",
+    "url": "lima-197",
+    "href": "zulu-372"
+  },
+  {
+    "id": "quebec-994",
+    "survey_id": "whiskey-364",
+    "name": "kilo-415",
+    "type": "papa-738",
+    "status": "quebec-268",
+    "redirect_url": "golf-785",
+    "thank_you_page": {
+      "is_enabled": false,
+      "message": "juliet-301"
+    },
+    "response_count": 18782,
+    "date_created": "yankee-241",
+    "date_modified": "bravo-550",
+    "url": "tango-611",
+    "href": "india-773"
+  }
+]

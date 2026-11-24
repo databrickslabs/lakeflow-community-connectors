@@ -1,0 +1,58 @@
+[
+  {
+    "OnboardingNewHireActivitiesStep_processStepId": 61177,
+    "OnboardingProcess_onboardingProcessId": 25520,
+    "activityId": 12572,
+    "activityStatus": "echo-349",
+    "createdBy": "victor-416",
+    "createdDateTime": "foxtrot-252",
+    "eventTriggered": true,
+    "externalName": "charlie-124",
+    "lastModifiedBy": "foxtrot-503",
+    "lastModifiedDateTime": "quebec-291",
+    "mdfSystemRecordStatus": "charlie-903",
+    "optional": true
+  },
+  {
+    "OnboardingNewHireActivitiesStep_processStepId": 77666,
+    "OnboardingProcess_onboardingProcessId": 18248,
+    "activityId": 81226,
+    "activityStatus": "bravo-620",
+    "createdBy": "juliet-433",
+    "createdDateTime": "papa-983",
+    "eventTriggered": false,
+    "externalName": "oscar-946",
+    "lastModifiedBy": "alpha-964",
+    "lastModifiedDateTime": "sierra-310",
+    "mdfSystemRecordStatus": "kilo-453",
+    "optional": true
+  },
+  {
+    "OnboardingNewHireActivitiesStep_processStepId": 17380,
+    "OnboardingProcess_onboardingProcessId": 6200,
+    "activityId": 82872,
+    "activityStatus": "whiskey-159",
+    "createdBy": "papa-474",
+    "createdDateTime": "papa-775",
+    "eventTriggered": false,
+    "externalName": "oscar-964",
+    "lastModifiedBy": "kilo-780",
+    "lastModifiedDateTime": "echo-901",
+    "mdfSystemRecordStatus": "india-620",
+    "optional": false
+  },
+  {
+    "OnboardingNewHireActivitiesStep_processStepId": 63225,
+    "OnboardingProcess_onboardingProcessId": 25738,
+    "activityId": 77414,
+    "activityStatus": "bravo-460",
+    "createdBy": "charlie-715",
+    "createdDateTime": "charlie-374",
+    "eventTriggered": false,
+    "externalName": "kilo-206",
+    "lastModifiedBy": "charlie-361",
+    "lastModifiedDateTime": "whiskey-834",
+    "mdfSystemRecordStatus": "tango-827",
+    "optional": true
+  }
+]

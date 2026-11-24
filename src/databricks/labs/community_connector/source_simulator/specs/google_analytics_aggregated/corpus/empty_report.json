@@ -1,0 +1,8 @@
+{
+  "dimensionHeaders": [],
+  "metricHeaders": [],
+  "rows": [],
+  "rowCount": 0,
+  "metadata": {"currencyCode": "USD", "timeZone": "UTC"},
+  "kind": "analyticsData#runReport"
+}

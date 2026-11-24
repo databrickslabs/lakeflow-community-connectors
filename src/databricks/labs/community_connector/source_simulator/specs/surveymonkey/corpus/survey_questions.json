@@ -1,0 +1,287 @@
+[
+  {
+    "id": "tango-296",
+    "survey_id": "kilo-537",
+    "page_id": "xray-758",
+    "position": 40494,
+    "visible": false,
+    "family": "tango-531",
+    "subtype": "india-101",
+    "heading": "mike-764",
+    "href": "quebec-186",
+    "sorting": {
+      "type": "kilo-687",
+      "ignore_last": true
+    },
+    "required": {
+      "text": "xray-861",
+      "type": "alpha-896",
+      "amount": "echo-136"
+    },
+    "validation": {
+      "type": "juliet-397",
+      "text": "bravo-623",
+      "min": "november-946",
+      "max": "alpha-729",
+      "sum": 53428,
+      "sum_text": "oscar-283"
+    },
+    "forced_ranking": true,
+    "answers": {
+      "choices": [
+        {
+          "id": "zulu-742",
+          "position": 53702,
+          "text": "juliet-765",
+          "visible": true,
+          "is_na": true,
+          "weight": 54298
+        }
+      ],
+      "rows": [],
+      "cols": [
+        {
+          "id": "whiskey-301",
+          "position": 86035,
+          "text": "bravo-829",
+          "visible": false,
+          "is_na": true,
+          "weight": 77625
+        }
+      ],
+      "other": {
+        "id": "alpha-866",
+        "text": "quebec-214",
+        "visible": true,
+        "is_answer_choice": true,
+        "position": 33380
+      }
+    }
+  },
+  {
+    "id": "foxtrot-172",
+    "survey_id": "charlie-737",
+    "page_id": "echo-267",
+    "position": 37865,
+    "visible": false,
+    "family": "sierra-587",
+    "subtype": "uniform-455",
+    "heading": "victor-377",
+    "href": "juliet-119",
+    "sorting": {
+      "type": "zulu-849",
+      "ignore_last": true
+    },
+    "required": {
+      "text": "victor-429",
+      "type": "bravo-310",
+      "amount": "delta-960"
+    },
+    "validation": {
+      "type": "india-852",
+      "text": "juliet-898",
+      "min": "uniform-707",
+      "max": "romeo-123",
+      "sum": 78831,
+      "sum_text": "papa-501"
+    },
+    "forced_ranking": false,
+    "answers": {
+      "choices": [
+        {
+          "id": "sierra-773",
+          "position": 69718,
+          "text": "hotel-104",
+          "visible": true,
+          "is_na": false,
+          "weight": 91654
+        }
+      ],
+      "rows": [
+        {
+          "id": "quebec-104",
+          "position": 31079,
+          "text": "kilo-640",
+          "visible": true,
+          "is_na": false,
+          "weight": 72407
+        },
+        {
+          "id": "foxtrot-345",
+          "position": 16192,
+          "text": "lima-247",
+          "visible": false,
+          "is_na": true,
+          "weight": 30580
+        }
+      ],
+      "cols": [
+        {
+          "id": "lima-487",
+          "position": 10938,
+          "text": "hotel-821",
+          "visible": false,
+          "is_na": false,
+          "weight": 50612
+        },
+        {
+          "id": "uniform-158",
+          "position": 39125,
+          "text": "bravo-189",
+          "visible": true,
+          "is_na": true,
+          "weight": 81983
+        }
+      ],
+      "other": {
+        "id": "foxtrot-559",
+        "text": "whiskey-646",
+        "visible": true,
+        "is_answer_choice": false,
+        "position": 68467
+      }
+    }
+  },
+  {
+    "id": "echo-375",
+    "survey_id": "november-429",
+    "page_id": "zulu-889",
+    "position": 96173,
+    "visible": false,
+    "family": "charlie-287",
+    "subtype": "uniform-844",
+    "heading": "zulu-408",
+    "href": "mike-892",
+    "sorting": {
+      "type": "sierra-846",
+      "ignore_last": false
+    },
+    "required": {
+      "text": "sierra-801",
+      "type": "oscar-615",
+      "amount": "kilo-269"
+    },
+    "validation": {
+      "type": "yankee-877",
+      "text": "yankee-738",
+      "min": "foxtrot-331",
+      "max": "romeo-345",
+      "sum": 34068,
+      "sum_text": "tango-159"
+    },
+    "forced_ranking": true,
+    "answers": {
+      "choices": [
+        {
+          "id": "alpha-676",
+          "position": 80024,
+          "text": "papa-957",
+          "visible": false,
+          "is_na": false,
+          "weight": 91700
+        },
+        {
+          "id": "golf-219",
+          "position": 25468,
+          "text": "golf-963",
+          "visible": false,
+          "is_na": true,
+          "weight": 92196
+        }
+      ],
+      "rows": [
+        {
+          "id": "charlie-854",
+          "position": 91598,
+          "text": "bravo-585",
+          "visible": true,
+          "is_na": true,
+          "weight": 79717
+        }
+      ],
+      "cols": [
+        {
+          "id": "bravo-863",
+          "position": 17439,
+          "text": "romeo-211",
+          "visible": true,
+          "is_na": true,
+          "weight": 12460
+        },
+        {
+          "id": "zulu-846",
+          "position": 77399,
+          "text": "xray-351",
+          "visible": false,
+          "is_na": false,
+          "weight": 90397
+        }
+      ],
+      "other": {
+        "id": "india-555",
+        "text": "november-564",
+        "visible": false,
+        "is_answer_choice": true,
+        "position": 66944
+      }
+    }
+  },
+  {
+    "id": "golf-666",
+    "survey_id": "alpha-531",
+    "page_id": "bravo-435",
+    "position": 64568,
+    "visible": true,
+    "family": "victor-609",
+    "subtype": "charlie-436",
+    "heading": "victor-321",
+    "href": "oscar-546",
+    "sorting": {
+      "type": "yankee-505",
+      "ignore_last": false
+    },
+    "required": {
+      "text": "victor-479",
+      "type": "quebec-753",
+      "amount": "india-532"
+    },
+    "validation": {
+      "type": "echo-397",
+      "text": "tango-248",
+      "min": "papa-246",
+      "max": "kilo-213",
+      "sum": 68465,
+      "sum_text": "india-537"
+    },
+    "forced_ranking": false,
+    "answers": {
+      "choices": [
+        {
+          "id": "papa-160",
+          "position": 56362,
+          "text": "mike-855",
+          "visible": false,
+          "is_na": false,
+          "weight": 40541
+        },
+        {
+          "id": "charlie-381",
+          "position": 93099,
+          "text": "whiskey-337",
+          "visible": true,
+          "is_na": true,
+          "weight": 28855
+        }
+      ],
+      "rows": [],
+      "cols": [],
+      "other": {
+        "id": "echo-562",
+        "text": "sierra-852",
+        "visible": false,
+        "is_answer_choice": true,
+        "position": 8228
+      }
+    }
+  }
+]

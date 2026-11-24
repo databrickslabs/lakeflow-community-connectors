@@ -1,0 +1,51 @@
+[
+  {
+    "contact_id": "yankee-626",
+    "first_name": "yankee-893",
+    "last_name": "mike-688",
+    "email": "foxtrot-853",
+    "phone": "papa-216",
+    "ext_ref": "uniform-447",
+    "language": "whiskey-578",
+    "unsubscribed": true,
+    "embedded_data": {}
+  },
+  {
+    "contact_id": "zulu-882",
+    "first_name": "charlie-719",
+    "last_name": "romeo-789",
+    "email": "tango-752",
+    "phone": "golf-263",
+    "ext_ref": "india-711",
+    "language": "echo-776",
+    "unsubscribed": true,
+    "embedded_data": {}
+  },
+  {
+    "contact_id": "papa-360",
+    "first_name": "juliet-602",
+    "last_name": "papa-797",
+    "email": "uniform-671",
+    "phone": "xray-873",
+    "ext_ref": "hotel-381",
+    "language": "sierra-705",
+    "unsubscribed": false,
+    "embedded_data": {
+      "key_0": "oscar-191",
+      "key_1": "kilo-684"
+    }
+  },
+  {
+    "contact_id": "quebec-372",
+    "first_name": "bravo-191",
+    "last_name": "charlie-509",
+    "email": "papa-140",
+    "phone": "victor-230",
+    "ext_ref": "golf-877",
+    "language": "alpha-797",
+    "unsubscribed": true,
+    "embedded_data": {
+      "key_0": "papa-423"
+    }
+  }
+]

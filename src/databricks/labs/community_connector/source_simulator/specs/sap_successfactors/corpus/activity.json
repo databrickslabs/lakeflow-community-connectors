@@ -1,0 +1,42 @@
+[
+  {
+    "activityId": 63427,
+    "activityName": "juliet-686",
+    "createdBy": "juliet-519",
+    "createdDateTime": "sierra-164",
+    "lastModifiedBy": "kilo-305",
+    "lastModifiedDateTime": "foxtrot-350",
+    "mdfSystemRecordStatus": "bravo-762",
+    "subjectUserId": "delta-973"
+  },
+  {
+    "activityId": 43783,
+    "activityName": "india-927",
+    "createdBy": "juliet-562",
+    "createdDateTime": "zulu-642",
+    "lastModifiedBy": "lima-693",
+    "lastModifiedDateTime": "golf-275",
+    "mdfSystemRecordStatus": "zulu-296",
+    "subjectUserId": "sierra-824"
+  },
+  {
+    "activityId": 12614,
+    "activityName": "whiskey-925",
+    "createdBy": "india-900",
+    "createdDateTime": "tango-839",
+    "lastModifiedBy": "charlie-605",
+    "lastModifiedDateTime": "lima-356",
+    "mdfSystemRecordStatus": "delta-473",
+    "subjectUserId": "hotel-366"
+  },
+  {
+    "activityId": 99117,
+    "activityName": "romeo-927",
+    "createdBy": "kilo-524",
+    "createdDateTime": "whiskey-635",
+    "lastModifiedBy": "xray-716",
+    "lastModifiedDateTime": "golf-665",
+    "mdfSystemRecordStatus": "whiskey-273",
+    "subjectUserId": "juliet-609"
+  }
+]

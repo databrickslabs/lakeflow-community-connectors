@@ -1,0 +1,22 @@
+{
+    "campaigns": {
+        "max_records_per_batch": "500",
+        "window_seconds": "315360000",
+        "start_timestamp": "2020-01-01T00:00:00+00:00"
+    },
+    "reports": {
+        "max_records_per_batch": "500",
+        "window_seconds": "315360000",
+        "start_timestamp": "2020-01-01T00:00:00+00:00"
+    },
+    "lists": {
+        "max_records_per_batch": "500",
+        "window_seconds": "315360000",
+        "start_timestamp": "2020-01-01T00:00:00+00:00"
+    },
+    "members": {
+        "max_records_per_batch": "500",
+        "window_seconds": "315360000",
+        "start_timestamp": "2020-01-01T00:00:00+00:00"
+    }
+}

@@ -1,0 +1,38 @@
+[
+  {
+    "jobReqId": 2943,
+    "operatorRole": "delta-466",
+    "userGroupId": 76004,
+    "userGroupName": "yankee-346",
+    "isAdminSelected": false,
+    "isDisabled": false,
+    "adminSelectedGroupToBeRemoved": false
+  },
+  {
+    "jobReqId": 72107,
+    "operatorRole": "foxtrot-658",
+    "userGroupId": 95109,
+    "userGroupName": "tango-368",
+    "isAdminSelected": true,
+    "isDisabled": true,
+    "adminSelectedGroupToBeRemoved": true
+  },
+  {
+    "jobReqId": 18540,
+    "operatorRole": "charlie-248",
+    "userGroupId": 50217,
+    "userGroupName": "alpha-380",
+    "isAdminSelected": false,
+    "isDisabled": true,
+    "adminSelectedGroupToBeRemoved": true
+  },
+  {
+    "jobReqId": 97452,
+    "operatorRole": "echo-335",
+    "userGroupId": 13741,
+    "userGroupName": "hotel-329",
+    "isAdminSelected": false,
+    "isDisabled": false,
+    "adminSelectedGroupToBeRemoved": false
+  }
+]

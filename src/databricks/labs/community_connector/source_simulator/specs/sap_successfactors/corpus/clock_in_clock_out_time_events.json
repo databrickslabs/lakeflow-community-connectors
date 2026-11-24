@@ -1,0 +1,34 @@
+[
+  {
+    "id": "lima-764",
+    "assignmentId": "victor-219",
+    "typeCode": "xray-706",
+    "timestamp": "echo-925",
+    "terminalId": "romeo-301",
+    "timeTypeCode": "sierra-118"
+  },
+  {
+    "id": "juliet-787",
+    "assignmentId": "oscar-778",
+    "typeCode": "india-281",
+    "timestamp": "mike-853",
+    "terminalId": "echo-799",
+    "timeTypeCode": "yankee-428"
+  },
+  {
+    "id": "yankee-442",
+    "assignmentId": "juliet-315",
+    "typeCode": "whiskey-620",
+    "timestamp": "yankee-925",
+    "terminalId": "uniform-670",
+    "timeTypeCode": "charlie-959"
+  },
+  {
+    "id": "echo-186",
+    "assignmentId": "hotel-528",
+    "typeCode": "romeo-792",
+    "timestamp": "lima-103",
+    "terminalId": "whiskey-405",
+    "timeTypeCode": "delta-618"
+  }
+]

@@ -1,0 +1,107 @@
+# HubSpot CRM API v3.
+#
+# Connector flow:
+# * ``list_tables`` → GET ``/crm/v3/schemas`` to discover custom objects
+#   (we return empty results so the connector falls back to the standard
+#   set of 9 CRM objects).
+# * ``get_table_schema`` → GET ``/properties/v2/{type}/properties`` to
+#   discover field types (we return [] so the connector builds a minimal
+#   schema with just id/createdAt/updatedAt/archived/associations/properties).
+# * ``read_table`` → GET ``/crm/v3/objects/{table}`` first call;
+#   POST ``/crm/v3/objects/{table}/search`` for incremental reads.
+#
+# Response wrapper for listing endpoints: ``{"results": [...], "paging": {}}``
+# with paging empty so the connector terminates after one page.
+
+endpoints:
+  # Discovery — empty schemas → no custom objects.
+  - path: /crm/v3/schemas
+    method: GET
+    corpus: schemas
+    response:
+      single_entity: true
+      pagination_style: none
+
+  # Discovery — properties per object type. The connector handles an empty
+  # list by building the minimal base schema.
+  - path: /properties/v2/{object_type}/properties
+    method: GET
+    corpus: properties
+    response:
+      pagination_style: none
+
+  # Per-table listing endpoints (GET).
+  - path: /crm/v3/objects/contacts
+    method: GET
+    corpus: contacts
+    response: {pagination_style: none, wrapper: {records_key: results, extras: {paging: {}}}}
+  - path: /crm/v3/objects/companies
+    method: GET
+    corpus: companies
+    response: {pagination_style: none, wrapper: {records_key: results, extras: {paging: {}}}}
+  - path: /crm/v3/objects/deals
+    method: GET
+    corpus: deals
+    response: {pagination_style: none, wrapper: {records_key: results, extras: {paging: {}}}}
+  - path: /crm/v3/objects/tickets
+    method: GET
+    corpus: tickets
+    response: {pagination_style: none, wrapper: {records_key: results, extras: {paging: {}}}}
+  - path: /crm/v3/objects/calls
+    method: GET
+    corpus: calls
+    response: {pagination_style: none, wrapper: {records_key: results, extras: {paging: {}}}}
+  - path: /crm/v3/objects/emails
+    method: GET
+    corpus: emails
+    response: {pagination_style: none, wrapper: {records_key: results, extras: {paging: {}}}}
+  - path: /crm/v3/objects/meetings
+    method: GET
+    corpus: meetings
+    response: {pagination_style: none, wrapper: {records_key: results, extras: {paging: {}}}}
+  - path: /crm/v3/objects/tasks
+    method: GET
+    corpus: tasks
+    response: {pagination_style: none, wrapper: {records_key: results, extras: {paging: {}}}}
+  - path: /crm/v3/objects/notes
+    method: GET
+    corpus: notes
+    response: {pagination_style: none, wrapper: {records_key: results, extras: {paging: {}}}}
+
+  # Search endpoint (POST) — used for incremental reads. Same wrapper.
+  - path: /crm/v3/objects/contacts/search
+    method: POST
+    corpus: contacts
+    response: {pagination_style: none, wrapper: {records_key: results, extras: {paging: {}, total: 0}}}
+  - path: /crm/v3/objects/companies/search
+    method: POST
+    corpus: companies
+    response: {pagination_style: none, wrapper: {records_key: results, extras: {paging: {}, total: 0}}}
+  - path: /crm/v3/objects/deals/search
+    method: POST
+    corpus: deals
+    response: {pagination_style: none, wrapper: {records_key: results, extras: {paging: {}, total: 0}}}
+  - path: /crm/v3/objects/tickets/search
+    method: POST
+    corpus: tickets
+    response: {pagination_style: none, wrapper: {records_key: results, extras: {paging: {}, total: 0}}}
+  - path: /crm/v3/objects/calls/search
+    method: POST
+    corpus: calls
+    response: {pagination_style: none, wrapper: {records_key: results, extras: {paging: {}, total: 0}}}
+  - path: /crm/v3/objects/emails/search
+    method: POST
+    corpus: emails
+    response: {pagination_style: none, wrapper: {records_key: results, extras: {paging: {}, total: 0}}}
+  - path: /crm/v3/objects/meetings/search
+    method: POST
+    corpus: meetings
+    response: {pagination_style: none, wrapper: {records_key: results, extras: {paging: {}, total: 0}}}
+  - path: /crm/v3/objects/tasks/search
+    method: POST
+    corpus: tasks
+    response: {pagination_style: none, wrapper: {records_key: results, extras: {paging: {}, total: 0}}}
+  - path: /crm/v3/objects/notes/search
+    method: POST
+    corpus: notes
+    response: {pagination_style: none, wrapper: {records_key: results, extras: {paging: {}, total: 0}}}

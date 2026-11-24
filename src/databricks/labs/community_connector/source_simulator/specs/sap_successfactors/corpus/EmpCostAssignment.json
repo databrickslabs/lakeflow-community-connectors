@@ -1,0 +1,58 @@
+[
+  {
+    "effectiveStartDate": "sierra-650",
+    "worker": "hotel-745",
+    "companyCode": "bravo-334",
+    "createdBy": "charlie-644",
+    "createdDateTime": "november-668",
+    "doNotSyncFromPositionCostAssignment": false,
+    "effectiveEndDate": "zulu-110",
+    "lastModifiedBy": "sierra-794",
+    "lastModifiedDateTime": "yankee-163",
+    "mdfSystemRecordStatus": "victor-996",
+    "mdfSystemStatus": "alpha-349",
+    "skipValidationDerivation": true
+  },
+  {
+    "effectiveStartDate": "sierra-270",
+    "worker": "yankee-491",
+    "companyCode": "tango-930",
+    "createdBy": "charlie-382",
+    "createdDateTime": "whiskey-615",
+    "doNotSyncFromPositionCostAssignment": true,
+    "effectiveEndDate": "whiskey-959",
+    "lastModifiedBy": "xray-980",
+    "lastModifiedDateTime": "charlie-638",
+    "mdfSystemRecordStatus": "delta-556",
+    "mdfSystemStatus": "papa-919",
+    "skipValidationDerivation": false
+  },
+  {
+    "effectiveStartDate": "delta-257",
+    "worker": "kilo-569",
+    "companyCode": "november-252",
+    "createdBy": "papa-406",
+    "createdDateTime": "bravo-741",
+    "doNotSyncFromPositionCostAssignment": true,
+    "effectiveEndDate": "whiskey-339",
+    "lastModifiedBy": "mike-261",
+    "lastModifiedDateTime": "bravo-432",
+    "mdfSystemRecordStatus": "uniform-399",
+    "mdfSystemStatus": "xray-410",
+    "skipValidationDerivation": true
+  },
+  {
+    "effectiveStartDate": "papa-305",
+    "worker": "golf-924",
+    "companyCode": "bravo-399",
+    "createdBy": "golf-849",
+    "createdDateTime": "india-652",
+    "doNotSyncFromPositionCostAssignment": true,
+    "effectiveEndDate": "papa-664",
+    "lastModifiedBy": "tango-709",
+    "lastModifiedDateTime": "hotel-622",
+    "mdfSystemRecordStatus": "uniform-238",
+    "mdfSystemStatus": "golf-808",
+    "skipValidationDerivation": false
+  }
+]

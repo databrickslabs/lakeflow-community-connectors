@@ -1,0 +1,38 @@
+[
+  {
+    "applicationId": 75315,
+    "currUserId": "quebec-619",
+    "offerDetailId": 49263,
+    "candidateName": "india-464",
+    "jobReqId": 40108,
+    "jobReqTitle": "quebec-222",
+    "targetUserId": "golf-902"
+  },
+  {
+    "applicationId": 23337,
+    "currUserId": "romeo-734",
+    "offerDetailId": 67906,
+    "candidateName": "zulu-988",
+    "jobReqId": 71877,
+    "jobReqTitle": "golf-550",
+    "targetUserId": "alpha-297"
+  },
+  {
+    "applicationId": 96794,
+    "currUserId": "xray-511",
+    "offerDetailId": 69723,
+    "candidateName": "kilo-779",
+    "jobReqId": 91830,
+    "jobReqTitle": "zulu-233",
+    "targetUserId": "hotel-356"
+  },
+  {
+    "applicationId": 90920,
+    "currUserId": "whiskey-921",
+    "offerDetailId": 76467,
+    "candidateName": "zulu-981",
+    "jobReqId": 54949,
+    "jobReqTitle": "sierra-137",
+    "targetUserId": "mike-981"
+  }
+]

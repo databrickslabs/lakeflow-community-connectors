@@ -1,0 +1,34 @@
+{
+  "version": 1,
+  "generated_at": "2026-05-28T12:45:33Z",
+  "endpoints": [
+    {
+      "method": "POST",
+      "spec_path": "/{tenant_id}/oauth2/v2.0/token",
+      "sample_url": "https://login.microsoftonline.com/72f988bf-86f1-41af-91ab-2d7cd011db47/oauth2/v2.0/token",
+      "status": "validated",
+      "calls": 3,
+      "matched": 3,
+      "mismatched": 0,
+      "no_spec": 0,
+      "issues": []
+    },
+    {
+      "method": "POST",
+      "spec_path": "/api/search/v2/query_with_cursor",
+      "sample_url": "https://admesbxscusins1.energy.azure.com/api/search/v2/query_with_cursor",
+      "status": "validated",
+      "calls": 18,
+      "matched": 18,
+      "mismatched": 0,
+      "no_spec": 0,
+      "issues": []
+    }
+  ],
+  "summary": {
+    "endpoints_total": 2,
+    "endpoints_validated": 2,
+    "endpoints_mismatched": 0,
+    "endpoints_missing_spec": 0
+  }
+}

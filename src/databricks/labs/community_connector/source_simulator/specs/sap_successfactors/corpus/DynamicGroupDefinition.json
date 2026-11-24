@@ -1,0 +1,38 @@
+[
+  {
+    "groupID": 65357,
+    "excludedPeoplePool1": "golf-659",
+    "excludedPeoplePool2": "uniform-242",
+    "excludedPeoplePool3": "lima-372",
+    "includedPeoplePool1": "hotel-986",
+    "includedPeoplePool2": "mike-745",
+    "includedPeoplePool3": "alpha-318"
+  },
+  {
+    "groupID": 89301,
+    "excludedPeoplePool1": "lima-164",
+    "excludedPeoplePool2": "sierra-932",
+    "excludedPeoplePool3": "whiskey-420",
+    "includedPeoplePool1": "tango-460",
+    "includedPeoplePool2": "quebec-599",
+    "includedPeoplePool3": "uniform-861"
+  },
+  {
+    "groupID": 36471,
+    "excludedPeoplePool1": "tango-633",
+    "excludedPeoplePool2": "hotel-349",
+    "excludedPeoplePool3": "hotel-556",
+    "includedPeoplePool1": "echo-229",
+    "includedPeoplePool2": "bravo-410",
+    "includedPeoplePool3": "delta-954"
+  },
+  {
+    "groupID": 99222,
+    "excludedPeoplePool1": "uniform-853",
+    "excludedPeoplePool2": "echo-379",
+    "excludedPeoplePool3": "lima-130",
+    "includedPeoplePool1": "juliet-128",
+    "includedPeoplePool2": "foxtrot-384",
+    "includedPeoplePool3": "alpha-559"
+  }
+]

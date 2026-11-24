@@ -1,0 +1,54 @@
+[
+  {
+    "timeAccount": {
+      "externalCode": "echo-630",
+      "externalName": "india-872",
+      "unit": "uniform-498"
+    },
+    "balances": {
+      "value": 341.3,
+      "formattedWithUnit": "echo-290",
+      "formattedWithUnitRoundedDown": "victor-869",
+      "asOfDate": "kilo-813"
+    }
+  },
+  {
+    "timeAccount": {
+      "externalCode": "alpha-445",
+      "externalName": "juliet-853",
+      "unit": "tango-306"
+    },
+    "balances": {
+      "value": 649.13,
+      "formattedWithUnit": "oscar-610",
+      "formattedWithUnitRoundedDown": "uniform-420",
+      "asOfDate": "golf-277"
+    }
+  },
+  {
+    "timeAccount": {
+      "externalCode": "oscar-392",
+      "externalName": "kilo-626",
+      "unit": "tango-127"
+    },
+    "balances": {
+      "value": 546.45,
+      "formattedWithUnit": "lima-774",
+      "formattedWithUnitRoundedDown": "tango-291",
+      "asOfDate": "yankee-128"
+    }
+  },
+  {
+    "timeAccount": {
+      "externalCode": "xray-814",
+      "externalName": "echo-681",
+      "unit": "romeo-120"
+    },
+    "balances": {
+      "value": 187.96,
+      "formattedWithUnit": "juliet-350",
+      "formattedWithUnitRoundedDown": "yankee-379",
+      "asOfDate": "delta-783"
+    }
+  }
+]

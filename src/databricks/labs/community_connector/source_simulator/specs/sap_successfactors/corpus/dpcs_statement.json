@@ -1,0 +1,50 @@
+[
+  {
+    "id": 61162,
+    "version": 72048,
+    "customFieldType": "alpha-624",
+    "template_id": 25614,
+    "template_name": "foxtrot-917",
+    "template_type": 32459,
+    "template_status": 67476,
+    "template_forceAccept": 19674,
+    "contents": "echo-108",
+    "attributes": "echo-228"
+  },
+  {
+    "id": 46624,
+    "version": 85181,
+    "customFieldType": "golf-177",
+    "template_id": 57530,
+    "template_name": "bravo-543",
+    "template_type": 87854,
+    "template_status": 49095,
+    "template_forceAccept": 94451,
+    "contents": "victor-791",
+    "attributes": "mike-974"
+  },
+  {
+    "id": 41586,
+    "version": 55391,
+    "customFieldType": "foxtrot-398",
+    "template_id": 97847,
+    "template_name": "echo-309",
+    "template_type": 84383,
+    "template_status": 42950,
+    "template_forceAccept": 73836,
+    "contents": "mike-865",
+    "attributes": "xray-959"
+  },
+  {
+    "id": 49371,
+    "version": 75459,
+    "customFieldType": "hotel-958",
+    "template_id": 65508,
+    "template_name": "alpha-128",
+    "template_type": 48144,
+    "template_status": 98995,
+    "template_forceAccept": 42543,
+    "contents": "november-213",
+    "attributes": "india-911"
+  }
+]

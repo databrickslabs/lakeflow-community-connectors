@@ -1,0 +1,34 @@
+[
+  {
+    "mailingListId": "whiskey-660",
+    "name": "papa-274",
+    "ownerId": "quebec-369",
+    "creationDate": 1704067200000,
+    "lastModifiedDate": 1704153600000,
+    "contactCount": 34044
+  },
+  {
+    "mailingListId": "hotel-306",
+    "name": "foxtrot-433",
+    "ownerId": "victor-883",
+    "creationDate": 1704240000000,
+    "lastModifiedDate": 1704326400000,
+    "contactCount": 82808
+  },
+  {
+    "mailingListId": "juliet-402",
+    "name": "tango-776",
+    "ownerId": "echo-579",
+    "creationDate": 1704412800000,
+    "lastModifiedDate": 1704499200000,
+    "contactCount": 17052
+  },
+  {
+    "mailingListId": "whiskey-881",
+    "name": "alpha-734",
+    "ownerId": "zulu-947",
+    "creationDate": 1704585600000,
+    "lastModifiedDate": 1704672000000,
+    "contactCount": 5679
+  }
+]

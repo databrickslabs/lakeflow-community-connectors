@@ -1,0 +1,50 @@
+[
+  {
+    "endpoint": "oscar-516",
+    "category": "oscar-396",
+    "description": "victor-251",
+    "supported": "delta-903",
+    "status_code": 20744,
+    "content_type": "foxtrot-536",
+    "latency_ms": 60899,
+    "notes": "echo-123",
+    "probe_timestamp": "oscar-800",
+    "connection_name": "sierra-727"
+  },
+  {
+    "endpoint": "victor-452",
+    "category": "xray-181",
+    "description": "delta-126",
+    "supported": "victor-445",
+    "status_code": 94321,
+    "content_type": "delta-577",
+    "latency_ms": 29574,
+    "notes": "sierra-585",
+    "probe_timestamp": "charlie-726",
+    "connection_name": "alpha-883"
+  },
+  {
+    "endpoint": "quebec-516",
+    "category": "delta-485",
+    "description": "romeo-514",
+    "supported": "echo-286",
+    "status_code": 67615,
+    "content_type": "mike-533",
+    "latency_ms": 81019,
+    "notes": "sierra-934",
+    "probe_timestamp": "tango-719",
+    "connection_name": "romeo-747"
+  },
+  {
+    "endpoint": "november-860",
+    "category": "foxtrot-461",
+    "description": "mike-521",
+    "supported": "bravo-801",
+    "status_code": 56045,
+    "content_type": "india-569",
+    "latency_ms": 6723,
+    "notes": "echo-517",
+    "probe_timestamp": "lima-706",
+    "connection_name": "yankee-388"
+  }
+]

@@ -1,0 +1,137 @@
+[
+  {
+    "id": "opendes:master-data--Sample:SAMPLE-PERMIAN-001:",
+    "kind": "osdu:wks:master-data--Sample:2.1.0",
+    "version": 1710676800000,
+    "acl": {
+      "viewers": ["data.default.viewers@opendes.contoso.com"],
+      "owners":  ["data.default.owners@opendes.contoso.com"]
+    },
+    "legal": {
+      "legaltags":                  ["opendes-public-usa-dataset-1"],
+      "otherRelevantDataCountries": ["US"],
+      "status":                     "compliant"
+    },
+    "tags": {},
+    "meta": [
+      {
+        "kind": "Unit",
+        "name": "m",
+        "persistableReference": "{\"abcd\":{\"a\":0.0,\"b\":1.0,\"c\":1.0,\"d\":0.0},\"symbol\":\"m\",\"baseMeasurement\":{\"ancestry\":\"Length\",\"type\":\"UM\"},\"type\":\"UAD\"}",
+        "propertyNames": ["TopDepth", "BaseDepth"],
+        "unitOfMeasureID": "opendes:reference-data--UnitOfMeasure:m:"
+      }
+    ],
+    "createTime": "2023-10-05T13:00:00.000Z",
+    "createUser": "ingestion-service@opendes.contoso.com",
+    "modifyTime": "2024-03-17T10:00:00.000Z",
+    "modifyUser": "data-steward@opendes.contoso.com",
+    "data": {
+      "SampleAcquisition": {
+        "SampleAcquisitionJobID":       "opendes:master-data--SampleAcquisitionJob:JOB-PBE-1-001:",
+        "SampleAcquisitionTypeID":      "opendes:reference-data--SampleAcquisitionType:CorePlug:",
+        "SampleAcquisitionContainerID": "opendes:master-data--SampleContainer:CP-047:",
+        "AcquisitionStartDate":         "2023-09-22T08:00:00.000Z",
+        "AcquisitionEndDate":           "2023-09-22T16:30:00.000Z",
+        "CollectionServiceCompanyID":   "opendes:master-data--Organisation:Halliburton:",
+        "HandlingServiceCompanyID":     "opendes:master-data--Organisation:CoreLabHouston:",
+        "SampleAcquisitionDetail": {
+          "WellboreID":  "opendes:master-data--Wellbore:WB-PERMIAN-001:",
+          "ToolKind":    "ConventionalCore",
+          "RunNumber":   "3",
+          "TopDepth":    2418.5,
+          "BaseDepth":   2420.0,
+          "FormationCondition": {
+            "Pressure":    3500.0,
+            "Temperature": 23.9
+          }
+        }
+      },
+      "ExtensionProperties": {"PorosityMeasured": 0.078, "PermeabilityMeasured_mD": 0.0009}
+    }
+  },
+  {
+    "id": "opendes:master-data--Sample:SAMPLE-NORTHSEA-002:",
+    "kind": "osdu:wks:master-data--Sample:2.1.0",
+    "version": 1710763200000,
+    "acl": {
+      "viewers": ["data.default.viewers@opendes.contoso.com"],
+      "owners":  ["data.default.owners@opendes.contoso.com"]
+    },
+    "legal": {
+      "legaltags":                  ["opendes-public-usa-dataset-1", "opendes-north-sea-dataset-1"],
+      "otherRelevantDataCountries": ["NO"],
+      "status":                     "compliant"
+    },
+    "tags": {},
+    "createTime": "2022-09-22T10:00:00.000Z",
+    "createUser": "ingestion-service@opendes.contoso.com",
+    "modifyTime": "2024-03-17T15:30:00.000Z",
+    "modifyUser": "data-steward@opendes.contoso.com",
+    "data": {
+      "SampleAcquisition": {
+        "SampleAcquisitionJobID":       "opendes:master-data--SampleAcquisitionJob:JOB-SLA-A23-002:",
+        "SampleAcquisitionTypeID":      "opendes:reference-data--SampleAcquisitionType:SidewallCore:",
+        "SampleAcquisitionContainerID": "opendes:master-data--SampleContainer:SWC-012:",
+        "AcquisitionStartDate":         "2022-09-10T06:00:00.000Z",
+        "AcquisitionEndDate":           "2022-09-10T14:00:00.000Z",
+        "CollectionServiceCompanyID":   "opendes:master-data--Organisation:Schlumberger:",
+        "HandlingServiceCompanyID":     "opendes:master-data--Organisation:EquinorResearchCentreTrondheim:",
+        "SampleAcquisitionDetail": {
+          "WellboreID":  "opendes:master-data--Wellbore:WB-NORTHSEA-002:",
+          "ToolKind":    "RotarySidewallCore",
+          "RunNumber":   "2",
+          "TopDepth":    2187.3,
+          "BaseDepth":   2188.0,
+          "FormationCondition": {
+            "Pressure":    2800.0,
+            "Temperature": 20.0
+          }
+        }
+      },
+      "ExtensionProperties": {"PorosityMeasured": 0.224, "PermeabilityMeasured_mD": 138.5}
+    }
+  },
+  {
+    "id": "opendes:master-data--Sample:SAMPLE-GOM-003:",
+    "kind": "osdu:wks:master-data--Sample:2.1.0",
+    "version": 1710849600000,
+    "acl": {
+      "viewers": ["data.default.viewers@opendes.contoso.com"],
+      "owners":  ["data.default.owners@opendes.contoso.com"]
+    },
+    "legal": {
+      "legaltags":                  ["opendes-public-usa-dataset-1", "opendes-boem-ocs-dataset-1"],
+      "otherRelevantDataCountries": ["US"],
+      "status":                     "compliant"
+    },
+    "tags": {},
+    "createTime": "2022-04-14T08:30:00.000Z",
+    "createUser": "ingestion-service@opendes.contoso.com",
+    "modifyTime": "2024-03-18T08:00:00.000Z",
+    "modifyUser": "data-steward@opendes.contoso.com",
+    "data": {
+      "SampleAcquisition": {
+        "SampleAcquisitionJobID":       "opendes:master-data--SampleAcquisitionJob:JOB-THS-ST1BP1-003:",
+        "SampleAcquisitionTypeID":      "opendes:reference-data--SampleAcquisitionType:DrillCuttings:",
+        "SampleAcquisitionContainerID": "opendes:master-data--SampleContainer:CUT-022:",
+        "AcquisitionStartDate":         "2022-04-02T07:00:00.000Z",
+        "AcquisitionEndDate":           "2022-04-02T18:00:00.000Z",
+        "CollectionServiceCompanyID":   "opendes:master-data--Organisation:BPRig:",
+        "HandlingServiceCompanyID":     "opendes:master-data--Organisation:IntertekWestport:",
+        "SampleAcquisitionDetail": {
+          "WellboreID":  "opendes:master-data--Wellbore:WB-GOM-003:",
+          "ToolKind":    "DrillCuttings",
+          "RunNumber":   null,
+          "TopDepth":    5140.0,
+          "BaseDepth":   5142.0,
+          "FormationCondition": {
+            "Pressure":    9500.0,
+            "Temperature": 121.1
+          }
+        }
+      },
+      "ExtensionProperties": {"PorosityMeasured": 0.286, "PermeabilityMeasured_mD": 498.0}
+    }
+  }
+]

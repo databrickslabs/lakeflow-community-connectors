@@ -1,0 +1,165 @@
+[
+  {
+    "id": "a6d72986e7",
+    "campaign_title": "TEST",
+    "type": "regular",
+    "list_id": "ec2a1e70e5",
+    "list_is_active": true,
+    "list_name": "Dbx",
+    "subject_line": "TEST",
+    "preview_text": "",
+    "emails_sent": 4,
+    "abuse_reports": 0,
+    "unsubscribed": 0,
+    "send_time": "2026-07-09T23:50:24+00:00",
+    "bounces": {
+      "hard_bounces": 0,
+      "soft_bounces": 0,
+      "syntax_errors": 0
+    },
+    "forwards": {
+      "forwards_count": 0,
+      "forwards_opens": 0
+    },
+    "opens": {
+      "opens_total": 0,
+      "proxy_excluded_opens": 0,
+      "unique_opens": 0,
+      "proxy_excluded_unique_opens": 0,
+      "open_rate": 0,
+      "proxy_excluded_open_rate": 0,
+      "last_open": ""
+    },
+    "clicks": {
+      "clicks_total": 0,
+      "unique_clicks": 0,
+      "unique_subscriber_clicks": 0,
+      "click_rate": 0,
+      "last_click": ""
+    },
+    "facebook_likes": {
+      "recipient_likes": 0,
+      "unique_likes": 0,
+      "facebook_likes": 0
+    },
+    "list_stats": {
+      "sub_rate": 0,
+      "unsub_rate": 0,
+      "open_rate": 0,
+      "proxy_excluded_open_rate": 0,
+      "click_rate": 0
+    },
+    "timeseries": [
+      {
+        "timestamp": "2026-07-09T23:00:00+00:00",
+        "emails_sent": 0,
+        "unique_opens": 0,
+        "proxy_excluded_unique_opens": 0,
+        "recipients_clicks": 0
+      },
+      {
+        "timestamp": "2026-07-10T00:00:00+00:00",
+        "emails_sent": 0,
+        "unique_opens": 0,
+        "proxy_excluded_unique_opens": 0,
+        "recipients_clicks": 0
+      }
+    ],
+    "ecommerce": {
+      "total_orders": 0,
+      "total_spent": 0,
+      "total_revenue": 0,
+      "currency_code": "USD"
+    },
+    "delivery_status": {
+      "enabled": false
+    },
+    "_links": [
+      {
+        "rel": "parent",
+        "href": "https://us1.api.mailchimp.com/3.0/reports",
+        "method": "GET",
+        "targetSchema": "https://us1.api.mailchimp.com/schema/3.0/Definitions/Reports/CollectionResponse.json",
+        "schema": "https://us1.api.mailchimp.com/schema/3.0/Paths/Reports/Collection.json"
+      },
+      {
+        "rel": "self",
+        "href": "https://us1.api.mailchimp.com/3.0/reports/a6d72986e7",
+        "method": "GET",
+        "targetSchema": "https://us1.api.mailchimp.com/schema/3.0/Definitions/Reports/Response.json"
+      },
+      {
+        "rel": "campaign",
+        "href": "https://us1.api.mailchimp.com/3.0/campaigns/a6d72986e7",
+        "method": "GET",
+        "targetSchema": "https://us1.api.mailchimp.com/schema/3.0/Definitions/Campaigns/Response.json"
+      },
+      {
+        "rel": "sub-reports",
+        "href": "https://us1.api.mailchimp.com/3.0/reports/a6d72986e7/sub-reports",
+        "method": "GET",
+        "targetSchema": "https://us1.api.mailchimp.com/schema/3.0/Definitions/Reports/Sub/Response.json"
+      },
+      {
+        "rel": "abuse-reports",
+        "href": "https://us1.api.mailchimp.com/3.0/reports/a6d72986e7/abuse-reports",
+        "method": "GET",
+        "targetSchema": "https://us1.api.mailchimp.com/schema/3.0/Definitions/Reports/Abuse/CollectionResponse.json"
+      },
+      {
+        "rel": "advice",
+        "href": "https://us1.api.mailchimp.com/3.0/reports/a6d72986e7/advice",
+        "method": "GET",
+        "targetSchema": "https://us1.api.mailchimp.com/schema/3.0/Definitions/Reports/Advice/Response.json"
+      },
+      {
+        "rel": "open-details",
+        "href": "https://us1.api.mailchimp.com/3.0/reports/a6d72986e7/open-details",
+        "method": "GET",
+        "targetSchema": "https://us1.api.mailchimp.com/schema/3.0/Definitions/Reports/OpenDetails/CollectionResponse.json"
+      },
+      {
+        "rel": "click-details",
+        "href": "https://us1.api.mailchimp.com/3.0/reports/a6d72986e7/click-details",
+        "method": "GET",
+        "targetSchema": "https://us1.api.mailchimp.com/schema/3.0/Definitions/Reports/ClickDetails/CollectionResponse.json"
+      },
+      {
+        "rel": "domain-performance",
+        "href": "https://us1.api.mailchimp.com/3.0/reports/a6d72986e7/domain-performance",
+        "method": "GET",
+        "targetSchema": "https://us1.api.mailchimp.com/schema/3.0/Definitions/Reports/DomainPerformance/Response.json"
+      },
+      {
+        "rel": "eepurl",
+        "href": "https://us1.api.mailchimp.com/3.0/reports/a6d72986e7/eepurl",
+        "method": "GET",
+        "targetSchema": "https://us1.api.mailchimp.com/schema/3.0/Definitions/Reports/Eepurl/CollectionResponse.json"
+      },
+      {
+        "rel": "email-activity",
+        "href": "https://us1.api.mailchimp.com/3.0/reports/a6d72986e7/email-activity",
+        "method": "GET",
+        "targetSchema": "https://us1.api.mailchimp.com/schema/3.0/Definitions/Reports/EmailActivity/CollectionResponse.json"
+      },
+      {
+        "rel": "locations",
+        "href": "https://us1.api.mailchimp.com/3.0/reports/a6d72986e7/locations",
+        "method": "GET",
+        "targetSchema": "https://us1.api.mailchimp.com/schema/3.0/Definitions/Reports/Locations/Response.json"
+      },
+      {
+        "rel": "sent-to",
+        "href": "https://us1.api.mailchimp.com/3.0/reports/a6d72986e7/sent-to",
+        "method": "GET",
+        "targetSchema": "https://us1.api.mailchimp.com/schema/3.0/Definitions/Reports/SentTo/CollectionResponse.json"
+      },
+      {
+        "rel": "unsubscribed",
+        "href": "https://us1.api.mailchimp.com/3.0/reports/a6d72986e7/unsubscribed",
+        "method": "GET",
+        "targetSchema": "https://us1.api.mailchimp.com/schema/3.0/Definitions/Reports/Unsubs/CollectionResponse.json"
+      }
+    ]
+  }
+]

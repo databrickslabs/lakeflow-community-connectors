@@ -1,0 +1,110 @@
+# Shopify Admin REST API.
+#
+# Connector flow:
+# * read_table(locations|customers|products|orders|inventory_levels) →
+#   GET /admin/api/{api_version}/{table}.json
+# * read_table(refunds|fulfillments) → discovers candidate orders via
+#   /orders.json then GET /orders/{order_id}/{sub}.json per order.
+#
+# Pagination: Shopify uses Link-header cursor pagination
+# (`<...page_info=xxx>; rel="next"`). The simulator uses
+# `pagination_style: none` and returns the full corpus in one response;
+# the connector terminates after one page when no Link header is present.
+#
+# Cursor capping (AvailableNow termination): the connector caps cursors
+# at `_init_time` server-side via `updated_at_max=...` and client-side
+# via `updated_at <= self._init_time`. The cursor-bearing endpoints
+# declare `synthesize_future_records` so the simulator injects a few
+# records past `_init_time` and the cap is actually exercised.
+
+endpoints:
+  # ---- /locations ----
+  - path: "/admin/api/{api_version}/locations.json"
+    method: GET
+    corpus: locations
+    response:
+      pagination_style: none
+      wrapper: {records_key: locations}
+
+  # ---- /customers (CDC, updated_at) ----
+  - path: "/admin/api/{api_version}/customers.json"
+    method: GET
+    corpus: customers
+    response:
+      pagination_style: none
+      default_sort: "updated_at asc"
+      wrapper: {records_key: customers}
+    params:
+      updated_at_min: {role: filter, field: updated_at, op: gte}
+      updated_at_max: {role: filter, field: updated_at, op: lte}
+      limit:          {role: per_page, default: 50, max: 250}
+      order:          {role: sort_by, options: ["updated_at asc", "updated_at desc"]}
+    synthesize_future_records:
+      cursor_field: updated_at
+      count: 3
+
+  # ---- /products (CDC, updated_at) ----
+  - path: "/admin/api/{api_version}/products.json"
+    method: GET
+    corpus: products
+    response:
+      pagination_style: none
+      default_sort: "updated_at asc"
+      wrapper: {records_key: products}
+    params:
+      updated_at_min: {role: filter, field: updated_at, op: gte}
+      updated_at_max: {role: filter, field: updated_at, op: lte}
+      limit:          {role: per_page, default: 50, max: 250}
+      order:          {role: sort_by, options: ["updated_at asc", "updated_at desc"]}
+    synthesize_future_records:
+      cursor_field: updated_at
+      count: 3
+
+  # ---- /orders (CDC, updated_at) ----
+  # NOTE: Connector passes ``status=any`` which is a Shopify-special
+  # value (means "no filter"). We declare ``status`` as a passthrough
+  # (no field/op) so the simulator doesn't do literal equality, which
+  # would otherwise reject every record (none have status="any").
+  - path: "/admin/api/{api_version}/orders.json"
+    method: GET
+    corpus: orders
+    response:
+      pagination_style: none
+      default_sort: "updated_at asc"
+      wrapper: {records_key: orders}
+    params:
+      status:         {role: ignore}
+      updated_at_min: {role: filter, field: updated_at, op: gte}
+      updated_at_max: {role: filter, field: updated_at, op: lte}
+      limit:          {role: per_page, default: 50, max: 250}
+      order:          {role: sort_by, options: ["updated_at asc", "updated_at desc"]}
+    synthesize_future_records:
+      cursor_field: updated_at
+      count: 3
+
+  # ---- /orders/{order_id}/refunds (per-order, append) ----
+  - path: "/admin/api/{api_version}/orders/{order_id}/refunds.json"
+    method: GET
+    corpus: refunds
+    response:
+      pagination_style: none
+      wrapper: {records_key: refunds}
+
+  # ---- /orders/{order_id}/fulfillments (per-order, CDC) ----
+  - path: "/admin/api/{api_version}/orders/{order_id}/fulfillments.json"
+    method: GET
+    corpus: fulfillments
+    response:
+      pagination_style: none
+      wrapper: {records_key: fulfillments}
+
+  # ---- /inventory_levels ----
+  - path: "/admin/api/{api_version}/inventory_levels.json"
+    method: GET
+    corpus: inventory_levels
+    response:
+      pagination_style: none
+      wrapper: {records_key: inventory_levels}
+    params:
+      location_ids: {role: filter, field: location_id, op: eq}
+      limit:        {role: per_page, default: 50, max: 250}

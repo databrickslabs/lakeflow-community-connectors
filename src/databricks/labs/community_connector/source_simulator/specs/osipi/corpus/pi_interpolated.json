@@ -1,0 +1,46 @@
+[
+  {
+    "tag_webid": "november-356",
+    "timestamp": "2024-01-10T00:56:27Z",
+    "value": 252.87,
+    "good": false,
+    "questionable": false,
+    "substituted": false,
+    "annotated": false,
+    "units": "mike-298",
+    "ingestion_timestamp": "2024-01-18T13:50:25Z"
+  },
+  {
+    "tag_webid": "alpha-724",
+    "timestamp": "2024-01-25T18:29:20Z",
+    "value": 651.7,
+    "good": true,
+    "questionable": false,
+    "substituted": false,
+    "annotated": true,
+    "units": "hotel-416",
+    "ingestion_timestamp": "2024-01-29T01:40:21Z"
+  },
+  {
+    "tag_webid": "golf-972",
+    "timestamp": "2024-01-14T19:17:34Z",
+    "value": 397.13,
+    "good": true,
+    "questionable": true,
+    "substituted": false,
+    "annotated": true,
+    "units": "november-410",
+    "ingestion_timestamp": "2024-01-15T18:01:01Z"
+  },
+  {
+    "tag_webid": "foxtrot-972",
+    "timestamp": "2024-01-21T19:01:58Z",
+    "value": 65.93,
+    "good": true,
+    "questionable": true,
+    "substituted": false,
+    "annotated": false,
+    "units": "zulu-319",
+    "ingestion_timestamp": "2024-01-01T08:19:11Z"
+  }
+]

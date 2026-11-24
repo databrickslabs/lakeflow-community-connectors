@@ -1,0 +1,50 @@
+[
+  {
+    "contact_id": "yankee-776",
+    "first_name": "bravo-706",
+    "last_name": "november-896",
+    "email": "delta-667",
+    "phone": "tango-580",
+    "ext_ref": "hotel-110",
+    "language": "tango-831",
+    "unsubscribed": true,
+    "mailing_list_unsubscribed": true,
+    "contact_lookup_id": "juliet-137"
+  },
+  {
+    "contact_id": "alpha-504",
+    "first_name": "november-149",
+    "last_name": "whiskey-682",
+    "email": "bravo-995",
+    "phone": "lima-273",
+    "ext_ref": "hotel-361",
+    "language": "yankee-400",
+    "unsubscribed": false,
+    "mailing_list_unsubscribed": true,
+    "contact_lookup_id": "delta-558"
+  },
+  {
+    "contact_id": "lima-951",
+    "first_name": "foxtrot-346",
+    "last_name": "golf-246",
+    "email": "lima-884",
+    "phone": "juliet-234",
+    "ext_ref": "uniform-525",
+    "language": "quebec-550",
+    "unsubscribed": false,
+    "mailing_list_unsubscribed": false,
+    "contact_lookup_id": "echo-394"
+  },
+  {
+    "contact_id": "whiskey-169",
+    "first_name": "golf-580",
+    "last_name": "india-260",
+    "email": "india-221",
+    "phone": "mike-950",
+    "ext_ref": "whiskey-496",
+    "language": "yankee-954",
+    "unsubscribed": false,
+    "mailing_list_unsubscribed": false,
+    "contact_lookup_id": "echo-436"
+  }
+]

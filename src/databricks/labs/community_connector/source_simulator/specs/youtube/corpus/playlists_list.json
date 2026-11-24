@@ -1,0 +1,23 @@
+{
+  "kind": "youtube#playlistListResponse",
+  "etag": "sim-playlists-etag",
+  "items": [
+    {
+      "kind": "youtube#playlist",
+      "etag": "sim-playlist-etag",
+      "id": "PL_test_playlist_001",
+      "snippet": {
+        "publishedAt": "2020-02-01T00:00:00Z",
+        "channelId": "UC_test_channel_001",
+        "title": "Simulator Playlist",
+        "description": "Test playlist",
+        "thumbnails": {
+          "default": {"url": "https://example.com/playlist-thumb.jpg"}
+        }
+      },
+      "contentDetails": {"itemCount": "3"}
+    }
+  ],
+  "nextPageToken": null,
+  "pageInfo": {"totalResults": 1, "resultsPerPage": 50}
+}

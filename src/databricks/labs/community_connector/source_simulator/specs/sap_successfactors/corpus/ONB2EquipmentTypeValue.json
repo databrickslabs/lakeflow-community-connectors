@@ -1,0 +1,54 @@
+[
+  {
+    "code": "foxtrot-212",
+    "createdBy": "oscar-606",
+    "createdDateTime": "alpha-185",
+    "description_defaultValue": "zulu-708",
+    "description_en_US": "quebec-717",
+    "description_localized": "whiskey-379",
+    "inUse": "romeo-946",
+    "lastModifiedBy": "foxtrot-132",
+    "lastModifiedDateTime": "lima-913",
+    "mdfSystemRecordStatus": "oscar-247",
+    "type": "yankee-623"
+  },
+  {
+    "code": "kilo-662",
+    "createdBy": "xray-335",
+    "createdDateTime": "golf-394",
+    "description_defaultValue": "zulu-525",
+    "description_en_US": "november-569",
+    "description_localized": "lima-738",
+    "inUse": "charlie-156",
+    "lastModifiedBy": "yankee-593",
+    "lastModifiedDateTime": "lima-739",
+    "mdfSystemRecordStatus": "uniform-364",
+    "type": "whiskey-110"
+  },
+  {
+    "code": "golf-458",
+    "createdBy": "victor-539",
+    "createdDateTime": "sierra-158",
+    "description_defaultValue": "uniform-172",
+    "description_en_US": "golf-489",
+    "description_localized": "tango-761",
+    "inUse": "xray-613",
+    "lastModifiedBy": "golf-262",
+    "lastModifiedDateTime": "delta-961",
+    "mdfSystemRecordStatus": "victor-828",
+    "type": "sierra-113"
+  },
+  {
+    "code": "hotel-213",
+    "createdBy": "hotel-251",
+    "createdDateTime": "kilo-806",
+    "description_defaultValue": "papa-671",
+    "description_en_US": "uniform-143",
+    "description_localized": "papa-682",
+    "inUse": "romeo-243",
+    "lastModifiedBy": "lima-996",
+    "lastModifiedDateTime": "november-622",
+    "mdfSystemRecordStatus": "charlie-851",
+    "type": "alpha-283"
+  }
+]

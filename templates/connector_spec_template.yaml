@@ -1,0 +1,136 @@
+# {{ source_name }} Community Connector Spec
+# This file defines the specification for the connector including
+# connection parameters and allowlist options.
+
+# ============================================================================
+# Connection Parameters
+# These are provided when creating the Unity Catalog connection.
+#
+# STRUCTURE OPTIONS:
+# -----------------
+# Option A: Single authentication method (simple case)
+#   Use 'parameters' directly under 'connection'.
+#
+# Option B: Multiple authentication methods
+#   Use 'auth_methods' to define each method with its own parameters,
+#   and 'parameters' for shared parameters across all methods.
+#
+# When multiple auth_methods are defined, the user must choose ONE method
+# and provide all its required parameters. Common parameters apply to all methods.
+# ============================================================================
+connection:
+  # ---------------------------------------------------------------------------
+  # OPTION A: Single Authentication Method (use this for simple connectors)
+  # ---------------------------------------------------------------------------
+  # parameters:
+  #   - name: api_key
+  #     type: string
+  #     required: true
+  #     description: >
+  #       API key used for authentication.
+  #
+  #   - name: base_url
+  #     type: string
+  #     required: false
+  #     description: >
+  #       Base URL for the API. Override if using a custom instance.
+
+  # ---------------------------------------------------------------------------
+  # OPTION B: Multiple Authentication Methods (use for connectors with choices)
+  # ---------------------------------------------------------------------------
+  # auth_methods:
+  #   - name: api_key
+  #     description: >
+  #       Authenticate using an API key. This is the simplest method.
+  #     parameters:
+  #       - name: api_key
+  #         type: string
+  #         required: true
+  #         description: >
+  #           API key for authentication.
+  #
+  #   - name: service_account
+  #     description: >
+  #       Authenticate using service account credentials.
+  #     parameters:
+  #       - name: username
+  #         type: string
+  #         required: true
+  #         description: >
+  #           Service account username.
+  #
+  #       - name: secret
+  #         type: string
+  #         required: true
+  #         description: >
+  #           Service account secret.
+  #
+  # # Shared parameters (apply to all authentication methods)
+  # parameters:
+  #   - name: region
+  #     type: string
+  #     required: false
+  #     description: >
+  #       Data region (e.g., 'US' or 'EU'). Defaults to 'US'.
+  #
+  #   - name: base_url
+  #     type: string
+  #     required: false
+  #     description: >
+  #       Base URL for the API. Override if using a custom instance.
+
+  # ---------------------------------------------------------------------------
+  # OAuth 2.0 (optional) — for sources that authenticate via OAuth 2.0.
+  #
+  # Add this block to make the connector use a Unity Catalog COMMUNITY
+  # connection in one of the OAuth auth modes instead of static credentials.
+  # The connection layer (UC, or the labs authenticate tool for local dev)
+  # runs the OAuth flow and injects an access token into the connector's
+  # options at query time — the user only supplies their OAuth app's
+  # `client_id` + `client_secret`, never a token.
+  #
+  # Because of that, the `parameters` list above should declare `client_id`
+  # and `client_secret` (the user-supplied app identity). Do NOT list the
+  # OAuth-issued tokens (`access_token` / `refresh_token`) as required
+  # parameters — UC/the flow supplies them at runtime.
+  #
+  # Keys:
+  #   flow               — which OAuth mode the connection uses. Maps to the
+  #                        CLI's `--auth-type` / UC's `community_oauth_flow`.
+  #                        When set, the CLI derives the auth type from here,
+  #                        so `--auth-type` is optional on the command line.
+  #                          m2m          — client-credentials (no user).
+  #                          u2m          — one human authorizes once at
+  #                                         connection creation (browser flow).
+  #                          u2m_per_user — each end user authorizes; UC
+  #                                         resolves the right token per query.
+  #   pkce               — true (default) to use PKCE in the u2m flow; set
+  #                        false for a confidential client that doesn't need it
+  #                        (e.g. a Google "Web application" client).
+  #   scopes             — space-separated OAuth scopes to request at consent.
+  #   authorization_url  — provider authorization endpoint (u2m / u2m_per_user).
+  #   token_url          — provider token endpoint.
+  #   extra_auth_params  — provider-specific knobs folded into the
+  #                        authorization request (e.g. access_type=offline,
+  #                        prompt=consent so the provider returns a
+  #                        refreshable grant). Never stored as a connection
+  #                        option.
+  # ---------------------------------------------------------------------------
+  # oauth:
+  #   flow: u2m
+  #   pkce: true
+  #   scopes: "read write"
+  #   authorization_url: "https://example.com/oauth/authorize"
+  #   token_url: "https://example.com/oauth/token"
+  #   extra_auth_params:
+  #     access_type: "offline"
+  #     prompt: "consent"
+
+# ============================================================================
+# External Options Allowlist
+# These table-specific options must be included in the externalOptionsAllowList
+# parameter of the UC connection to allow them to be passed through.
+# Use a comma-separated string of option names.
+# If no table-specific options are needed, set to empty string or omit.
+# ============================================================================
+external_options_allowlist: ""

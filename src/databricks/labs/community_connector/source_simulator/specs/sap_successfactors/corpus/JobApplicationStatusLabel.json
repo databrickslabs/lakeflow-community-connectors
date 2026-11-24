@@ -1,0 +1,26 @@
+[
+  {
+    "appStatusId": 70677,
+    "locale": "alpha-685",
+    "statusLabel": "victor-916",
+    "candidateLabel": "kilo-773"
+  },
+  {
+    "appStatusId": 59359,
+    "locale": "golf-160",
+    "statusLabel": "yankee-437",
+    "candidateLabel": "hotel-290"
+  },
+  {
+    "appStatusId": 85483,
+    "locale": "bravo-330",
+    "statusLabel": "delta-171",
+    "candidateLabel": "hotel-503"
+  },
+  {
+    "appStatusId": 57932,
+    "locale": "quebec-223",
+    "statusLabel": "whiskey-316",
+    "candidateLabel": "victor-744"
+  }
+]

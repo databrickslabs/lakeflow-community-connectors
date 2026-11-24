@@ -1,0 +1,464 @@
+[
+  {
+    "userId": 1,
+    "dayOffset": 2,
+    "date": "2026-04-07",
+    "leaveTypeId": 1,
+    "leaveTime": 240
+  },
+  {
+    "userId": 13,
+    "dayOffset": 2,
+    "date": "2026-04-07",
+    "leaveTypeId": 3,
+    "leaveTime": 420
+  },
+  {
+    "userId": 1,
+    "dayOffset": 3,
+    "date": "2026-04-08",
+    "leaveTypeId": 1,
+    "leaveTime": 480
+  },
+  {
+    "userId": 13,
+    "dayOffset": 3,
+    "date": "2026-04-08",
+    "leaveTypeId": 3,
+    "leaveTime": 420
+  },
+  {
+    "userId": 13,
+    "dayOffset": 4,
+    "date": "2026-04-09",
+    "leaveTypeId": 3,
+    "leaveTime": 420
+  },
+  {
+    "userId": 13,
+    "dayOffset": 1,
+    "date": "2026-04-13",
+    "leaveTypeId": 3,
+    "leaveTime": 420
+  },
+  {
+    "userId": 13,
+    "dayOffset": 2,
+    "date": "2026-04-14",
+    "leaveTypeId": 3,
+    "leaveTime": 420
+  },
+  {
+    "userId": 13,
+    "dayOffset": 3,
+    "date": "2026-04-15",
+    "leaveTypeId": 3,
+    "leaveTime": 420
+  },
+  {
+    "userId": 15,
+    "dayOffset": 3,
+    "date": "2026-04-15",
+    "leaveTypeId": 3,
+    "leaveTime": 480
+  },
+  {
+    "userId": 15,
+    "dayOffset": 4,
+    "date": "2026-04-16",
+    "leaveTypeId": 3,
+    "leaveTime": 480
+  },
+  {
+    "userId": 15,
+    "dayOffset": 1,
+    "date": "2026-04-20",
+    "leaveTypeId": 3,
+    "leaveTime": 480
+  },
+  {
+    "userId": 15,
+    "dayOffset": 2,
+    "date": "2026-04-21",
+    "leaveTypeId": 3,
+    "leaveTime": 480
+  },
+  {
+    "userId": 15,
+    "dayOffset": 3,
+    "date": "2026-04-22",
+    "leaveTypeId": 3,
+    "leaveTime": 240
+  },
+  {
+    "userId": 17,
+    "dayOffset": 3,
+    "date": "2026-04-22",
+    "leaveTypeId": 3,
+    "leaveTime": 240
+  },
+  {
+    "userId": 16,
+    "dayOffset": 4,
+    "date": "2026-04-23",
+    "leaveTypeId": 2,
+    "leaveTime": 160
+  },
+  {
+    "userId": 17,
+    "dayOffset": 1,
+    "date": "2026-04-27",
+    "leaveTypeId": 3,
+    "leaveTime": 480
+  },
+  {
+    "userId": 17,
+    "dayOffset": 2,
+    "date": "2026-04-28",
+    "leaveTypeId": 3,
+    "leaveTime": 480
+  },
+  {
+    "userId": 18,
+    "dayOffset": 2,
+    "date": "2026-04-28",
+    "leaveTypeId": 2,
+    "leaveTime": 480
+  },
+  {
+    "userId": 13,
+    "dayOffset": 3,
+    "date": "2026-04-29",
+    "leaveTypeId": 1,
+    "leaveTime": 420
+  },
+  {
+    "userId": 14,
+    "dayOffset": 3,
+    "date": "2026-04-29",
+    "leaveTypeId": 2,
+    "leaveTime": 240
+  },
+  {
+    "userId": 20,
+    "dayOffset": 2,
+    "date": "2026-05-05",
+    "leaveTypeId": 2,
+    "leaveTime": 480
+  },
+  {
+    "userId": 13,
+    "dayOffset": 3,
+    "date": "2026-05-06",
+    "leaveTypeId": 2,
+    "leaveTime": 150
+  },
+  {
+    "userId": 14,
+    "dayOffset": 3,
+    "date": "2026-05-06",
+    "leaveTypeId": 3,
+    "leaveTime": 480
+  },
+  {
+    "userId": 13,
+    "dayOffset": 4,
+    "date": "2026-05-07",
+    "leaveTypeId": 2,
+    "leaveTime": 420
+  },
+  {
+    "userId": 14,
+    "dayOffset": 4,
+    "date": "2026-05-07",
+    "leaveTypeId": 3,
+    "leaveTime": 480
+  },
+  {
+    "userId": 1,
+    "dayOffset": 1,
+    "date": "2026-05-11",
+    "leaveTypeId": 2,
+    "leaveTime": 120
+  },
+  {
+    "userId": 14,
+    "dayOffset": 1,
+    "date": "2026-05-11",
+    "leaveTypeId": 3,
+    "leaveTime": 480
+  },
+  {
+    "userId": 16,
+    "dayOffset": 1,
+    "date": "2026-05-11",
+    "leaveTypeId": 1,
+    "leaveTime": 210
+  },
+  {
+    "userId": 18,
+    "dayOffset": 1,
+    "date": "2026-05-11",
+    "leaveTypeId": 2,
+    "leaveTime": 150
+  },
+  {
+    "userId": 14,
+    "dayOffset": 2,
+    "date": "2026-05-12",
+    "leaveTypeId": 3,
+    "leaveTime": 240
+  },
+  {
+    "userId": 15,
+    "dayOffset": 4,
+    "date": "2026-05-21",
+    "leaveTypeId": 9,
+    "leaveTime": 510
+  },
+  {
+    "userId": 15,
+    "dayOffset": 5,
+    "date": "2026-05-22",
+    "leaveTypeId": 9,
+    "leaveTime": 450
+  },
+  {
+    "userId": 23,
+    "dayOffset": 12,
+    "date": "2026-05-29",
+    "leaveTypeId": 9,
+    "leaveTime": 240
+  },
+  {
+    "userId": 20,
+    "dayOffset": 8,
+    "date": "2026-06-01",
+    "leaveTypeId": 2,
+    "leaveTime": 480
+  },
+  {
+    "userId": 20,
+    "dayOffset": 9,
+    "date": "2026-06-02",
+    "leaveTypeId": 2,
+    "leaveTime": 480
+  },
+  {
+    "userId": 1,
+    "dayOffset": 12,
+    "date": "2026-06-19",
+    "leaveTypeId": 2,
+    "leaveTime": 480
+  },
+  {
+    "userId": 20,
+    "dayOffset": 12,
+    "date": "2026-06-19",
+    "leaveTypeId": 9,
+    "leaveTime": 480
+  },
+  {
+    "userId": 16,
+    "dayOffset": 10,
+    "date": "2026-06-24",
+    "leaveTypeId": 2,
+    "leaveTime": 480
+  },
+  {
+    "userId": 16,
+    "dayOffset": 11,
+    "date": "2026-06-25",
+    "leaveTypeId": 2,
+    "leaveTime": 510
+  },
+  {
+    "userId": 1,
+    "dayOffset": 8,
+    "date": "2026-07-13",
+    "leaveTypeId": 3,
+    "leaveTime": 480
+  },
+  {
+    "userId": 1,
+    "dayOffset": 9,
+    "date": "2026-07-14",
+    "leaveTypeId": 3,
+    "leaveTime": 480
+  },
+  {
+    "userId": 1,
+    "dayOffset": 10,
+    "date": "2026-07-15",
+    "leaveTypeId": 3,
+    "leaveTime": 480
+  },
+  {
+    "userId": 1,
+    "dayOffset": 11,
+    "date": "2026-07-16",
+    "leaveTypeId": 3,
+    "leaveTime": 480
+  },
+  {
+    "userId": 1,
+    "dayOffset": 12,
+    "date": "2026-07-17",
+    "leaveTypeId": 3,
+    "leaveTime": 480
+  },
+  {
+    "userId": 1,
+    "dayOffset": 1,
+    "date": "2026-07-20",
+    "leaveTypeId": 3,
+    "leaveTime": 480
+  },
+  {
+    "userId": 1,
+    "dayOffset": 2,
+    "date": "2026-07-21",
+    "leaveTypeId": 3,
+    "leaveTime": 480
+  },
+  {
+    "userId": 1,
+    "dayOffset": 3,
+    "date": "2026-07-22",
+    "leaveTypeId": 3,
+    "leaveTime": 480
+  },
+  {
+    "userId": 14,
+    "dayOffset": 3,
+    "date": "2026-07-22",
+    "leaveTypeId": 3,
+    "leaveTime": 480
+  },
+  {
+    "userId": 1,
+    "dayOffset": 4,
+    "date": "2026-07-23",
+    "leaveTypeId": 3,
+    "leaveTime": 480
+  },
+  {
+    "userId": 14,
+    "dayOffset": 1,
+    "date": "2026-07-27",
+    "leaveTypeId": 3,
+    "leaveTime": 480
+  },
+  {
+    "userId": 14,
+    "dayOffset": 2,
+    "date": "2026-07-28",
+    "leaveTypeId": 3,
+    "leaveTime": 480
+  },
+  {
+    "userId": 14,
+    "dayOffset": 3,
+    "date": "2026-07-29",
+    "leaveTypeId": 3,
+    "leaveTime": 480
+  },
+  {
+    "userId": 14,
+    "dayOffset": 4,
+    "date": "2026-07-30",
+    "leaveTypeId": 3,
+    "leaveTime": 480
+  },
+  {
+    "userId": 21,
+    "dayOffset": 8,
+    "date": "2026-08-03",
+    "leaveTypeId": 3,
+    "leaveTime": 480
+  },
+  {
+    "userId": 21,
+    "dayOffset": 2,
+    "date": "2026-08-04",
+    "leaveTypeId": 3,
+    "leaveTime": 480
+  },
+  {
+    "userId": 21,
+    "dayOffset": 3,
+    "date": "2026-08-05",
+    "leaveTypeId": 3,
+    "leaveTime": 480
+  },
+  {
+    "userId": 21,
+    "dayOffset": 4,
+    "date": "2026-08-06",
+    "leaveTypeId": 3,
+    "leaveTime": 480
+  },
+  {
+    "userId": 21,
+    "dayOffset": 5,
+    "date": "2026-08-07",
+    "leaveTypeId": 3,
+    "leaveTime": 480
+  },
+  {
+    "userId": 14,
+    "dayOffset": 8,
+    "date": "2026-08-17",
+    "leaveTypeId": 3,
+    "leaveTime": 480
+  },
+  {
+    "userId": 14,
+    "dayOffset": 9,
+    "date": "2026-08-18",
+    "leaveTypeId": 3,
+    "leaveTime": 480
+  },
+  {
+    "userId": 14,
+    "dayOffset": 10,
+    "date": "2026-08-19",
+    "leaveTypeId": 3,
+    "leaveTime": 480
+  },
+  {
+    "userId": 14,
+    "dayOffset": 11,
+    "date": "2026-08-20",
+    "leaveTypeId": 3,
+    "leaveTime": 240
+  },
+  {
+    "userId": 16,
+    "dayOffset": 9,
+    "date": "2026-09-01",
+    "leaveTypeId": 3,
+    "leaveTime": 480
+  },
+  {
+    "userId": 16,
+    "dayOffset": 10,
+    "date": "2026-09-02",
+    "leaveTypeId": 3,
+    "leaveTime": 480
+  },
+  {
+    "userId": 16,
+    "dayOffset": 11,
+    "date": "2026-09-03",
+    "leaveTypeId": 3,
+    "leaveTime": 510
+  },
+  {
+    "userId": 16,
+    "dayOffset": 12,
+    "date": "2026-09-04",
+    "leaveTypeId": 3,
+    "leaveTime": 450
+  }
+]

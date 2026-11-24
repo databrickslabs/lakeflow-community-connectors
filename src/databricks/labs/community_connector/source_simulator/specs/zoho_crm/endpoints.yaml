@@ -1,0 +1,69 @@
+# Zoho CRM API v8.
+#
+# Connector flow:
+# * First HTTP call triggers OAuth refresh:
+#     POST {accounts_url}/oauth/v2/token
+#   We stub a 200 with access_token / token_type / expires_in so the
+#   connector caches a token and continues.
+# * ``list_tables`` → GET ``/crm/v8/settings/modules``. We return empty
+#   modules so list_tables falls back to the 6 hand-coded "derived" tables
+#   (Users, Roles, Profiles, Campaigns_Leads, Campaigns_Contacts,
+#   Contacts_X_Deals).
+# * ``get_table_schema`` for module-discovered tables → GET
+#   ``/crm/v8/settings/fields?module=X``. We return empty fields so the
+#   connector builds a minimal schema.
+# * ``read_table`` → GET ``/crm/v8/<table>`` paginated via
+#   ``{"data": [...], "info": {"more_records": false}}``.
+
+endpoints:
+  # OAuth refresh (lazy — first real request triggers it).
+  - path: /oauth/v2/token
+    method: POST
+    corpus: oauth_token
+    response:
+      single_entity: true
+      pagination_style: none
+
+  # Settings discovery — empty so no module-derived tables; only the
+  # hand-coded "derived" ones survive.
+  - path: /crm/v8/settings/modules
+    method: GET
+    corpus: modules
+    response:
+      single_entity: true
+      pagination_style: none
+
+  - path: /crm/v8/settings/fields
+    method: GET
+    corpus: fields
+    response:
+      single_entity: true
+      pagination_style: none
+
+  # Derived: Settings (Users, Roles, Profiles).
+  - path: /crm/v8/users
+    method: GET
+    corpus: Users
+    response: {pagination_style: none, wrapper: {records_key: data, extras: {info: {more_records: false}}}}
+
+  - path: /crm/v8/settings/roles
+    method: GET
+    corpus: Roles
+    response: {pagination_style: none, wrapper: {records_key: data, extras: {info: {more_records: false}}}}
+
+  - path: /crm/v8/settings/profiles
+    method: GET
+    corpus: Profiles
+    response: {pagination_style: none, wrapper: {records_key: data, extras: {info: {more_records: false}}}}
+
+  # Derived: Related tables. Each fetches the parent module first, then
+  # drills down. Empty parent → no drill-down calls.
+  - path: /crm/v8/Campaigns
+    method: GET
+    corpus: Campaigns
+    response: {pagination_style: none, wrapper: {records_key: data, extras: {info: {more_records: false}}}}
+
+  - path: /crm/v8/Deals
+    method: GET
+    corpus: Deals
+    response: {pagination_style: none, wrapper: {records_key: data, extras: {info: {more_records: false}}}}

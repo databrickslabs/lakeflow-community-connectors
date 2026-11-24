@@ -1,0 +1,50 @@
+[
+  {
+    "journeyId": "india-923",
+    "status": "yankee-618",
+    "userId": "echo-183",
+    "startDate": "uniform-762",
+    "manager": "hotel-472",
+    "journeyType": "hotel-957",
+    "journeySubType": "victor-717",
+    "hireStatus": "echo-549",
+    "userFullName": "mike-437",
+    "managerFullName": "foxtrot-854"
+  },
+  {
+    "journeyId": "whiskey-789",
+    "status": "hotel-648",
+    "userId": "papa-159",
+    "startDate": "charlie-951",
+    "manager": "bravo-350",
+    "journeyType": "zulu-828",
+    "journeySubType": "foxtrot-450",
+    "hireStatus": "delta-937",
+    "userFullName": "tango-615",
+    "managerFullName": "delta-189"
+  },
+  {
+    "journeyId": "lima-615",
+    "status": "lima-687",
+    "userId": "uniform-187",
+    "startDate": "mike-543",
+    "manager": "kilo-731",
+    "journeyType": "xray-363",
+    "journeySubType": "kilo-111",
+    "hireStatus": "golf-462",
+    "userFullName": "xray-695",
+    "managerFullName": "tango-656"
+  },
+  {
+    "journeyId": "uniform-233",
+    "status": "xray-362",
+    "userId": "mike-844",
+    "startDate": "hotel-171",
+    "manager": "mike-396",
+    "journeyType": "foxtrot-315",
+    "journeySubType": "kilo-262",
+    "hireStatus": "whiskey-505",
+    "userFullName": "delta-470",
+    "managerFullName": "victor-746"
+  }
+]

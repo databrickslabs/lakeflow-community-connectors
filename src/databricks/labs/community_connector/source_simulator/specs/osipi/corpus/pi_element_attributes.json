@@ -1,0 +1,50 @@
+[
+  {
+    "element_webid": "foxtrot-378",
+    "attribute_webid": "alpha-390",
+    "name": "papa-665",
+    "description": "golf-689",
+    "path": "zulu-901",
+    "type": "zulu-815",
+    "default_units_name": "kilo-311",
+    "data_reference_plugin": "kilo-457",
+    "is_configuration_item": true,
+    "ingestion_timestamp": "2024-01-11T15:52:12Z"
+  },
+  {
+    "element_webid": "november-112",
+    "attribute_webid": "mike-858",
+    "name": "november-174",
+    "description": "november-924",
+    "path": "tango-670",
+    "type": "kilo-636",
+    "default_units_name": "india-222",
+    "data_reference_plugin": "zulu-133",
+    "is_configuration_item": true,
+    "ingestion_timestamp": "2024-01-16T14:25:04Z"
+  },
+  {
+    "element_webid": "india-313",
+    "attribute_webid": "xray-618",
+    "name": "india-285",
+    "description": "victor-142",
+    "path": "oscar-145",
+    "type": "delta-352",
+    "default_units_name": "quebec-261",
+    "data_reference_plugin": "echo-944",
+    "is_configuration_item": false,
+    "ingestion_timestamp": "2024-01-21T06:16:31Z"
+  },
+  {
+    "element_webid": "xray-795",
+    "attribute_webid": "sierra-519",
+    "name": "juliet-909",
+    "description": "uniform-734",
+    "path": "tango-564",
+    "type": "hotel-205",
+    "default_units_name": "delta-638",
+    "data_reference_plugin": "india-506",
+    "is_configuration_item": true,
+    "ingestion_timestamp": "2024-01-01T19:19:25Z"
+  }
+]

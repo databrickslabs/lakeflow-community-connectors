@@ -1,0 +1,18 @@
+{
+  "kind": "youtube#videoCategoryListResponse",
+  "etag": "sim-video-categories-etag",
+  "items": [
+    {
+      "kind": "youtube#videoCategory",
+      "etag": "sim-video-category-etag",
+      "id": "22",
+      "snippet": {
+        "title": "People & Blogs",
+        "assignable": true,
+        "channelId": "UC_test_channel_001"
+      }
+    }
+  ],
+  "nextPageToken": null,
+  "pageInfo": {"totalResults": 1, "resultsPerPage": 50}
+}

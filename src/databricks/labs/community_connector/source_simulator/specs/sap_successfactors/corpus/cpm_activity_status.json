@@ -1,0 +1,54 @@
+[
+  {
+    "activityStatusRecordId": "oscar-121",
+    "statusName": "romeo-695",
+    "colorRGBCode": "tango-693",
+    "createAchievement": true,
+    "defaultStatus": true,
+    "deleted": true,
+    "priority": "tango-657",
+    "createdBy": "sierra-831",
+    "createdDate": "india-771",
+    "lastModifiedBy": "papa-109",
+    "lastModifiedDateTime": "india-452"
+  },
+  {
+    "activityStatusRecordId": "oscar-343",
+    "statusName": "papa-567",
+    "colorRGBCode": "november-397",
+    "createAchievement": true,
+    "defaultStatus": true,
+    "deleted": false,
+    "priority": "romeo-803",
+    "createdBy": "echo-973",
+    "createdDate": "juliet-896",
+    "lastModifiedBy": "papa-250",
+    "lastModifiedDateTime": "lima-998"
+  },
+  {
+    "activityStatusRecordId": "victor-366",
+    "statusName": "kilo-340",
+    "colorRGBCode": "charlie-416",
+    "createAchievement": false,
+    "defaultStatus": false,
+    "deleted": true,
+    "priority": "bravo-268",
+    "createdBy": "bravo-218",
+    "createdDate": "india-125",
+    "lastModifiedBy": "golf-563",
+    "lastModifiedDateTime": "quebec-688"
+  },
+  {
+    "activityStatusRecordId": "uniform-599",
+    "statusName": "oscar-259",
+    "colorRGBCode": "papa-745",
+    "createAchievement": true,
+    "defaultStatus": false,
+    "deleted": true,
+    "priority": "zulu-811",
+    "createdBy": "victor-957",
+    "createdDate": "lima-301",
+    "lastModifiedBy": "hotel-587",
+    "lastModifiedDateTime": "alpha-150"
+  }
+]

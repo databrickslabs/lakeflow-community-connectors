@@ -1,0 +1,50 @@
+[
+  {
+    "event_time": "alpha-448",
+    "event_name": "tango-769",
+    "appsflyer_id": "tango-230",
+    "customer_user_id": "zulu-312",
+    "install_time": "echo-320",
+    "media_source": "zulu-779",
+    "campaign": "oscar-334",
+    "platform": "lima-125",
+    "app_id": "romeo-449",
+    "country_code": "echo-907"
+  },
+  {
+    "event_time": "victor-125",
+    "event_name": "charlie-120",
+    "appsflyer_id": "juliet-676",
+    "customer_user_id": "delta-468",
+    "install_time": "bravo-891",
+    "media_source": "romeo-401",
+    "campaign": "victor-505",
+    "platform": "lima-398",
+    "app_id": "hotel-947",
+    "country_code": "romeo-384"
+  },
+  {
+    "event_time": "sierra-324",
+    "event_name": "kilo-418",
+    "appsflyer_id": "echo-731",
+    "customer_user_id": "zulu-737",
+    "install_time": "whiskey-725",
+    "media_source": "yankee-201",
+    "campaign": "yankee-705",
+    "platform": "hotel-525",
+    "app_id": "whiskey-247",
+    "country_code": "xray-475"
+  },
+  {
+    "event_time": "juliet-943",
+    "event_name": "whiskey-885",
+    "appsflyer_id": "victor-678",
+    "customer_user_id": "mike-745",
+    "install_time": "yankee-859",
+    "media_source": "zulu-453",
+    "campaign": "golf-503",
+    "platform": "victor-751",
+    "app_id": "sierra-429",
+    "country_code": "yankee-931"
+  }
+]

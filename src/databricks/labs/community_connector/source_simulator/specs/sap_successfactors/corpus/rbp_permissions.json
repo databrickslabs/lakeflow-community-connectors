@@ -1,0 +1,30 @@
+[
+  {
+    "permissionId": 34504,
+    "permissionLabel": "oscar-931",
+    "granted": true,
+    "userName": "lima-854",
+    "keyWords": "yankee-118"
+  },
+  {
+    "permissionId": 28864,
+    "permissionLabel": "whiskey-746",
+    "granted": true,
+    "userName": "victor-480",
+    "keyWords": "india-306"
+  },
+  {
+    "permissionId": 92302,
+    "permissionLabel": "zulu-454",
+    "granted": true,
+    "userName": "quebec-932",
+    "keyWords": "golf-562"
+  },
+  {
+    "permissionId": 11819,
+    "permissionLabel": "xray-197",
+    "granted": false,
+    "userName": "romeo-113",
+    "keyWords": "bravo-911"
+  }
+]

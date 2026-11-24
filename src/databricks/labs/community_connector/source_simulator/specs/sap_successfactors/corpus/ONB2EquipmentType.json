@@ -1,0 +1,54 @@
+[
+  {
+    "code": "oscar-998",
+    "createdBy": "yankee-372",
+    "createdDateTime": "golf-825",
+    "description_defaultValue": "november-180",
+    "description_en_US": "quebec-124",
+    "description_localized": "xray-132",
+    "inUse": "whiskey-506",
+    "lastModifiedBy": "oscar-868",
+    "lastModifiedDateTime": "juliet-179",
+    "mdfSystemRecordStatus": "delta-112",
+    "ui5StandardIconId": "bravo-904"
+  },
+  {
+    "code": "tango-358",
+    "createdBy": "papa-478",
+    "createdDateTime": "echo-193",
+    "description_defaultValue": "sierra-376",
+    "description_en_US": "november-239",
+    "description_localized": "november-385",
+    "inUse": "xray-423",
+    "lastModifiedBy": "mike-499",
+    "lastModifiedDateTime": "yankee-197",
+    "mdfSystemRecordStatus": "romeo-270",
+    "ui5StandardIconId": "lima-759"
+  },
+  {
+    "code": "papa-798",
+    "createdBy": "oscar-288",
+    "createdDateTime": "whiskey-643",
+    "description_defaultValue": "alpha-953",
+    "description_en_US": "zulu-700",
+    "description_localized": "tango-565",
+    "inUse": "november-486",
+    "lastModifiedBy": "xray-734",
+    "lastModifiedDateTime": "juliet-396",
+    "mdfSystemRecordStatus": "delta-811",
+    "ui5StandardIconId": "india-934"
+  },
+  {
+    "code": "yankee-159",
+    "createdBy": "xray-961",
+    "createdDateTime": "alpha-301",
+    "description_defaultValue": "india-642",
+    "description_en_US": "lima-712",
+    "description_localized": "xray-887",
+    "inUse": "mike-594",
+    "lastModifiedBy": "juliet-344",
+    "lastModifiedDateTime": "xray-199",
+    "mdfSystemRecordStatus": "golf-490",
+    "ui5StandardIconId": "yankee-286"
+  }
+]

@@ -1,0 +1,22 @@
+{
+  "kind": "youtube#subscriptionListResponse",
+  "etag": "sim-subscriptions-etag",
+  "items": [
+    {
+      "kind": "youtube#subscription",
+      "etag": "sim-subscription-etag",
+      "id": "sub_test_001",
+      "snippet": {
+        "publishedAt": "2020-08-01T00:00:00Z",
+        "title": "Simulator Subscription",
+        "description": "Test subscription",
+        "resourceId": {"kind": "youtube#channel", "channelId": "UC_test_channel_002"},
+        "thumbnails": {
+          "default": {"url": "https://example.com/sub-thumb.jpg"}
+        }
+      }
+    }
+  ],
+  "nextPageToken": null,
+  "pageInfo": {"totalResults": 1, "resultsPerPage": 50}
+}

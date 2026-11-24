@@ -1,0 +1,42 @@
+[
+  {
+    "id": "quebec-912",
+    "countryCode": "yankee-918",
+    "payComponentId": "xray-189",
+    "accountAssignmentType": "india-165",
+    "validFrom": "hotel-406",
+    "validTo": "sierra-499",
+    "symbolicAccount": "uniform-225",
+    "lastModifiedTimestamp": "whiskey-252"
+  },
+  {
+    "id": "hotel-994",
+    "countryCode": "sierra-129",
+    "payComponentId": "delta-628",
+    "accountAssignmentType": "yankee-857",
+    "validFrom": "bravo-909",
+    "validTo": "oscar-417",
+    "symbolicAccount": "uniform-782",
+    "lastModifiedTimestamp": "india-819"
+  },
+  {
+    "id": "victor-556",
+    "countryCode": "sierra-522",
+    "payComponentId": "foxtrot-179",
+    "accountAssignmentType": "whiskey-757",
+    "validFrom": "zulu-993",
+    "validTo": "mike-582",
+    "symbolicAccount": "mike-553",
+    "lastModifiedTimestamp": "mike-817"
+  },
+  {
+    "id": "quebec-309",
+    "countryCode": "quebec-740",
+    "payComponentId": "kilo-511",
+    "accountAssignmentType": "victor-670",
+    "validFrom": "juliet-844",
+    "validTo": "papa-922",
+    "symbolicAccount": "quebec-623",
+    "lastModifiedTimestamp": "tango-958"
+  }
+]

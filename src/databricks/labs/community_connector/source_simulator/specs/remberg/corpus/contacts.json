@@ -1,0 +1,86 @@
+[
+  {
+    "id": "oscar-98-pk0",
+    "firstName": "papa-887",
+    "lastName": "golf-377",
+    "rembergUserEmail": "uniform-662",
+    "jobPosition": "delta-549",
+    "phoneNumber": {
+      "number": "oscar-643",
+      "countryPrefix": "juliet-346"
+    },
+    "organizationNumber": "romeo-456",
+    "hourlyRates": []
+  },
+  {
+    "id": "echo-213-pk1",
+    "firstName": "xray-472",
+    "lastName": "romeo-152",
+    "rembergUserEmail": "lima-123",
+    "jobPosition": "whiskey-500",
+    "phoneNumber": {
+      "number": "uniform-402",
+      "countryPrefix": "uniform-929"
+    },
+    "organizationNumber": "romeo-309",
+    "hourlyRates": [
+      {
+        "value": 851.19,
+        "validFrom": "lima-387"
+      }
+    ]
+  },
+  {
+    "id": "alpha-32-pk2",
+    "firstName": "tango-829",
+    "lastName": "delta-666",
+    "rembergUserEmail": "victor-867",
+    "jobPosition": "mike-116",
+    "phoneNumber": {
+      "number": "golf-719",
+      "countryPrefix": "romeo-620"
+    },
+    "organizationNumber": "bravo-615",
+    "hourlyRates": [
+      {
+        "value": 846.21,
+        "validFrom": "kilo-177"
+      }
+    ]
+  },
+  {
+    "id": "quebec-4-pk3",
+    "firstName": "uniform-765",
+    "lastName": "xray-826",
+    "rembergUserEmail": "lima-199",
+    "jobPosition": "delta-952",
+    "phoneNumber": {
+      "number": "charlie-148",
+      "countryPrefix": "victor-777"
+    },
+    "organizationNumber": "yankee-996",
+    "hourlyRates": []
+  },
+  {
+    "id": "whiskey--pk4",
+    "firstName": "golf-892",
+    "lastName": "alpha-630",
+    "rembergUserEmail": "oscar-790",
+    "jobPosition": "lima-669",
+    "phoneNumber": {
+      "number": "papa-309",
+      "countryPrefix": "juliet-684"
+    },
+    "organizationNumber": "quebec-841",
+    "hourlyRates": [
+      {
+        "value": 159.79,
+        "validFrom": "romeo-968"
+      },
+      {
+        "value": 658.99,
+        "validFrom": "bravo-179"
+      }
+    ]
+  }
+]

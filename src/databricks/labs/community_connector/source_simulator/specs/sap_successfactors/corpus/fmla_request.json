@@ -1,0 +1,68 @@
+[
+  {
+    "assignmentId": "bravo-619",
+    "id": "november-175",
+    "providerName": "oscar-740",
+    "fmlaStartDate": "victor-179",
+    "fmlaEndDate": "oscar-614",
+    "fmlaReason": "november-237",
+    "absenceType": "whiskey-202",
+    "requestStatus": "bravo-949",
+    "returnToWorkDate": "whiskey-859",
+    "absenceSpecificInformation": [
+      {
+        "absenceStartDate": "foxtrot-947",
+        "absenceEndDate": "lima-736",
+        "absenceStartTime": "november-225",
+        "absenceEndTime": "foxtrot-915",
+        "durationDays": "zulu-625",
+        "durationHours": "hotel-679"
+      }
+    ]
+  },
+  {
+    "assignmentId": "xray-885",
+    "id": "foxtrot-207",
+    "providerName": "yankee-139",
+    "fmlaStartDate": "papa-418",
+    "fmlaEndDate": "xray-136",
+    "fmlaReason": "zulu-184",
+    "absenceType": "hotel-877",
+    "requestStatus": "sierra-577",
+    "returnToWorkDate": "romeo-516",
+    "absenceSpecificInformation": []
+  },
+  {
+    "assignmentId": "delta-415",
+    "id": "oscar-888",
+    "providerName": "romeo-575",
+    "fmlaStartDate": "delta-357",
+    "fmlaEndDate": "whiskey-802",
+    "fmlaReason": "zulu-438",
+    "absenceType": "mike-330",
+    "requestStatus": "november-191",
+    "returnToWorkDate": "hotel-359",
+    "absenceSpecificInformation": []
+  },
+  {
+    "assignmentId": "lima-848",
+    "id": "zulu-188",
+    "providerName": "whiskey-642",
+    "fmlaStartDate": "lima-885",
+    "fmlaEndDate": "xray-800",
+    "fmlaReason": "lima-182",
+    "absenceType": "xray-171",
+    "requestStatus": "papa-986",
+    "returnToWorkDate": "kilo-493",
+    "absenceSpecificInformation": [
+      {
+        "absenceStartDate": "tango-102",
+        "absenceEndDate": "oscar-996",
+        "absenceStartTime": "kilo-863",
+        "absenceEndTime": "mike-488",
+        "durationDays": "romeo-709",
+        "durationHours": "mike-354"
+      }
+    ]
+  }
+]

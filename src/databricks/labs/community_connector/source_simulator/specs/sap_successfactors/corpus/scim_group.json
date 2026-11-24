@@ -1,0 +1,92 @@
+[
+  {
+    "id": "kilo-284",
+    "displayName": "victor-224",
+    "schemas": [
+      "echo-583"
+    ],
+    "members": [],
+    "meta": {
+      "resourceType": "quebec-556",
+      "created": "juliet-669",
+      "lastModified": "victor-169",
+      "location": "bravo-959",
+      "version": "alpha-340"
+    },
+    "GroupExtensionVersion2": "delta-465"
+  },
+  {
+    "id": "papa-320",
+    "displayName": "juliet-434",
+    "schemas": [],
+    "members": [
+      {
+        "value": "golf-904",
+        "type": "kilo-255",
+        "display": "november-824",
+        "ref": "bravo-374"
+      }
+    ],
+    "meta": {
+      "resourceType": "alpha-371",
+      "created": "kilo-160",
+      "lastModified": "bravo-832",
+      "location": "sierra-828",
+      "version": "papa-109"
+    },
+    "GroupExtensionVersion2": "tango-561"
+  },
+  {
+    "id": "oscar-294",
+    "displayName": "kilo-252",
+    "schemas": [
+      "quebec-534"
+    ],
+    "members": [
+      {
+        "value": "mike-300",
+        "type": "india-417",
+        "display": "mike-374",
+        "ref": "november-703"
+      },
+      {
+        "value": "foxtrot-576",
+        "type": "zulu-805",
+        "display": "foxtrot-910",
+        "ref": "xray-690"
+      }
+    ],
+    "meta": {
+      "resourceType": "hotel-715",
+      "created": "whiskey-265",
+      "lastModified": "oscar-117",
+      "location": "kilo-480",
+      "version": "zulu-987"
+    },
+    "GroupExtensionVersion2": "whiskey-334"
+  },
+  {
+    "id": "golf-916",
+    "displayName": "golf-833",
+    "schemas": [
+      "november-711",
+      "oscar-129"
+    ],
+    "members": [
+      {
+        "value": "uniform-967",
+        "type": "hotel-683",
+        "display": "kilo-615",
+        "ref": "yankee-579"
+      }
+    ],
+    "meta": {
+      "resourceType": "zulu-442",
+      "created": "bravo-914",
+      "lastModified": "xray-390",
+      "location": "foxtrot-843",
+      "version": "whiskey-280"
+    },
+    "GroupExtensionVersion2": "golf-980"
+  }
+]

@@ -1,0 +1,50 @@
+[
+  {
+    "tag_webid": "hotel-191",
+    "query_time": "2024-01-27T10:57:20Z",
+    "timestamp": "2024-01-29T07:29:45Z",
+    "value": 888.24,
+    "good": false,
+    "questionable": false,
+    "substituted": true,
+    "annotated": false,
+    "units": "romeo-809",
+    "ingestion_timestamp": "2024-01-16T21:50:50Z"
+  },
+  {
+    "tag_webid": "golf-623",
+    "query_time": "2024-01-26T15:53:00Z",
+    "timestamp": "2024-01-20T17:28:04Z",
+    "value": 64.05,
+    "good": false,
+    "questionable": true,
+    "substituted": false,
+    "annotated": false,
+    "units": "zulu-800",
+    "ingestion_timestamp": "2024-01-21T13:10:45Z"
+  },
+  {
+    "tag_webid": "quebec-829",
+    "query_time": "2024-01-21T09:20:25Z",
+    "timestamp": "2024-01-18T11:40:08Z",
+    "value": 600.86,
+    "good": false,
+    "questionable": false,
+    "substituted": false,
+    "annotated": true,
+    "units": "hotel-534",
+    "ingestion_timestamp": "2024-01-17T15:28:20Z"
+  },
+  {
+    "tag_webid": "mike-507",
+    "query_time": "2024-01-21T19:05:45Z",
+    "timestamp": "2024-01-24T06:57:03Z",
+    "value": 668.36,
+    "good": false,
+    "questionable": false,
+    "substituted": true,
+    "annotated": true,
+    "units": "mike-248",
+    "ingestion_timestamp": "2024-01-27T14:01:56Z"
+  }
+]

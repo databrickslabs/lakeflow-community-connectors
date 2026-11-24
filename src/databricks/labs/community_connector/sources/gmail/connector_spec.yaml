@@ -1,0 +1,110 @@
+# Gmail Community Connector Spec
+#
+# Gmail authenticates via the OAuth 2.0 authorization-code flow. The
+# connection layer (Unity Catalog COMMUNITY connection, or the labs
+# authenticate tool for local dev) runs the browser-based flow, so the
+# user only supplies their OAuth app's client_id + client_secret; the
+# token is obtained from Google by the flow rather than entered by hand.
+#
+# Provides 100% Gmail API coverage with 10 tables:
+# - messages, threads, labels, drafts (core email data)
+# - profile (user info)
+# - settings, filters, forwarding_addresses, send_as, delegates (configuration)
+
+# ============================================================================
+# Connection Parameters
+# These are the options the user supplies when creating the Unity Catalog
+# connection. The OAuth-issued token is NOT listed here — it is obtained by
+# the OAuth flow (and, for UC, refreshed server-side) rather than entered.
+# ============================================================================
+display_name: Gmail
+connection:
+  parameters:
+    - name: client_id
+      type: string
+      required: true
+      secret: true
+      description: >
+        OAuth 2.0 client ID from Google Cloud Console (APIs & Services →
+        Credentials → OAuth 2.0 Client IDs, Web application type).
+
+    - name: client_secret
+      type: string
+      required: true
+      secret: true
+      description: >
+        OAuth 2.0 client secret issued alongside the client_id.
+
+    - name: user_id
+      type: string
+      required: false
+      description: >
+        Gmail user identifier the connector reads against. Defaults to
+        'me' (the authorizing user). Service-account workflows with
+        domain-wide delegation can specify a target user email here.
+
+  # OAuth 2.0 authorization-code flow definition (see PR #218 for the shape).
+  #   flow   — u2m: a single human authorizes once at connection creation.
+  #            Maps to UC's community_oauth_flow.
+  #   pkce   — false: Google's Web-application client is a confidential
+  #            client (authenticates with client_secret) and does not
+  #            require PKCE. The labs authenticate CLI does not implement
+  #            PKCE yet, so this must stay false there.
+  oauth:
+    flow: u2m
+    pkce: false
+    scopes: https://www.googleapis.com/auth/gmail.readonly
+    authorization_url: https://accounts.google.com/o/oauth2/v2/auth
+    token_url: https://oauth2.googleapis.com/token
+    extra_auth_params:
+      access_type: offline
+      prompt: consent
+
+# ============================================================================
+# External Options Allowlist
+# These table-specific options must be included in the externalOptionsAllowList
+# parameter of the UC connection to allow them to be passed through.
+# Use a comma-separated string of option names.
+# ============================================================================
+external_options_allowlist: "q,labelIds,maxResults,includeSpamTrash,format,max_records_per_batch"
+
+# ============================================================================
+# Supported Tables (10 tables - 100% Gmail API coverage)
+# ============================================================================
+# Core Email Data:
+#   - messages:              Email messages (CDC with historyId cursor)
+#   - threads:               Email threads (CDC with historyId cursor)
+#   - labels:                Gmail labels (snapshot)
+#   - drafts:                Draft messages (snapshot)
+#
+# Account Information:
+#   - profile:               User profile and mailbox stats (snapshot)
+#
+# Settings & Configuration:
+#   - settings:              Combined settings (IMAP, POP, vacation, etc.)
+#   - filters:               Email filter rules (snapshot)
+#   - forwarding_addresses:  Forwarding destinations (snapshot)
+#   - send_as:               Send-as aliases (snapshot)
+#   - delegates:             Delegated access users (snapshot)
+
+# ============================================================================
+# Table Options Documentation
+# ============================================================================
+# q:               Gmail search query (same syntax as Gmail web UI)
+#                  Example: "newer_than:7d", "from:user@example.com"
+#
+# labelIds:        Filter by label ID (e.g., INBOX, SENT, DRAFT, SPAM, TRASH)
+#                  For user labels, use the label ID (e.g., Label_1)
+#
+# maxResults:      Maximum items per page (default: 100, max: 500)
+#
+# includeSpamTrash: Include messages from SPAM and TRASH folders
+#                   Values: "true" or "false" (default: "false")
+#
+# format:          Message format to retrieve
+#                  Values: "full" (default), "metadata", "minimal", "raw"
+#                  - full: Returns full email content including body
+#                  - metadata: Returns only headers, no body
+#                  - minimal: Returns only id and threadId
+#                  - raw: Returns full email in RFC 2822 format (base64)
+

@@ -1,0 +1,35 @@
+[
+  {
+    "status": "whiskey-786",
+    "message": "november-858",
+    "deletedCount": 46644,
+    "failedTimeEvents": []
+  },
+  {
+    "status": "kilo-291",
+    "message": "india-437",
+    "deletedCount": 1890,
+    "failedTimeEvents": []
+  },
+  {
+    "status": "romeo-701",
+    "message": "lima-425",
+    "deletedCount": 31107,
+    "failedTimeEvents": [
+      {
+        "id": "zulu-662",
+        "reason": "tango-866"
+      },
+      {
+        "id": "tango-273",
+        "reason": "mike-102"
+      }
+    ]
+  },
+  {
+    "status": "india-853",
+    "message": "charlie-681",
+    "deletedCount": 48904,
+    "failedTimeEvents": []
+  }
+]

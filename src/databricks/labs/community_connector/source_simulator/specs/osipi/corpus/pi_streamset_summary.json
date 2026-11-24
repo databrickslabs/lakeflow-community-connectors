@@ -1,0 +1,50 @@
+[
+  {
+    "tag_webid": "hotel-967",
+    "summary_type": "uniform-696",
+    "timestamp": "2024-01-12T02:49:48Z",
+    "value": 830.0,
+    "good": true,
+    "questionable": false,
+    "substituted": false,
+    "annotated": false,
+    "units": "zulu-834",
+    "ingestion_timestamp": "2024-01-25T18:59:07Z"
+  },
+  {
+    "tag_webid": "romeo-747",
+    "summary_type": "tango-494",
+    "timestamp": "2024-01-29T09:06:18Z",
+    "value": 184.41,
+    "good": false,
+    "questionable": false,
+    "substituted": true,
+    "annotated": false,
+    "units": "hotel-929",
+    "ingestion_timestamp": "2024-01-16T19:51:04Z"
+  },
+  {
+    "tag_webid": "zulu-608",
+    "summary_type": "november-695",
+    "timestamp": "2024-01-15T04:30:49Z",
+    "value": 530.64,
+    "good": false,
+    "questionable": false,
+    "substituted": true,
+    "annotated": false,
+    "units": "uniform-847",
+    "ingestion_timestamp": "2024-01-28T09:30:28Z"
+  },
+  {
+    "tag_webid": "kilo-114",
+    "summary_type": "whiskey-214",
+    "timestamp": "2024-01-27T02:43:15Z",
+    "value": 279.39,
+    "good": true,
+    "questionable": false,
+    "substituted": true,
+    "annotated": false,
+    "units": "foxtrot-203",
+    "ingestion_timestamp": "2024-01-01T20:28:43Z"
+  }
+]

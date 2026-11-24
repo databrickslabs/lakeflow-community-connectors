@@ -1,0 +1,42 @@
+[
+  {
+    "CustomPayType_externalCode": "tango-265",
+    "country": "whiskey-407",
+    "createdBy": "xray-167",
+    "createdDateTime": "hotel-206",
+    "externalCode": 87406,
+    "lastModifiedBy": "echo-817",
+    "lastModifiedDateTime": "bravo-769",
+    "mdfSystemRecordStatus": "papa-247"
+  },
+  {
+    "CustomPayType_externalCode": "victor-269",
+    "country": "echo-123",
+    "createdBy": "papa-551",
+    "createdDateTime": "mike-175",
+    "externalCode": 46500,
+    "lastModifiedBy": "oscar-155",
+    "lastModifiedDateTime": "mike-645",
+    "mdfSystemRecordStatus": "oscar-305"
+  },
+  {
+    "CustomPayType_externalCode": "romeo-223",
+    "country": "zulu-496",
+    "createdBy": "delta-977",
+    "createdDateTime": "mike-375",
+    "externalCode": 23709,
+    "lastModifiedBy": "tango-614",
+    "lastModifiedDateTime": "yankee-974",
+    "mdfSystemRecordStatus": "alpha-450"
+  },
+  {
+    "CustomPayType_externalCode": "yankee-237",
+    "country": "hotel-769",
+    "createdBy": "quebec-318",
+    "createdDateTime": "yankee-684",
+    "externalCode": 92344,
+    "lastModifiedBy": "alpha-339",
+    "lastModifiedDateTime": "bravo-241",
+    "mdfSystemRecordStatus": "tango-874"
+  }
+]

@@ -1,0 +1,110 @@
+[
+  {
+    "externalId": "kilo-331",
+    "workAssignmentId": "november-276",
+    "timestampUTC": "xray-328",
+    "timeEventTypeCode": "foxtrot-817",
+    "timeTypeCode": "oscar-812",
+    "timeZoneOffset": "delta-431",
+    "approvalStatusCode": "hotel-285",
+    "validationStatusCode": "oscar-455",
+    "pairingStatusCode": "tango-287",
+    "creationSourceCode": "kilo-982",
+    "createdAt": "papa-374",
+    "createdBy": "whiskey-728",
+    "lastChangedAt": "november-646",
+    "lastChangedBy": "hotel-805",
+    "comments": "uniform-412",
+    "reasonForManualTimeEventCode": "november-133",
+    "terminalId": "sierra-628",
+    "validationMessages": []
+  },
+  {
+    "externalId": "mike-468",
+    "workAssignmentId": "oscar-802",
+    "timestampUTC": "xray-984",
+    "timeEventTypeCode": "uniform-779",
+    "timeTypeCode": "november-615",
+    "timeZoneOffset": "tango-972",
+    "approvalStatusCode": "papa-346",
+    "validationStatusCode": "whiskey-899",
+    "pairingStatusCode": "romeo-990",
+    "creationSourceCode": "echo-619",
+    "createdAt": "november-780",
+    "createdBy": "echo-224",
+    "lastChangedAt": "mike-179",
+    "lastChangedBy": "india-434",
+    "comments": "oscar-171",
+    "reasonForManualTimeEventCode": "uniform-137",
+    "terminalId": "kilo-360",
+    "validationMessages": [
+      {
+        "code": "november-648",
+        "message": "juliet-944",
+        "target": "quebec-632"
+      }
+    ]
+  },
+  {
+    "externalId": "delta-780",
+    "workAssignmentId": "lima-106",
+    "timestampUTC": "victor-206",
+    "timeEventTypeCode": "uniform-627",
+    "timeTypeCode": "india-274",
+    "timeZoneOffset": "bravo-911",
+    "approvalStatusCode": "yankee-817",
+    "validationStatusCode": "golf-887",
+    "pairingStatusCode": "mike-796",
+    "creationSourceCode": "zulu-877",
+    "createdAt": "kilo-696",
+    "createdBy": "quebec-585",
+    "lastChangedAt": "sierra-274",
+    "lastChangedBy": "alpha-465",
+    "comments": "victor-745",
+    "reasonForManualTimeEventCode": "yankee-621",
+    "terminalId": "alpha-783",
+    "validationMessages": [
+      {
+        "code": "lima-338",
+        "message": "delta-879",
+        "target": "lima-869"
+      },
+      {
+        "code": "tango-586",
+        "message": "victor-924",
+        "target": "yankee-889"
+      }
+    ]
+  },
+  {
+    "externalId": "whiskey-154",
+    "workAssignmentId": "romeo-549",
+    "timestampUTC": "sierra-849",
+    "timeEventTypeCode": "juliet-476",
+    "timeTypeCode": "xray-868",
+    "timeZoneOffset": "delta-816",
+    "approvalStatusCode": "quebec-472",
+    "validationStatusCode": "bravo-911",
+    "pairingStatusCode": "golf-190",
+    "creationSourceCode": "sierra-379",
+    "createdAt": "hotel-958",
+    "createdBy": "sierra-755",
+    "lastChangedAt": "echo-231",
+    "lastChangedBy": "golf-546",
+    "comments": "oscar-899",
+    "reasonForManualTimeEventCode": "golf-190",
+    "terminalId": "charlie-903",
+    "validationMessages": [
+      {
+        "code": "bravo-423",
+        "message": "november-998",
+        "target": "hotel-731"
+      },
+      {
+        "code": "india-725",
+        "message": "sierra-390",
+        "target": "quebec-156"
+      }
+    ]
+  }
+]

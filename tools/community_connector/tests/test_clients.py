@@ -12,9 +12,9 @@ from databricks.sdk import WorkspaceClient
 from databricks.sdk.service.workspace import RepoInfo
 from databricks.sdk.service.pipelines import CreatePipelineResponse, StartUpdateResponse
 
-from databricks.labs.community_connector.config import RepoConfig, PipelineConfig
-from databricks.labs.community_connector.repo_client import RepoClient
-from databricks.labs.community_connector.pipeline_client import PipelineClient
+from databricks.labs.community_connector_cli.config import RepoConfig, PipelineConfig
+from databricks.labs.community_connector_cli.repo_client import RepoClient
+from databricks.labs.community_connector_cli.pipeline_client import PipelineClient
 
 
 class TestRepoClient:
@@ -74,7 +74,7 @@ class TestPipelineClient:
         config = PipelineConfig(
             name="Test Pipeline",
             catalog="main",
-            target="test_schema",
+            schema="test_schema",
             development=True,
         )
 
@@ -163,7 +163,7 @@ class TestConfigDefaults:
         config = PipelineConfig(name="Test")
 
         assert config.name == "Test"
-        assert config.target is None
+        assert config.schema is None
         assert config.catalog is None
         assert config.root_path is None
         assert config.channel is None

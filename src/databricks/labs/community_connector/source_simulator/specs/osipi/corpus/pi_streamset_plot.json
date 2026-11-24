@@ -1,0 +1,46 @@
+[
+  {
+    "tag_webid": "oscar-935",
+    "timestamp": "2024-01-18T23:15:29Z",
+    "value": 231.29,
+    "good": true,
+    "questionable": true,
+    "substituted": true,
+    "annotated": true,
+    "units": "juliet-981",
+    "ingestion_timestamp": "2024-01-08T21:46:58Z"
+  },
+  {
+    "tag_webid": "tango-412",
+    "timestamp": "2024-01-26T12:26:24Z",
+    "value": 887.48,
+    "good": false,
+    "questionable": true,
+    "substituted": true,
+    "annotated": true,
+    "units": "kilo-739",
+    "ingestion_timestamp": "2024-01-28T15:12:15Z"
+  },
+  {
+    "tag_webid": "november-566",
+    "timestamp": "2024-01-05T09:03:10Z",
+    "value": 425.64,
+    "good": false,
+    "questionable": false,
+    "substituted": false,
+    "annotated": false,
+    "units": "delta-303",
+    "ingestion_timestamp": "2024-01-06T07:08:01Z"
+  },
+  {
+    "tag_webid": "victor-343",
+    "timestamp": "2024-01-04T05:27:53Z",
+    "value": 429.89,
+    "good": true,
+    "questionable": false,
+    "substituted": true,
+    "annotated": true,
+    "units": "bravo-678",
+    "ingestion_timestamp": "2024-01-16T00:53:07Z"
+  }
+]

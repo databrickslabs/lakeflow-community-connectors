@@ -1,0 +1,30 @@
+# Example Community Connector Spec
+# This file defines the specification for the connector including
+# connection parameters and allowlist options.
+
+# ============================================================================
+# Connection Parameters
+# These are provided when creating the Unity Catalog connection.
+# ============================================================================
+display_name: Example
+connection:
+  parameters:
+    - name: username
+      type: string
+      required: true
+      description: >
+        Username for authentication with the Example source.
+    - name: password
+      type: string
+      required: true
+      description: >
+        Password for authentication with the Example source.
+
+# ============================================================================
+# External Options Allowlist
+# These table-specific options must be included in the externalOptionsAllowList
+# parameter of the UC connection to allow them to be passed through.
+# Use a comma-separated string of option names.
+# If no table-specific options are needed, set to empty string or omit.
+# ============================================================================
+external_options_allowlist: "max_records_per_batch,category,user_id,status,limit,window_seconds"

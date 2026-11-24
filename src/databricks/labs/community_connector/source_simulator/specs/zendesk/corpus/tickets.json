@@ -1,0 +1,245 @@
+[
+  {
+    "id": 1000,
+    "url": "sierra-430",
+    "external_id": "november-745",
+    "via": {
+      "key_0": "sierra-318"
+    },
+    "created_at": "oscar-134",
+    "updated_at": "charlie-244",
+    "type": "november-310",
+    "subject": "juliet-846",
+    "raw_subject": "foxtrot-654",
+    "description": "delta-209",
+    "priority": "alpha-105",
+    "status": "delta-132",
+    "recipient": "quebec-632",
+    "requester_id": 50120,
+    "submitter_id": 89638,
+    "assignee_id": 66624,
+    "organization_id": 22152,
+    "group_id": 79431,
+    "collaborator_ids": [],
+    "follower_ids": [],
+    "email_cc_ids": [
+      32778,
+      89148
+    ],
+    "forum_topic_id": 85384,
+    "problem_id": 53204,
+    "has_incidents": true,
+    "is_public": false,
+    "due_at": "juliet-508",
+    "tags": [
+      "charlie-828",
+      "charlie-191"
+    ],
+    "custom_fields": [
+      {
+        "key_0": "charlie-977",
+        "key_1": "uniform-986"
+      },
+      {
+        "key_0": "hotel-976"
+      }
+    ],
+    "satisfaction_rating": {
+      "key_0": "delta-486"
+    },
+    "sharing_agreement_ids": [
+      54449
+    ],
+    "fields": [
+      {
+        "key_0": "sierra-180",
+        "key_1": "charlie-491"
+      },
+      {
+        "key_0": "zulu-911",
+        "key_1": "bravo-632"
+      }
+    ],
+    "followup_ids": [
+      90269,
+      90720
+    ],
+    "ticket_form_id": 66561,
+    "brand_id": 78425,
+    "allow_channelback": false,
+    "allow_attachments": false,
+    "from_messaging_channel": true,
+    "generated_timestamp": 1704067200
+  },
+  {
+    "id": 1001,
+    "url": "kilo-317",
+    "external_id": "golf-646",
+    "via": {},
+    "created_at": "india-858",
+    "updated_at": "victor-592",
+    "type": "mike-204",
+    "subject": "xray-720",
+    "raw_subject": "charlie-951",
+    "description": "hotel-701",
+    "priority": "xray-877",
+    "status": "zulu-905",
+    "recipient": "golf-403",
+    "requester_id": 82283,
+    "submitter_id": 9525,
+    "assignee_id": 91287,
+    "organization_id": 74215,
+    "group_id": 3047,
+    "collaborator_ids": [],
+    "follower_ids": [
+      95902
+    ],
+    "email_cc_ids": [
+      4296,
+      43044
+    ],
+    "forum_topic_id": 37628,
+    "problem_id": 9232,
+    "has_incidents": true,
+    "is_public": false,
+    "due_at": "hotel-687",
+    "tags": [
+      "charlie-716",
+      "alpha-760"
+    ],
+    "custom_fields": [
+      {
+        "key_0": "victor-787",
+        "key_1": "alpha-676"
+      }
+    ],
+    "satisfaction_rating": {
+      "key_0": "romeo-417"
+    },
+    "sharing_agreement_ids": [
+      33442,
+      68160
+    ],
+    "fields": [
+      {}
+    ],
+    "followup_ids": [
+      53985,
+      85574
+    ],
+    "ticket_form_id": 35421,
+    "brand_id": 94738,
+    "allow_channelback": false,
+    "allow_attachments": false,
+    "from_messaging_channel": false,
+    "generated_timestamp": 1704070800
+  },
+  {
+    "id": 1002,
+    "url": "echo-938",
+    "external_id": "tango-175",
+    "via": {},
+    "created_at": "zulu-175",
+    "updated_at": "sierra-690",
+    "type": "quebec-827",
+    "subject": "kilo-202",
+    "raw_subject": "kilo-819",
+    "description": "sierra-268",
+    "priority": "juliet-566",
+    "status": "golf-496",
+    "recipient": "whiskey-424",
+    "requester_id": 69338,
+    "submitter_id": 20460,
+    "assignee_id": 91347,
+    "organization_id": 70513,
+    "group_id": 64036,
+    "collaborator_ids": [],
+    "follower_ids": [],
+    "email_cc_ids": [
+      86406,
+      21360
+    ],
+    "forum_topic_id": 35004,
+    "problem_id": 2976,
+    "has_incidents": false,
+    "is_public": true,
+    "due_at": "golf-407",
+    "tags": [
+      "uniform-496",
+      "charlie-594"
+    ],
+    "custom_fields": [],
+    "satisfaction_rating": {
+      "key_0": "echo-965"
+    },
+    "sharing_agreement_ids": [
+      44092,
+      19984
+    ],
+    "fields": [],
+    "followup_ids": [
+      85494,
+      23461
+    ],
+    "ticket_form_id": 48872,
+    "brand_id": 19165,
+    "allow_channelback": false,
+    "allow_attachments": true,
+    "from_messaging_channel": false,
+    "generated_timestamp": 1704074400
+  },
+  {
+    "id": 1003,
+    "url": "yankee-415",
+    "external_id": "hotel-379",
+    "via": {},
+    "created_at": "india-339",
+    "updated_at": "bravo-351",
+    "type": "oscar-738",
+    "subject": "november-238",
+    "raw_subject": "alpha-991",
+    "description": "foxtrot-282",
+    "priority": "yankee-896",
+    "status": "yankee-724",
+    "recipient": "yankee-305",
+    "requester_id": 44104,
+    "submitter_id": 14408,
+    "assignee_id": 13885,
+    "organization_id": 83743,
+    "group_id": 65920,
+    "collaborator_ids": [
+      81297
+    ],
+    "follower_ids": [
+      79546,
+      26668
+    ],
+    "email_cc_ids": [
+      99755,
+      85983
+    ],
+    "forum_topic_id": 39268,
+    "problem_id": 82948,
+    "has_incidents": false,
+    "is_public": false,
+    "due_at": "foxtrot-855",
+    "tags": [],
+    "custom_fields": [],
+    "satisfaction_rating": {},
+    "sharing_agreement_ids": [],
+    "fields": [
+      {},
+      {
+        "key_0": "hotel-349",
+        "key_1": "xray-916"
+      }
+    ],
+    "followup_ids": [],
+    "ticket_form_id": 46318,
+    "brand_id": 90292,
+    "allow_channelback": false,
+    "allow_attachments": false,
+    "from_messaging_channel": false,
+    "generated_timestamp": 1704078000
+  }
+]

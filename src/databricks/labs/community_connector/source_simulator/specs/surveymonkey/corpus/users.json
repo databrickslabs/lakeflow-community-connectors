@@ -1,0 +1,30 @@
+{
+  "id": "india-768",
+  "username": "sierra-340",
+  "first_name": "victor-758",
+  "last_name": "mike-144",
+  "email": "delta-545",
+  "email_verified": true,
+  "account_type": "november-279",
+  "language": "echo-853",
+  "date_created": "tango-124",
+  "date_last_login": "india-426",
+  "question_types": {
+    "available": []
+  },
+  "scopes": {
+    "available": [],
+    "granted": [
+      "quebec-996",
+      "oscar-606"
+    ]
+  },
+  "sso_connections": [
+    "india-186"
+  ],
+  "features": {
+    "collector_create_limit": 40125,
+    "email_enabled": false
+  },
+  "href": "romeo-575"
+}

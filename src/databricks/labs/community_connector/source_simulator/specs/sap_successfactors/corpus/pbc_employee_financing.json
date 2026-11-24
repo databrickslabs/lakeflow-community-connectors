@@ -1,0 +1,54 @@
+[
+  {
+    "id": "lima-440",
+    "objectType": "tango-663",
+    "startDate": "yankee-780",
+    "endDate": "kilo-694",
+    "companyCode": "lima-282",
+    "creationDate": "tango-203",
+    "status": "yankee-943",
+    "payLocked": "uniform-798",
+    "recalActive": "foxtrot-257",
+    "financingStatusEffectiveDate": "hotel-255",
+    "allDocsReleased": true
+  },
+  {
+    "id": "november-559",
+    "objectType": "delta-212",
+    "startDate": "kilo-924",
+    "endDate": "tango-717",
+    "companyCode": "india-871",
+    "creationDate": "tango-678",
+    "status": "delta-372",
+    "payLocked": "quebec-949",
+    "recalActive": "yankee-844",
+    "financingStatusEffectiveDate": "zulu-171",
+    "allDocsReleased": true
+  },
+  {
+    "id": "golf-543",
+    "objectType": "alpha-210",
+    "startDate": "hotel-367",
+    "endDate": "lima-952",
+    "companyCode": "delta-799",
+    "creationDate": "foxtrot-469",
+    "status": "yankee-169",
+    "payLocked": "whiskey-531",
+    "recalActive": "golf-221",
+    "financingStatusEffectiveDate": "romeo-500",
+    "allDocsReleased": true
+  },
+  {
+    "id": "whiskey-853",
+    "objectType": "juliet-968",
+    "startDate": "alpha-280",
+    "endDate": "foxtrot-891",
+    "companyCode": "zulu-681",
+    "creationDate": "india-484",
+    "status": "delta-351",
+    "payLocked": "papa-848",
+    "recalActive": "uniform-436",
+    "financingStatusEffectiveDate": "lima-495",
+    "allDocsReleased": false
+  }
+]

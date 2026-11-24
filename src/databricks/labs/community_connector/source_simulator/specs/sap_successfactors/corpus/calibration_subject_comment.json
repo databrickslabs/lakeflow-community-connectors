@@ -1,0 +1,46 @@
+[
+  {
+    "id": 5725,
+    "comment": "delta-995",
+    "createdByWorkAssignmentLegacyId": "hotel-199",
+    "createdDateTime": "kilo-801",
+    "lastModifiedDateTime": "xray-979",
+    "modified": true,
+    "authorizedByWorkAssignmentLegacyId": "uniform-218",
+    "reasonId": 69969,
+    "reasonLabel": "victor-658"
+  },
+  {
+    "id": 91323,
+    "comment": "uniform-988",
+    "createdByWorkAssignmentLegacyId": "echo-263",
+    "createdDateTime": "charlie-541",
+    "lastModifiedDateTime": "delta-763",
+    "modified": true,
+    "authorizedByWorkAssignmentLegacyId": "quebec-661",
+    "reasonId": 47815,
+    "reasonLabel": "echo-388"
+  },
+  {
+    "id": 71677,
+    "comment": "whiskey-381",
+    "createdByWorkAssignmentLegacyId": "romeo-787",
+    "createdDateTime": "hotel-422",
+    "lastModifiedDateTime": "papa-588",
+    "modified": false,
+    "authorizedByWorkAssignmentLegacyId": "oscar-253",
+    "reasonId": 19097,
+    "reasonLabel": "echo-471"
+  },
+  {
+    "id": 54839,
+    "comment": "golf-971",
+    "createdByWorkAssignmentLegacyId": "golf-333",
+    "createdDateTime": "foxtrot-428",
+    "lastModifiedDateTime": "whiskey-539",
+    "modified": true,
+    "authorizedByWorkAssignmentLegacyId": "oscar-249",
+    "reasonId": 31495,
+    "reasonLabel": "zulu-583"
+  }
+]

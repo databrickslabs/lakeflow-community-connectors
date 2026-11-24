@@ -1,0 +1,58 @@
+[
+  {
+    "OnboardingGoalActivity_activityId": 48448,
+    "OnboardingNewHireActivitiesStep_processStepId": 69982,
+    "OnboardingProcess_onboardingProcessId": 37705,
+    "externalCode": 87462,
+    "createdBy": "oscar-999",
+    "createdDateTime": "zulu-609",
+    "dueDaysAfterStart": 37312,
+    "goalCategoryId": "echo-524",
+    "goalCategoryName": "november-539",
+    "lastModifiedBy": "echo-744",
+    "lastModifiedDateTime": "bravo-496",
+    "mdfSystemRecordStatus": "victor-294"
+  },
+  {
+    "OnboardingGoalActivity_activityId": 59071,
+    "OnboardingNewHireActivitiesStep_processStepId": 81635,
+    "OnboardingProcess_onboardingProcessId": 41393,
+    "externalCode": 31019,
+    "createdBy": "alpha-276",
+    "createdDateTime": "oscar-922",
+    "dueDaysAfterStart": 47639,
+    "goalCategoryId": "mike-640",
+    "goalCategoryName": "charlie-105",
+    "lastModifiedBy": "tango-348",
+    "lastModifiedDateTime": "alpha-288",
+    "mdfSystemRecordStatus": "papa-777"
+  },
+  {
+    "OnboardingGoalActivity_activityId": 8231,
+    "OnboardingNewHireActivitiesStep_processStepId": 30037,
+    "OnboardingProcess_onboardingProcessId": 28268,
+    "externalCode": 29740,
+    "createdBy": "tango-811",
+    "createdDateTime": "oscar-118",
+    "dueDaysAfterStart": 41999,
+    "goalCategoryId": "lima-344",
+    "goalCategoryName": "india-895",
+    "lastModifiedBy": "sierra-653",
+    "lastModifiedDateTime": "november-981",
+    "mdfSystemRecordStatus": "echo-946"
+  },
+  {
+    "OnboardingGoalActivity_activityId": 58122,
+    "OnboardingNewHireActivitiesStep_processStepId": 21424,
+    "OnboardingProcess_onboardingProcessId": 46755,
+    "externalCode": 10302,
+    "createdBy": "charlie-127",
+    "createdDateTime": "whiskey-673",
+    "dueDaysAfterStart": 29917,
+    "goalCategoryId": "yankee-422",
+    "goalCategoryName": "tango-315",
+    "lastModifiedBy": "juliet-402",
+    "lastModifiedDateTime": "charlie-650",
+    "mdfSystemRecordStatus": "tango-719"
+  }
+]

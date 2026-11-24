@@ -1,0 +1,40 @@
+{
+  "kind": "youtube#activityListResponse",
+  "etag": "sim-activities-etag",
+  "items": [
+    {
+      "kind": "youtube#activity",
+      "etag": "sim-activity-etag",
+      "id": "act_test_001",
+      "snippet": {
+        "publishedAt": "2020-06-01T00:00:00Z",
+        "channelId": "UC_test_channel_001",
+        "title": "Simulator Activity",
+        "type": "upload",
+        "channelTitle": "Simulator Channel"
+      },
+      "contentDetails": {
+        "upload": {"videoId": "vid_test_001"}
+      }
+    },
+    {
+      "kind": "youtube#activity",
+      "etag": "sim-activity-like-etag",
+      "id": "act_test_002",
+      "snippet": {
+        "publishedAt": "2020-06-02T00:00:00Z",
+        "channelId": "UC_test_channel_001",
+        "title": "Simulator Like Activity",
+        "type": "like",
+        "channelTitle": "Simulator Channel"
+      },
+      "contentDetails": {
+        "like": {
+          "resourceId": {"kind": "youtube#video", "videoId": "vid_test_002"}
+        }
+      }
+    }
+  ],
+  "nextPageToken": null,
+  "pageInfo": {"totalResults": 1, "resultsPerPage": 50}
+}
