@@ -188,3 +188,34 @@ endpoints:
     corpus: user
     response:
       single_entity: true
+
+  # ---- repository_files (source code contents) ----
+  # Read-only fan-out: repo detail (default branch) -> commit (tree sha) ->
+  # git tree (blob shas) -> per-blob content. All single-entity: the simulator
+  # returns the same corpus payload regardless of the {sha}/{ref} in the path.
+
+  - path: "/repos/{owner}/{repo}"
+    method: GET
+    corpus: repo_detail
+    response:
+      single_entity: true
+
+  - path: "/repos/{owner}/{repo}/commits/{ref}"
+    method: GET
+    corpus: repo_commit
+    response:
+      single_entity: true
+
+  - path: "/repos/{owner}/{repo}/git/trees/{tree_sha}"
+    method: GET
+    corpus: git_tree
+    response:
+      single_entity: true
+    params:
+      recursive: {role: ignore}
+
+  - path: "/repos/{owner}/{repo}/git/blobs/{blob_sha}"
+    method: GET
+    corpus: git_blob
+    response:
+      single_entity: true
