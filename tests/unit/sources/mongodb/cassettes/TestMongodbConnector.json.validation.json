@@ -1,0 +1,34 @@
+{
+  "version": 1,
+  "generated_at": "2026-11-16T06:33:58.617068Z",
+  "endpoints": [
+    {
+      "method": "POST",
+      "spec_path": "/api/2.1/unity-catalog/temporary-service-credentials",
+      "sample_url": "https://<workspace-host>/api/2.1/unity-catalog/temporary-service-credentials",
+      "status": "validated",
+      "calls": 1,
+      "matched": 1,
+      "mismatched": 0,
+      "no_spec": 0,
+      "issues": []
+    },
+    {
+      "method": "POST",
+      "spec_path": "/oidc/v1/token",
+      "sample_url": "https://<workspace-host>/oidc/v1/token",
+      "status": "validated",
+      "calls": 1,
+      "matched": 1,
+      "mismatched": 0,
+      "no_spec": 0,
+      "issues": []
+    }
+  ],
+  "summary": {
+    "endpoints_total": 2,
+    "endpoints_validated": 2,
+    "endpoints_mismatched": 0,
+    "endpoints_missing_spec": 0
+  }
+}

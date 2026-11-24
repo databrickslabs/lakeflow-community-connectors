@@ -1,0 +1,341 @@
+"""Offline tests: the connector against the in-process fake in ``fake_mongo.py``.
+
+These run in CI without credentials. They exercise the connector's own logic
+(paging, offsets, resume tokens, trigger caps, replay, deletes, multibyte
+data). The generic suite is in test_mongodb_lakeflow_connect.py; server
+behaviour is covered by test_mongodb_live.py against a real replica set.
+"""
+
+import json
+import uuid
+
+import pytest
+from bson import Decimal128, ObjectId
+from bson.timestamp import Timestamp
+
+from databricks.labs.community_connector.sources.mongodb import mongodb_auth
+from databricks.labs.community_connector.sources.mongodb.mongodb import MongodbLakeflowConnect
+from databricks.labs.community_connector.sources.mongodb.mongodb_utils import dumps, encode_id
+from tests.unit.sources.mongodb.fake_mongo import FakeMongoClient
+
+MB_COLLECTION = "顧客🍣コレクション"
+MB_TEXT = "日本語・ｶﾀｶﾅ・한국어・中文・👨‍👩‍👧‍👦・é (e\u0301)・\u3000全角"
+
+
+def _fake_create(self):
+    return FakeMongoClient(self.uri)
+
+
+@pytest.fixture()
+def fake(monkeypatch):
+    monkeypatch.setattr(mongodb_auth.MongoClientFactory, "create", _fake_create)
+    uri = f"fake://{uuid.uuid4().hex}"
+    return uri, FakeMongoClient(uri)["db"]
+
+
+def _connector(uri, **extra):
+    return MongodbLakeflowConnect({"connection_uri": uri, "database": "db", **extra})
+
+
+def drive(connector, table, options, start=None, flow="upsert", max_calls=10_000):
+    reader = connector.read_table if flow == "upsert" else connector.read_table_deletes
+    rows, offset = [], start or {}
+    for _ in range(max_calls):
+        records, end = reader(table, offset, options)
+        rows.extend(records)
+        if end == offset:
+            return rows, end
+        offset = end
+    raise AssertionError("read_table never converged")
+
+
+def apply_changes(upserts, deletes):
+    current, seq = {}, {}
+    for row in sorted(upserts + deletes, key=lambda r: r["_cdc_sequence"]):
+        key, s = row["_id"], row["_cdc_sequence"]
+        if s <= seq.get(key, ""):
+            continue
+        seq[key] = s
+        if row["_cdc_operation"] == "delete":
+            current.pop(key, None)
+        else:
+            current[key] = json.loads(row["document"])
+    return current
+
+
+def expected(coll):
+    return {encode_id(d["_id"]): json.loads(dumps(d)) for d in coll.find({})}
+
+
+def test_snapshot_stream_and_deletes(fake):
+    uri, db = fake
+    coll = db.create_collection(MB_COLLECTION)
+    coll.insert_many([{"_id": ObjectId(), "名前": MB_TEXT}, {"_id": "文字列🍣", "v": 1}, {"_id": 7},
+                      {"_id": 7.5, "d": Decimal128("1.10")}, {"_id": {"複合": 1}}]
+                     + [{"_id": ObjectId(), "i": i} for i in range(60)])
+    options = {"max_records_per_batch": "7", "snapshot_batch_size": "7"}
+    conn = _connector(uri)
+    snap, offset = drive(conn, MB_COLLECTION, options)
+    assert offset["phase"] == "stream" and len({r["_id"] for r in snap}) == 65
+
+    coll.update_one({"_id": "文字列🍣"}, {"$set": {"v": "更新🍣"}})
+    coll.delete_one({"_id": 7})
+    coll.replace_one({"_id": 7.5}, {"置換": True})
+    coll.insert_one({"_id": "新規🆕", "本文": MB_TEXT})
+    changes, _ = drive(_connector(uri), MB_COLLECTION, options, start=offset)
+    deletes, _ = drive(_connector(uri), MB_COLLECTION, options, flow="delete")
+    assert apply_changes(snap + changes, deletes) == expected(coll)
+    assert all("\\u" not in r["document"] for r in snap + changes)
+
+
+def test_changes_during_snapshot(fake):
+    uri, db = fake
+    coll = db.create_collection("c")
+    coll.insert_many([{"_id": i, "v": 0} for i in range(30)])
+    options = {"max_records_per_batch": "5", "snapshot_batch_size": "5"}
+    conn = _connector(uri)
+    records, offset = conn.read_table("c", {}, options)  # the first page
+    rows = list(records)
+    assert len(rows) == 5 and offset["phase"] == "snapshot"
+    assert all(r["_cdc_cluster_time"] is not None for r in rows)  # snapshot "as of" time
+    coll.update_one({"_id": 1}, {"$set": {"v": 1}})     # already read
+    coll.update_one({"_id": 29}, {"$set": {"v": 2}})    # not read yet
+    coll.delete_one({"_id": 2})
+    coll.insert_one({"_id": -1, "v": "below the cursor"})
+    more, _ = drive(conn, "c", options, start=offset)
+    deletes, _ = drive(_connector(uri), "c", options, flow="delete")
+    assert apply_changes(rows + more, deletes) == expected(coll)
+
+
+def test_trigger_cap_and_idle(fake):
+    uri, db = fake
+    coll = db.create_collection("c")
+    conn = _connector(uri)
+    options = {"start_mode": "latest", "idle_advance_seconds": "1"}
+    _, offset = conn.read_table("c", {}, options)
+    coll.insert_one({"_id": 1})
+    # Pretend the trigger started long ago: the new change is past its cap.
+    conn._caps[("db.c", "upsert")] = Timestamp(1, 0)  # pylint: disable=protected-access
+    rows, offset2 = drive(conn, "c", options, start=offset)
+    assert not rows                       # this trigger ends without it
+    rows, _ = drive(conn, "c", options, start=offset2)
+    assert [r["_id"] for r in rows] == [encode_id(1)]  # the next one reads it
+
+
+def test_idle_token_keeps_advancing_across_triggers(fake, monkeypatch):
+    uri, db = fake
+    db.create_collection("quiet")
+    other = db.create_collection("busy")
+    options = {"start_mode": "latest", "idle_advance_seconds": "60"}
+    clock = [1_000_000]
+    from databricks.labs.community_connector.sources.mongodb import mongodb  # pylint: disable=import-outside-toplevel
+    monkeypatch.setattr(mongodb.MongodbLakeflowConnect, "_now",
+                        staticmethod(lambda: Timestamp(clock[0], 0)))
+    _, offset = _connector(uri).read_table("quiet", {}, options)
+    tokens = [offset["token"]]
+    for _ in range(3):              # three triggers, each a new reader, 2 minutes apart
+        other.insert_one({"x": 1})  # the oplog moves; "quiet" does not
+        clock[0] += 120
+        rows, offset = drive(_connector(uri), "quiet", options, start=offset, max_calls=5)
+        assert not rows
+        tokens.append(offset["token"])
+    assert tokens == sorted(tokens) and len(set(tokens)) == 4
+
+
+def test_replay_between_offsets(fake):
+    uri, db = fake
+    coll = db.create_collection("log")
+    options = {"ingestion_type": "append", "start_mode": "latest", "max_records_per_batch": "3"}
+    conn = _connector(uri)
+    _, start = conn.read_table("log", {}, options)
+    coll.insert_many([{"_id": i} for i in range(6)])
+    records, end = conn.read_table("log", start, options)
+    original = list(records)
+    coll.insert_many([{"_id": i} for i in range(6, 9)])
+    assert list(_connector(uri).read_table_range("log", start, end, options)) == original
+
+
+def test_replay_fails_instead_of_returning_a_partial_batch(fake, monkeypatch):
+    uri, db = fake
+    coll = db.create_collection("log")
+    options = {"ingestion_type": "append", "start_mode": "latest", "max_records_per_batch": "3"}
+    conn = _connector(uri)
+    _, start = conn.read_table("log", {}, options)
+    coll.insert_many([{"_id": i} for i in range(3)])
+    _, end = conn.read_table("log", start, options)
+    from databricks.labs.community_connector.sources.mongodb import mongodb  # pylint: disable=import-outside-toplevel
+    monkeypatch.setattr(mongodb, "REPLAY_TIMEOUT_SECONDS", 0)
+    bad_end = dict(end, token=end["token"][:-2] + "7F")  # an end the stream never reaches
+    with pytest.raises(RuntimeError, match="did not reach its end offset"):
+        list(_connector(uri).read_table_range("log", start, bad_end, options))
+
+
+def test_replay_with_history_lost_raises(fake, monkeypatch):
+    import pymongo.errors  # pylint: disable=import-outside-toplevel
+    from tests.unit.sources.mongodb import fake_mongo  # pylint: disable=import-outside-toplevel
+
+    uri, db = fake
+    db.create_collection("c")
+    conn = _connector(uri)
+    start = {"v": 1, "ns": "db.c", "phase": "stream", "token": None, "start_at": 1, "lookback": True}
+    end = {"v": 1, "ns": "db.c", "phase": "stream", "token": "82FFFFFFFF", "at": 0}
+
+    def lost(*_a, **_k):
+        raise pymongo.errors.OperationFailure("history lost", code=286)
+
+    monkeypatch.setattr(fake_mongo.FakeCollection, "watch", lost)
+    with pytest.raises(RuntimeError, match="no longer in the oplog"):
+        list(conn.read_table_range("c", start, end, {}, deletes=True))
+
+
+def test_append_keeps_every_event(fake):
+    uri, db = fake
+    coll = db.create_collection("log")
+    options = {"ingestion_type": "append", "start_mode": "latest"}
+    conn = _connector(uri)
+    _, offset = conn.read_table("log", {}, options)
+    coll.insert_one({"_id": 1, "v": "一"})
+    coll.update_one({"_id": 1}, {"$set": {"v": "二"}})
+    coll.delete_one({"_id": 1})
+    rows, _ = drive(conn, "log", options, start=offset)
+    assert [r["_cdc_operation"] for r in rows] == ["insert", "update", "delete"]
+
+
+def test_drop_and_unknown_and_views(fake):
+    uri, db = fake
+    coll = db.create_collection("c")
+    db.create_collection("v", viewOn="c")
+    conn = _connector(uri)
+    with pytest.raises(ValueError, match="does not exist"):
+        conn.read_table("missing", {}, {})
+    with pytest.raises(ValueError, match="only regular collections"):
+        conn.read_table("v", {}, {})
+    assert conn.list_tables() == ["c"]
+    _, offset = conn.read_table("c", {}, {"start_mode": "latest"})
+    coll.drop()
+    with pytest.raises(RuntimeError, match="dropped or renamed"):
+        drive(conn, "c", {"start_mode": "latest"}, start=offset)
+
+
+def _server(uri):
+    return FakeMongoClient(uri)._s  # pylint: disable=protected-access
+
+
+def test_sharded_collection_needs_assume_unique_id(fake):
+    uri, db = fake
+    db.create_collection("sharded").insert_one({"_id": 1})
+    server = _server(uri)
+    server.mongos = True
+    server.config_collections["db.sharded"] = {"key": {"region": 1}}
+    with pytest.raises(ValueError, match="assume_unique_id=true"):
+        _connector(uri).read_table("sharded", {}, {})
+    rows, _ = drive(_connector(uri), "sharded", {"assume_unique_id": "true"})
+    assert [r["_id"] for r in rows] == [encode_id(1)]
+
+
+def test_replica_set_needs_no_shard_lookup(fake):
+    uri, db = fake
+    db.create_collection("c").insert_one({"_id": 1})
+    drive(_connector(uri), "c", {})
+    assert "collStats" not in _server(uri).commands  # the deprecated command is not used
+
+
+@pytest.mark.parametrize("entry", [None, {"key": {"_id": 1}, "unsplittable": True}])
+def test_unsharded_collection_on_a_sharded_cluster(fake, entry):
+    uri, db = fake
+    db.create_collection("c").insert_one({"_id": 1})
+    server = _server(uri)
+    server.mongos = True
+    if entry is not None:  # a tracked unsharded collection (8.0+)
+        server.config_collections["db.c"] = entry
+    rows, _ = drive(_connector(uri), "c", {})
+    assert len(rows) == 1
+
+
+def test_shard_check_falls_back_to_collstats(fake):
+    uri, db = fake
+    db.create_collection("sharded").insert_one({"_id": 1})
+    server = _server(uri)
+    server.mongos = True
+    server.config_collections["db.sharded"] = {"key": {"region": 1}}
+    server.config_readable = False  # no read on the config database
+    with pytest.raises(ValueError, match="assume_unique_id=true"):
+        _connector(uri).read_table("sharded", {}, {})
+    assert "collStats" in server.commands
+    server.config_readable = None  # collStats refused as well: cannot tell, read
+    rows, _ = drive(_connector(uri), "sharded", {})
+    assert len(rows) == 1
+
+
+def test_snapshot_reads_use_majority_on_the_primary(fake):
+    uri, db = fake
+    db.create_collection("c").insert_many([{"_id": i} for i in range(3)])
+    drive(_connector(uri), "c", {})
+    server = FakeMongoClient(uri)._s  # pylint: disable=protected-access
+    assert server.read_concerns and set(server.read_concerns) == {"majority"}
+    assert set(server.read_preferences) == {"Primary"}
+
+
+def test_collection_alias(fake):
+    uri, db = fake
+    db.create_collection(MB_COLLECTION).insert_one({"_id": 1, "v": "別名"})
+    rows, _ = drive(_connector(uri), "alias", {"collection": MB_COLLECTION})
+    assert rows[0]["_cdc_namespace"] == f"db.{MB_COLLECTION}"
+
+
+def test_replay_of_first_page_ignores_changed_start_mode(fake):
+    """The first batch is replayed from its offsets, not from today's options."""
+    client = FakeMongoClient("fake://first-page-replay")
+    client["db"].create_collection("c").insert_many([{"_id": i} for i in range(10)])
+    conn = _connector("fake://first-page-replay")
+    options = {"max_records_per_batch": "4", "snapshot_batch_size": "4"}
+    records, end = conn.read_table("c", {}, options)
+    original = [r["_id"] for r in records]
+    assert len(original) == 4
+    replayed = [r["_id"] for r in conn.read_table_range(
+        "c", {}, end, dict(options, start_mode="latest"))]
+    assert replayed == original
+
+
+def test_replay_of_first_page_checks_namespace(fake):
+    client = FakeMongoClient("fake://first-page-ns")
+    client["db"].create_collection("a").insert_many([{"_id": i} for i in range(10)])
+    client["db"].create_collection("b").insert_many([{"_id": i} for i in range(10)])
+    conn = _connector("fake://first-page-ns")
+    options = {"max_records_per_batch": "4", "snapshot_batch_size": "4"}
+    _, end = conn.read_table("a", {}, options)
+    with pytest.raises(Exception, match="db.a"):
+        list(conn.read_table_range("b", {}, end, options))
+
+
+def test_client_is_not_replaced_while_the_change_stream_is_open(fake, monkeypatch):
+    """whenAvailable lookups run inside the open change stream: no client swap there."""
+    uri, db = fake
+    coll = db.create_collection("c")
+    coll.insert_many([{"_id": i, "v": 0} for i in range(3)])
+    conn = _connector(uri)
+    options = {"full_document": "whenAvailable"}
+    _, offset = drive(conn, "c", options)
+    for i in range(3):
+        coll.update_one({"_id": i}, {"$set": {"v": 1}})  # no post-image: lookup
+    closes = []
+    monkeypatch.setattr(FakeMongoClient, "close", lambda self: closes.append(1))
+    monkeypatch.setattr(conn._factory, "credentials_expire_soon", lambda: True)  # pylint: disable=protected-access
+    records, _ = conn.read_table("c", offset, options)
+    rows = list(records)
+    assert [json.loads(r["document"])["v"] for r in rows] == [1, 1, 1]
+    assert len(closes) == 1  # replaced once, when the batch opened its stream
+
+
+def test_snapshot_ingestion_uses_a_string_document(fake):
+    """apply_changes_from_snapshot compares whole rows; VARIANT cannot be compared."""
+    uri, db = fake
+    db.create_collection("c").insert_one({"_id": 1, "名前": "値🍣"})
+    conn = _connector(uri)
+    schema = conn.get_table_schema("c", {"ingestion_type": "snapshot"})
+    assert schema["document"].dataType.simpleString() == "string"
+    assert conn.get_table_schema("c", {})["document"].dataType.simpleString() == "variant"
+    with pytest.raises(ValueError, match="document_format=string"):
+        conn.get_table_schema("c", {"ingestion_type": "snapshot", "document_format": "variant"})
+    rows = list(conn.read_table("c", {}, {"ingestion_type": "snapshot"})[0])
+    assert json.loads(rows[0]["document"])["名前"] == "値🍣"

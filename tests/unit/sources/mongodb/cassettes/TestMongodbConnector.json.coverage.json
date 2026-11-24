@@ -1,0 +1,21 @@
+{
+  "version": 1,
+  "endpoints": [
+    {
+      "method": "POST",
+      "url": "https://<workspace-host>/api/2.1/unity-catalog/temporary-service-credentials",
+      "count": 1,
+      "param_shapes": [
+        []
+      ]
+    },
+    {
+      "method": "POST",
+      "url": "https://<workspace-host>/oidc/v1/token",
+      "count": 1,
+      "param_shapes": [
+        []
+      ]
+    }
+  ]
+}
