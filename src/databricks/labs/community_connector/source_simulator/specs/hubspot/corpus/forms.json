@@ -1,0 +1,30 @@
+[
+  {
+    "id": "form-1",
+    "name": "Synthetic form",
+    "formType": "hubspot",
+    "createdAt": "2024-03-01T00:00:00.000Z",
+    "updatedAt": "2024-03-01T00:00:00.000Z",
+    "archived": true,
+    "archivedAt": "2024-03-01T00:00:00.000Z",
+    "configuration": {
+      "createNewContactForNewEmail": true
+    },
+    "displayOptions": {
+      "renderRawHtml": false
+    },
+    "fieldGroups": [
+      {
+        "fields": [
+          {
+            "name": "email",
+            "fieldType": "email"
+          }
+        ]
+      }
+    ],
+    "legalConsentOptions": {
+      "type": "none"
+    }
+  }
+]

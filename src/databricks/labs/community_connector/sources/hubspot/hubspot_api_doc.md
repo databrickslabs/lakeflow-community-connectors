@@ -51,8 +51,27 @@ connector follows it until either:
 | `tasks`      | `GET /crm/v3/objects/tasks`              | `POST /crm/v3/objects/tasks/search`            | `id`        | `updatedAt`  |
 | `notes`      | `GET /crm/v3/objects/notes`              | `POST /crm/v3/objects/notes/search`            | `id`        | `updatedAt`  |
 
-Custom objects discovered via `GET /crm/v3/schemas` are exposed as additional
-tables using the same patterns as the standard objects above.
+Custom objects are discovered through
+`GET /crm-object-schemas/2026-09/schemas`. The connector retries 429 and 5xx
+responses, then fails closed so a transient discovery gap cannot silently remove
+tables or association columns. If that date-versioned route reports 404 or 410,
+the connector falls back to `GET /crm/v3/schemas` for tenant compatibility.
+
+### Resource snapshot tables
+
+| Table | Endpoint(s) | Primary key |
+|---|---|---|
+| `owners` | `GET /crm/owners/2026-09` | `id` |
+| `pipelines` | `GET /crm/v3/pipelines/{objectTypeId}` | `objectTypeId`, `id` |
+| `forms` | `GET /marketing/v3/forms` | `id` |
+| `contact_lists` | `POST /crm/lists/2026-09/search`; optional v1 ID mapping | `listId` |
+| `contact_list_memberships` | list search plus `GET /crm/lists/2026-09/{listId}/memberships` | `listId`, `recordId` |
+| `form_submissions` | forms plus `GET /form-integrations/v1/submissions/forms/{formId}` | `formId`, `conversionId` |
+
+These endpoints are drained as complete snapshots without a Lakeflow continuation
+offset. Pages are emitted incrementally to bound connector memory, but any
+malformed, repeated, inaccessible, or failed page aborts the task before the
+snapshot can be committed as complete.
 
 ### Cursor property mapping
 
@@ -69,10 +88,17 @@ the response-level `updatedAt`:
 HubSpot supports `archived=true` queries on the following tables. The
 connector emits these via `read_table_deletes`:
 
-- `contacts`, `companies`, `deals`, `tickets`, `emails`, `tasks`, `notes`
+- `contacts`, `companies`, `deals`, `tickets`, `calls`, `emails`, `tasks`, `notes`
 
-`calls` and `meetings` do not support archived queries and are append-only
-incremental.
+The connector drains every archived page before committing the frozen archive-time
+window. Archive listing is not ordered by archive time, so this scan ignores
+`max_records_per_batch`. Invalid records, conflicting duplicate IDs, malformed
+paging, and later-page failures fail the read before publishing a checkpoint.
+Archive reads cover records retained and returned by HubSpot; they do not detect
+hard deletes or records outside the source retention window.
+
+Meetings use complete active snapshots instead of archive reads because HubSpot
+rejects archived listing for that object type.
 
 ## Schema discovery
 

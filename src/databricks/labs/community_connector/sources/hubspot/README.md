@@ -51,6 +51,47 @@ The HubSpot connector supports the following CRM objects with dynamic schema dis
 
 > **Note**: Table names are case-sensitive. Use the exact names shown above (lowercase with underscores). Custom objects are also supported and will be discovered automatically.
 
+### Resource snapshots
+
+These additive tables read complete snapshots. Each page is yielded before the
+next request, while the batch fails closed if a partition or later page cannot be
+read. The snapshot consumer reconciles removals only after the complete read
+succeeds.
+
+| Table | Primary key | Coverage |
+|---|---|---|
+| `owners` | `id` | Active and archived owners |
+| `pipelines` | `objectTypeId`, `id` | Pipelines and nested stages |
+| `forms` | `id` | Active and archived forms |
+| `contact_lists` | `listId` | Lists with current and, when available, legacy IDs |
+| `contact_list_memberships` | `listId`, `recordId` | Current membership for every discovered contact list |
+| `form_submissions` | `formId`, `conversionId` | Submissions for every discovered form |
+
+Resource snapshots ignore `max_records_per_batch`, because stopping early would
+publish an incomplete current set. `pipeline_object_types` may provide an
+explicit comma-separated set such as `0-3,0-5`; otherwise the connector reads
+the built-in pipeline types plus discovered custom objects. Missing permissions
+fail the selected snapshot. The optional legacy-list lookup may instead leave
+`legacyListId` null when HubSpot returns 403, 404, or 410.
+
+### Custom objects and associations
+
+Custom tables keep their lowercase schema names while API requests use HubSpot's
+canonical `objectTypeId`. Directional schema definitions add association columns
+for standard, custom, and self relationships. Association batch reads page each
+parent independently and fail before checkpointing if a response is incomplete.
+When custom objects exist, their directional definitions can therefore add new
+association columns to standard tables as well as custom tables.
+
+Association columns are ID arrays by default. Source-specific table options can
+change that behavior:
+
+| Option | Values | Behavior |
+|---|---|---|
+| `associations` | omitted, empty, or comma-separated names | Fetch all discovered targets, none, or the named subset. Unknown names fail validation. |
+| `association_value_mode` | `ids` (default), `typed` | Emit `array<string>` IDs or structs containing `id`, `typeId`, `category`, and `label`. |
+| `association_sync_mode` | `incremental` (default), `full_refresh` | Refresh relationships with changed parents or rescan all parents as a snapshot so removals can be reconciled. |
+
 ### Object Details
 
 ### Standard CRM Objects
@@ -147,7 +188,21 @@ These are set inside the `table_configuration` map alongside any source-specific
 | `primary_keys` | No | List of columns to override the connector's default primary keys |
 | `sequence_by` | No | Column used to order records for SCD Type 2 change tracking |
 
-This connector does not require any source-specific table configuration options.
+The association options above are optional source-specific table configurations.
+
+### Activity reliability and numeric values
+
+Activity incrementals finish every record sharing the current timestamp before
+advancing their checkpoint. Archive reads drain the complete frozen window, and
+meetings use complete active snapshots because HubSpot does not support their
+archive listing. Read-only GETs and POSTs retry `429`, `500`, `502`, and `503`
+up to five times and honor `Retry-After`.
+
+Numeric properties remain `BIGINT` by default for backward compatibility. Set
+`numeric_value_mode=decimal` to use `DECIMAL(38,18)`. Exact values that fit stay
+exact; recognizable long binary-float expansions such as HubSpot's long form of
+`0.1` normalize to their shortest representation. Other overflow, nonfinite,
+or malformed values fail before checkpointing.
 
 ## How to Run
 
