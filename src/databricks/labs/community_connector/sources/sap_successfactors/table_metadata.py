@@ -1,6 +1,67 @@
 # pylint: disable=too-many-lines
 from typing import Any, Dict
 
+# Optional per-table key: ``status_filter``
+# --------------------------------------------------------------------------
+# Some SuccessFactors entity sets exclude inactive records from OData responses
+# unless the query explicitly asks for them. ``User`` is the documented case:
+# per SAP KBA 2166571, "by default OData API User entity won't return data for
+# inactive users unless you explicitly specify in the query statement".
+#
+# This matters beyond completeness. Under ``cdc`` ingestion the pipeline upserts
+# by primary key and never deletes, so a record that silently drops out of the
+# extract is not removed downstream — it persists as the current version
+# indefinitely. Deactivation is the closest thing SuccessFactors OData offers to
+# a delete signal (the API cannot report deletions at all — KBA 2628958), so
+# filtering it out loses both the record and the signal.
+#
+# ``status_filter`` is appended to ``$filter`` with ``and`` for both cdc and
+# snapshot reads. It is deliberately per-table, and the default is off.
+#
+# A WRONG PREDICATE FAILS SILENTLY. Sending ``status in 't','f'`` to FOLocation
+# returns HTTP 200 with zero rows — the t/f domain simply matches nothing there.
+# It is not rejected, it is not an error, the table just comes back empty. So a
+# status_filter must never be applied speculatively; an unverified one risks
+# total data loss for that entity rather than a noisy failure.
+#
+# Verified against a live tenant across every configured entity carrying a
+# ``status`` field, comparing an unfiltered count against ``status ne null`` —
+# a value-domain-agnostic detector:
+#
+#   * ``User`` was the only entity found to hide records, and it hides the
+#     majority of them.
+#   * The rest returned everything already, the whole FO family included
+#     (FOLocation, FOCompany, FOCostCenter, FODepartment, ...). Their A/I
+#     status values appear in unfiltered responses, so they need no predicate
+#     and must not be given one.
+#   * Some entities could not be reached on the tenant available for testing
+#     (404 where a module is not enabled, 403 where the API user lacks the
+#     grant). Those remain unverified — re-run the check before relying on
+#     them.
+#
+# To check an entity: compare ``$inlinecount`` with no filter against the same
+# query with ``$filter=status ne null``. A higher count means the entity applies
+# an implicit active-only filter and needs a status_filter here.
+#
+# THE MECHANISM, because it is counterintuitive: SuccessFactors injects an
+# implicit ``status = 't'`` predicate on User. If the caller's $filter mentions
+# ``status``, that implicit predicate is OMITTED and the caller's expression
+# governs the column; otherwise it is silently conjoined. Observed on User,
+# where N is the full population and A the active subset:
+#
+#   (no $filter)        A      status in 't'    A   <- the implicit default
+#   status ne null      N      status in 'f'    N-A
+#   status in 't','f'   N      userId ne null   A   <- not just any filter
+#
+# So it is naming the *column* that suppresses the default, not the predicate's
+# logic — which is why ``status ne null``, a semantic no-op, works as a probe.
+#
+# CONSEQUENCE FOR ANY OTHER QUERY PATH: this applies to every request, not just
+# the main extract. A key-only reconciliation sweep (``$select=userId`` with no
+# status predicate) sees only the active subset and reports every inactive
+# user as absent — manufacturing a delete event for each. $select does not
+# help; the default sits on the row filter, not the projection. Any key-only,
+# count-based or sampling query added later must carry the predicate too.
 TABLE_CONFIG: Dict[str, Dict[str, Any]] = {
     "Advance": {
         "entity_set": "Advance",
@@ -1162,6 +1223,13 @@ TABLE_CONFIG: Dict[str, Dict[str, Any]] = {
         "primary_keys": ["userId"],
         "cursor_field": "lastModifiedDateTime",
         "ingestion_type": "cdc",
+        # Without this, inactive users are omitted from every response (KBA
+        # 2166571), which on a live tenant hid the majority of the
+        # population. 't'/'f' are active/inactive. Tenants with external users may
+        # need "status in 'active','active_external','inactive','inactive_external'"
+        # instead — the two forms are not interchangeable, and the wrong one
+        # returns zero rows rather than erroring.
+        "status_filter": "status in 't','f'",
     },
     "UserPermissions": {
         "entity_set": "UserPermissions",
