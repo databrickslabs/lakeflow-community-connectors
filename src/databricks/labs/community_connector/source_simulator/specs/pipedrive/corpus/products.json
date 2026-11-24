@@ -1,0 +1,148 @@
+[
+  {
+    "id": 1000,
+    "name": "romeo-831",
+    "code": "quebec-453",
+    "unit": "zulu-700",
+    "tax": 910.52,
+    "is_deleted": true,
+    "is_linkable": true,
+    "visible_to": 72616,
+    "owner_id": 65822,
+    "add_time": "kilo-955",
+    "update_time": "2024-01-01T00:00:00Z",
+    "description": "echo-923",
+    "category": "alpha-591",
+    "billing_frequency": "bravo-151",
+    "billing_frequency_cycles": 18801,
+    "prices": [
+      {
+        "price": 420.68,
+        "cost": 148.39,
+        "product_id": 68095,
+        "currency": "delta-997",
+        "direct_cost": 662.54,
+        "notes": "golf-141"
+      },
+      {
+        "price": 82.01,
+        "cost": 251.65,
+        "product_id": 15872,
+        "currency": "romeo-650",
+        "direct_cost": 86.1,
+        "notes": "bravo-705"
+      }
+    ],
+    "custom_fields": "delta-254"
+  },
+  {
+    "id": 1001,
+    "name": "foxtrot-471",
+    "code": "romeo-320",
+    "unit": "zulu-759",
+    "tax": 874.17,
+    "is_deleted": false,
+    "is_linkable": true,
+    "visible_to": 19389,
+    "owner_id": 60539,
+    "add_time": "romeo-560",
+    "update_time": "2024-01-01T01:00:00Z",
+    "description": "juliet-229",
+    "category": "tango-556",
+    "billing_frequency": "bravo-880",
+    "billing_frequency_cycles": 35630,
+    "prices": [
+      {
+        "price": 131.52,
+        "cost": 26.09,
+        "product_id": 99515,
+        "currency": "romeo-302",
+        "direct_cost": 427.09,
+        "notes": "golf-616"
+      },
+      {
+        "price": 501.52,
+        "cost": 797.19,
+        "product_id": 45095,
+        "currency": "november-901",
+        "direct_cost": 238.65,
+        "notes": "delta-980"
+      }
+    ],
+    "custom_fields": "yankee-968"
+  },
+  {
+    "id": 1002,
+    "name": "sierra-573",
+    "code": "golf-956",
+    "unit": "oscar-551",
+    "tax": 326.98,
+    "is_deleted": true,
+    "is_linkable": false,
+    "visible_to": 49451,
+    "owner_id": 1969,
+    "add_time": "foxtrot-231",
+    "update_time": "2024-01-01T02:00:00Z",
+    "description": "mike-747",
+    "category": "hotel-556",
+    "billing_frequency": "delta-300",
+    "billing_frequency_cycles": 23326,
+    "prices": [],
+    "custom_fields": "november-743"
+  },
+  {
+    "id": 1003,
+    "name": "romeo-175",
+    "code": "yankee-980",
+    "unit": "sierra-151",
+    "tax": 386.35,
+    "is_deleted": true,
+    "is_linkable": true,
+    "visible_to": 69257,
+    "owner_id": 80033,
+    "add_time": "romeo-222",
+    "update_time": "2024-01-01T03:00:00Z",
+    "description": "zulu-298",
+    "category": "delta-612",
+    "billing_frequency": "juliet-989",
+    "billing_frequency_cycles": 7117,
+    "prices": [
+      {
+        "price": 507.63,
+        "cost": 888.95,
+        "product_id": 77657,
+        "currency": "zulu-104",
+        "direct_cost": 59.98,
+        "notes": "echo-354"
+      },
+      {
+        "price": 876.84,
+        "cost": 806.03,
+        "product_id": 1474,
+        "currency": "romeo-477",
+        "direct_cost": 187.94,
+        "notes": "tango-483"
+      }
+    ],
+    "custom_fields": "golf-854"
+  },
+  {
+    "id": 1004,
+    "name": "alpha-978",
+    "code": "quebec-714",
+    "unit": "delta-715",
+    "tax": 204.94,
+    "is_deleted": true,
+    "is_linkable": false,
+    "visible_to": 45275,
+    "owner_id": 22513,
+    "add_time": "yankee-705",
+    "update_time": "2024-01-01T04:00:00Z",
+    "description": "golf-621",
+    "category": "victor-795",
+    "billing_frequency": "india-972",
+    "billing_frequency_cycles": 14884,
+    "prices": [],
+    "custom_fields": "sierra-251"
+  }
+]

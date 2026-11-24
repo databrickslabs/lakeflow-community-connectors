@@ -1,0 +1,44 @@
+# Pipedrive Community Connector Spec
+# Defines connection parameters and the external table-options allowlist.
+
+connection:
+  parameters:
+    - name: api_token
+      type: string
+      required: true
+      secret: true
+      description: >
+        Pipedrive personal API token (Settings > Personal preferences > API),
+        sent in the x-api-token header.
+
+    - name: company_domain
+      type: string
+      required: false
+      description: >
+        Pipedrive company subdomain (e.g. 'mycompany' or 'mycompany.pipedrive.com').
+        If omitted, requests go to https://api.pipedrive.com.
+
+    - name: start_date
+      type: string
+      required: false
+      description: >
+        RFC 3339 timestamp (e.g. '2020-01-01T00:00:00Z') used as the initial
+        cursor for incremental tables on the first read. Defaults to the
+        connector's built-in start date.
+
+    - name: burst_limit
+      type: integer
+      required: false
+      description: >
+        Maximum requests per 2-second window used by the client-side throttle.
+        Lower it if you hit HTTP 429 responses (Pipedrive's limit is 20 requests
+        per 2 seconds on the lowest plan).
+
+# Table-specific options accepted via table_options:
+#   max_records_per_batch - maximum records per micro-batch (deal_flow may exceed it:
+#                           a deal's change log is never split)
+#   page_size             - page size for incremental reads
+#   lookback_seconds      - settle margin for incremental tables: a change is read once
+#                           it is this many seconds old (deal_flow: window widening)
+#   include_fields        - comma-separated optional fields to request (v2 tables)
+external_options_allowlist: "max_records_per_batch,page_size,lookback_seconds,include_fields"

@@ -1,0 +1,154 @@
+[
+  {
+    "id": 1000,
+    "name": "yankee-657",
+    "owner_id": 70844,
+    "add_time": "alpha-983",
+    "update_time": "2024-01-01T00:00:00Z",
+    "is_deleted": true,
+    "visible_to": 1408,
+    "address": {
+      "value": "lima-528",
+      "country": "november-911",
+      "admin_area_level_1": "victor-608",
+      "admin_area_level_2": "yankee-828",
+      "locality": "mike-780",
+      "sublocality": "zulu-623",
+      "route": "delta-423",
+      "street_number": "quebec-418",
+      "subpremise": "xray-239",
+      "postal_code": "whiskey-985"
+    },
+    "label_ids": [
+      5575,
+      66699
+    ],
+    "website": "charlie-876",
+    "linkedin": "november-307",
+    "industry": 11395,
+    "annual_revenue": 34675,
+    "employee_count": 74744,
+    "custom_fields": "whiskey-369"
+  },
+  {
+    "id": 1001,
+    "name": "zulu-257",
+    "owner_id": 54573,
+    "add_time": "echo-186",
+    "update_time": "2024-01-01T01:00:00Z",
+    "is_deleted": false,
+    "visible_to": 75114,
+    "address": {
+      "value": "oscar-486",
+      "country": "sierra-543",
+      "admin_area_level_1": "uniform-921",
+      "admin_area_level_2": "sierra-702",
+      "locality": "oscar-547",
+      "sublocality": "golf-474",
+      "route": "mike-201",
+      "street_number": "whiskey-405",
+      "subpremise": "delta-698",
+      "postal_code": "november-542"
+    },
+    "label_ids": [
+      56939,
+      74891
+    ],
+    "website": "foxtrot-748",
+    "linkedin": "hotel-410",
+    "industry": 48598,
+    "annual_revenue": 53122,
+    "employee_count": 23138,
+    "custom_fields": "delta-329"
+  },
+  {
+    "id": 1002,
+    "name": "bravo-989",
+    "owner_id": 83209,
+    "add_time": "quebec-152",
+    "update_time": "2024-01-01T02:00:00Z",
+    "is_deleted": false,
+    "visible_to": 44268,
+    "address": {
+      "value": "whiskey-536",
+      "country": "kilo-381",
+      "admin_area_level_1": "delta-896",
+      "admin_area_level_2": "foxtrot-629",
+      "locality": "hotel-588",
+      "sublocality": "sierra-740",
+      "route": "kilo-382",
+      "street_number": "yankee-623",
+      "subpremise": "november-887",
+      "postal_code": "india-526"
+    },
+    "label_ids": [
+      62567
+    ],
+    "website": "whiskey-449",
+    "linkedin": "november-880",
+    "industry": 88138,
+    "annual_revenue": 87742,
+    "employee_count": 37537,
+    "custom_fields": "echo-244"
+  },
+  {
+    "id": 1003,
+    "name": "romeo-870",
+    "owner_id": 28352,
+    "add_time": "juliet-157",
+    "update_time": "2024-01-01T03:00:00Z",
+    "is_deleted": false,
+    "visible_to": 77804,
+    "address": {
+      "value": "xray-604",
+      "country": "bravo-372",
+      "admin_area_level_1": "bravo-253",
+      "admin_area_level_2": "golf-135",
+      "locality": "lima-217",
+      "sublocality": "juliet-714",
+      "route": "golf-425",
+      "street_number": "golf-880",
+      "subpremise": "tango-259",
+      "postal_code": "zulu-643"
+    },
+    "label_ids": [
+      76237
+    ],
+    "website": "juliet-371",
+    "linkedin": "delta-629",
+    "industry": 50554,
+    "annual_revenue": 97275,
+    "employee_count": 28303,
+    "custom_fields": "alpha-272"
+  },
+  {
+    "id": 1004,
+    "name": "hotel-284",
+    "owner_id": 13239,
+    "add_time": "echo-854",
+    "update_time": "2024-01-01T04:00:00Z",
+    "is_deleted": false,
+    "visible_to": 61274,
+    "address": {
+      "value": "sierra-681",
+      "country": "uniform-186",
+      "admin_area_level_1": "india-604",
+      "admin_area_level_2": "lima-135",
+      "locality": "india-980",
+      "sublocality": "zulu-541",
+      "route": "oscar-325",
+      "street_number": "papa-881",
+      "subpremise": "india-855",
+      "postal_code": "lima-170"
+    },
+    "label_ids": [
+      35233
+    ],
+    "website": "charlie-761",
+    "linkedin": "november-943",
+    "industry": 65907,
+    "annual_revenue": 67213,
+    "employee_count": 27410,
+    "custom_fields": "delta-325"
+  }
+]

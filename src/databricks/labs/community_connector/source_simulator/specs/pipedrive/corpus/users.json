@@ -1,0 +1,156 @@
+[
+  {
+    "id": 1000,
+    "name": "uniform-693",
+    "default_currency": "hotel-798",
+    "locale": "uniform-510",
+    "lang": 5652,
+    "email": "delta-545",
+    "phone": "yankee-699",
+    "activated": true,
+    "last_login": "november-279",
+    "created": "echo-853",
+    "modified": "tango-124",
+    "has_created_company": false,
+    "access": [
+      {
+        "app": "hotel-336",
+        "admin": false,
+        "permission_set_id": "papa-496"
+      }
+    ],
+    "active_flag": false,
+    "timezone_name": "charlie-413",
+    "timezone_offset": "tango-862",
+    "role_id": 36199,
+    "icon_url": "romeo-575",
+    "is_you": true,
+    "is_deleted": true,
+    "is_admin": 33344,
+    "signup_flow_variation": "bravo-227"
+  },
+  {
+    "id": 1001,
+    "name": "bravo-494",
+    "default_currency": "november-872",
+    "locale": "zulu-418",
+    "lang": 8345,
+    "email": "oscar-172",
+    "phone": "victor-622",
+    "activated": true,
+    "last_login": "tango-154",
+    "created": "kilo-654",
+    "modified": "kilo-892",
+    "has_created_company": false,
+    "access": [
+      {
+        "app": "tango-608",
+        "admin": true,
+        "permission_set_id": "charlie-365"
+      },
+      {
+        "app": "xray-899",
+        "admin": true,
+        "permission_set_id": "charlie-361"
+      }
+    ],
+    "active_flag": false,
+    "timezone_name": "tango-930",
+    "timezone_offset": "golf-637",
+    "role_id": 56584,
+    "icon_url": "whiskey-284",
+    "is_you": false,
+    "is_deleted": false,
+    "is_admin": 60882,
+    "signup_flow_variation": "whiskey-781"
+  },
+  {
+    "id": 1002,
+    "name": "india-446",
+    "default_currency": "uniform-306",
+    "locale": "papa-992",
+    "lang": 32208,
+    "email": "oscar-618",
+    "phone": "delta-387",
+    "activated": false,
+    "last_login": "kilo-487",
+    "created": "foxtrot-965",
+    "modified": "oscar-918",
+    "has_created_company": false,
+    "access": [
+      {
+        "app": "victor-933",
+        "admin": true,
+        "permission_set_id": "tango-183"
+      },
+      {
+        "app": "oscar-872",
+        "admin": true,
+        "permission_set_id": "bravo-883"
+      }
+    ],
+    "active_flag": false,
+    "timezone_name": "hotel-183",
+    "timezone_offset": "hotel-918",
+    "role_id": 71096,
+    "icon_url": "quebec-727",
+    "is_you": true,
+    "is_deleted": false,
+    "is_admin": 54929,
+    "signup_flow_variation": "india-183"
+  },
+  {
+    "id": 1003,
+    "name": "alpha-687",
+    "default_currency": "kilo-298",
+    "locale": "juliet-358",
+    "lang": 85003,
+    "email": "golf-159",
+    "phone": "romeo-948",
+    "activated": true,
+    "last_login": "lima-188",
+    "created": "xray-158",
+    "modified": "victor-988",
+    "has_created_company": true,
+    "access": [
+      {
+        "app": "charlie-580",
+        "admin": false,
+        "permission_set_id": "yankee-211"
+      }
+    ],
+    "active_flag": true,
+    "timezone_name": "hotel-141",
+    "timezone_offset": "oscar-739",
+    "role_id": 14433,
+    "icon_url": "delta-500",
+    "is_you": false,
+    "is_deleted": false,
+    "is_admin": 33798,
+    "signup_flow_variation": "foxtrot-880"
+  },
+  {
+    "id": 1004,
+    "name": "juliet-647",
+    "default_currency": "foxtrot-572",
+    "locale": "bravo-121",
+    "lang": 19786,
+    "email": "delta-452",
+    "phone": "quebec-358",
+    "activated": false,
+    "last_login": "alpha-568",
+    "created": "tango-398",
+    "modified": "uniform-285",
+    "has_created_company": true,
+    "access": [],
+    "active_flag": true,
+    "timezone_name": "yankee-730",
+    "timezone_offset": "uniform-914",
+    "role_id": 41412,
+    "icon_url": "romeo-962",
+    "is_you": true,
+    "is_deleted": false,
+    "is_admin": 74071,
+    "signup_flow_variation": "kilo-887"
+  }
+]
