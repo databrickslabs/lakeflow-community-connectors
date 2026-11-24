@@ -73,7 +73,7 @@ If Step 2 changed any packaged file under `{SRC}/` (`*.py`, `connector_spec.yaml
 python tools/scripts/build_wheelhouse.py {source_name} --check --base origin/master
 ```
 
-Gate: the check passes. Commit `{SRC}/` and `wheelhouse/{source_name}/` changes together, with the bump in the commit message.
+Gate: the check passes, which includes the change log matching the new version. Commit `{SRC}/` (including `version-change-log.md`) and `wheelhouse/{source_name}/` changes together, with the bump in the commit message.
 
 ---
 

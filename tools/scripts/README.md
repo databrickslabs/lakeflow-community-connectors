@@ -16,6 +16,8 @@ python3 tools/scripts/build_wheelhouse.py all               # every connector an
 python3 tools/scripts/build_wheelhouse.py <source_name> --check --base origin/master
 ```
 
+Every run also checks each target's `version-change-log.md`: the newest entry must be for the `pyproject.toml` version (see `CONTRIBUTING.md`, Change log).
+
 A committed wheel is kept when nothing that affects pipelines changed (docs, the README text in `METADATA`, the build tool version, and the test-only source simulator are ignored), so rebuilding unchanged code doesn't churn binaries.
 
 ## merge_python_source.py

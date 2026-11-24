@@ -58,7 +58,7 @@ packages = ["databricks.labs.community_connector.sources.{{source_name}}"]
 
 2. **Package Naming**: Use `lakeflow-community-connectors-{{source_name}}` format (with hyphens, not underscores)
 
-3. **Version**: a new connector starts at `0.1.0`. For an existing connector, never reset or hand-pick the version: bump it as described below.
+3. **Version**: a new connector starts at `0.1.0`, with a `version-change-log.md` next to `pyproject.toml` holding one `## 0.1.0 — <date> - INITIAL` entry (format in `CONTRIBUTING.md`, Change log). For an existing connector, never reset or hand-pick the version: bump it as described below.
 
 ## Choose the version
 
@@ -74,9 +74,10 @@ Skip this section for a new connector. Otherwise, compare the change with `maste
    - **PATCH** (`x.y.z` → `x.y.z+1`) for fixes, performance, logging and refactors
    - **No bump** if only tests, `README.md` or `{{source_name}}_api_doc.md` changed. Stop here: don't rebuild.
 3. If `master` already has a higher version than your branch's base, bump from `master`'s version.
-4. Record the bump in the commit message and PR description: `{{source_name}} 0.1.0 → 0.2.0 (MINOR): add the cohorts table`. For MAJOR, also list what users must do, per table.
+4. Add an entry at the top of `src/databricks/labs/community_connector/sources/{{source_name}}/version-change-log.md` with the new version, today's date and the bump type, filling in Changes, Compatibility, Upgrade instructions, Rollback and References (format in `CONTRIBUTING.md`, Change log). For MAJOR, Upgrade instructions must say what users must do, per table.
+5. Record the bump in the commit message and PR description too: `{{source_name}} 0.1.0 → 0.2.0 (MINOR): add the cohorts table`.
 
-If the change also touches framework code (outside `sources/`), bump the root `pyproject.toml` by the framework rules in `CONTRIBUTING.md` (Versioning → Framework: MAJOR if any connector must change, MINOR for new capability, PATCH for fixes; `source_simulator/` changes don't bump) and rebuild with `--framework`. The new framework version must satisfy every connector's `lakeflow-community-connectors` range: if the script reports a mismatch, update those connectors in the same change (raise the cap and bump each one) or don't release the framework change.
+If the change also touches framework code (outside `sources/`), bump the root `pyproject.toml`, add an entry to the root `version-change-log.md`, by the framework rules in `CONTRIBUTING.md` (Versioning → Framework: MAJOR if any connector must change, MINOR for new capability, PATCH for fixes; `source_simulator/` changes don't bump) and rebuild with `--framework`. The new framework version must satisfy every connector's `lakeflow-community-connectors` range: if the script reports a mismatch, update those connectors in the same change (raise the cap and bump each one) or don't release the framework change.
 
 ## Build the prebuilt wheel (required)
 
