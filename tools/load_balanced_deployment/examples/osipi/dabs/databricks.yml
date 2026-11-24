@@ -1,0 +1,88 @@
+# Example Databricks Asset Bundle for Load-Balanced OSIPI Deployment
+# Generated from preset_by_category_and_ingestion.csv (4 pipelines)
+#
+# IMPORTANT: This is an EXAMPLE file for reference only.
+# Do NOT check this into your actual project root.
+# Generate your own using generate_dab_yaml.py
+
+bundle:
+  name: osipi_load_balanced
+
+variables:
+  catalog:
+    description: Target Unity Catalog
+    default: osipi
+  schema:
+    description: Target schema
+    default: bronze
+  connection_name:
+    description: UC Connection name
+    default: osipi_connection_lakeflow
+
+resources:
+  pipelines:
+    osipi_metadata_snapshot:
+      name: "OSIPI - Metadata (Snapshot)"
+      catalog: ${var.catalog}
+      target: ${var.schema}
+      photon: true
+      serverless: true
+      channel: preview
+      configuration:
+        connection_name: ${var.connection_name}
+      libraries:
+        - notebook:
+            path: /Workspace/Users/${workspace.current_user.userName}/osipi_ingest/ingest_metadata_snapshot.py
+
+    osipi_timeseries_append:
+      name: "OSIPI - Time Series (Append)"
+      catalog: ${var.catalog}
+      target: ${var.schema}
+      photon: true
+      serverless: true
+      channel: preview
+      configuration:
+        connection_name: ${var.connection_name}
+      libraries:
+        - notebook:
+            path: /Workspace/Users/${workspace.current_user.userName}/osipi_ingest/ingest_timeseries_append.py
+
+    osipi_asset_framework_snapshot:
+      name: "OSIPI - Asset Framework (Snapshot)"
+      catalog: ${var.catalog}
+      target: ${var.schema}
+      photon: true
+      serverless: true
+      channel: preview
+      configuration:
+        connection_name: ${var.connection_name}
+      libraries:
+        - notebook:
+            path: /Workspace/Users/${workspace.current_user.userName}/osipi_ingest/ingest_asset_framework_snapshot.py
+
+    osipi_event_frames_snapshot:
+      name: "OSIPI - Event Frames (Snapshot)"
+      catalog: ${var.catalog}
+      target: ${var.schema}
+      photon: true
+      serverless: true
+      channel: preview
+      configuration:
+        connection_name: ${var.connection_name}
+      libraries:
+        - notebook:
+            path: /Workspace/Users/${workspace.current_user.userName}/osipi_ingest/ingest_event_frames_snapshot.py
+
+targets:
+  dev:
+    mode: development
+    workspace:
+      host: https://your-workspace.cloud.databricks.com
+
+  prod:
+    mode: production
+    workspace:
+      host: https://your-workspace.cloud.databricks.com
+    variables:
+      catalog: osipi_prod
+      schema: bronze

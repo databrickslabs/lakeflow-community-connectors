@@ -1,0 +1,11 @@
+source_table,category,table_configuration_json
+contacts,all,{}
+companies,all,{}
+deals,all,{}
+tickets,all,{}
+calls,all,{}
+emails,all,{}
+meetings,all,{}
+tasks,all,{}
+notes,all,{}
+deal_split,all,{}

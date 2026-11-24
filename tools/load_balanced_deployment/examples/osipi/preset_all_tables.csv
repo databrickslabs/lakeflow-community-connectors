@@ -1,0 +1,16 @@
+source_table,category,table_configuration_json
+pi_dataservers,all,{}
+pi_points,all,{}
+pi_point_attributes,all,{}
+pi_timeseries,all,{}
+pi_streamset_recorded,all,{}
+pi_streamset_interpolated,all,{}
+pi_streamset_plot,all,{}
+pi_assetservers,all,{}
+pi_assetdatabases,all,{}
+pi_af_hierarchy,all,{}
+pi_element_attributes,all,{}
+pi_element_templates,all,{}
+pi_categories,all,{}
+pi_event_frames,all,{}
+pi_eventframe_attributes,all,{}
