@@ -1,0 +1,622 @@
+{
+  "$schema": "https://spec.openapis.org/oas/3.1/schema/2022-10-07",
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Apis REST Service",
+    "description": "A RESTful APIs",
+    "version": "0.4.0"
+  },
+  "servers": [
+    {
+      "url": "http://localhost:8080",
+      "description": "Local APIS Rest server"
+    }
+  ],
+  "tags": [
+    {
+      "name": "Browse",
+      "description": "browse hive instances and modules"
+    },
+    {
+      "name": "Real-time",
+      "description": "Read and write real-time values from Hive"
+    },
+    {
+      "name": "Timeseries",
+      "description": "Read historical data from Hive"
+    }
+  ],
+  "paths": {
+    "/hive": {
+      "get": {
+        "tags": [
+          "Browse"
+        ],
+        "summary": "returns a list of all hive instances",
+        "description": "Returns a list of all hive instances.",
+        "parameters": [
+          {
+            "name": "format",
+            "in": "query",
+            "description": "Optional to change response format, json (default) or csv.",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "json",
+                "csv"
+              ],
+              "default": "json"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "500": {
+            "description": "Internal Server Error"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/hive/{instance}/runstate": {
+      "get": {
+        "tags": [
+          "Browse"
+        ],
+        "summary": "returns runstate of the instance",
+        "description": "Can be used to check if the instance is running. Returns \"none\" if the instance is not running.",
+        "parameters": [
+          {
+            "name": "instance",
+            "in": "path",
+            "description": "Name of the Hive instance, e.g. ApisHive",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "format",
+            "in": "query",
+            "description": "Optional to change response format, json (default) or csv.",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "json",
+                "csv"
+              ],
+              "default": "json"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "400": {
+            "description": "Bad request"
+          },
+          "404": {
+            "description": "Not Found"
+          },
+          "500": {
+            "description": "Internal Server Error"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/hive/{instance}/modules": {
+      "get": {
+        "tags": [
+          "Browse"
+        ],
+        "summary": "returns a list of all modules",
+        "description": "Current list of all modules in an instance, which must be running.",
+        "parameters": [
+          {
+            "name": "instance",
+            "in": "path",
+            "description": "Name of the Hive instance, e.g. ApisHive",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "format",
+            "in": "query",
+            "description": "Optional to change response format, json (default) or csv.",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "json",
+                "csv"
+              ],
+              "default": "json"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "400": {
+            "description": "Bad request"
+          },
+          "404": {
+            "description": "Not Found"
+          },
+          "500": {
+            "description": "Internal Server Error"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/hive/{instance}/items": {
+      "get": {
+        "tags": [
+          "Browse"
+        ],
+        "summary": "returns a list of items from one or more modules",
+        "description": "Items can be filtered by name and supports wildcard in names",
+        "parameters": [
+          {
+            "name": "instance",
+            "in": "path",
+            "description": "Name of the Hive instance, e.g ApisHive",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "item",
+            "in": "query",
+            "description": "Item name, e.g. Worker.Signal1 or optionally use wildcard pattern, e.g. Work\\*.Sig\\* which will return all items starting with *Sig* in all modules starting with *Work*.",
+            "required": true,
+            "schema": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "default": ""
+              }
+            },
+            "style": "form",
+            "explode": true
+          },
+          {
+            "name": "attrib",
+            "in": "query",
+            "description": "Optional to include additional attributes item, specify the Attribute ID",
+            "required": false,
+            "schema": {
+              "type": "array",
+              "items": {
+                "type": "number"
+              }
+            },
+            "style": "form",
+            "explode": true
+          },
+          {
+            "name": "format",
+            "in": "query",
+            "description": "Optional to change response format, json (default) or csv.",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "json",
+                "csv"
+              ],
+              "default": "json"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "206": {
+            "description": "Partial content"
+          },
+          "400": {
+            "description": "Bad request"
+          },
+          "404": {
+            "description": "Not Found"
+          },
+          "500": {
+            "description": "Internal Server Error"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/hive/{instance}/values": {
+      "get": {
+        "tags": [
+          "Real-time"
+        ],
+        "summary": "read current values from items",
+        "description": "Returns the latest values from items.",
+        "parameters": [
+          {
+            "name": "instance",
+            "in": "path",
+            "description": "Name of the Hive instance, e.g. ApisHive",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "item",
+            "in": "query",
+            "description": "The name of the item, e.g. Worker.Signal1",
+            "required": true,
+            "schema": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "default": ""
+              }
+            },
+            "style": "form",
+            "explode": true
+          },
+          {
+            "name": "updatedSince",
+            "in": "query",
+            "description": "Optional filter to return only values updated after this time, see apis_datetime_format schema for details.",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/apis_datetime_format"
+            }
+          },
+          {
+            "name": "quality",
+            "in": "query",
+            "description": "Optional filter to return only values that has minimum quality level.",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "good",
+                "uncertain",
+                "bad"
+              ]
+            }
+          },
+          {
+            "name": "format",
+            "in": "query",
+            "description": "Optional to change response format: JSON (default) or CSV.",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "json",
+                "csv"
+              ],
+              "default": "json"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/single_value_t"
+                  }
+                }
+              }
+            }
+          },
+          "206": {
+            "description": "Partial content"
+          },
+          "400": {
+            "description": "Bad request "
+          },
+          "404": {
+            "description": "Not Found"
+          },
+          "500": {
+            "description": "Internal Server Error"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "Real-time"
+        ],
+        "summary": "write values to items",
+        "description": "Writes a set of values to items. Use same format as the results returned from the GET request.",
+        "operationId": "writeItemValues",
+        "parameters": [
+          {
+            "name": "instance",
+            "in": "path",
+            "description": "Name of the Hive instance, e.g. ApisHive",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "description": "Array of values to write.",
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/single_value_t"
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "400": {
+            "description": "Bad request"
+          },
+          "404": {
+            "description": "Not Found"
+          },
+          "500": {
+            "description": "Internal Server Error"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/hive/{instance}/timeseries": {
+      "get": {
+        "tags": [
+          "Timeseries"
+        ],
+        "summary": "returns timeseries for items",
+        "description": "Returns raw or aggredated timeseries.",
+        "parameters": [
+          {
+            "name": "instance",
+            "in": "path",
+            "description": "Name of the Hive instance, e.g. ApisHive",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "item",
+            "in": "query",
+            "description": "The name of the item, e.g. Worker.Signal1",
+            "required": true,
+            "schema": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "default": ""
+              }
+            },
+            "style": "form",
+            "explode": true
+          },
+          {
+            "name": "starttime",
+            "in": "query",
+            "description": "Start time of the time-series. See apis_datetime_format schema for details.",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/apis_datetime_format"
+            }
+          },
+          {
+            "name": "endtime",
+            "in": "query",
+            "description": "End time of the time-series. See apis_datetime_format schema for details.",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/apis_datetime_format"
+            }
+          },
+          {
+            "name": "aggregate",
+            "in": "query",
+            "description": "Optional for getting aggregated data",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "interpolative",
+                "total",
+                "average",
+                "timeaverage",
+                "count",
+                "regstddev",
+                "minimumactualtime",
+                "minimum",
+                "maximumactualtime",
+                "maximum",
+                "start",
+                "end",
+                "delta",
+                "regslope",
+                "regconst",
+                "regdev",
+                "variance",
+                "range",
+                "duration_good",
+                "duration_bad",
+                "percent_good",
+                "percent_bad",
+                "worst_quality",
+                "annotation_count",
+                "sum",
+                "interpolative_0",
+                "median",
+                "ua_minimumactualtime2",
+                "ua_maximumactualtime2",
+                "ua_range2",
+                "vec_sum",
+                "vec_aver",
+                "vec_min",
+                "vec_max",
+                "displayvalues",
+                "lowpassfilter",
+                "movingaveragebycount",
+                "movingaveragebytime",
+                "ua_percentgood",
+                "ua_percentbad"
+              ]
+            }
+          },
+          {
+            "name": "interval",
+            "in": "query",
+            "description": "Optional resample interval for the aggregated data [seconds].",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 86400,
+              "default": 3600
+            }
+          },
+          {
+            "name": "quality",
+            "in": "query",
+            "description": "Optional filter to get only data with a minimum quality level.",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "good",
+                "uncertain",
+                "bad"
+              ]
+            }
+          },
+          {
+            "name": "format",
+            "in": "query",
+            "description": "Optional to change response format: JSON (default) or CSV.",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "json",
+                "csv"
+              ],
+              "default": "json"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "206": {
+            "description": "Partial content"
+          },
+          "400": {
+            "description": "Bad request"
+          },
+          "404": {
+            "description": "Not Found"
+          },
+          "500": {
+            "description": "Internal Server Error"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "BearerAuth": {
+        "type": "apiKey",
+        "name": "Authorization",
+        "in": "header"
+      }
+    },
+    "schemas": {
+      "apis_datetime_format": {
+        "type": "string",
+        "description": "Accepts either [ISO 8601](https://en.wikipedia.org/wiki/ISO_8601) basic combined date and time format or [OPC time](https://reference.opcfoundation.org/Core/Part11/v104/docs/A.1). Examples: 2023-06-01T12:00:00Z, DAY-1D"
+      },
+      "single_value_t": {
+        "type": "object",
+        "properties": {
+          "item_name": {
+            "type": "string"
+          },
+          "value": {
+            "type": "object",
+            "properties": {
+              "v": {},
+              "q": {
+                "type": "string"
+              },
+              "t": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "security": [
+    {
+      "BearerAuth": []
+    }
+  ]
+}
