@@ -46,6 +46,15 @@ def _make_export_zip(rows: list[dict]) -> bytes:
     return zip_buffer.getvalue()
 
 
+def _mock_export_response(content: bytes, step: int = 7) -> Mock:
+    """A 200 Export response whose body arrives in small chunks."""
+    resp = _mock_response(200)
+    resp.iter_content = lambda chunk_size=1: iter(
+        content[i : i + step] for i in range(0, len(content), step)
+    )
+    return resp
+
+
 def test_parse_export_body_reads_zip_of_gzip_ndjson():
     rows = [{"uuid": "u1"}, {"uuid": "u2"}]
     content = _make_export_zip(rows)
@@ -125,6 +134,40 @@ def test_read_events_advances_cursor_by_window():
     )
 
 
+def test_read_events_streams_export_body_lazily():
+    """A 200 window returns a lazy iterator over the spooled body, not a list,
+    so a large window never holds every event in memory at once."""
+    connector = _connector()
+    connector._init_ts = "2026-06-20T12:00:00+00:00"
+    rows = [{"uuid": f"u{i}", "event_type": "page_view"} for i in range(500)]
+    resp = _mock_export_response(_make_export_zip(rows))
+
+    with patch.object(connector, "_request_with_retry", return_value=resp):
+        records, offset = connector._read_events(
+            {"cursor": "2026-06-20T00:00:00+00:00"}, {"window_hours": "1"}
+        )
+
+    assert not isinstance(records, list)
+    assert next(records) == rows[0]
+    assert list(records) == rows[1:]
+    assert offset == {"cursor": "2026-06-20T02:00:00+00:00"}
+
+
+def test_read_events_handles_non_zip_body():
+    """The simulator serves a plain JSON array; that path still works."""
+    connector = _connector()
+    connector._init_ts = "2026-06-20T12:00:00+00:00"
+    rows = [{"uuid": "u1"}, {"uuid": "u2"}]
+    resp = _mock_export_response(json.dumps(rows).encode())
+
+    with patch.object(connector, "_request_with_retry", return_value=resp):
+        records, _ = connector._read_events(
+            {"cursor": "2026-06-20T00:00:00+00:00"}, {"window_hours": "1"}
+        )
+
+    assert list(records) == rows
+
+
 def test_read_events_rejects_non_positive_window():
     connector = _connector()
     connector._init_ts = "2026-06-20T12:00:00+00:00"
@@ -200,8 +243,7 @@ def test_read_events_404_then_200_returns_records_on_second_call():
 
     event = {"uuid": "e1", "event_type": "page_view"}
     resp_404 = _mock_response(404)
-    resp_200 = _mock_response(200)
-    resp_200.content = _make_export_zip([event])
+    resp_200 = _mock_export_response(_make_export_zip([event]))
 
     with patch.object(
         connector, "_request_with_retry", side_effect=[resp_404, resp_200]

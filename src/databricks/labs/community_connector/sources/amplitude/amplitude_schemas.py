@@ -32,6 +32,9 @@ INITIAL_BACKOFF = 1.0  # seconds; doubled after each retry
 # events reader overrides this with a larger value.
 DEFAULT_TIMEOUT = 60
 EXPORT_TIMEOUT = 120
+# Export bodies are spooled to disk past this size, then parsed one line at a time.
+EXPORT_SPOOL_MAX_MEMORY = 16 * 1024 * 1024
+EXPORT_CHUNK_SIZE = 1024 * 1024
 
 # Base URLs by data-residency region.
 BASE_URLS = {
