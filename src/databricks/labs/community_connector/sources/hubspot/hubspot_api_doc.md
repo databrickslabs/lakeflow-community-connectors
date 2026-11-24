@@ -51,8 +51,11 @@ connector follows it until either:
 | `tasks`      | `GET /crm/v3/objects/tasks`              | `POST /crm/v3/objects/tasks/search`            | `id`        | `updatedAt`  |
 | `notes`      | `GET /crm/v3/objects/notes`              | `POST /crm/v3/objects/notes/search`            | `id`        | `updatedAt`  |
 
-Custom objects discovered via `GET /crm/v3/schemas` are exposed as additional
-tables using the same patterns as the standard objects above.
+Custom objects are discovered through
+`GET /crm-object-schemas/2026-09/schemas`. The connector retries 429 and 5xx
+responses, then fails closed so a transient discovery gap cannot silently remove
+tables or association columns. If that date-versioned route reports 404 or 410,
+the connector falls back to `GET /crm/v3/schemas` for tenant compatibility.
 
 ### Cursor property mapping
 
@@ -69,10 +72,17 @@ the response-level `updatedAt`:
 HubSpot supports `archived=true` queries on the following tables. The
 connector emits these via `read_table_deletes`:
 
-- `contacts`, `companies`, `deals`, `tickets`, `emails`, `tasks`, `notes`
+- `contacts`, `companies`, `deals`, `tickets`, `calls`, `emails`, `tasks`, `notes`
 
-`calls` and `meetings` do not support archived queries and are append-only
-incremental.
+The connector drains every archived page before committing the frozen archive-time
+window. Archive listing is not ordered by archive time, so this scan ignores
+`max_records_per_batch`. Invalid records, conflicting duplicate IDs, malformed
+paging, and later-page failures fail the read before publishing a checkpoint.
+Archive reads cover records retained and returned by HubSpot; they do not detect
+hard deletes or records outside the source retention window.
+
+Meetings use complete active snapshots instead of archive reads because HubSpot
+rejects archived listing for that object type.
 
 ## Schema discovery
 
