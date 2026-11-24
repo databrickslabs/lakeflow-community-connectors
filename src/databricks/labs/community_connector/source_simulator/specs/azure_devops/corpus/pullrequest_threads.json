@@ -61,7 +61,11 @@
     "organization": "alpha-524",
     "project_name": "foxtrot-858",
     "repository_id": "tango-834",
-    "pullrequest_id": 95339
+    "pullrequest_id": 95339,
+    "_links": {},
+    "identities": {},
+    "properties": {},
+    "pullRequestThreadContext": {}
   },
   {
     "id": 1001,
@@ -92,7 +96,11 @@
     "organization": "tango-571",
     "project_name": "kilo-943",
     "repository_id": "romeo-118",
-    "pullrequest_id": 82460
+    "pullrequest_id": 82460,
+    "_links": {},
+    "identities": {},
+    "properties": {},
+    "pullRequestThreadContext": {}
   },
   {
     "id": 1002,
@@ -156,7 +164,11 @@
     "organization": "zulu-572",
     "project_name": "echo-667",
     "repository_id": "lima-447",
-    "pullrequest_id": 55056
+    "pullrequest_id": 55056,
+    "_links": {},
+    "identities": {},
+    "properties": {},
+    "pullRequestThreadContext": {}
   },
   {
     "id": 1003,
@@ -204,6 +216,10 @@
     "organization": "delta-651",
     "project_name": "zulu-424",
     "repository_id": "romeo-611",
-    "pullrequest_id": 70944
+    "pullrequest_id": 70944,
+    "_links": {},
+    "identities": {},
+    "properties": {},
+    "pullRequestThreadContext": {}
   }
 ]

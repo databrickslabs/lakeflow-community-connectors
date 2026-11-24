@@ -1,0 +1,48 @@
+[
+  {
+    "id": 1000,
+    "name": "golf-245",
+    "_links": {"self": {"href": "https://example.invalid/pipelines/1000"}},
+    "folder": "golf-415",
+    "revision": 91695,
+    "url": "echo-638",
+    "organization": "delta-192",
+    "project_name": "lima-166-pk0"
+  },
+  {
+    "id": 1001,
+    "name": "juliet-333",
+    "folder": "yankee-178",
+    "revision": 39352,
+    "url": "romeo-714",
+    "organization": "november-587",
+    "project_name": "delta-28-pk1"
+  },
+  {
+    "id": 1002,
+    "name": "romeo-213",
+    "folder": "romeo-157",
+    "revision": 95006,
+    "url": "foxtrot-244",
+    "organization": "kilo-359",
+    "project_name": "kilo-920-pk2"
+  },
+  {
+    "id": 1003,
+    "name": "alpha-381",
+    "folder": "whiskey-326",
+    "revision": 93957,
+    "url": "juliet-659",
+    "organization": "bravo-414",
+    "project_name": "alpha-45-pk3"
+  },
+  {
+    "id": 1004,
+    "name": "victor-791",
+    "folder": "echo-586",
+    "revision": 13562,
+    "url": "kilo-358",
+    "organization": "papa-992",
+    "project_name": "yankee-8-pk4"
+  }
+]

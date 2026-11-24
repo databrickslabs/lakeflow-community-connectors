@@ -62,9 +62,12 @@ The object list is **static** (defined by the connector), not discovered dynamic
 | `workitems` | Work items (tasks, bugs, user stories, etc.) | `GET /{organization}/{project}/_apis/wit/workitems` | `cdc` |
 | `workitem_revisions` | Historical changes to work items | `GET /{organization}/{project}/_apis/wit/reporting/workitemrevisions` | `append` |
 | `workitem_types` | Work item type definitions and fields | `GET /{organization}/{project}/_apis/wit/workitemtypes` | `snapshot` |
+| `pipelines` | Pipeline definitions | `GET /{organization}/{project}/_apis/pipelines` | `snapshot` |
+| `builds` | Completed pipeline runs (builds) | `GET /{organization}/{project}/_apis/build/builds` | `cdc` |
+| `build_timeline` | Stages, jobs and steps of each completed build | `GET /{organization}/{project}/_apis/build/builds/{buildId}/timeline` | `cdc` |
 
 **Connector scope**:
-- Supports 14 objects from Azure DevOps REST API v7.1: 1 project object + 9 Git objects (including 4 PR-related) + 1 identity object + 3 work item tracking objects.
+- Supports 17 objects from Azure DevOps REST API v7.1: 1 project object + 9 Git objects (including 4 PR-related) + 1 identity object + 3 work item tracking objects + 3 pipeline/build objects.
 - **Connection parameters**:
   - `organization` (required) - Azure DevOps organization name
   - `project` (optional) - If provided, scopes Git and Work Item operations to specific project; if omitted, tables can fetch from all projects
@@ -1971,6 +1974,33 @@ curl -u :{PERSONAL_ACCESS_TOKEN} \
 - Compare with previous snapshot to detect changes in type definitions.
 - Types rarely change (only with process template updates).
 - Small dataset - full refresh is efficient.
+
+### `pipelines` read endpoint
+
+`GET https://dev.azure.com/{organization}/{project}/_apis/pipelines?api-version=7.1&$top=1000`
+
+- Pagination: the next-page token is returned in the `x-ms-continuationtoken` response header and passed back as the `continuationToken` query parameter until the header is absent.
+- Returns `id`, `name`, `folder`, `revision`, `url`. Snapshot ingestion.
+
+### `builds` read endpoint
+
+`GET https://dev.azure.com/{organization}/{project}/_apis/build/builds?api-version=7.1&statusFilter=completed&queryOrder=finishTimeAscending&$top=1000[&minTime={ts}][&definitions={id}]`
+
+- Only completed builds are read: `finishTime` is final, ascending, and used as the cdc cursor. A re-run ("Rerun failed jobs") keeps the build id but gets a new `finishTime`, so the build is read again and upserted by primary key instead of duplicated.
+- `minTime` filters on `finishTime` and is inclusive; the connector drops the boundary build client-side.
+- Pagination: `x-ms-continuationtoken` response header → `continuationToken` query parameter.
+- Required PAT scope: `Build (read)`.
+
+### `build_timeline` read endpoint
+
+`GET https://dev.azure.com/{organization}/{project}/_apis/build/builds/{buildId}/timeline?api-version=7.1`
+
+- Returns `{"records": [...]}`: one record per Stage, Phase, Job, Task (pipeline step) and Checkpoint, linked by `parentId`.
+- One call per newly completed build (discovered through the `builds` endpoint above). A `404` means the timeline was removed by retention and the build is skipped.
+- Each record is tagged with `build_id`, `build_finish_time`, `organization`, `project_name`.
+- `previousAttempts` (array of `{attempt, timelineId, recordId}`) links a record to its earlier attempts after a re-run.
+- Both `builds` and `build_timeline` are `cdc`. A re-run keeps the build id but gets a new `finishTime`, so the build is read again: the `builds` row is replaced by `id`, and the unchanged timeline records (same ids) are upserted onto themselves by (`build_id`, `id`) instead of duplicated.
+- Records that were re-run (stage, job, steps) come back with new ids and `attempt` >= 2; the attempt-1 records are no longer in the current timeline. Their rows from the earlier sync therefore remain in `build_timeline` as history. Verified on live builds 33920 and 34475.
 
 
 ### General rate limiting considerations
