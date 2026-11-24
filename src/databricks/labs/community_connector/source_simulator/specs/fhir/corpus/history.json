@@ -1,0 +1,65 @@
+[
+  {
+    "fullUrl": "https://simulator-fhir.example.com/baseR4/Goal/goal-retired",
+    "request": {
+      "method": "DELETE",
+      "url": "Goal/goal-retired/_history/2"
+    },
+    "response": {
+      "status": "200 OK",
+      "etag": "W/\"2\""
+    }
+  },
+  {
+    "fullUrl": "https://simulator-fhir.example.com/baseR4/Goal/goal-1",
+    "request": {
+      "method": "PUT",
+      "url": "Goal/goal-1"
+    },
+    "response": {
+      "status": "200 OK",
+      "etag": "W/\"2\""
+    },
+    "resource": {
+      "resourceType": "Goal",
+      "id": "goal-1",
+      "meta": {
+        "versionId": "2",
+        "lastUpdated": "2024-02-10T00:00:00+00:00"
+      },
+      "lifecycleStatus": "completed",
+      "description": {
+        "text": "quit smoking"
+      },
+      "subject": {
+        "reference": "Patient/p1"
+      }
+    }
+  },
+  {
+    "fullUrl": "https://simulator-fhir.example.com/baseR4/Goal/goal-retired",
+    "request": {
+      "method": "POST",
+      "url": "Goal"
+    },
+    "response": {
+      "status": "201 Created",
+      "etag": "W/\"1\""
+    },
+    "resource": {
+      "resourceType": "Goal",
+      "id": "goal-retired",
+      "meta": {
+        "versionId": "1",
+        "lastUpdated": "2024-02-09T00:00:00+00:00"
+      },
+      "lifecycleStatus": "proposed",
+      "description": {
+        "text": "retired goal"
+      },
+      "subject": {
+        "reference": "Patient/p2"
+      }
+    }
+  }
+]

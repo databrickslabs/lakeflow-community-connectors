@@ -72,45 +72,48 @@ Patient, Observation, Condition, Encounter, Procedure, MedicationRequest,
 DiagnosticReport, AllergyIntolerance, Immunization, Coverage, CarePlan,
 Goal, Device, DocumentReference
 
-Primary key for all resources: `id` (unique per resource type per server, per FHIR spec).
-All resources use CDC ingestion via `_lastUpdated` cursor.
+Each resource type is its own table. Primary key: `resource_id`, the FHIR logical
+id (unique per resource type per server, per FHIR spec). Cursor: `last_updated`
+(`meta.lastUpdated`).
 
 ---
 
 ## Object Schema
 
-No schema discovery API. Schemas are hardcoded per resource type.
+No schema discovery is needed: every resource-type table shares one schema, with
+the whole resource stored as a VARIANT. Any FHIR R4 resource type works without
+schema code.
 
-All resources share common fields:
-- `id` (string): FHIR logical id, up to 64 chars, case-sensitive
-- `resourceType` (string): e.g. "Patient"
-- `lastUpdated` (timestamp): from `meta.lastUpdated`, nullable (spec: 0..1 cardinality)
-- `raw_json` (string): full FHIR resource as JSON string
-
-Resource-specific typed fields:
-
-**Patient:** gender (string), birthDate (string), active (boolean), name_text (string), name_family (string)
-**Observation:** status (string), code_text (string), code_system (string), code_code (string), subject_reference (string), effective_datetime (timestamp), value_quantity_value (double), value_quantity_unit (string), value_string (string), issued (timestamp)
-**Condition:** clinical_status (string), verification_status (string), code_text (string), subject_reference (string), onset_datetime (timestamp), recorded_date (string)
-**Encounter:** status (string), class_code (string), subject_reference (string), period_start (timestamp), period_end (timestamp)
-**Procedure:** status (string), code_text (string), subject_reference (string), performed_datetime (timestamp)
-**MedicationRequest:** status (string), intent (string), medication_text (string), subject_reference (string), authored_on (string)
-**DiagnosticReport:** status (string), code_text (string), subject_reference (string), effective_datetime (timestamp), issued (timestamp)
-**AllergyIntolerance:** clinical_status (string), verification_status (string), code_text (string), patient_reference (string), recorded_date (string)
-**Immunization:** status (string), vaccine_code_text (string), patient_reference (string), occurrence_datetime (timestamp)
-**Coverage:** status (string), beneficiary_reference (string), payor_reference (string), period_start (string), period_end (string)
-**CarePlan:** status (string), intent (string), subject_reference (string), period_start (timestamp), period_end (timestamp)
-**Goal:** lifecycle_status (string), description_text (string), subject_reference (string), start_date (string)
-**Device:** status (string), device_name (string), type_text (string), patient_reference (string)
-**DocumentReference:** status (string), type_text (string), subject_reference (string), date (timestamp)
-
-Unknown resource types → fallback to common fields + raw_json only.
+| Column | Spark type | Source |
+|---|---|---|
+| `resource_type` | StringType, not null | `resourceType` (constant per table) |
+| `resource_id` | StringType, not null | `id` (FHIR logical id, up to 64 chars, case-sensitive) |
+| `last_updated` | TimestampType | `meta.lastUpdated`, nullable (spec: 0..1 cardinality) |
+| `resource` | VariantType | the whole resource. Bulk NDJSON lines are stored verbatim, so decimals keep full precision; REST re-serialises the parsed JSON, so decimals round to float64 |
+| `fhir_version` | StringType | `fhirVersion` from the server's CapabilityStatement (`GET /metadata`) |
+| `ingested_at` | TimestampType | connector read time |
 
 ---
 
 ## Object Ingestion Type
 
-All resources: `ingestion_type=cdc`, `cursor_field=lastUpdated`, `primary_keys=["id"]`
+| Mode | `ingestion_type` | `cursor_field` | `primary_keys` |
+|---|---|---|---|
+| REST, or bulk `since` / `typefilter` (default) | `cdc` | `last_updated` | `["resource_id"]` |
+| Same, with `track_deletes=true` | `cdc_with_deletes` | `last_updated` | `["resource_id"]` |
+| Bulk `full` | `snapshot` | none | `["resource_id"]` |
+
+### Deletes via history (`track_deletes=true`)
+```
+GET {base_url}/{ResourceType}/_history?_since={cursor}&_count={page_size}
+```
+Returns a FHIR Bundle of type `history`, **newest first**. A deletion is an entry
+with `request.method = "DELETE"` and `request.url = "{Type}/{id}/_history/{n}"`.
+On public HAPI R4 (measured 2026-11-01), DELETE entries carry no resource and no
+`response.lastModified`. Each deletion is therefore sequenced by the closest newer
+entry's timestamp. The whole history since the cursor is read once per trigger;
+the next cursor is the trigger start minus 5 minutes. Servers without type-level
+`_history` support (e.g. Epic) cannot use `track_deletes`.
 
 ---
 
@@ -156,13 +159,13 @@ Links are opaque — follow as-is, never parse or modify.
 - Type: FHIR `instant` (ISO8601 with timezone, e.g. `2024-01-15T10:30:00+00:00`)
 - Nullable: 0..1 cardinality — not guaranteed present
 - On REST write ops, server SHALL update it (so present on server-stored resources in practice)
-- If absent: yield record but don't advance cursor from it
+- If absent: the record cannot advance the cursor; a batch where no record has it ends the trigger
 
 ### Error handling
 - `429`, `500`, `502`, `503`: retry with exponential backoff (max 5 retries, initial 5s; 5→10→20→40→80s)
 - `429`: honor `Retry-After` header if present
 - `400`, `401`, `403`, `404`: raise immediately with descriptive message
-- All HTTP calls must have `timeout=60` (prevents hangs on slow servers)
+- Every HTTP call has a timeout (60s REST, 30s token, 300s NDJSON) to prevent hangs
 
 ### Rate limits
 HAPI FHIR public server: no documented limit but use small `_count` (5-10) in tests.
@@ -171,20 +174,18 @@ Production EHRs (Epic, Cerner): check server's CapabilityStatement. Use `max_rec
 ### Table options (passed via table_options dict)
 - `page_size` (default: "100"): `_count` sent to FHIR server
 - `max_records_per_batch` (default: "1000"): max records per read_table() call
-- `resource_types` (connection-level): comma-separated resource type override
+- `page_delay` (default: "0"): seconds to sleep between pages
+- `resource_types`: comma-separated resource types; each becomes a table
+- `track_deletes` (default: "false"): read deletions from `_history`
 
 ---
 
 ## Field Type Mapping
 
-| FHIR type | Spark type |
-|-----------|-----------|
-| string / code / uri | StringType |
-| instant / dateTime | TimestampType (stored as ISO string, framework converts) |
-| date | StringType (FHIR date is not a full timestamp) |
-| boolean | BooleanType |
-| decimal / integer / positiveInt | DoubleType / LongType |
-| Reference.reference | StringType |
+FHIR datatypes stay inside the `resource` VARIANT; the connector does not map
+them to Spark types. Cast with VARIANT paths at query time, e.g.
+`resource:birthDate::string` (FHIR `date` may be partial, like `"1956"`, which
+`::date` turns into `1956-01-01`) or `resource:valueQuantity.value::decimal(38,18)`.
 
 ---
 

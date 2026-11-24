@@ -1,0 +1,203 @@
+{
+  "version": 1,
+  "endpoints": [
+    {
+      "method": "GET",
+      "url": "https://hapi.fhir.org/baseR4",
+      "count": 301,
+      "param_shapes": [
+        [
+          "_bundletype",
+          "_count",
+          "_getpages",
+          "_getpagesoffset",
+          "_pretty"
+        ]
+      ]
+    },
+    {
+      "method": "GET",
+      "url": "https://hapi.fhir.org/baseR4/.well-known/smart-configuration",
+      "count": 1,
+      "param_shapes": [
+        []
+      ]
+    },
+    {
+      "method": "GET",
+      "url": "https://hapi.fhir.org/baseR4/AllergyIntolerance",
+      "count": 3,
+      "param_shapes": [
+        [
+          "_count",
+          "_lastUpdated",
+          "_sort"
+        ]
+      ]
+    },
+    {
+      "method": "GET",
+      "url": "https://hapi.fhir.org/baseR4/CarePlan",
+      "count": 3,
+      "param_shapes": [
+        [
+          "_count",
+          "_lastUpdated",
+          "_sort"
+        ]
+      ]
+    },
+    {
+      "method": "GET",
+      "url": "https://hapi.fhir.org/baseR4/Condition",
+      "count": 4,
+      "param_shapes": [
+        [
+          "_count",
+          "_lastUpdated",
+          "_sort"
+        ]
+      ]
+    },
+    {
+      "method": "GET",
+      "url": "https://hapi.fhir.org/baseR4/Coverage",
+      "count": 3,
+      "param_shapes": [
+        [
+          "_count",
+          "_lastUpdated",
+          "_sort"
+        ]
+      ]
+    },
+    {
+      "method": "GET",
+      "url": "https://hapi.fhir.org/baseR4/Device",
+      "count": 3,
+      "param_shapes": [
+        [
+          "_count",
+          "_lastUpdated",
+          "_sort"
+        ]
+      ]
+    },
+    {
+      "method": "GET",
+      "url": "https://hapi.fhir.org/baseR4/DiagnosticReport",
+      "count": 3,
+      "param_shapes": [
+        [
+          "_count",
+          "_lastUpdated",
+          "_sort"
+        ]
+      ]
+    },
+    {
+      "method": "GET",
+      "url": "https://hapi.fhir.org/baseR4/DocumentReference",
+      "count": 3,
+      "param_shapes": [
+        [
+          "_count",
+          "_lastUpdated",
+          "_sort"
+        ]
+      ]
+    },
+    {
+      "method": "GET",
+      "url": "https://hapi.fhir.org/baseR4/Encounter",
+      "count": 5,
+      "param_shapes": [
+        [
+          "_count",
+          "_lastUpdated",
+          "_sort"
+        ]
+      ]
+    },
+    {
+      "method": "GET",
+      "url": "https://hapi.fhir.org/baseR4/Goal",
+      "count": 3,
+      "param_shapes": [
+        [
+          "_count",
+          "_lastUpdated",
+          "_sort"
+        ]
+      ]
+    },
+    {
+      "method": "GET",
+      "url": "https://hapi.fhir.org/baseR4/Immunization",
+      "count": 3,
+      "param_shapes": [
+        [
+          "_count",
+          "_lastUpdated",
+          "_sort"
+        ]
+      ]
+    },
+    {
+      "method": "GET",
+      "url": "https://hapi.fhir.org/baseR4/MedicationRequest",
+      "count": 4,
+      "param_shapes": [
+        [
+          "_count",
+          "_lastUpdated",
+          "_sort"
+        ]
+      ]
+    },
+    {
+      "method": "GET",
+      "url": "https://hapi.fhir.org/baseR4/Observation",
+      "count": 16,
+      "param_shapes": [
+        [
+          "_count",
+          "_lastUpdated",
+          "_sort"
+        ]
+      ]
+    },
+    {
+      "method": "GET",
+      "url": "https://hapi.fhir.org/baseR4/Patient",
+      "count": 7,
+      "param_shapes": [
+        [
+          "_count",
+          "_lastUpdated",
+          "_sort"
+        ]
+      ]
+    },
+    {
+      "method": "GET",
+      "url": "https://hapi.fhir.org/baseR4/Procedure",
+      "count": 3,
+      "param_shapes": [
+        [
+          "_count",
+          "_lastUpdated",
+          "_sort"
+        ]
+      ]
+    },
+    {
+      "method": "GET",
+      "url": "https://hapi.fhir.org/baseR4/metadata",
+      "count": 1,
+      "param_shapes": [
+        []
+      ]
+    }
+  ]
+}

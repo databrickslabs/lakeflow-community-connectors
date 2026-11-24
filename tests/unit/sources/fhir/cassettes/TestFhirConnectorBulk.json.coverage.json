@@ -1,0 +1,59 @@
+{
+  "version": 1,
+  "endpoints": [
+    {
+      "method": "GET",
+      "url": "https://hapi.fhir.org/baseR4/$export",
+      "count": 2,
+      "param_shapes": [
+        [
+          "_type"
+        ]
+      ]
+    },
+    {
+      "method": "DELETE",
+      "url": "https://hapi.fhir.org/baseR4/$export-poll-status",
+      "count": 2,
+      "param_shapes": [
+        [
+          "_jobId"
+        ]
+      ]
+    },
+    {
+      "method": "GET",
+      "url": "https://hapi.fhir.org/baseR4/$export-poll-status",
+      "count": 4,
+      "param_shapes": [
+        [
+          "_jobId"
+        ]
+      ]
+    },
+    {
+      "method": "GET",
+      "url": "https://hapi.fhir.org/baseR4/Binary/FfwyqldBFyP67UbYoldbRz7CaMToeipr",
+      "count": 1,
+      "param_shapes": [
+        []
+      ]
+    },
+    {
+      "method": "GET",
+      "url": "https://hapi.fhir.org/baseR4/Binary/ouz5anwSL2jNOhDdLuG2ySbEOK9JvXeY",
+      "count": 1,
+      "param_shapes": [
+        []
+      ]
+    },
+    {
+      "method": "GET",
+      "url": "https://hapi.fhir.org/baseR4/metadata",
+      "count": 1,
+      "param_shapes": [
+        []
+      ]
+    }
+  ]
+}

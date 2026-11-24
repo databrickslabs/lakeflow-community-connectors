@@ -1,0 +1,199 @@
+{
+  "version": 1,
+  "generated_at": "2026-11-02T01:12:44.397833Z",
+  "endpoints": [
+    {
+      "method": "GET",
+      "spec_path": "/baseR4",
+      "sample_url": "https://hapi.fhir.org/baseR4?_getpages=99bdcf26-6504-460e-a49b-334776290d2e&_getpagesoffset=500&_count=500&_pretty=true&_bundletype=searchset",
+      "status": "validated",
+      "calls": 301,
+      "matched": 301,
+      "mismatched": 0,
+      "no_spec": 0,
+      "issues": []
+    },
+    {
+      "method": "GET",
+      "spec_path": "/baseR4/.well-known/smart-configuration",
+      "sample_url": "https://hapi.fhir.org/baseR4/.well-known/smart-configuration",
+      "status": "validated",
+      "calls": 1,
+      "matched": 1,
+      "mismatched": 0,
+      "no_spec": 0,
+      "issues": []
+    },
+    {
+      "method": "GET",
+      "spec_path": "/baseR4/AllergyIntolerance",
+      "sample_url": "https://hapi.fhir.org/baseR4/AllergyIntolerance?_count=500&_sort=_lastUpdated&_lastUpdated=le2026-11-02T01%3A10%3A06.541805Z",
+      "status": "validated",
+      "calls": 3,
+      "matched": 3,
+      "mismatched": 0,
+      "no_spec": 0,
+      "issues": []
+    },
+    {
+      "method": "GET",
+      "spec_path": "/baseR4/CarePlan",
+      "sample_url": "https://hapi.fhir.org/baseR4/CarePlan?_count=500&_sort=_lastUpdated&_lastUpdated=le2026-11-02T01%3A10%3A06.541805Z",
+      "status": "validated",
+      "calls": 3,
+      "matched": 3,
+      "mismatched": 0,
+      "no_spec": 0,
+      "issues": []
+    },
+    {
+      "method": "GET",
+      "spec_path": "/baseR4/Condition",
+      "sample_url": "https://hapi.fhir.org/baseR4/Condition?_count=500&_sort=_lastUpdated&_lastUpdated=le2026-11-02T01%3A10%3A06.541805Z",
+      "status": "validated",
+      "calls": 4,
+      "matched": 4,
+      "mismatched": 0,
+      "no_spec": 0,
+      "issues": []
+    },
+    {
+      "method": "GET",
+      "spec_path": "/baseR4/Coverage",
+      "sample_url": "https://hapi.fhir.org/baseR4/Coverage?_count=500&_sort=_lastUpdated&_lastUpdated=le2026-11-02T01%3A10%3A06.541805Z",
+      "status": "validated",
+      "calls": 3,
+      "matched": 3,
+      "mismatched": 0,
+      "no_spec": 0,
+      "issues": []
+    },
+    {
+      "method": "GET",
+      "spec_path": "/baseR4/Device",
+      "sample_url": "https://hapi.fhir.org/baseR4/Device?_count=500&_sort=_lastUpdated&_lastUpdated=le2026-11-02T01%3A10%3A06.541805Z",
+      "status": "validated",
+      "calls": 3,
+      "matched": 3,
+      "mismatched": 0,
+      "no_spec": 0,
+      "issues": []
+    },
+    {
+      "method": "GET",
+      "spec_path": "/baseR4/DiagnosticReport",
+      "sample_url": "https://hapi.fhir.org/baseR4/DiagnosticReport?_count=500&_sort=_lastUpdated&_lastUpdated=le2026-11-02T01%3A10%3A06.541805Z",
+      "status": "validated",
+      "calls": 3,
+      "matched": 3,
+      "mismatched": 0,
+      "no_spec": 0,
+      "issues": []
+    },
+    {
+      "method": "GET",
+      "spec_path": "/baseR4/DocumentReference",
+      "sample_url": "https://hapi.fhir.org/baseR4/DocumentReference?_count=500&_sort=_lastUpdated&_lastUpdated=le2026-11-02T01%3A10%3A06.541805Z",
+      "status": "validated",
+      "calls": 3,
+      "matched": 3,
+      "mismatched": 0,
+      "no_spec": 0,
+      "issues": []
+    },
+    {
+      "method": "GET",
+      "spec_path": "/baseR4/Encounter",
+      "sample_url": "https://hapi.fhir.org/baseR4/Encounter?_count=500&_sort=_lastUpdated&_lastUpdated=le2026-11-02T01%3A10%3A06.541805Z",
+      "status": "validated",
+      "calls": 5,
+      "matched": 5,
+      "mismatched": 0,
+      "no_spec": 0,
+      "issues": []
+    },
+    {
+      "method": "GET",
+      "spec_path": "/baseR4/Goal",
+      "sample_url": "https://hapi.fhir.org/baseR4/Goal?_count=500&_sort=_lastUpdated&_lastUpdated=le2026-11-02T01%3A10%3A06.541805Z",
+      "status": "validated",
+      "calls": 3,
+      "matched": 3,
+      "mismatched": 0,
+      "no_spec": 0,
+      "issues": []
+    },
+    {
+      "method": "GET",
+      "spec_path": "/baseR4/Immunization",
+      "sample_url": "https://hapi.fhir.org/baseR4/Immunization?_count=500&_sort=_lastUpdated&_lastUpdated=le2026-11-02T01%3A10%3A06.541805Z",
+      "status": "validated",
+      "calls": 3,
+      "matched": 3,
+      "mismatched": 0,
+      "no_spec": 0,
+      "issues": []
+    },
+    {
+      "method": "GET",
+      "spec_path": "/baseR4/MedicationRequest",
+      "sample_url": "https://hapi.fhir.org/baseR4/MedicationRequest?_count=500&_sort=_lastUpdated&_lastUpdated=le2026-11-02T01%3A10%3A06.541805Z",
+      "status": "validated",
+      "calls": 4,
+      "matched": 4,
+      "mismatched": 0,
+      "no_spec": 0,
+      "issues": []
+    },
+    {
+      "method": "GET",
+      "spec_path": "/baseR4/Observation",
+      "sample_url": "https://hapi.fhir.org/baseR4/Observation?_count=500&_sort=_lastUpdated&_lastUpdated=le2026-11-02T01%3A10%3A06.541805Z",
+      "status": "validated",
+      "calls": 16,
+      "matched": 16,
+      "mismatched": 0,
+      "no_spec": 0,
+      "issues": []
+    },
+    {
+      "method": "GET",
+      "spec_path": "/baseR4/Patient",
+      "sample_url": "https://hapi.fhir.org/baseR4/Patient?_count=500&_sort=_lastUpdated&_lastUpdated=le2026-11-02T01%3A10%3A06.541805Z",
+      "status": "validated",
+      "calls": 7,
+      "matched": 7,
+      "mismatched": 0,
+      "no_spec": 0,
+      "issues": []
+    },
+    {
+      "method": "GET",
+      "spec_path": "/baseR4/Procedure",
+      "sample_url": "https://hapi.fhir.org/baseR4/Procedure?_count=500&_sort=_lastUpdated&_lastUpdated=le2026-11-02T01%3A10%3A06.541805Z",
+      "status": "validated",
+      "calls": 3,
+      "matched": 3,
+      "mismatched": 0,
+      "no_spec": 0,
+      "issues": []
+    },
+    {
+      "method": "GET",
+      "spec_path": "/baseR4/metadata",
+      "sample_url": "https://hapi.fhir.org/baseR4/metadata",
+      "status": "validated",
+      "calls": 1,
+      "matched": 1,
+      "mismatched": 0,
+      "no_spec": 0,
+      "issues": []
+    }
+  ],
+  "summary": {
+    "endpoints_total": 17,
+    "endpoints_validated": 17,
+    "endpoints_mismatched": 0,
+    "endpoints_missing_spec": 0
+  }
+}

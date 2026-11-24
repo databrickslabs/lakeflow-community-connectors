@@ -13,12 +13,11 @@ import json
 import sys
 from pathlib import Path
 
-import requests
-
 from databricks.labs.community_connector.sources.fhir.fhir_utils import (
-    SmartAuthClient, FhirHttpClient, discover_token_url,
+    FhirHttpClient,
+    build_auth_client,
+    discover_token_url,
 )
-from databricks.labs.community_connector.sources.fhir.fhir_constants import TOKEN_TIMEOUT
 
 
 def validate(config: dict) -> None:
@@ -45,18 +44,12 @@ def validate(config: dict) -> None:
         print(f"  token_url  : {token_url}")
 
     # Step 2: Obtain an access token
+    try:
+        auth_client = build_auth_client({**config, "token_url": token_url})
+    except ValueError as exc:
+        _fail(str(exc))
     if auth_type != "none":
         print(f"\n[2/3] Requesting access token ({auth_type}) ...")
-        auth_client = SmartAuthClient(
-            token_url=token_url,
-            client_id=config.get("client_id", ""),
-            auth_type=auth_type,
-            private_key_pem=config.get("private_key_pem", ""),
-            client_secret=config.get("client_secret", ""),
-            scope=config.get("scope", ""),
-            kid=config.get("kid", ""),
-            private_key_algorithm=config.get("private_key_algorithm", "RS384"),
-        )
         try:
             token = auth_client.get_token()
         except (RuntimeError, ValueError) as exc:
@@ -64,9 +57,6 @@ def validate(config: dict) -> None:
         print(f"  access token obtained  ({len(token)} chars)")
     else:
         print("\n[2/3] auth_type=none — skipping token request.")
-        auth_client = SmartAuthClient(
-            token_url="", client_id="", auth_type="none",
-        )
 
     # Step 3: Hit the FHIR server metadata endpoint to confirm connectivity
     print("\n[3/3] Confirming FHIR server connectivity (GET /metadata) ...")

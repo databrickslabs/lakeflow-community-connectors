@@ -1,0 +1,36 @@
+{
+  "version": 1,
+  "endpoints": [
+    {
+      "method": "GET",
+      "url": "https://hapi.fhir.org/baseR4/Goal",
+      "count": 3,
+      "param_shapes": [
+        [
+          "_count",
+          "_lastUpdated",
+          "_sort"
+        ]
+      ]
+    },
+    {
+      "method": "GET",
+      "url": "https://hapi.fhir.org/baseR4/Goal/_history",
+      "count": 1,
+      "param_shapes": [
+        [
+          "_count",
+          "_since"
+        ]
+      ]
+    },
+    {
+      "method": "GET",
+      "url": "https://hapi.fhir.org/baseR4/metadata",
+      "count": 1,
+      "param_shapes": [
+        []
+      ]
+    }
+  ]
+}

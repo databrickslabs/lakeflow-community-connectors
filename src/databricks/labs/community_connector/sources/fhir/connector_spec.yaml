@@ -143,9 +143,104 @@ connection:
         Authentication method to use. Must be one of: "jwt_assertion", "client_secret", or "none".
         Select the auth_type that matches your FHIR server's capabilities.
 
+    - name: resource_types
+      type: string
+      required: false
+      description: >
+        Comma-separated FHIR resource types to ingest; each becomes its own table.
+        Every table has the same schema (resource_type, resource_id, last_updated,
+        resource VARIANT, fhir_version, ingested_at), so any R4 resource type works
+        without schema code. Default: Patient, Observation, Condition, Encounter,
+        Procedure, MedicationRequest, DiagnosticReport, AllergyIntolerance,
+        Immunization, Coverage, CarePlan, Goal, Device, DocumentReference.
+
+    - name: track_deletes
+      type: string
+      required: false
+      description: >
+        "true" to remove resources deleted on the server from the target tables
+        (ingestion_type cdc_with_deletes). Deletions are read from each type's
+        REST history (GET [type]/_history?_since=...), once per trigger, in both
+        REST and bulk modes; the server must support type-level history (HAPI
+        does; Epic does not). Not needed with bulk_incremental_mode "full", which
+        is ingested as a snapshot. Default: "false".
+
+    # ── Bulk Data Export options (opt-in) ──────────────────────────────────────
+    - name: bulk_export_enabled
+      type: string
+      required: false
+      description: >
+        Enable FHIR Bulk Data Access export mode (HL7 Bulk Data Access IG).
+        When "true", the connector uses the async $export workflow instead of
+        per-resource bundle pagination. Default: "false".
+
+    - name: bulk_export_scope
+      type: string
+      required: false
+      description: >
+        Export scope for bulk requests. "system": all resources server-wide.
+        "patient": Patient compartment export. "group": Group-specific export
+        (requires bulk_export_group_id). Default: "system".
+
+    - name: bulk_export_group_id
+      type: string
+      required: false
+      description: >
+        FHIR Group resource ID for group-scoped bulk export. Required when
+        bulk_export_scope is "group". Ignored otherwise. This ID is provided
+        by the healthcare organization's administrators.
+
+    - name: bulk_export_poll_interval
+      type: string
+      required: false
+      description: >
+        Seconds between status poll requests while waiting for bulk export
+        to complete. The server's Retry-After header takes precedence when
+        present. Default: "30".
+
+    - name: bulk_export_timeout
+      type: string
+      required: false
+      description: >
+        Maximum seconds to wait for a bulk export job to complete before
+        raising an error. Default: "14400" (4 hours).
+
+    - name: bulk_incremental_mode
+      type: string
+      required: false
+      description: >
+        How to apply the CDC cursor in bulk export mode. "since": standard
+        _since parameter (most servers). "typefilter": _typeFilter with date
+        ranges, sent alongside _type (Epic workaround — Epic does not support
+        _since). "full": no incremental filtering — re-exports ALL data on
+        every trigger and ingests it as a snapshot, so resources deleted on the
+        server are removed from the target; use a low trigger frequency.
+        Default: "since".
+
+    - name: bulk_overlap_seconds
+      type: string
+      required: false
+      description: >
+        Seconds to rewind the cursor after each bulk export. Servers differ on
+        whether the manifest's transactionTime marks the start or the completion
+        of an export; on completion-time servers a 0 overlap can skip resources
+        written while the export ran. A non-zero value re-reads that window —
+        duplicates are absorbed by the upsert on the primary key. The cursor is
+        never moved earlier than the previous cursor. Default: "0".
+
+    - name: bulk_export_ignore_errors
+      type: string
+      required: false
+      description: >
+        "true" to accept a bulk export whose manifest reports error or fatal
+        OperationOutcomes. By default such an export fails the read without
+        advancing the cursor, so the next trigger retries instead of silently
+        skipping the resources that failed to export. Warning and information
+        outcomes are always just logged. Default: "false".
+
 # ============================================================================
 # External Options Allowlist
 # These table-specific options must be included in the externalOptionsAllowList
 # parameter of the UC connection to allow them to be passed through.
 # ============================================================================
-external_options_allowlist: "resource_types,page_size,max_records_per_batch,page_delay,profile"
+external_options_allowlist: "resource_types,page_size,max_records_per_batch,page_delay,bulk_export_enabled,bulk_export_scope,bulk_export_group_id,bulk_export_poll_interval,bulk_export_timeout,bulk_incremental_mode,bulk_overlap_seconds,bulk_export_ignore_errors,track_deletes"

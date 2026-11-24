@@ -8,17 +8,14 @@
 from abc import ABC, abstractmethod
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
-from pathlib import Path
 from typing import (
     Any,
-    Callable,
     Iterator,
     Optional,
     Sequence,
 )
-import argparse
 import json
-import sys
+import re
 import time
 
 from pyspark.sql import Row
@@ -49,9 +46,11 @@ from pyspark.sql.types import (
     VariantType,
     VariantVal,
 )
-from urllib.parse import urljoin
+from urllib.parse import quote, urljoin, urlparse
 import base64
 import jwt  # pylint: disable=import-error
+import logging
+import math
 import requests
 import uuid
 
@@ -606,1381 +605,108 @@ def register_lakeflow_source(spark):
     ########################################################
 
     DEFAULT_RESOURCES = [
-        "Patient", "Observation", "Condition", "Encounter",
-        "Procedure", "MedicationRequest", "DiagnosticReport",
-        "AllergyIntolerance", "Immunization", "Coverage",
-        "CarePlan", "Goal", "Device", "DocumentReference",
+        "Patient",
+        "Observation",
+        "Condition",
+        "Encounter",
+        "Procedure",
+        "MedicationRequest",
+        "DiagnosticReport",
+        "AllergyIntolerance",
+        "Immunization",
+        "Coverage",
+        "CarePlan",
+        "Goal",
+        "Device",
+        "DocumentReference",
     ]
 
-    CURSOR_FIELD = "lastUpdated"
+    PRIMARY_KEYS = ["resource_id"]
+    CURSOR_FIELD = "last_updated"
 
     RETRIABLE_STATUS_CODES = {429, 500, 502, 503}  # 502: Azure/AWS
     MAX_RETRIES = 5
     INITIAL_BACKOFF = 5.0  # seconds; doubled after each retry (5→10→20→40→80)
-    PAGE_DELAY = 0.0       # seconds to sleep between paginated requests; set to 1.0 for public servers
-    HTTP_TIMEOUT = 60   # seconds; timeout for FHIR API requests
+    PAGE_DELAY = 0.0  # seconds to sleep between paginated requests; set to 1.0 for public servers
+    HTTP_TIMEOUT = 60  # seconds; timeout for FHIR API requests
     TOKEN_TIMEOUT = 30  # seconds; timeout for OAuth2 token requests
+    MAX_RETRY_AFTER = 300  # seconds; ceiling on a server-supplied Retry-After value
 
-    DEFAULT_PAGE_SIZE = 100   # _count parameter sent to FHIR server
+    DEFAULT_PAGE_SIZE = 100  # _count parameter sent to FHIR server
     DEFAULT_MAX_RECORDS = 1000  # max records per read_table() call
-
-
-    ########################################################
-    # src/databricks/labs/community_connector/sources/fhir/fhir_profile_registry.py
-    ########################################################
-
-    _SCHEMA_REGISTRY: dict = {}
-    _EXTRACTOR_REGISTRY: dict = {}
-
-    # Profiles tried in order. First match wins.
-    # To add au_core: insert "au_core" before "uk_core"
-    PROFILE_CHAIN: list = ["uk_core", "base_r4"]
-
-    _COMMON_FIELDS: list = [
-        StructField("id", StringType(), nullable=True),
-        StructField("resourceType", StringType(), nullable=True),
-        StructField("lastUpdated", TimestampType(), nullable=True),
-        StructField("raw_json", StringType(), nullable=True),
-        StructField("extension", StringType(), nullable=True),
-    ]
-
-    FALLBACK_SCHEMA = StructType(_COMMON_FIELDS)
-
-
-    def _chain(from_profile: str) -> list:
-        """Return the fallback chain starting at from_profile.
-
-        If from_profile is not in PROFILE_CHAIN, it is tried first (exact match),
-        then the full PROFILE_CHAIN is appended as fallback.
-        """
-        try:
-            idx = PROFILE_CHAIN.index(from_profile)
-            return PROFILE_CHAIN[idx:]
-        except ValueError:
-            return [from_profile] + PROFILE_CHAIN
-
-
-    def register(resource_type: str, profile: str, schema: StructType) -> Callable:
-        """Decorator factory. Registers schema and extractor for (resource_type, profile).
-
-        Usage:
-            @register("Patient", "base_r4", _PATIENT_SCHEMA)
-            def _patient(r: dict) -> dict:
-                return {...}
-        """
-        def decorator(fn: Callable) -> Callable:
-            _SCHEMA_REGISTRY[(resource_type, profile)] = schema
-            _EXTRACTOR_REGISTRY[(resource_type, profile)] = fn
-            return fn
-        return decorator
-
-
-    def get_schema(resource_type: str, profile: str = "uk_core") -> StructType:
-        """Return the Spark schema for resource_type, walking the fallback chain.
-
-        Falls back to FALLBACK_SCHEMA if no match found in any profile.
-        """
-        for p in _chain(profile):
-            key = (resource_type, p)
-            if key in _SCHEMA_REGISTRY:
-                return _SCHEMA_REGISTRY[key]
-        return FALLBACK_SCHEMA
-
-
-    def extract(resource: dict, resource_type: str, profile: str = "uk_core") -> dict:
-        """Extract typed fields from resource, walking the fallback chain.
-
-        Returns {} if no extractor found (caller adds common fields separately).
-        """
-        for p in _chain(profile):
-            key = (resource_type, p)
-            if key in _EXTRACTOR_REGISTRY:
-                return _EXTRACTOR_REGISTRY[key](resource)
-        return {}
-
-
-    ########################################################
-    # src/databricks/labs/community_connector/sources/fhir/fhir_schemas.py
-    ########################################################
-
-    __all__ = ["get_schema", "FALLBACK_SCHEMA"]
-
-
-    ########################################################
-    # src/databricks/labs/community_connector/sources/fhir/fhir_types.py
-    ########################################################
-
-    def _f(name: str, t, nullable: bool = True) -> StructField:
-        return StructField(name, t, nullable=nullable)
-
-
-    # ── Coding ────────────────────────────────────────────────────────────────────
-    # https://hl7.org/fhir/R4/datatypes.html#Coding
-    # Fields: system (0..1 uri), version (0..1), code (0..1), display (0..1), userSelected (0..1)
-    # We include system, code, display — the analytically relevant fields.
-    CODING = StructType([
-        _f("system", StringType()),
-        _f("code", StringType()),
-        _f("display", StringType()),
-    ])
-
-    # ── CodeableConcept ───────────────────────────────────────────────────────────
-    # https://hl7.org/fhir/R4/datatypes.html#CodeableConcept
-    # Fields: coding (0..*), text (0..1)
-    CODEABLE_CONCEPT = StructType([
-        _f("coding", ArrayType(CODING)),
-        _f("text", StringType()),
-    ])
-
-    # ── Reference ─────────────────────────────────────────────────────────────────
-    # https://hl7.org/fhir/R4/references.html#Reference
-    # Fields: reference (0..1), type (0..1), identifier (0..1), display (0..1)
-    # We include reference and display — the analytically relevant fields.
-    REFERENCE = StructType([
-        _f("reference", StringType()),
-        _f("display", StringType()),
-    ])
-
-    # ── Period ────────────────────────────────────────────────────────────────────
-    # https://hl7.org/fhir/R4/datatypes.html#Period
-    # Fields: start (0..1 dateTime), end (0..1 dateTime)
-    PERIOD = StructType([
-        _f("start", TimestampType()),
-        _f("end", TimestampType()),
-    ])
-
-    # ── Identifier ────────────────────────────────────────────────────────────────
-    # https://hl7.org/fhir/R4/datatypes.html#Identifier
-    # Fields: use (0..1), type (0..1), system (0..1 uri), value (0..1), period (0..1), assigner (0..1)
-    # We include use, system, value — the analytically relevant fields.
-    IDENTIFIER = StructType([
-        _f("system", StringType()),
-        _f("value", StringType()),
-        _f("use", StringType()),
-    ])
-
-    # ── HumanName ────────────────────────────────────────────────────────────────
-    # https://hl7.org/fhir/R4/datatypes.html#HumanName
-    # Fields: use (0..1), text (0..1), family (0..1), given (0..*), prefix (0..*), suffix (0..*)
-    # We include use, text, family, given — the analytically relevant fields.
-    HUMAN_NAME = StructType([
-        _f("family", StringType()),
-        _f("given", ArrayType(StringType())),
-        _f("text", StringType()),
-        _f("use", StringType()),
-    ])
-
-    # ── Address ───────────────────────────────────────────────────────────────────
-    # https://hl7.org/fhir/R4/datatypes.html#Address
-    # Fields: use (0..1), type (0..1), text (0..1), line (0..*), city (0..1),
-    #         district (0..1), state (0..1), postalCode (0..1), country (0..1), period (0..1)
-    ADDRESS = StructType([
-        _f("use", StringType()),
-        _f("line", ArrayType(StringType())),
-        _f("city", StringType()),
-        _f("district", StringType()),
-        _f("postalCode", StringType()),
-        _f("country", StringType()),
-    ])
-
-    # ── ContactPoint ──────────────────────────────────────────────────────────────
-    # https://hl7.org/fhir/R4/datatypes.html#ContactPoint
-    # Fields: system (0..1), value (0..1), use (0..1), rank (0..1), period (0..1)
-    CONTACT_POINT = StructType([
-        _f("system", StringType()),
-        _f("value", StringType()),
-        _f("use", StringType()),
-    ])
-
-    # ── Quantity ─────────────────────────────────────────────────────────────────
-    # https://hl7.org/fhir/R4/datatypes.html#Quantity
-    # Fields: value (0..1 decimal), comparator (0..1), unit (0..1), system (0..1 uri), code (0..1)
-    QUANTITY = StructType([
-        _f("value", DoubleType()),
-        _f("unit", StringType()),
-        _f("system", StringType()),
-        _f("code", StringType()),
-    ])
-
-    # ── Annotation ────────────────────────────────────────────────────────────────
-    # https://hl7.org/fhir/R4/datatypes.html#Annotation
-    # Fields: author[x] (0..1), time (0..1 dateTime), text (1..1 markdown)
-    ANNOTATION = StructType([
-        _f("text", StringType()),
-        _f("time", TimestampType()),
-    ])
-
-    # ── Dosage ────────────────────────────────────────────────────────────────────
-    # https://hl7.org/fhir/R4/dosage.html
-    # Full spec has many fields. We extract the clinically essential subset:
-    # text, timing.code, doseAndRate[0].doseQuantity, route, site
-    DOSAGE = StructType([
-        _f("text", StringType()),
-        _f("timing_code", StringType()),
-        _f("dose_value", DoubleType()),
-        _f("dose_unit", StringType()),
-        _f("route", CODEABLE_CONCEPT),
-        _f("site", CODEABLE_CONCEPT),
-    ])
-
-
-    # ─────────────────────────────────────────────────────────────────────────────
-    # Extractor helpers
-    # ─────────────────────────────────────────────────────────────────────────────
-
-    def _safe(d, *keys, default=None):
-        """Safely navigate nested dicts. Returns default if any key is missing or non-dict."""
-        for k in keys:
-            if not isinstance(d, dict):
-                return default
-            d = d.get(k)
-            if d is None:
-                return default
-        return d
-
-
-    def extract_coding(obj: dict | None) -> dict | None:
-        """Extract a FHIR Coding datatype."""
-        if not obj:
-            return None
-        return {"system": obj.get("system"), "code": obj.get("code"), "display": obj.get("display")}
-
-
-    def extract_codeable_concept(obj: dict | None) -> dict | None:
-        """Extract a FHIR CodeableConcept datatype."""
-        if not obj:
-            return None
-        return {
-            "coding": [extract_coding(c) for c in (obj.get("coding") or []) if c],
-            "text": obj.get("text"),
-        }
-
-
-    def extract_reference(obj: dict | None) -> dict | None:
-        """Extract a FHIR Reference datatype."""
-        if not obj:
-            return None
-        return {"reference": obj.get("reference"), "display": obj.get("display")}
-
-
-    def extract_period(obj: dict | None) -> dict | None:
-        """Extract a FHIR Period datatype."""
-        if not obj:
-            return None
-        return {"start": obj.get("start"), "end": obj.get("end")}
-
-
-    def extract_identifier(obj: dict | None) -> dict | None:
-        """Extract a FHIR Identifier datatype."""
-        if not obj:
-            return None
-        return {"system": obj.get("system"), "value": obj.get("value"), "use": obj.get("use")}
-
-
-    def extract_human_name(obj: dict | None) -> dict | None:
-        """Extract a FHIR HumanName datatype."""
-        if not obj:
-            return None
-        return {
-            "family": obj.get("family"),
-            "given": obj.get("given") or [],
-            "text": obj.get("text"),
-            "use": obj.get("use"),
-        }
-
-
-    def extract_address(obj: dict | None) -> dict | None:
-        """Extract a FHIR Address datatype."""
-        if not obj:
-            return None
-        return {
-            "use": obj.get("use"),
-            "line": obj.get("line") or [],
-            "city": obj.get("city"),
-            "district": obj.get("district"),
-            "postalCode": obj.get("postalCode"),
-            "country": obj.get("country"),
-        }
-
-
-    def extract_contact_point(obj: dict | None) -> dict | None:
-        """Extract a FHIR ContactPoint datatype."""
-        if not obj:
-            return None
-        return {"system": obj.get("system"), "value": obj.get("value"), "use": obj.get("use")}
-
-
-    def extract_quantity(obj: dict | None) -> dict | None:
-        """Extract a FHIR Quantity datatype."""
-        if not obj:
-            return None
-        return {
-            "value": obj.get("value"),
-            "unit": obj.get("unit"),
-            "system": obj.get("system"),
-            "code": obj.get("code"),
-        }
-
-
-    def extract_annotation(obj: dict | None) -> dict | None:
-        """Extract a FHIR Annotation datatype."""
-        if not obj:
-            return None
-        return {"text": obj.get("text"), "time": obj.get("time")}
-
-
-    def extract_dosage(obj: dict) -> dict:
-        """Extract a FHIR Dosage backbone element into a flat dict."""
-        timing = obj.get("timing") or {}
-        timing_codings = _safe(timing, "code", "coding") or []
-        timing_code = (timing_codings[0] or {}).get("code") if timing_codings else None
-        dose_and_rate = (obj.get("doseAndRate") or [{}])[0] or {}
-        dose_qty = dose_and_rate.get("doseQuantity") or {}
-        return {
-            "text": obj.get("text"),
-            "timing_code": timing_code,
-            "dose_value": dose_qty.get("value"),
-            "dose_unit": dose_qty.get("unit"),
-            "route": extract_codeable_concept(obj.get("route")),
-            "site": extract_codeable_concept(obj.get("site")),
-        }
-
-
-    ########################################################
-    # src/databricks/labs/community_connector/sources/fhir/profiles/base_r4.py
-    ########################################################
-
-    def _f(name: str, t, nullable: bool = True) -> StructField:
-        return StructField(name, t, nullable=nullable)
-
-
-    def _s(*extra: StructField) -> StructType:
-        return StructType(list(_COMMON_FIELDS) + list(extra))
-
-
-    # ─── Patient ──────────────────────────────────────────────────────────────────
-    # FHIR R4:  https://hl7.org/fhir/R4/patient.html
-    # UK Core:  https://fhir.hl7.org.uk/StructureDefinition/UKCore-Patient v2.6.1
-    # MS fields: identifier, active, name, telecom, gender, birthDate, address,
-    #            managingOrganization
-    # deceased[x]: deceasedBoolean (boolean) | deceasedDateTime (dateTime)
-    _PATIENT_SCHEMA = _s(
-        _f("identifier", ArrayType(IDENTIFIER)),
-        _f("active", BooleanType()),
-        _f("name", ArrayType(HUMAN_NAME)),
-        _f("telecom", ArrayType(CONTACT_POINT)),
-        _f("gender", StringType()),
-        _f("birthDate", StringType()),
-        _f("deceased_boolean", BooleanType()),
-        _f("deceased_datetime", TimestampType()),
-        _f("address", ArrayType(ADDRESS)),
-        _f("maritalStatus", CODEABLE_CONCEPT),
-        _f("generalPractitioner", ArrayType(REFERENCE)),
-        _f("managingOrganization", REFERENCE),
-    )
-
-
-    @register("Patient", "base_r4", _PATIENT_SCHEMA)
-    def _patient(r: dict) -> dict:
-        return {
-            "identifier": [extract_identifier(i) for i in (r.get("identifier") or [])],
-            "active": r.get("active"),
-            "name": [extract_human_name(n) for n in (r.get("name") or [])],
-            "telecom": [extract_contact_point(t) for t in (r.get("telecom") or [])],
-            "gender": r.get("gender"),
-            "birthDate": r.get("birthDate"),
-            "deceased_boolean": r.get("deceasedBoolean"),
-            "deceased_datetime": r.get("deceasedDateTime"),
-            "address": [extract_address(a) for a in (r.get("address") or [])],
-            "maritalStatus": extract_codeable_concept(r.get("maritalStatus")),
-            "generalPractitioner": [
-                extract_reference(gp)
-                for gp in (r.get("generalPractitioner") or [])
-            ],
-            "managingOrganization": extract_reference(r.get("managingOrganization")),
-        }
-
-
-    # ─── Observation ──────────────────────────────────────────────────────────────
-    # FHIR R4: https://hl7.org/fhir/R4/observation.html
-    # UK Core: https://fhir.hl7.org.uk/StructureDefinition/UKCore-Observation v2.5.0
-    # MS fields: status(R), category, code(R), subject, effective[x], performer, value[x], component
-    # value[x] variants: valueQuantity, valueCodeableConcept, valueString, valueBoolean, valueInteger
-    # effective[x] variants: effectiveDateTime, effectivePeriod
-
-    _OBS_REF_RANGE = StructType([
-        _f("low_value", DoubleType()),
-        _f("low_unit", StringType()),
-        _f("high_value", DoubleType()),
-        _f("high_unit", StringType()),
-        _f("type", CODEABLE_CONCEPT),
-        _f("text", StringType()),
-    ])
-
-    _OBS_COMPONENT = StructType([
-        _f("code", CODEABLE_CONCEPT),
-        _f("value_quantity", QUANTITY),
-        _f("value_string", StringType()),
-        _f("value_codeable_concept", CODEABLE_CONCEPT),
-        _f("value_boolean", BooleanType()),
-        _f("value_integer", LongType()),
-        _f("data_absent_reason", CODEABLE_CONCEPT),
-    ])
-
-    _OBSERVATION_SCHEMA = _s(
-        _f("status", StringType()),
-        _f("category", ArrayType(CODEABLE_CONCEPT)),
-        _f("code", CODEABLE_CONCEPT),
-        _f("subject", REFERENCE),
-        _f("encounter", REFERENCE),
-        _f("effective_datetime", TimestampType()),
-        _f("effective_period", PERIOD),
-        _f("issued", TimestampType()),
-        _f("performer", ArrayType(REFERENCE)),
-        _f("value_quantity", QUANTITY),
-        _f("value_codeable_concept", CODEABLE_CONCEPT),
-        _f("value_string", StringType()),
-        _f("value_boolean", BooleanType()),
-        _f("value_integer", LongType()),
-        _f("data_absent_reason", CODEABLE_CONCEPT),
-        _f("interpretation", ArrayType(CODEABLE_CONCEPT)),
-        _f("body_site", CODEABLE_CONCEPT),
-        _f("method", CODEABLE_CONCEPT),
-        _f("specimen", REFERENCE),
-        _f("device", REFERENCE),
-        _f("reference_range", ArrayType(_OBS_REF_RANGE)),
-        _f("has_member", ArrayType(REFERENCE)),
-        _f("derived_from", ArrayType(REFERENCE)),
-        _f("component", ArrayType(_OBS_COMPONENT)),
-    )
-
-
-    def _extract_obs_ref_range(obj: dict) -> dict:
-        low = obj.get("low") or {}
-        high = obj.get("high") or {}
-        return {
-            "low_value": low.get("value"),
-            "low_unit": low.get("unit"),
-            "high_value": high.get("value"),
-            "high_unit": high.get("unit"),
-            "type": extract_codeable_concept(obj.get("type")),
-            "text": obj.get("text"),
-        }
-
-
-    def _extract_obs_component(obj: dict) -> dict:
-        return {
-            "code": extract_codeable_concept(obj.get("code")),
-            "value_quantity": extract_quantity(obj.get("valueQuantity")),
-            "value_string": obj.get("valueString"),
-            "value_codeable_concept": extract_codeable_concept(obj.get("valueCodeableConcept")),
-            "value_boolean": obj.get("valueBoolean"),
-            "value_integer": obj.get("valueInteger"),
-            "data_absent_reason": extract_codeable_concept(obj.get("dataAbsentReason")),
-        }
-
-
-    @register("Observation", "base_r4", _OBSERVATION_SCHEMA)
-    def _observation(r: dict) -> dict:
-        return {
-            "status": r.get("status"),
-            "category": [extract_codeable_concept(c) for c in (r.get("category") or [])],
-            "code": extract_codeable_concept(r.get("code")),
-            "subject": extract_reference(r.get("subject")),
-            "encounter": extract_reference(r.get("encounter")),
-            "effective_datetime": r.get("effectiveDateTime"),
-            "effective_period": extract_period(r.get("effectivePeriod")),
-            "issued": r.get("issued"),
-            "performer": [extract_reference(p) for p in (r.get("performer") or [])],
-            "value_quantity": extract_quantity(r.get("valueQuantity")),
-            "value_codeable_concept": extract_codeable_concept(r.get("valueCodeableConcept")),
-            "value_string": r.get("valueString"),
-            "value_boolean": r.get("valueBoolean"),
-            "value_integer": r.get("valueInteger"),
-            "data_absent_reason": extract_codeable_concept(r.get("dataAbsentReason")),
-            "interpretation": [extract_codeable_concept(i) for i in (r.get("interpretation") or [])],
-            "body_site": extract_codeable_concept(r.get("bodySite")),
-            "method": extract_codeable_concept(r.get("method")),
-            "specimen": extract_reference(r.get("specimen")),
-            "device": extract_reference(r.get("device")),
-            "reference_range": [_extract_obs_ref_range(rr) for rr in (r.get("referenceRange") or [])],
-            "has_member": [extract_reference(m) for m in (r.get("hasMember") or [])],
-            "derived_from": [extract_reference(d) for d in (r.get("derivedFrom") or [])],
-            "component": [_extract_obs_component(c) for c in (r.get("component") or [])],
-        }
-
-
-    # ─── Condition ────────────────────────────────────────────────────────────────
-    # FHIR R4: https://hl7.org/fhir/R4/condition.html
-    # UK Core: https://fhir.hl7.org.uk/StructureDefinition/UKCore-Condition v2.6.0
-    # MS fields: clinicalStatus, verificationStatus, severity, code, subject, recorder
-    # onset[x]: onsetDateTime | onsetPeriod | onsetString
-    # abatement[x]: abatementDateTime | abatementString
-    _CONDITION_SCHEMA = _s(
-        _f("identifier", ArrayType(IDENTIFIER)),
-        _f("clinical_status", CODEABLE_CONCEPT),
-        _f("verification_status", CODEABLE_CONCEPT),
-        _f("category", ArrayType(CODEABLE_CONCEPT)),
-        _f("severity", CODEABLE_CONCEPT),
-        _f("code", CODEABLE_CONCEPT),
-        _f("body_site", ArrayType(CODEABLE_CONCEPT)),
-        _f("subject", REFERENCE),
-        _f("encounter", REFERENCE),
-        _f("onset_datetime", TimestampType()),
-        _f("onset_period", PERIOD),
-        _f("onset_string", StringType()),
-        _f("abatement_datetime", TimestampType()),
-        _f("abatement_string", StringType()),
-        _f("recorded_date", StringType()),
-        _f("recorder", REFERENCE),
-        _f("asserter", REFERENCE),
-        _f("note", ArrayType(ANNOTATION)),
-    )
-
-
-    @register("Condition", "base_r4", _CONDITION_SCHEMA)
-    def _condition(r: dict) -> dict:
-        return {
-            "identifier": [extract_identifier(i) for i in (r.get("identifier") or [])],
-            "clinical_status": extract_codeable_concept(r.get("clinicalStatus")),
-            "verification_status": extract_codeable_concept(r.get("verificationStatus")),
-            "category": [extract_codeable_concept(c) for c in (r.get("category") or [])],
-            "severity": extract_codeable_concept(r.get("severity")),
-            "code": extract_codeable_concept(r.get("code")),
-            "body_site": [extract_codeable_concept(b) for b in (r.get("bodySite") or [])],
-            "subject": extract_reference(r.get("subject")),
-            "encounter": extract_reference(r.get("encounter")),
-            "onset_datetime": r.get("onsetDateTime"),
-            "onset_period": extract_period(r.get("onsetPeriod")),
-            "onset_string": r.get("onsetString"),
-            "abatement_datetime": r.get("abatementDateTime"),
-            "abatement_string": r.get("abatementString"),
-            "recorded_date": r.get("recordedDate"),
-            "recorder": extract_reference(r.get("recorder")),
-            "asserter": extract_reference(r.get("asserter")),
-            "note": [extract_annotation(n) for n in (r.get("note") or [])],
-        }
-
-
-    # ─── AllergyIntolerance ───────────────────────────────────────────────────────
-    # FHIR R4: https://hl7.org/fhir/R4/allergyintolerance.html
-    # UK Core: https://fhir.hl7.org.uk/StructureDefinition/UKCore-AllergyIntolerance v2.5.0
-    # MS fields: clinicalStatus, verificationStatus, code(R), patient(R), reaction, reaction.severity
-    # NOTE: category is 0..* code (array of strings), not CodeableConcept — per spec
-    # onset[x]: onsetDateTime | onsetString
-    _ALLERGY_REACTION = StructType([
-        _f("substance", CODEABLE_CONCEPT),
-        _f("manifestation", ArrayType(CODEABLE_CONCEPT)),
-        _f("description", StringType()),
-        _f("onset", TimestampType()),
-        _f("severity", StringType()),
-        _f("exposure_route", CODEABLE_CONCEPT),
-    ])
-
-    _ALLERGY_SCHEMA = _s(
-        _f("identifier", ArrayType(IDENTIFIER)),
-        _f("clinical_status", CODEABLE_CONCEPT),
-        _f("verification_status", CODEABLE_CONCEPT),
-        _f("type", StringType()),
-        _f("category", ArrayType(StringType())),
-        _f("criticality", StringType()),
-        _f("code", CODEABLE_CONCEPT),
-        _f("patient", REFERENCE),
-        _f("encounter", REFERENCE),
-        _f("onset_datetime", TimestampType()),
-        _f("onset_string", StringType()),
-        _f("recorded_date", StringType()),
-        _f("recorder", REFERENCE),
-        _f("asserter", REFERENCE),
-        _f("last_occurrence", TimestampType()),
-        _f("note", ArrayType(ANNOTATION)),
-        _f("reaction", ArrayType(_ALLERGY_REACTION)),
-    )
-
-
-    def _extract_allergy_reaction(obj: dict) -> dict:
-        return {
-            "substance": extract_codeable_concept(obj.get("substance")),
-            "manifestation": [extract_codeable_concept(m) for m in (obj.get("manifestation") or [])],
-            "description": obj.get("description"),
-            "onset": obj.get("onset"),
-            "severity": obj.get("severity"),
-            "exposure_route": extract_codeable_concept(obj.get("exposureRoute")),
-        }
-
-
-    @register("AllergyIntolerance", "base_r4", _ALLERGY_SCHEMA)
-    def _allergy(r: dict) -> dict:
-        return {
-            "identifier": [extract_identifier(i) for i in (r.get("identifier") or [])],
-            "clinical_status": extract_codeable_concept(r.get("clinicalStatus")),
-            "verification_status": extract_codeable_concept(r.get("verificationStatus")),
-            "type": r.get("type"),
-            "category": r.get("category") or [],
-            "criticality": r.get("criticality"),
-            "code": extract_codeable_concept(r.get("code")),
-            "patient": extract_reference(r.get("patient")),
-            "encounter": extract_reference(r.get("encounter")),
-            "onset_datetime": r.get("onsetDateTime"),
-            "onset_string": r.get("onsetString"),
-            "recorded_date": r.get("recordedDate"),
-            "recorder": extract_reference(r.get("recorder")),
-            "asserter": extract_reference(r.get("asserter")),
-            "last_occurrence": r.get("lastOccurrence"),
-            "note": [extract_annotation(n) for n in (r.get("note") or [])],
-            "reaction": [_extract_allergy_reaction(rx) for rx in (r.get("reaction") or [])],
-        }
-
-
-    # ─── Encounter ────────────────────────────────────────────────────────────────
-    # FHIR R4: https://hl7.org/fhir/R4/encounter.html
-    # UK Core: https://fhir.hl7.org.uk/StructureDefinition/UKCore-Encounter v2.5.0
-    # MS fields: identifier, status(R), class(R Coding), serviceType, subject,
-    #            participant, reasonCode, reasonReference
-    # NOTE: Encounter.class is FHIR type Coding (1..1), NOT CodeableConcept
-
-    _ENCOUNTER_PARTICIPANT = StructType([
-        _f("type", ArrayType(CODEABLE_CONCEPT)),
-        _f("period", PERIOD),
-        _f("individual", REFERENCE),
-    ])
-
-    _ENCOUNTER_DIAGNOSIS = StructType([
-        _f("condition", REFERENCE),
-        _f("use", CODEABLE_CONCEPT),
-        _f("rank", LongType()),
-    ])
-
-    _ENCOUNTER_HOSPITALIZATION = StructType([
-        _f("admit_source", CODEABLE_CONCEPT),
-        _f("re_admission", CODEABLE_CONCEPT),
-        _f("discharge_disposition", CODEABLE_CONCEPT),
-        _f("origin", REFERENCE),
-        _f("destination", REFERENCE),
-    ])
-
-    _ENCOUNTER_LOCATION = StructType([
-        _f("location", REFERENCE),
-        _f("status", StringType()),
-        _f("physical_type", CODEABLE_CONCEPT),
-        _f("period", PERIOD),
-    ])
-
-    _ENCOUNTER_SCHEMA = _s(
-        _f("identifier", ArrayType(IDENTIFIER)),
-        _f("status", StringType()),
-        _f("class_coding", CODING),
-        _f("type", ArrayType(CODEABLE_CONCEPT)),
-        _f("service_type", CODEABLE_CONCEPT),
-        _f("priority", CODEABLE_CONCEPT),
-        _f("subject", REFERENCE),
-        _f("episode_of_care", ArrayType(REFERENCE)),
-        _f("participant", ArrayType(_ENCOUNTER_PARTICIPANT)),
-        _f("appointment", ArrayType(REFERENCE)),
-        _f("period", PERIOD),
-        _f("reason_code", ArrayType(CODEABLE_CONCEPT)),
-        _f("reason_reference", ArrayType(REFERENCE)),
-        _f("diagnosis", ArrayType(_ENCOUNTER_DIAGNOSIS)),
-        _f("hospitalization", _ENCOUNTER_HOSPITALIZATION),
-        _f("location", ArrayType(_ENCOUNTER_LOCATION)),
-        _f("service_provider", REFERENCE),
-        _f("part_of", REFERENCE),
-    )
-
-
-    def _extract_encounter_participant(obj: dict) -> dict:
-        return {
-            "type": [extract_codeable_concept(t) for t in (obj.get("type") or [])],
-            "period": extract_period(obj.get("period")),
-            "individual": extract_reference(obj.get("individual")),
-        }
-
-
-    def _extract_encounter_diagnosis(obj: dict) -> dict:
-        return {
-            "condition": extract_reference(obj.get("condition")),
-            "use": extract_codeable_concept(obj.get("use")),
-            "rank": obj.get("rank"),
-        }
-
-
-    def _extract_encounter_hospitalization(obj: dict | None) -> dict | None:
-        if not obj:
-            return None
-        return {
-            "admit_source": extract_codeable_concept(obj.get("admitSource")),
-            "re_admission": extract_codeable_concept(obj.get("reAdmission")),
-            "discharge_disposition": extract_codeable_concept(obj.get("dischargeDisposition")),
-            "origin": extract_reference(obj.get("origin")),
-            "destination": extract_reference(obj.get("destination")),
-        }
-
-
-    def _extract_encounter_location(obj: dict) -> dict:
-        return {
-            "location": extract_reference(obj.get("location")),
-            "status": obj.get("status"),
-            "physical_type": extract_codeable_concept(obj.get("physicalType")),
-            "period": extract_period(obj.get("period")),
-        }
-
-
-    @register("Encounter", "base_r4", _ENCOUNTER_SCHEMA)
-    def _encounter(r: dict) -> dict:
-        class_obj = r.get("class") or {}
-        return {
-            "identifier": [extract_identifier(i) for i in (r.get("identifier") or [])],
-            "status": r.get("status"),
-            "class_coding": {
-                "system": class_obj.get("system"),
-                "code": class_obj.get("code"),
-                "display": class_obj.get("display"),
-            } if class_obj else None,
-            "type": [extract_codeable_concept(t) for t in (r.get("type") or [])],
-            "service_type": extract_codeable_concept(r.get("serviceType")),
-            "priority": extract_codeable_concept(r.get("priority")),
-            "subject": extract_reference(r.get("subject")),
-            "episode_of_care": [extract_reference(e) for e in (r.get("episodeOfCare") or [])],
-            "participant": [_extract_encounter_participant(p) for p in (r.get("participant") or [])],
-            "appointment": [extract_reference(a) for a in (r.get("appointment") or [])],
-            "period": extract_period(r.get("period")),
-            "reason_code": [extract_codeable_concept(rc) for rc in (r.get("reasonCode") or [])],
-            "reason_reference": [extract_reference(rr) for rr in (r.get("reasonReference") or [])],
-            "diagnosis": [_extract_encounter_diagnosis(d) for d in (r.get("diagnosis") or [])],
-            "hospitalization": _extract_encounter_hospitalization(r.get("hospitalization")),
-            "location": [_extract_encounter_location(loc) for loc in (r.get("location") or [])],
-            "service_provider": extract_reference(r.get("serviceProvider")),
-            "part_of": extract_reference(r.get("partOf")),
-        }
-
-
-    # ─── Procedure ────────────────────────────────────────────────────────────────
-    # FHIR R4: https://hl7.org/fhir/R4/procedure.html
-    # UK Core: https://fhir.hl7.org.uk/StructureDefinition/UKCore-Procedure v2.5.0
-    # MS fields: status(R), code, subject(R), performed[x]
-    # performed[x]: performedDateTime | performedPeriod
-    _PROCEDURE_PERFORMER = StructType([
-        _f("function", CODEABLE_CONCEPT),
-        _f("actor", REFERENCE),
-        _f("on_behalf_of", REFERENCE),
-    ])
-
-    _PROCEDURE_SCHEMA = _s(
-        _f("identifier", ArrayType(IDENTIFIER)),
-        _f("status", StringType()),
-        _f("status_reason", CODEABLE_CONCEPT),
-        _f("category", CODEABLE_CONCEPT),
-        _f("code", CODEABLE_CONCEPT),
-        _f("subject", REFERENCE),
-        _f("encounter", REFERENCE),
-        _f("performed_datetime", TimestampType()),
-        _f("performed_period", PERIOD),
-        _f("recorder", REFERENCE),
-        _f("asserter", REFERENCE),
-        _f("performer", ArrayType(_PROCEDURE_PERFORMER)),
-        _f("location", REFERENCE),
-        _f("reason_code", ArrayType(CODEABLE_CONCEPT)),
-        _f("reason_reference", ArrayType(REFERENCE)),
-        _f("body_site", ArrayType(CODEABLE_CONCEPT)),
-        _f("outcome", CODEABLE_CONCEPT),
-        _f("report", ArrayType(REFERENCE)),
-        _f("complication", ArrayType(CODEABLE_CONCEPT)),
-        _f("follow_up", ArrayType(CODEABLE_CONCEPT)),
-        _f("note", ArrayType(ANNOTATION)),
-    )
-
-
-    @register("Procedure", "base_r4", _PROCEDURE_SCHEMA)
-    def _procedure(r: dict) -> dict:
-        return {
-            "identifier": [extract_identifier(i) for i in (r.get("identifier") or [])],
-            "status": r.get("status"),
-            "status_reason": extract_codeable_concept(r.get("statusReason")),
-            "category": extract_codeable_concept(r.get("category")),
-            "code": extract_codeable_concept(r.get("code")),
-            "subject": extract_reference(r.get("subject")),
-            "encounter": extract_reference(r.get("encounter")),
-            "performed_datetime": r.get("performedDateTime"),
-            "performed_period": extract_period(r.get("performedPeriod")),
-            "recorder": extract_reference(r.get("recorder")),
-            "asserter": extract_reference(r.get("asserter")),
-            "performer": [
-                {
-                    "function": extract_codeable_concept(p.get("function")),
-                    "actor": extract_reference(p.get("actor")),
-                    "on_behalf_of": extract_reference(p.get("onBehalfOf")),
-                }
-                for p in (r.get("performer") or [])
-            ],
-            "location": extract_reference(r.get("location")),
-            "reason_code": [extract_codeable_concept(rc) for rc in (r.get("reasonCode") or [])],
-            "reason_reference": [extract_reference(rr) for rr in (r.get("reasonReference") or [])],
-            "body_site": [extract_codeable_concept(b) for b in (r.get("bodySite") or [])],
-            "outcome": extract_codeable_concept(r.get("outcome")),
-            "report": [extract_reference(rp) for rp in (r.get("report") or [])],
-            "complication": [extract_codeable_concept(c) for c in (r.get("complication") or [])],
-            "follow_up": [extract_codeable_concept(f) for f in (r.get("followUp") or [])],
-            "note": [extract_annotation(n) for n in (r.get("note") or [])],
-        }
-
-
-    # ─── DiagnosticReport ─────────────────────────────────────────────────────────
-    # FHIR R4: https://hl7.org/fhir/R4/diagnosticreport.html
-    # UK Core: https://fhir.hl7.org.uk/StructureDefinition/UKCore-DiagnosticReport v2.5.0
-    # MS fields: status(R), category, code(R), subject, encounter, issued, result
-    # effective[x]: effectiveDateTime | effectivePeriod
-    _DIAGNOSTIC_REPORT_SCHEMA = _s(
-        _f("identifier", ArrayType(IDENTIFIER)),
-        _f("based_on", ArrayType(REFERENCE)),
-        _f("status", StringType()),
-        _f("category", ArrayType(CODEABLE_CONCEPT)),
-        _f("code", CODEABLE_CONCEPT),
-        _f("subject", REFERENCE),
-        _f("encounter", REFERENCE),
-        _f("effective_datetime", TimestampType()),
-        _f("effective_period", PERIOD),
-        _f("issued", TimestampType()),
-        _f("performer", ArrayType(REFERENCE)),
-        _f("results_interpreter", ArrayType(REFERENCE)),
-        _f("specimen", ArrayType(REFERENCE)),
-        _f("result", ArrayType(REFERENCE)),
-        _f("conclusion", StringType()),
-        _f("conclusion_code", ArrayType(CODEABLE_CONCEPT)),
-    )
-
-
-    @register("DiagnosticReport", "base_r4", _DIAGNOSTIC_REPORT_SCHEMA)
-    def _diagnostic_report(r: dict) -> dict:
-        return {
-            "identifier": [extract_identifier(i) for i in (r.get("identifier") or [])],
-            "based_on": [extract_reference(b) for b in (r.get("basedOn") or [])],
-            "status": r.get("status"),
-            "category": [extract_codeable_concept(c) for c in (r.get("category") or [])],
-            "code": extract_codeable_concept(r.get("code")),
-            "subject": extract_reference(r.get("subject")),
-            "encounter": extract_reference(r.get("encounter")),
-            "effective_datetime": r.get("effectiveDateTime"),
-            "effective_period": extract_period(r.get("effectivePeriod")),
-            "issued": r.get("issued"),
-            "performer": [extract_reference(p) for p in (r.get("performer") or [])],
-            "results_interpreter": [
-                extract_reference(ri)
-                for ri in (r.get("resultsInterpreter") or [])
-            ],
-            "specimen": [extract_reference(s) for s in (r.get("specimen") or [])],
-            "result": [extract_reference(res) for res in (r.get("result") or [])],
-            "conclusion": r.get("conclusion"),
-            "conclusion_code": [extract_codeable_concept(cc) for cc in (r.get("conclusionCode") or [])],
-        }
-
-
-    # ─── MedicationRequest ────────────────────────────────────────────────────────
-    # FHIR R4: https://hl7.org/fhir/R4/medicationrequest.html
-    # UK Core: https://fhir.hl7.org.uk/StructureDefinition/UKCore-MedicationRequest v2.5.0
-    # MS fields: identifier, status(R), intent(R), category, medication[x](R), subject(R),
-    #            authoredOn, requester, dosageInstruction, dispenseRequest, substitution
-    # medication[x]: medicationCodeableConcept | medicationReference
-
-    _DISPENSE_REQUEST = StructType([
-        _f("validity_period", PERIOD),
-        _f("number_of_repeats_allowed", LongType()),
-        _f("quantity_value", DoubleType()),
-        _f("quantity_unit", StringType()),
-        _f("expected_supply_duration_value", DoubleType()),
-        _f("expected_supply_duration_unit", StringType()),
-    ])
-
-    _MEDICATION_REQUEST_SCHEMA = _s(
-        _f("identifier", ArrayType(IDENTIFIER)),
-        _f("status", StringType()),
-        _f("status_reason", CODEABLE_CONCEPT),
-        _f("intent", StringType()),
-        _f("category", ArrayType(CODEABLE_CONCEPT)),
-        _f("priority", StringType()),
-        _f("medication_codeable_concept", CODEABLE_CONCEPT),
-        _f("medication_reference", REFERENCE),
-        _f("subject", REFERENCE),
-        _f("encounter", REFERENCE),
-        _f("authored_on", StringType()),
-        _f("requester", REFERENCE),
-        _f("reason_code", ArrayType(CODEABLE_CONCEPT)),
-        _f("reason_reference", ArrayType(REFERENCE)),
-        _f("note", ArrayType(ANNOTATION)),
-        _f("dosage_instruction", ArrayType(DOSAGE)),
-        _f("dispense_request", _DISPENSE_REQUEST),
-        _f("substitution_allowed_boolean", BooleanType()),
-    )
-
-
-    @register("MedicationRequest", "base_r4", _MEDICATION_REQUEST_SCHEMA)
-    def _medication_request(r: dict) -> dict:
-        dr = r.get("dispenseRequest") or {}
-        dr_qty = dr.get("quantity") or {}
-        dr_dur = dr.get("expectedSupplyDuration") or {}
-        sub = r.get("substitution") or {}
-        return {
-            "identifier": [extract_identifier(i) for i in (r.get("identifier") or [])],
-            "status": r.get("status"),
-            "status_reason": extract_codeable_concept(r.get("statusReason")),
-            "intent": r.get("intent"),
-            "category": [extract_codeable_concept(c) for c in (r.get("category") or [])],
-            "priority": r.get("priority"),
-            "medication_codeable_concept": extract_codeable_concept(r.get("medicationCodeableConcept")),
-            "medication_reference": extract_reference(r.get("medicationReference")),
-            "subject": extract_reference(r.get("subject")),
-            "encounter": extract_reference(r.get("encounter")),
-            "authored_on": r.get("authoredOn"),
-            "requester": extract_reference(r.get("requester")),
-            "reason_code": [extract_codeable_concept(rc) for rc in (r.get("reasonCode") or [])],
-            "reason_reference": [extract_reference(rr) for rr in (r.get("reasonReference") or [])],
-            "note": [extract_annotation(n) for n in (r.get("note") or [])],
-            "dosage_instruction": [extract_dosage(d) for d in (r.get("dosageInstruction") or [])],
-            "dispense_request": {
-                "validity_period": extract_period(dr.get("validityPeriod")),
-                "number_of_repeats_allowed": dr.get("numberOfRepeatsAllowed"),
-                "quantity_value": dr_qty.get("value"),
-                "quantity_unit": dr_qty.get("unit"),
-                "expected_supply_duration_value": dr_dur.get("value"),
-                "expected_supply_duration_unit": dr_dur.get("unit"),
-            } if dr else None,
-            "substitution_allowed_boolean": sub.get("allowedBoolean"),
-        }
-
-
-    # ─── Immunization ─────────────────────────────────────────────────────────────
-    # FHIR R4: https://hl7.org/fhir/R4/immunization.html
-    # UK Core: https://fhir.hl7.org.uk/StructureDefinition/UKCore-Immunization v2.4.0
-    # MS: status(R), vaccineCode(R), patient(R), occurrence[x](R), manufacturer, lotNumber, doseQuantity
-    # occurrence[x]: occurrenceDateTime | occurrenceString
-
-    _IMMUNIZATION_PERFORMER = StructType([
-        _f("function", CODEABLE_CONCEPT),
-        _f("actor", REFERENCE),
-    ])
-
-    _PROTOCOL_APPLIED = StructType([
-        _f("series", StringType()),
-        _f("authority", REFERENCE),
-        _f("target_disease", ArrayType(CODEABLE_CONCEPT)),
-        _f("dose_number_positive_int", LongType()),
-        _f("dose_number_string", StringType()),
-        _f("series_doses_positive_int", LongType()),
-        _f("series_doses_string", StringType()),
-    ])
-
-    _IMMUNIZATION_SCHEMA = _s(
-        _f("identifier", ArrayType(IDENTIFIER)),
-        _f("status", StringType()),
-        _f("status_reason", CODEABLE_CONCEPT),
-        _f("vaccine_code", CODEABLE_CONCEPT),
-        _f("patient", REFERENCE),
-        _f("encounter", REFERENCE),
-        _f("occurrence_datetime", TimestampType()),
-        _f("occurrence_string", StringType()),
-        _f("recorded", StringType()),
-        _f("primary_source", BooleanType()),
-        _f("manufacturer", REFERENCE),
-        _f("lot_number", StringType()),
-        _f("expiration_date", StringType()),
-        _f("site", CODEABLE_CONCEPT),
-        _f("route", CODEABLE_CONCEPT),
-        _f("dose_quantity", QUANTITY),
-        _f("performer", ArrayType(_IMMUNIZATION_PERFORMER)),
-        _f("reason_code", ArrayType(CODEABLE_CONCEPT)),
-        _f("reason_reference", ArrayType(REFERENCE)),
-        _f("is_subpotent", BooleanType()),
-        _f("program_eligibility", ArrayType(CODEABLE_CONCEPT)),
-        _f("funding_source", CODEABLE_CONCEPT),
-        _f("protocol_applied", ArrayType(_PROTOCOL_APPLIED)),
-    )
-
-
-    def _extract_protocol_applied(obj: dict) -> dict:
-        return {
-            "series": obj.get("series"),
-            "authority": extract_reference(obj.get("authority")),
-            "target_disease": [extract_codeable_concept(td) for td in (obj.get("targetDisease") or [])],
-            "dose_number_positive_int": obj.get("doseNumberPositiveInt"),
-            "dose_number_string": obj.get("doseNumberString"),
-            "series_doses_positive_int": obj.get("seriesDosesPositiveInt"),
-            "series_doses_string": obj.get("seriesDosesString"),
-        }
-
-
-    @register("Immunization", "base_r4", _IMMUNIZATION_SCHEMA)
-    def _immunization(r: dict) -> dict:
-        return {
-            "identifier": [extract_identifier(i) for i in (r.get("identifier") or [])],
-            "status": r.get("status"),
-            "status_reason": extract_codeable_concept(r.get("statusReason")),
-            "vaccine_code": extract_codeable_concept(r.get("vaccineCode")),
-            "patient": extract_reference(r.get("patient")),
-            "encounter": extract_reference(r.get("encounter")),
-            "occurrence_datetime": r.get("occurrenceDateTime"),
-            "occurrence_string": r.get("occurrenceString"),
-            "recorded": r.get("recorded"),
-            "primary_source": r.get("primarySource"),
-            "manufacturer": extract_reference(r.get("manufacturer")),
-            "lot_number": r.get("lotNumber"),
-            "expiration_date": r.get("expirationDate"),
-            "site": extract_codeable_concept(r.get("site")),
-            "route": extract_codeable_concept(r.get("route")),
-            "dose_quantity": extract_quantity(r.get("doseQuantity")),
-            "performer": [
-                {
-                    "function": extract_codeable_concept(p.get("function")),
-                    "actor": extract_reference(p.get("actor")),
-                }
-                for p in (r.get("performer") or [])
-            ],
-            "reason_code": [extract_codeable_concept(rc) for rc in (r.get("reasonCode") or [])],
-            "reason_reference": [extract_reference(rr) for rr in (r.get("reasonReference") or [])],
-            "is_subpotent": r.get("isSubpotent"),
-            "program_eligibility": [
-                extract_codeable_concept(pe)
-                for pe in (r.get("programEligibility") or [])
-            ],
-            "funding_source": extract_codeable_concept(r.get("fundingSource")),
-            "protocol_applied": [
-                _extract_protocol_applied(pa)
-                for pa in (r.get("protocolApplied") or [])
-            ],
-        }
-
-
-    # ─── Coverage ─────────────────────────────────────────────────────────────────
-    # FHIR R4: https://hl7.org/fhir/R4/coverage.html
-    # No UK Core profile — base R4 is authoritative
-    # Required: status(R), beneficiary(R), payor(R 1..*)
-    # NOTE: FHIR JSON field is "class" — use r.get("class") in extractor
-    _COVERAGE_CLASS = StructType([
-        _f("type", CODEABLE_CONCEPT),
-        _f("value", StringType()),
-        _f("name", StringType()),
-    ])
-
-    _COVERAGE_SCHEMA = _s(
-        _f("identifier", ArrayType(IDENTIFIER)),
-        _f("status", StringType()),
-        _f("type", CODEABLE_CONCEPT),
-        _f("policy_holder", REFERENCE),
-        _f("subscriber", REFERENCE),
-        _f("subscriber_id", StringType()),
-        _f("beneficiary", REFERENCE),
-        _f("dependent", StringType()),
-        _f("relationship", CODEABLE_CONCEPT),
-        _f("period", PERIOD),
-        _f("payor", ArrayType(REFERENCE)),
-        _f("class_coverage", ArrayType(_COVERAGE_CLASS)),
-        _f("order", LongType()),
-        _f("network", StringType()),
-        _f("subrogation", BooleanType()),
-    )
-
-
-    @register("Coverage", "base_r4", _COVERAGE_SCHEMA)
-    def _coverage(r: dict) -> dict:
-        return {
-            "identifier": [extract_identifier(i) for i in (r.get("identifier") or [])],
-            "status": r.get("status"),
-            "type": extract_codeable_concept(r.get("type")),
-            "policy_holder": extract_reference(r.get("policyHolder")),
-            "subscriber": extract_reference(r.get("subscriber")),
-            "subscriber_id": r.get("subscriberId"),
-            "beneficiary": extract_reference(r.get("beneficiary")),
-            "dependent": r.get("dependent"),
-            "relationship": extract_codeable_concept(r.get("relationship")),
-            "period": extract_period(r.get("period")),
-            "payor": [extract_reference(p) for p in (r.get("payor") or [])],
-            "class_coverage": [
-                {
-                    "type": extract_codeable_concept(c.get("type")),
-                    "value": c.get("value"),
-                    "name": c.get("name"),
-                }
-                for c in (r.get("class") or [])
-            ],
-            "order": r.get("order"),
-            "network": r.get("network"),
-            "subrogation": r.get("subrogation"),
-        }
-
-
-    # ─── CarePlan ─────────────────────────────────────────────────────────────────
-    # FHIR R4: https://hl7.org/fhir/R4/careplan.html
-    # UK Core: https://fhir.hl7.org.uk/StructureDefinition/UKCore-CarePlan v2.2.0
-    # UK Core adds minimal constraints only. Required: status(R), intent(R), subject(R)
-    _CARE_PLAN_ACTIVITY = StructType([
-        _f("reference", REFERENCE),
-        _f("detail_status", StringType()),
-        _f("detail_code", CODEABLE_CONCEPT),
-        _f("detail_description", StringType()),
-    ])
-
-    _CARE_PLAN_SCHEMA = _s(
-        _f("identifier", ArrayType(IDENTIFIER)),
-        _f("status", StringType()),
-        _f("intent", StringType()),
-        _f("category", ArrayType(CODEABLE_CONCEPT)),
-        _f("title", StringType()),
-        _f("description", StringType()),
-        _f("subject", REFERENCE),
-        _f("encounter", REFERENCE),
-        _f("period", PERIOD),
-        _f("created", StringType()),
-        _f("author", REFERENCE),
-        _f("care_team", ArrayType(REFERENCE)),
-        _f("addresses", ArrayType(REFERENCE)),
-        _f("goal", ArrayType(REFERENCE)),
-        _f("activity", ArrayType(_CARE_PLAN_ACTIVITY)),
-        _f("note", ArrayType(ANNOTATION)),
-    )
-
-
-    @register("CarePlan", "base_r4", _CARE_PLAN_SCHEMA)
-    def _care_plan(r: dict) -> dict:
-        def _extract_activity(obj: dict) -> dict:
-            detail = obj.get("detail") or {}
-            return {
-                "reference": extract_reference(obj.get("reference")),
-                "detail_status": detail.get("status"),
-                "detail_code": extract_codeable_concept(detail.get("code")),
-                "detail_description": detail.get("description"),
-            }
-        return {
-            "identifier": [extract_identifier(i) for i in (r.get("identifier") or [])],
-            "status": r.get("status"),
-            "intent": r.get("intent"),
-            "category": [extract_codeable_concept(c) for c in (r.get("category") or [])],
-            "title": r.get("title"),
-            "description": r.get("description"),
-            "subject": extract_reference(r.get("subject")),
-            "encounter": extract_reference(r.get("encounter")),
-            "period": extract_period(r.get("period")),
-            "created": r.get("created"),
-            "author": extract_reference(r.get("author")),
-            "care_team": [extract_reference(ct) for ct in (r.get("careTeam") or [])],
-            "addresses": [extract_reference(a) for a in (r.get("addresses") or [])],
-            "goal": [extract_reference(g) for g in (r.get("goal") or [])],
-            "activity": [_extract_activity(a) for a in (r.get("activity") or [])],
-            "note": [extract_annotation(n) for n in (r.get("note") or [])],
-        }
-
-
-    # ─── Goal ─────────────────────────────────────────────────────────────────────
-    # FHIR R4: https://hl7.org/fhir/R4/goal.html
-    # No UK Core profile — base R4 is authoritative
-    # Required: lifecycleStatus(R), description(R), subject(R)
-    # start[x]: startDate | startCodeableConcept
-    _GOAL_TARGET = StructType([
-        _f("measure", CODEABLE_CONCEPT),
-        _f("detail_quantity", QUANTITY),
-        _f("detail_string", StringType()),
-        _f("detail_boolean", BooleanType()),
-        _f("due_date", StringType()),
-    ])
-
-    _GOAL_SCHEMA = _s(
-        _f("identifier", ArrayType(IDENTIFIER)),
-        _f("lifecycle_status", StringType()),
-        _f("achievement_status", CODEABLE_CONCEPT),
-        _f("category", ArrayType(CODEABLE_CONCEPT)),
-        _f("priority", CODEABLE_CONCEPT),
-        _f("description", CODEABLE_CONCEPT),
-        _f("subject", REFERENCE),
-        _f("start_date", StringType()),
-        _f("start_codeable_concept", CODEABLE_CONCEPT),
-        _f("target", ArrayType(_GOAL_TARGET)),
-        _f("status_date", StringType()),
-        _f("status_reason", StringType()),
-        _f("expressed_by", REFERENCE),
-        _f("addresses", ArrayType(REFERENCE)),
-        _f("note", ArrayType(ANNOTATION)),
-    )
-
-
-    def _extract_goal_target(obj: dict) -> dict:
-        return {
-            "measure": extract_codeable_concept(obj.get("measure")),
-            "detail_quantity": extract_quantity(obj.get("detailQuantity")),
-            "detail_string": obj.get("detailString"),
-            "detail_boolean": obj.get("detailBoolean"),
-            "due_date": obj.get("dueDate"),
-        }
-
-
-    @register("Goal", "base_r4", _GOAL_SCHEMA)
-    def _goal(r: dict) -> dict:
-        return {
-            "identifier": [extract_identifier(i) for i in (r.get("identifier") or [])],
-            "lifecycle_status": r.get("lifecycleStatus"),
-            "achievement_status": extract_codeable_concept(r.get("achievementStatus")),
-            "category": [extract_codeable_concept(c) for c in (r.get("category") or [])],
-            "priority": extract_codeable_concept(r.get("priority")),
-            "description": extract_codeable_concept(r.get("description")),
-            "subject": extract_reference(r.get("subject")),
-            "start_date": r.get("startDate"),
-            "start_codeable_concept": extract_codeable_concept(r.get("startCodeableConcept")),
-            "target": [_extract_goal_target(t) for t in (r.get("target") or [])],
-            "status_date": r.get("statusDate"),
-            "status_reason": r.get("statusReason"),
-            "expressed_by": extract_reference(r.get("expressedBy")),
-            "addresses": [extract_reference(a) for a in (r.get("addresses") or [])],
-            "note": [extract_annotation(n) for n in (r.get("note") or [])],
-        }
-
-
-    # ─── Device ───────────────────────────────────────────────────────────────────
-    # FHIR R4: https://hl7.org/fhir/R4/device.html
-    # UK Core: https://fhir.hl7.org.uk/StructureDefinition/UKCore-Device v1.2.0
-    # MS fields (UK Core): status, type
-    _DEVICE_NAME = StructType([
-        _f("name", StringType()),
-        _f("type", StringType()),
-    ])
-
-    _DEVICE_SCHEMA = _s(
-        _f("identifier", ArrayType(IDENTIFIER)),
-        _f("status", StringType()),
-        _f("status_reason", ArrayType(CODEABLE_CONCEPT)),
-        _f("manufacturer", StringType()),
-        _f("manufacture_date", StringType()),
-        _f("expiration_date", StringType()),
-        _f("lot_number", StringType()),
-        _f("serial_number", StringType()),
-        _f("device_name", ArrayType(_DEVICE_NAME)),
-        _f("model_number", StringType()),
-        _f("type", CODEABLE_CONCEPT),
-        _f("patient", REFERENCE),
-        _f("owner", REFERENCE),
-        _f("contact", ArrayType(CONTACT_POINT)),
-        _f("note", ArrayType(ANNOTATION)),
-        _f("safety", ArrayType(CODEABLE_CONCEPT)),
-    )
-
-
-    @register("Device", "base_r4", _DEVICE_SCHEMA)
-    def _device(r: dict) -> dict:
-        return {
-            "identifier": [extract_identifier(i) for i in (r.get("identifier") or [])],
-            "status": r.get("status"),
-            "status_reason": [extract_codeable_concept(sr) for sr in (r.get("statusReason") or [])],
-            "manufacturer": r.get("manufacturer"),
-            "manufacture_date": r.get("manufactureDate"),
-            "expiration_date": r.get("expirationDate"),
-            "lot_number": r.get("lotNumber"),
-            "serial_number": r.get("serialNumber"),
-            "device_name": [
-                {"name": dn.get("name"), "type": dn.get("type")}
-                for dn in (r.get("deviceName") or [])
-            ],
-            "model_number": r.get("modelNumber"),
-            "type": extract_codeable_concept(r.get("type")),
-            "patient": extract_reference(r.get("patient")),
-            "owner": extract_reference(r.get("owner")),
-            "contact": [extract_contact_point(cp) for cp in (r.get("contact") or [])],
-            "note": [extract_annotation(n) for n in (r.get("note") or [])],
-            "safety": [extract_codeable_concept(s) for s in (r.get("safety") or [])],
-        }
-
-
-    # ─── DocumentReference ────────────────────────────────────────────────────────
-    # FHIR R4: https://hl7.org/fhir/R4/documentreference.html
-    # UK Core: https://fhir.hl7.org.uk/StructureDefinition/UKCore-DocumentReference v2.2.0
-    # MS: identifier, status(R), type, category, subject, date, author, description, content(R 1..*)
-    _DOC_REF_RELATES_TO = StructType([
-        _f("code", StringType()),
-        _f("target", REFERENCE),
-    ])
-
-    _DOC_REF_CONTENT = StructType([
-        _f("attachment_url", StringType()),
-        _f("attachment_title", StringType()),
-        _f("attachment_content_type", StringType()),
-        _f("format_code", StringType()),
-        _f("format_system", StringType()),
-    ])
-
-    _DOC_REF_CONTEXT = StructType([
-        _f("encounter", ArrayType(REFERENCE)),
-        _f("event", ArrayType(CODEABLE_CONCEPT)),
-        _f("period", PERIOD),
-        _f("facility_type", CODEABLE_CONCEPT),
-        _f("practice_setting", CODEABLE_CONCEPT),
-    ])
-
-    _DOCUMENT_REFERENCE_SCHEMA = _s(
-        _f("identifier", ArrayType(IDENTIFIER)),
-        _f("status", StringType()),
-        _f("doc_status", StringType()),
-        _f("type", CODEABLE_CONCEPT),
-        _f("category", ArrayType(CODEABLE_CONCEPT)),
-        _f("subject", REFERENCE),
-        _f("date", TimestampType()),
-        _f("author", ArrayType(REFERENCE)),
-        _f("authenticator", REFERENCE),
-        _f("custodian", REFERENCE),
-        _f("relates_to", ArrayType(_DOC_REF_RELATES_TO)),
-        _f("description", StringType()),
-        _f("security_label", ArrayType(CODEABLE_CONCEPT)),
-        _f("content", ArrayType(_DOC_REF_CONTENT)),
-        _f("context", _DOC_REF_CONTEXT),
-    )
-
-
-    def _extract_doc_ref_content(obj: dict) -> dict:
-        att = obj.get("attachment") or {}
-        fmt = obj.get("format") or {}
-        return {
-            "attachment_url": att.get("url"),
-            "attachment_title": att.get("title"),
-            "attachment_content_type": att.get("contentType"),
-            "format_code": fmt.get("code"),
-            "format_system": fmt.get("system"),
-        }
-
-
-    def _extract_doc_ref_context(obj: dict | None) -> dict | None:
-        if not obj:
-            return None
-        return {
-            "encounter": [extract_reference(e) for e in (obj.get("encounter") or [])],
-            "event": [extract_codeable_concept(ev) for ev in (obj.get("event") or [])],
-            "period": extract_period(obj.get("period")),
-            "facility_type": extract_codeable_concept(obj.get("facilityType")),
-            "practice_setting": extract_codeable_concept(obj.get("practiceSetting")),
-        }
-
-
-    @register("DocumentReference", "base_r4", _DOCUMENT_REFERENCE_SCHEMA)
-    def _document_reference(r: dict) -> dict:
-        return {
-            "identifier": [extract_identifier(i) for i in (r.get("identifier") or [])],
-            "status": r.get("status"),
-            "doc_status": r.get("docStatus"),
-            "type": extract_codeable_concept(r.get("type")),
-            "category": [extract_codeable_concept(c) for c in (r.get("category") or [])],
-            "subject": extract_reference(r.get("subject")),
-            "date": r.get("date"),
-            "author": [extract_reference(a) for a in (r.get("author") or [])],
-            "authenticator": extract_reference(r.get("authenticator")),
-            "custodian": extract_reference(r.get("custodian")),
-            "relates_to": [
-                {"code": rt.get("code"), "target": extract_reference(rt.get("target"))}
-                for rt in (r.get("relatesTo") or [])
-            ],
-            "description": r.get("description"),
-            "security_label": [extract_codeable_concept(sl) for sl in (r.get("securityLabel") or [])],
-            "content": [_extract_doc_ref_content(c) for c in (r.get("content") or [])],
-            "context": _extract_doc_ref_context(r.get("context")),
-        }
+    # Each deletes read starts this far before the previous trigger began, so a
+    # server clock trailing the driver cannot hide a deletion; re-reads are
+    # idempotent deletes.
+    HISTORY_OVERLAP_SECONDS = 300
+
+    # Bulk export constants (HL7 Bulk Data Access IG)
+    BULK_POLL_INTERVAL = 30  # seconds between status poll requests
+    BULK_EXPORT_TIMEOUT = 14400  # seconds (4 hours) max wait for export completion
+    BULK_NDJSON_TIMEOUT = 300  # seconds; NDJSON file download timeout (files can be GBs)
+    BULK_VALID_SCOPES = {"system", "patient", "group"}
+    BULK_VALID_INCREMENTAL_MODES = {"since", "typefilter", "full"}
+    BULK_MAX_REDIRECTS = 5  # max hops when following NDJSON download redirects
+    BULK_MIN_POLL_SLEEP = 0.5  # seconds; below this the remaining budget is spent, so stop polling
 
 
     ########################################################
     # src/databricks/labs/community_connector/sources/fhir/fhir_utils.py
     ########################################################
 
+    logger = logging.getLogger(__name__)
+
+    # Shared by every resource-type table. `resource` holds the whole FHIR
+    # resource; the scalar columns exist because VARIANT has no min/max statistics,
+    # so filters on them are what let Delta skip files. resource_type is constant
+    # within a table but makes UNION ALL across tables self-describing.
+    RESOURCE_SCHEMA = StructType(
+        [
+            StructField("resource_type", StringType(), nullable=False),
+            StructField("resource_id", StringType(), nullable=False),
+            StructField("last_updated", TimestampType(), nullable=True),
+            StructField("resource", VariantType(), nullable=True),
+            StructField("fhir_version", StringType(), nullable=True),
+            StructField("ingested_at", TimestampType(), nullable=True),
+        ]
+    )
+
     _SUPPORTED_ALGORITHMS = {"RS384", "ES384"}
+    _TOKEN_AUTH_TYPES = {"jwt_assertion", "client_secret"}
+
+
+    def retry_after(resp: requests.Response, default: float, ceiling: Optional[float] = None) -> float:
+        """Extract Retry-After (seconds) from a response, clamped to a safe range.
+
+        Shared by the REST and bulk paths. A server may send a value that is
+        negative (time.sleep raises), non-finite (also raises, or hangs), or an
+        HTTP-date rather than a number; none of those may take the connector down.
+
+        `ceiling` bounds the wait for callers that have their own deadline to
+        respect. It defaults to None — honouring the server's request in full —
+        because sleeping *less* than a 429 asked for is what provokes a request
+        storm. Waits beyond MAX_RETRY_AFTER are logged so a stalled run is
+        diagnosable from the driver log.
+        """
+        seconds = default
+        header = resp.headers.get("Retry-After")
+        if header:
+            try:
+                parsed = float(header)
+            except (TypeError, ValueError):
+                parsed = None  # HTTP-date form; fall back to the caller's backoff
+            if parsed is not None and math.isfinite(parsed):
+                seconds = parsed
+        if ceiling is not None:
+            seconds = min(seconds, ceiling)
+        seconds = max(0.0, seconds)
+        if seconds > MAX_RETRY_AFTER:
+            logger.warning(
+                "Server asked to retry after %.0fs (>%ds); honouring it, so this "
+                "request will block until then.",
+                seconds,
+                MAX_RETRY_AFTER,
+            )
+        return seconds
 
 
     class SmartAuthClient:  # pylint: disable=too-few-public-methods,too-many-instance-attributes
@@ -1993,9 +719,14 @@ def register_lakeflow_source(spark):
         """
 
         def __init__(  # pylint: disable=too-many-arguments,too-many-positional-arguments
-            self, token_url: str, client_id: str, auth_type: str,
-            private_key_pem: str = "", client_secret: str = "",
-            scope: str = "", kid: str = "",
+            self,
+            token_url: str,
+            client_id: str,
+            auth_type: str,
+            private_key_pem: str = "",
+            client_secret: str = "",
+            scope: str = "",
+            kid: str = "",
             private_key_algorithm: str = "RS384",
         ) -> None:
             self._token_url = token_url
@@ -2009,6 +740,12 @@ def register_lakeflow_source(spark):
             self._access_token: Optional[str] = None
             self._expires_at: Optional[datetime] = None
 
+            # Fail at construction, not on the first HTTP call mid-pipeline.
+            if auth_type not in _TOKEN_AUTH_TYPES | {"none"}:
+                raise ValueError(
+                    f"Unsupported auth_type: {auth_type!r}. "
+                    f"Use 'jwt_assertion', 'client_secret', or 'none'."
+                )
             if auth_type == "jwt_assertion":
                 if private_key_algorithm not in _SUPPORTED_ALGORITHMS:
                     raise ValueError(
@@ -2031,14 +768,12 @@ def register_lakeflow_source(spark):
             if self._auth_type == "jwt_assertion":
                 data = self._jwt_assertion_data()
                 post_kwargs: dict = {}
-            elif self._auth_type == "client_secret":
+            else:  # client_secret; "none" returns before reaching here
                 data = self._client_secret_data()
                 post_kwargs = {"auth": (self._client_id, self._client_secret)}
-            else:
-                raise ValueError(f"Unsupported auth_type: {self._auth_type!r}. "
-                                 f"Use 'jwt_assertion', 'client_secret', or 'none'.")
             resp = requests.post(
-                self._token_url, data=data,
+                self._token_url,
+                data=data,
                 headers={"Content-Type": "application/x-www-form-urlencoded"},
                 timeout=TOKEN_TIMEOUT,
                 **post_kwargs,
@@ -2053,8 +788,12 @@ def register_lakeflow_source(spark):
         def _jwt_assertion_data(self) -> dict:
             now = datetime.now(timezone.utc)
             payload = {
-                "iss": self._client_id, "sub": self._client_id, "aud": self._token_url,
-                "jti": str(uuid.uuid4()), "iat": now, "nbf": now,
+                "iss": self._client_id,
+                "sub": self._client_id,
+                "aud": self._token_url,
+                "jti": str(uuid.uuid4()),
+                "iat": now,
+                "nbf": now,
                 "exp": now + timedelta(minutes=5),
             }
             if not self._kid:
@@ -2065,7 +804,8 @@ def register_lakeflow_source(spark):
                 )
             jwt_headers = {"kid": self._kid, "typ": "JWT"}
             assertion = jwt.encode(
-                payload, self._private_key_pem,
+                payload,
+                self._private_key_pem,
                 algorithm=self._private_key_algorithm,
                 headers=jwt_headers,
             )
@@ -2118,24 +858,48 @@ def register_lakeflow_source(spark):
         return token_endpoint
 
 
+    def build_auth_client(options: dict) -> SmartAuthClient:
+        """Build the SMART auth client from connection options.
+
+        Discovers the token endpoint from .well-known/smart-configuration when a
+        token-based auth_type is configured without an explicit token_url.
+        """
+        auth_type = options.get("auth_type", "none")
+        token_url = options.get("token_url", "").strip()
+        if not token_url and auth_type in _TOKEN_AUTH_TYPES:
+            token_url = discover_token_url(options["base_url"])
+        return SmartAuthClient(
+            token_url=token_url,
+            client_id=options.get("client_id", ""),
+            auth_type=auth_type,
+            private_key_pem=options.get("private_key_pem", ""),
+            client_secret=options.get("client_secret", ""),
+            scope=options.get("scope", ""),
+            kid=options.get("kid", ""),
+            private_key_algorithm=options.get("private_key_algorithm", "RS384"),
+        )
+
+
+    def auth_headers(auth_client: SmartAuthClient, accept: str = "application/fhir+json") -> dict:
+        """Request headers with a Bearer token when the auth client has one."""
+        headers = {"Accept": accept}
+        token = auth_client.get_token()
+        if token:
+            headers["Authorization"] = f"Bearer {token}"
+        return headers
+
+
     class FhirHttpClient:
         """HTTP client for FHIR R4 REST API with auth injection and retry logic.
 
         Retries on 429/500/503 with exponential backoff. Honors Retry-After on 429.
-        All requests have timeout=60 to prevent hangs.
+        Every request has a timeout (HTTP_TIMEOUT) to prevent hangs.
         """
 
         def __init__(self, base_url: str, auth_client: SmartAuthClient) -> None:
             self._base_url = base_url.rstrip("/") + "/"
             self._auth_client = auth_client
             self._session = requests.Session()
-
-        def _headers(self) -> dict:
-            token = self._auth_client.get_token()
-            h = {"Accept": "application/fhir+json"}
-            if token:
-                h["Authorization"] = f"Bearer {token}"
-            return h
 
         def get(self, resource_type: str, params: Optional[dict] = None) -> requests.Response:
             """Fetch a FHIR resource type with optional query parameters."""
@@ -2147,21 +911,15 @@ def register_lakeflow_source(spark):
             backoff = INITIAL_BACKOFF
             for attempt in range(MAX_RETRIES):
                 resp = self._session.get(
-                    url, params=params,
-                    headers=self._headers(), timeout=HTTP_TIMEOUT,
+                    url,
+                    params=params,
+                    headers=auth_headers(self._auth_client),
+                    timeout=HTTP_TIMEOUT,
                 )
                 if resp.status_code not in RETRIABLE_STATUS_CODES:
                     return resp
                 if attempt < MAX_RETRIES - 1:
-                    retry_after = resp.headers.get("Retry-After")
-                    if retry_after:
-                        try:
-                            sleep_seconds = float(retry_after)
-                        except ValueError:
-                            sleep_seconds = backoff  # Retry-After is an HTTP-date; fall back to backoff
-                    else:
-                        sleep_seconds = backoff
-                    time.sleep(sleep_seconds)
+                    time.sleep(retry_after(resp, backoff))
                     backoff *= 2
             return resp
 
@@ -2177,30 +935,35 @@ def register_lakeflow_source(spark):
         client: FhirHttpClient,
         resource_type: str,
         params: Optional[dict] = None,
-        max_records: Optional[int] = None,
         page_delay: float = PAGE_DELAY,
     ) -> Iterator[dict]:
         """Yield FHIR resources from a paginated search, following Bundle next links."""
-        count = 0
-        resp = client.get(resource_type, params=params)
+        for entry in iter_bundle_entries(client, resource_type, params, page_delay):
+            resource = entry.get("resource")
+            if resource:
+                yield resource
+
+
+    def iter_bundle_entries(
+        client: FhirHttpClient,
+        path: str,
+        params: Optional[dict] = None,
+        page_delay: float = PAGE_DELAY,
+    ) -> Iterator[dict]:
+        """Yield Bundle entries from a paginated search or history, following next links.
+
+        History entries matter beyond their resource: a DELETE entry has no
+        resource at all, only `request.method` and `request.url`.
+        """
+        resp = client.get(path, params=params)
         if resp.status_code != 200:
-            raise RuntimeError(
-                f"FHIR search failed for {resource_type} (HTTP {resp.status_code}): {resp.text}"
-            )
+            raise RuntimeError(f"FHIR search failed for {path} (HTTP {resp.status_code}): {resp.text}")
 
         while True:
             bundle = resp.json()
             if bundle.get("resourceType") != "Bundle":
-                raise RuntimeError(
-                    f"Expected Bundle for {resource_type}, got: {bundle.get('resourceType')}"
-                )
-            for entry in bundle.get("entry", []):
-                resource = entry.get("resource")
-                if resource:
-                    yield resource
-                    count += 1
-                    if max_records is not None and count >= max_records:
-                        return
+                raise RuntimeError(f"Expected Bundle for {path}, got: {bundle.get('resourceType')}")
+            yield from bundle.get("entry", [])
 
             next_url = _next_link(bundle)
             if not next_url:
@@ -2211,287 +974,500 @@ def register_lakeflow_source(spark):
             resp = client.get_url(next_url)
             if resp.status_code != 200:
                 raise RuntimeError(
-                    f"FHIR pagination failed for {resource_type} (HTTP {resp.status_code}): {resp.text}"
+                    f"FHIR pagination failed for {path} (HTTP {resp.status_code}): {resp.text}"
                 )
 
 
-    def _safe(d, *keys, default=None):
-        """Safely navigate nested dicts. Returns default if any key is missing."""
-        for k in keys:
-            if not isinstance(d, dict):
-                return default
-            d = d.get(k)
-            if d is None:
-                return default
-        return d
+    def extract_record(
+        resource: dict,
+        raw: Optional[str] = None,
+        fhir_version: Optional[str] = None,
+        ingested_at: Optional[str] = None,
+    ) -> dict:
+        """Map a FHIR resource to a row of RESOURCE_SCHEMA.
 
-
-    def extract_record(resource: dict, resource_type: str, profile: str = "uk_core") -> dict:
-        """Map a raw FHIR resource to hybrid schema format (typed fields + raw_json).
-
-        Delegates to the profile registry for resource-specific extraction.
-        Returns raw field values — do NOT pre-convert types; framework handles coercion.
-        profile defaults to 'uk_core' (falls back to base_r4 for resources without UK Core override).
+        `raw` is the resource's JSON text as the server sent it (bulk NDJSON). When
+        given it becomes the VARIANT value unchanged, which keeps FHIR decimal
+        precision exactly; otherwise the parsed resource is re-serialised, which
+        rounds decimals to float64. Values are returned raw: the framework's
+        parse_value() converts JSON text via VariantVal.parseJson() and ISO strings
+        to timestamps.
         """
-        meta = resource.get("meta") or {}
-        record = {
-            "id": resource.get("id"),
-            "resourceType": resource.get("resourceType", resource_type),
-            "lastUpdated": meta.get("lastUpdated"),
-            # raw_json and extension are stored as StringType (JSON strings).
-            # Downstream queries on DBR 15.3+ can use parse_json() to get VARIANT.
-            "raw_json": json.dumps(resource),
-            "extension": json.dumps(resource.get("extension")),
+        return {
+            "resource_type": resource.get("resourceType"),
+            "resource_id": resource.get("id"),
+            "last_updated": (resource.get("meta") or {}).get("lastUpdated"),
+            "resource": raw if raw is not None else json.dumps(resource),
+            "fhir_version": fhir_version,
+            "ingested_at": ingested_at,
         }
-        record.update(extract(resource, resource_type, profile))
-        return record
 
 
     ########################################################
-    # src/databricks/labs/community_connector/sources/fhir/profiles/uk_core.py
+    # src/databricks/labs/community_connector/sources/fhir/fhir_bulk.py
     ########################################################
 
-    def _f(name: str, t, nullable: bool = True) -> StructField:
-        return StructField(name, t, nullable=nullable)
+    logger = logging.getLogger(__name__)
+
+    NDJSON = "application/fhir+ndjson"
 
 
-    # ── UK Core extension URL constants ──────────────────────────────────────────
-    # Verified from UKCore-Patient.xml in NHSDigital/FHIR-R4-UKCORE-STAGING-MAIN
-    # Each StructureDefinition XML confirms the <url value="..."> and value[x] type.
+    class BulkExportClient:
+        """Client for the FHIR Bulk Data Access IG async export workflow."""
 
-    # valueCodeableConcept — verified from Extension-UKCore-EthnicCategory.xml
-    _EXT_ETHNIC_CATEGORY = "https://fhir.hl7.org.uk/StructureDefinition/Extension-UKCore-EthnicCategory"
+        def __init__(
+            self,
+            base_url: str,
+            auth_client: SmartAuthClient,
+            scope: str = "system",
+            group_id: Optional[str] = None,
+            poll_interval: int = BULK_POLL_INTERVAL,
+            timeout: int = BULK_EXPORT_TIMEOUT,
+            ignore_errors: bool = False,
+        ) -> None:
+            if scope not in BULK_VALID_SCOPES:
+                raise ValueError(
+                    f"Invalid bulk_export_scope {scope!r}. Use one of: {sorted(BULK_VALID_SCOPES)}."
+                )
+            if scope == "group" and not group_id:
+                raise ValueError("bulk_export_group_id is required when bulk_export_scope is 'group'.")
+            self._base_url = base_url.rstrip("/")
+            self._auth_client = auth_client
+            self._scope = scope
+            self._group_id = group_id
+            self._poll_interval = poll_interval
+            self._timeout = timeout
+            self._ignore_errors = ignore_errors
+            self._session = requests.Session()
 
-    # valueCodeableConcept — verified from Extension-UKCore-BirthSex.xml
-    _EXT_BIRTH_SEX = "https://fhir.hl7.org.uk/StructureDefinition/Extension-UKCore-BirthSex"
+        def _export_url(self) -> str:
+            if self._scope == "patient":
+                return f"{self._base_url}/Patient/$export"
+            if self._scope == "group":
+                safe_id = quote(self._group_id, safe="")
+                return f"{self._base_url}/Group/{safe_id}/$export"
+            return f"{self._base_url}/$export"
 
-    # Complex nested extension (sub-extensions: deathNotificationStatus, systemEffectiveDate)
-    # Top-level valueX not used directly; sub-extension deathNotificationStatus is valueCodeableConcept
-    # Verified from Extension-UKCore-DeathNotificationStatus.xml
-    _EXT_DEATH_NOTIFICATION_STATUS = (
-        "https://fhir.hl7.org.uk/StructureDefinition/"
-        "Extension-UKCore-DeathNotificationStatus"
-    )
+        def export(
+            self,
+            resource_types: list,
+            since: Optional[str] = None,
+            incremental_mode: str = "since",
+        ) -> tuple:
+            """Run a full bulk export cycle: kick-off -> poll -> download -> cleanup.
 
-    # valueBoolean — standard HL7 R4 extension (NOT a UK Core-specific URL).
-    # UK Core Patient profile references the base HL7 extension for interpreter required.
-    # Verified from: https://hl7.org/fhir/R4/extension-patient-interpreterrequired.html
-    # and UKCore-Patient.xml profile reference:
-    #   profile value="http://hl7.org/fhir/StructureDefinition/patient-interpreterRequired"
-    _EXT_INTERPRETER_REQUIRED = "http://hl7.org/fhir/StructureDefinition/patient-interpreterRequired"
+            Returns (transaction_time, [(raw_ndjson_line, resource_dict), ...]).
+            transaction_time is an ISO-8601 string suitable for use as a CDC cursor.
+            For incremental_mode="full", transaction_time is None (caller should not
+            advance the cursor).
+            """
+            # Captured before kick-off so it is never later than the export's own
+            # snapshot point. Using the post-download clock would skip everything
+            # written while the export ran.
+            fallback_cursor = datetime.now(timezone.utc).isoformat()
 
-    # valueCodeableConcept — verified from Extension-UKCore-ResidentialStatus.xml
-    _EXT_RESIDENTIAL_STATUS = (
-        "https://fhir.hl7.org.uk/StructureDefinition/"
-        "Extension-UKCore-ResidentialStatus"
-    )
+            status_url = self._kick_off(resource_types, since, incremental_mode)
+            try:
+                manifest = self._poll_until_complete(status_url)
+                resources = self._download_and_parse(manifest)
+                if incremental_mode == "full":
+                    # Full mode re-exports all data every run — no server cursor.
+                    return None, resources
+                transaction_time = manifest.get("transactionTime")
+                if not transaction_time:
+                    logger.warning(
+                        "Bulk export manifest missing transactionTime. Falling back "
+                        "to the pre-kick-off UTC time as cursor — this may cause "
+                        "duplicate records on the next incremental run."
+                    )
+                    transaction_time = fallback_cursor
+                return transaction_time, resources
+            finally:
+                self._cleanup(status_url)
 
-    # NHS number identifier system — verified: fixedUri in UKCore-Patient.xml
-    _NHS_NUMBER_SYSTEM = "https://fhir.nhs.uk/Id/nhs-number"
+        def _kick_off(
+            self,
+            resource_types: list,
+            since: Optional[str],
+            incremental_mode: str,
+        ) -> str:
+            """Issue the async $export request. Returns the status polling URL."""
+            url = self._export_url()
+            params = {}
 
+            if resource_types:
+                # _type must always be sent. Per the Bulk Data IG, a Data Provider
+                # "SHALL return all supported resources" when _type is omitted, and
+                # _typeFilter only filters "resource types referenced in the
+                # _typeFilter expression" -- so omitting _type makes the server
+                # export every other type unfiltered.
+                params["_type"] = ",".join(resource_types)
 
-    def _find_extension(extensions: list, url: str) -> dict | None:
-        """Find first extension matching url in an extension list."""
-        for ext in (extensions or []):
-            if ext.get("url") == url:
-                return ext
-        return None
+            if incremental_mode == "typefilter" and since and resource_types:
+                # Epic does not support _since; express the date bound per type
+                # instead. Sent alongside _type, matching the IG's own example.
+                filters = [f"{rt}?_lastUpdated=gt{since}" for rt in resource_types]
+                params["_typeFilter"] = ",".join(filters)
+            elif since and incremental_mode == "since":
+                params["_since"] = since
 
+            backoff = INITIAL_BACKOFF
+            for attempt in range(MAX_RETRIES):
+                # Re-fetch the token each attempt: the retry ladder spans up to
+                # ~155s, which can outlive a cached token's remaining lifetime.
+                headers = auth_headers(self._auth_client)
+                headers["Prefer"] = "respond-async"
+                resp = self._session.get(
+                    url,
+                    params=params,
+                    headers=headers,
+                    timeout=HTTP_TIMEOUT,
+                )
+                if resp.status_code == 202:
+                    status_url = resp.headers.get("Content-Location")
+                    if not status_url:
+                        raise RuntimeError(
+                            "Bulk export kick-off returned 202 but no Content-Location header. "
+                            f"Response headers: {dict(resp.headers)}"
+                        )
+                    logger.info("Bulk export started. Status URL: %s", status_url)
+                    return status_url
+                if resp.status_code not in RETRIABLE_STATUS_CODES:
+                    raise RuntimeError(
+                        f"Bulk export kick-off failed (HTTP {resp.status_code}): {resp.text[:500]}"
+                    )
+                if attempt < MAX_RETRIES - 1:
+                    sleep_seconds = _retry_after(resp, backoff, ceiling=MAX_RETRY_AFTER)
+                    logger.warning(
+                        "Bulk export kick-off got %d, retrying in %.0fs (attempt %d/%d)",
+                        resp.status_code,
+                        sleep_seconds,
+                        attempt + 1,
+                        MAX_RETRIES,
+                    )
+                    time.sleep(sleep_seconds)
+                    backoff *= 2
 
-    # ─── Patient (UK Core) ────────────────────────────────────────────────────────
-    # UK Core adds NHS number and UK-specific extensions on top of base_r4 Patient
-    _PATIENT_UK_SCHEMA = StructType(
-        list(_PATIENT_SCHEMA.fields) + [
-            _f("nhs_number", StringType()),
-            _f("ethnic_category", CODEABLE_CONCEPT),
-            _f("birth_sex", CODEABLE_CONCEPT),
-            _f("death_notification_status", CODEABLE_CONCEPT),
-            _f("interpreter_required", BooleanType()),
-            _f("residential_status", CODEABLE_CONCEPT),
-        ]
-    )
+            raise RuntimeError(
+                f"Bulk export kick-off failed after {MAX_RETRIES} retries "
+                f"(last HTTP {resp.status_code}): {resp.text[:500]}"
+            )
 
+        @staticmethod
+        def _poll_sleep(resp: requests.Response, default: float, deadline: float) -> Optional[float]:
+            """How long to wait before the next poll, or None if the budget is spent.
 
-    @register("Patient", "uk_core", _PATIENT_UK_SCHEMA)
-    def _patient_uk(r: dict) -> dict:
-        result = _base_patient(r)
+            The budget check keys off the remaining time, never off the requested
+            sleep: a server may legitimately send `Retry-After: 0`, and treating
+            that as "out of time" would abort an export that still has hours left.
+            A short request is honoured but floored so the loop cannot busy-spin.
+            """
+            remaining = deadline - time.time()
+            if remaining < BULK_MIN_POLL_SLEEP:
+                return None
+            requested = _retry_after(resp, default, ceiling=remaining)
+            return max(requested, BULK_MIN_POLL_SLEEP)
 
-        nhs_number = None
-        for ident in (r.get("identifier") or []):
-            if ident.get("system") == _NHS_NUMBER_SYSTEM:
-                nhs_number = ident.get("value")
-                break
+        def _poll_until_complete(self, status_url: str) -> dict:
+            """Poll the status URL until the export completes or times out.
 
-        extensions = r.get("extension") or []
-        ethnic_ext = _find_extension(extensions, _EXT_ETHNIC_CATEGORY)
-        birth_sex_ext = _find_extension(extensions, _EXT_BIRTH_SEX)
-        death_ext = _find_extension(extensions, _EXT_DEATH_NOTIFICATION_STATUS)
-        interp_ext = _find_extension(extensions, _EXT_INTERPRETER_REQUIRED)
-        residential_ext = _find_extension(extensions, _EXT_RESIDENTIAL_STATUS)
+            Retries on transient errors (429, 500, 502, 503) with backoff.
+            """
+            deadline = time.time() + self._timeout
+            transient_backoff = INITIAL_BACKOFF
+            while time.time() < deadline:
+                resp = self._session.get(
+                    status_url,
+                    headers=auth_headers(self._auth_client),
+                    timeout=HTTP_TIMEOUT,
+                )
+                if resp.status_code == 200:
+                    return resp.json()
 
-        # DeathNotificationStatus is a complex extension; extract the nested
-        # deathNotificationStatus sub-extension's valueCodeableConcept.
-        death_status_cc = None
-        if death_ext:
-            for sub_ext in (death_ext.get("extension") or []):
-                if sub_ext.get("url") == "deathNotificationStatus":
-                    death_status_cc = sub_ext.get("valueCodeableConcept")
+                if resp.status_code == 202:
+                    progress = resp.headers.get("X-Progress", "")
+                    if progress:
+                        logger.info("Bulk export progress: %s", progress)
+                    sleep_seconds = self._poll_sleep(resp, self._poll_interval, deadline)
+                    if sleep_seconds is None:
+                        break  # budget spent
+                    transient_backoff = INITIAL_BACKOFF  # reset on successful poll
+                    time.sleep(sleep_seconds)
+                    continue
+
+                if resp.status_code in RETRIABLE_STATUS_CODES:
+                    sleep_seconds = self._poll_sleep(resp, transient_backoff, deadline)
+                    if sleep_seconds is None:
+                        break
+                    logger.warning(
+                        "Bulk export poll got %d, retrying in %.0fs",
+                        resp.status_code,
+                        sleep_seconds,
+                    )
+                    time.sleep(sleep_seconds)
+                    transient_backoff = min(transient_backoff * 2, 120)
+                    continue
+
+                raise RuntimeError(
+                    f"Bulk export status check failed (HTTP {resp.status_code}): {resp.text[:500]}"
+                )
+
+            raise RuntimeError(
+                f"Bulk export timed out after {self._timeout}s. Status URL: {status_url}"
+            )
+
+        def _download_and_parse(self, manifest: dict) -> list:
+            """Download the manifest's NDJSON files as (raw line, parsed resource) pairs.
+
+            The raw line is kept so the caller can store it verbatim: re-serialising
+            the parsed dict would round FHIR decimals to float64.
+            """
+            # `is not False` rather than a get() default: an explicit JSON null must
+            # keep auth on, not silently drop the bearer token from every download.
+            requires_token = manifest.get("requiresAccessToken") is not False
+            resources: list = []
+
+            # `or []` rather than a get() default: a server may send an explicit
+            # JSON null for these keys, and get(k, []) returns the stored None.
+            for entry in manifest.get("output") or []:
+                url = entry.get("url")
+                if not url:
+                    continue
+                lines = list(self._download_ndjson(url, requires_token))
+                resources.extend((line, json.loads(line)) for line in lines)
+                logger.info("Downloaded %d %s resources from %s", len(lines), entry.get("type"), url)
+
+            # The spec puts error, warning and information OperationOutcomes in the
+            # same "error" array. Only error/fatal issues mean resources are missing
+            # from the export; the caller would otherwise advance the cursor past
+            # them and they would never be re-read. An outcome with no severity, or
+            # an error file that cannot be read, is treated as an error: we cannot
+            # tell what was lost.
+            problems = []
+            for entry in manifest.get("error") or []:
+                url = entry.get("url")
+                if not url:
+                    continue
+                try:
+                    outcomes = [json.loads(line) for line in self._download_ndjson(url, requires_token)]
+                except Exception as exc:
+                    problems.append(f"error file {url} could not be downloaded: {exc}")
+                    continue
+                for outcome in outcomes:
+                    severities = {
+                        (issue.get("severity") or "").lower() for issue in outcome.get("issue") or []
+                    }
+                    text = json.dumps(outcome)[:300]
+                    if not severities or severities - {"warning", "information"}:
+                        problems.append(text)
+                    else:
+                        logger.warning("Bulk export OperationOutcome: %s", text)
+
+            if problems:
+                if not self._ignore_errors:
+                    raise RuntimeError(
+                        f"Bulk export reported {len(problems)} error(s), so the export is "
+                        f"incomplete. The cursor is not advanced; the next trigger retries. "
+                        f"Set bulk_export_ignore_errors=true to accept partial exports. "
+                        f"First error: {problems[0]}"
+                    )
+                for problem in problems:
+                    logger.warning("Bulk export error ignored (bulk_export_ignore_errors): %s", problem)
+
+            # Deletions reported by a _since export (Bulk Data v2 "deleted" array) are
+            # not applied: the tables are upsert-only outside full mode. Say so rather
+            # than drop them silently.
+            deleted = manifest.get("deleted") or []
+            if deleted:
+                logger.warning(
+                    "Bulk export manifest lists %d file(s) of deleted resources. Deletes are "
+                    "not applied in incremental bulk modes, so those rows stay in the target "
+                    "table. Use bulk_incremental_mode=full to propagate deletes.",
+                    len(deleted),
+                )
+
+            return resources
+
+        def _download_ndjson(self, url: str, requires_access_token: bool = True):
+            """Download an NDJSON file, yielding each non-empty line as text.
+
+            Handles three download patterns:
+            1. Direct HTTP + bearer token (Epic, HAPI, InterSystems, etc.)
+            2. No auth / presigned URL (IBM, SMART test server)
+            3. Redirect to presigned cloud storage (Cerner) — drops auth off-origin
+
+            Redirects are followed manually so the Authorization header can be
+            dropped when leaving the original host: presigned storage URLs carry
+            their own credentials and reject (or, worse, log) a bearer token.
+            Once dropped, auth is never re-attached, so a redirect chain that
+            returns to the origin cannot be used to harvest the token.
+            """
+            # Scheme is part of the origin: an https -> http redirect on the same
+            # host must not replay the bearer token over plaintext.
+            _parsed = urlparse(url)
+            origin = (_parsed.scheme.lower(), _parsed.netloc.lower())
+            current = url
+            send_auth = requires_access_token
+
+            for _ in range(BULK_MAX_REDIRECTS + 1):
+                headers = auth_headers(self._auth_client, NDJSON) if send_auth else {"Accept": NDJSON}
+                resp = self._session.get(
+                    current,
+                    headers=headers,
+                    stream=True,
+                    allow_redirects=False,
+                    timeout=BULK_NDJSON_TIMEOUT,
+                )
+                if resp.status_code not in (301, 302, 303, 307, 308):
                     break
 
-        result.update({
-            "nhs_number": nhs_number,
-            "ethnic_category": extract_codeable_concept(
-                ethnic_ext.get("valueCodeableConcept") if ethnic_ext else None
-            ),
-            "birth_sex": extract_codeable_concept(
-                birth_sex_ext.get("valueCodeableConcept") if birth_sex_ext else None
-            ),
-            "death_notification_status": extract_codeable_concept(death_status_cc),
-            "interpreter_required": (
-                interp_ext.get("valueBoolean") if interp_ext else None
-            ),
-            "residential_status": extract_codeable_concept(
-                residential_ext.get("valueCodeableConcept") if residential_ext else None
-            ),
-        })
-        return result
+                redirect_url = resp.headers.get("Location")
+                resp.close()
+                if not redirect_url:
+                    raise RuntimeError(f"NDJSON download got {resp.status_code} but no Location header")
+                # Location may be relative (RFC 7231); resolve against the current URL.
+                current = urljoin(current, redirect_url)
+                nxt = urlparse(current)
+                if (nxt.scheme.lower(), nxt.netloc.lower()) != origin:
+                    send_auth = False
+            else:
+                raise RuntimeError(f"NDJSON download exceeded {BULK_MAX_REDIRECTS} redirects for {url}")
 
-
-    ########################################################
-    # src/databricks/labs/community_connector/sources/fhir/validate_auth.py
-    ########################################################
-
-    def validate(config: dict) -> None:
-        """Validate FHIR credentials by performing a token exchange and metadata fetch."""
-        auth_type = config.get("auth_type", "none")
-        base_url = config.get("base_url", "").rstrip("/")
-
-        if not base_url:
-            _fail("'base_url' is required in config.")
-
-        print(f"  base_url   : {base_url}")
-        print(f"  auth_type  : {auth_type}")
-
-        # Step 1: Resolve token URL (or skip for none)
-        token_url = config.get("token_url", "").strip()
-        if auth_type != "none" and not token_url:
-            print("\n[1/3] Discovering token endpoint via .well-known/smart-configuration ...")
             try:
-                token_url = discover_token_url(base_url)
-                print(f"  token_url  : {token_url}  (auto-discovered)")
-            except RuntimeError as exc:
-                _fail(f"Token endpoint discovery failed:\n  {exc}")
-        elif token_url:
-            print(f"  token_url  : {token_url}")
+                if resp.status_code != 200:
+                    raise RuntimeError(
+                        f"NDJSON download failed (HTTP {resp.status_code}): {resp.text[:500]}"
+                    )
+                # Split on bytes, then decode: NDJSON is UTF-8 by spec, and
+                # str-mode splitting would also break lines on U+2028/U+2029,
+                # which are legal inside JSON strings.
+                for line in resp.iter_lines():
+                    if line:
+                        yield line.decode("utf-8") if isinstance(line, bytes) else line
+            finally:
+                resp.close()
 
-        # Step 2: Obtain an access token
-        if auth_type != "none":
-            print(f"\n[2/3] Requesting access token ({auth_type}) ...")
-            auth_client = SmartAuthClient(
-                token_url=token_url,
-                client_id=config.get("client_id", ""),
-                auth_type=auth_type,
-                private_key_pem=config.get("private_key_pem", ""),
-                client_secret=config.get("client_secret", ""),
-                scope=config.get("scope", ""),
-                kid=config.get("kid", ""),
-                private_key_algorithm=config.get("private_key_algorithm", "RS384"),
-            )
+        def _cleanup(self, status_url: str) -> None:
+            """Best-effort DELETE of the export job. Never raises."""
             try:
-                token = auth_client.get_token()
-            except (RuntimeError, ValueError) as exc:
-                _fail(f"Token request failed:\n  {exc}")
-            print(f"  access token obtained  ({len(token)} chars)")
-        else:
-            print("\n[2/3] auth_type=none — skipping token request.")
-            auth_client = SmartAuthClient(
-                token_url="", client_id="", auth_type="none",
-            )
-
-        # Step 3: Hit the FHIR server metadata endpoint to confirm connectivity
-        print("\n[3/3] Confirming FHIR server connectivity (GET /metadata) ...")
-        client = FhirHttpClient(base_url=base_url, auth_client=auth_client)
-        resp = client.get("metadata")
-        if resp.status_code != 200:
-            _fail(
-                f"GET {base_url}/metadata returned HTTP {resp.status_code}.\n"
-                f"  Response: {resp.text[:300]}"
-            )
-        body = resp.json()
-        fhir_version = body.get("fhirVersion", "unknown")
-        software = body.get("software", {}).get("name", "unknown")
-        print(f"  FHIR version : {fhir_version}")
-        print(f"  Server       : {software}")
-
-        print("\n✓ Credentials validated successfully. The connector can reach the FHIR server.\n")
-
-
-    def _fail(message: str) -> None:
-        print(f"\n✗ Validation failed: {message}\n", file=sys.stderr)
-        sys.exit(1)
-
-
-    def main() -> None:
-        """CLI entry point for credential validation."""
-        parser = argparse.ArgumentParser(
-            description="Validate FHIR connector credentials against a real FHIR server."
-        )
-        parser.add_argument(
-            "--config", required=True,
-            help="Path to dev_config.json produced by authenticate.py",
-        )
-        args = parser.parse_args()
-
-        config_path = Path(args.config)
-        if not config_path.exists():
-            _fail(f"Config file not found: {config_path}")
-
-        with open(config_path) as f:
-            config = json.load(f)
-
-        print(f"\nValidating FHIR credentials from: {config_path}\n")
-        validate(config)
-
-
-    if __name__ == "__main__":
-        main()
+                self._session.delete(
+                    status_url,
+                    headers=auth_headers(self._auth_client),
+                    timeout=HTTP_TIMEOUT,
+                )
+            except Exception as exc:
+                logger.warning("Bulk export cleanup failed for %s: %s", status_url, exc)
 
 
     ########################################################
     # src/databricks/labs/community_connector/sources/fhir/fhir.py
     ########################################################
 
+    logger = logging.getLogger(__name__)
+
+    _UNSET = object()
+
+
+    _TS_RE = re.compile(
+        r"^(?P<base>\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(?::\d{2})?)"
+        r"(?:\.(?P<frac>\d+))?"
+        r"(?P<tz>[Zz]|[+-]\d{2}:?\d{2})?$"
+    )
+
+
     def _parse_ts(ts: str) -> datetime:
-        """Parse a FHIR instant (ISO 8601 with timezone) to a datetime."""
-        return datetime.fromisoformat(ts)
+        """Parse a FHIR instant to a timezone-aware datetime.
+
+        datetime.fromisoformat() alone is too strict for real FHIR servers on the
+        Python versions this connector supports (3.10+). It rejects a trailing "Z"
+        before 3.11, fractional seconds that aren't exactly 3 or 6 digits, and
+        compact "+0000" offsets; and it yields naive values for instants with no
+        offset, which then cannot be compared against aware ones. Normalise all of
+        that so cursor comparisons never crash mid-microbatch.
+        """
+        raw = ts.strip()
+        match = _TS_RE.match(raw)
+        if not match:
+            # Let fromisoformat produce the error for anything we don't recognise.
+            parsed = datetime.fromisoformat(raw)
+            return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+
+        base, frac, tz = match.group("base"), match.group("frac"), match.group("tz")
+        # Python accepts only 3- or 6-digit fractions; pad/truncate to microseconds.
+        normalised = f"{base}.{frac[:6].ljust(6, '0')}" if frac else base
+        if tz and tz not in ("Z", "z"):
+            offset = tz if ":" in tz else f"{tz[:3]}:{tz[3:]}"
+            normalised += offset
+        parsed = datetime.fromisoformat(normalised)
+        return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+
+
+    def _canonical_ts(ts: str) -> str:
+        """Render an instant as a UTC "Z" string.
+
+        Two reasons every stored/sent cursor goes through this. A "+00:00" offset is
+        percent-encoded as "%2B" and, inside the nested `_typeFilter` query, decoded
+        back to a space — corrupting the date bound. And a server that re-spells the
+        same instant between polls ("...12:00:00Z" vs "...12:00:00.000+00:00") would
+        defeat any equality check done on the raw text.
+        """
+        return _parse_ts(ts).astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+    def _int_option(options: dict, key: str, default: int, minimum: int = 1) -> int:
+        """Read an integer option, failing with an actionable message.
+
+        A bare int() here surfaces as an opaque pipeline-init error, so validate at
+        construction time the same way the bulk scope/mode options do.
+        """
+        raw = options.get(key)
+        if raw is None or str(raw).strip() == "":
+            return default
+        try:
+            value = int(raw)
+        except (TypeError, ValueError):
+            raise ValueError(f"Option '{key}' must be an integer (got {raw!r}).") from None
+        if value < minimum:
+            raise ValueError(f"Option '{key}' must be >= {minimum} (got {value}).")
+        return value
+
+
+    def _float_option(options: dict, key: str, default: float, minimum: float = 0.0) -> float:
+        """Read a float option, failing with an actionable message.
+
+        Rejects nan/inf explicitly: both slip past a `< minimum` check, and an
+        infinite page_delay would sleep the executor until the pipeline is killed.
+        """
+        raw = options.get(key)
+        if raw is None or str(raw).strip() == "":
+            return default
+        try:
+            value = float(raw)
+        except (TypeError, ValueError):
+            raise ValueError(f"Option '{key}' must be a number (got {raw!r}).") from None
+        if not math.isfinite(value):
+            raise ValueError(f"Option '{key}' must be a finite number (got {raw!r}).")
+        if value < minimum:
+            raise ValueError(f"Option '{key}' must be >= {minimum} (got {value}).")
+        return value
 
 
     class FhirLakeflowConnect(LakeflowConnect):
-        """LakeflowConnect implementation for FHIR R4 servers."""
+        """LakeflowConnect implementation for FHIR R4 servers.
+
+        One table per resource type named in `resource_types`. All tables share
+        RESOURCE_SCHEMA, so supporting another FHIR type needs no schema code.
+        """
 
         def __init__(self, options: dict[str, str]) -> None:
             super().__init__(options)
 
-            auth_type = options.get("auth_type", "none")
-            token_url = options.get("token_url", "").strip()
-
-            if not token_url and auth_type != "none":
-                token_url = discover_token_url(options["base_url"])
-
-            auth_client = SmartAuthClient(
-                token_url=token_url,
-                client_id=options.get("client_id", ""),
-                auth_type=auth_type,
-                private_key_pem=options.get("private_key_pem", ""),
-                client_secret=options.get("client_secret", ""),
-                scope=options.get("scope", ""),
-                kid=options.get("kid", ""),
-                private_key_algorithm=options.get("private_key_algorithm", "RS384"),
-            )
+            auth_client = build_auth_client(options)
             self._client = FhirHttpClient(base_url=options["base_url"], auth_client=auth_client)
 
             # Cap cursor at init time -- never chase data written after this trigger started.
             self._init_ts = datetime.now(timezone.utc).isoformat()
+            self._fhir_version = _UNSET
 
             resource_types_opt = options.get("resource_types", "").strip()
             self._resources = (
@@ -2500,94 +1476,377 @@ def register_lakeflow_source(spark):
                 else list(DEFAULT_RESOURCES)
             )
 
+            # Bulk export (opt-in via bulk_export_enabled=true). The mode and overlap
+            # are assigned unconditionally so the cursor helpers work on any instance;
+            # `_bulk_client` exists only when bulk mode is on, and `_read_table_bulk`
+            # is reachable only through the `_bulk_enabled` guard in read_table.
+            # Deletes come from each type's REST _history (opt-in: not every
+            # server supports type-level history), in both REST and bulk modes.
+            self._track_deletes = options.get("track_deletes", "false").lower() == "true"
+
+            self._bulk_enabled = options.get("bulk_export_enabled", "false").lower() == "true"
+            self._bulk_incremental_mode = options.get("bulk_incremental_mode", "since")
+            # Servers differ on whether manifest transactionTime marks the start
+            # or the completion of an export. A non-zero overlap re-reads a safe
+            # window; duplicates are absorbed by the upsert on the primary key.
+            self._bulk_overlap_seconds = _int_option(options, "bulk_overlap_seconds", 0, minimum=0)
+            if self._bulk_enabled:
+                if self._bulk_incremental_mode not in BULK_VALID_INCREMENTAL_MODES:
+                    raise ValueError(
+                        f"Invalid bulk_incremental_mode {self._bulk_incremental_mode!r}. "
+                        f"Use one of: {sorted(BULK_VALID_INCREMENTAL_MODES)}."
+                    )
+                self._bulk_client = BulkExportClient(
+                    base_url=options["base_url"],
+                    auth_client=auth_client,
+                    scope=options.get("bulk_export_scope", "system"),
+                    group_id=options.get("bulk_export_group_id") or None,
+                    poll_interval=_int_option(options, "bulk_export_poll_interval", BULK_POLL_INTERVAL),
+                    timeout=_int_option(options, "bulk_export_timeout", BULK_EXPORT_TIMEOUT),
+                    ignore_errors=options.get("bulk_export_ignore_errors", "false").lower() == "true",
+                )
+
         def list_tables(self) -> list[str]:
             return list(self._resources)
 
         def get_table_schema(self, table_name: str, table_options: dict[str, str]) -> StructType:
             self._validate_table(table_name)
-            profile = table_options.get("profile", "uk_core")
-            return get_schema(table_name, profile=profile)
+            return RESOURCE_SCHEMA
 
         def read_table_metadata(self, table_name: str, table_options: dict[str, str]) -> dict:
             self._validate_table(table_name)
+            if self._bulk_enabled and self._bulk_incremental_mode == "full":
+                # A full export is a complete copy of the server's data, so ingest it
+                # as a snapshot: resources deleted on the server leave the target.
+                # As "cdc" they would be upserted forever and never removed.
+                return {"primary_keys": PRIMARY_KEYS, "ingestion_type": "snapshot"}
             return {
-                "primary_keys": ["id"],
+                "primary_keys": PRIMARY_KEYS,
                 "cursor_field": CURSOR_FIELD,
-                "ingestion_type": "cdc",
+                "ingestion_type": "cdc_with_deletes" if self._track_deletes else "cdc",
             }
 
         def read_table(
             self, table_name: str, start_offset: dict, table_options: dict[str, str]
         ) -> tuple[Iterator[dict], dict]:
-            """Fetch FHIR resources with bundle pagination and _lastUpdated incremental sync.
+            """Fetch one resource type with bundle pagination and _lastUpdated incremental sync.
 
-            Uses max_records_per_batch admission control (always required for CDC tables).
-            Short-circuits when cursor >= _init_ts to prevent chasing live writes.
+            Uses max_records_per_batch admission control. Short-circuits when the
+            cursor reaches _init_ts so a trigger never chases live writes.
+            When bulk_export_enabled=true, delegates to _read_table_bulk() instead.
             """
             self._validate_table(table_name)
+            if self._bulk_enabled:
+                return self._read_table_bulk(table_name, start_offset)
 
             since = start_offset.get("cursor") if start_offset else None
-            if since and _parse_ts(since) >= _parse_ts(self._init_ts):
-                return iter([]), start_offset
-
-            page_size = int(table_options.get("page_size", str(DEFAULT_PAGE_SIZE)))
-            max_records = int(table_options.get("max_records_per_batch", str(DEFAULT_MAX_RECORDS)))
-            page_delay = float(table_options.get("page_delay", str(PAGE_DELAY)))
-            profile = table_options.get("profile", "uk_core")
-
-            params: dict[str, str] = {"_count": str(page_size), "_sort": "_lastUpdated"}
-            if since:
-                params["_lastUpdated"] = f"gt{since}"
-
-            records = []
-            for resource in iter_bundle_pages(
-                self._client, table_name, params,
-                max_records=max_records, page_delay=page_delay,
-            ):
-                records.append(extract_record(resource, table_name, profile=profile))
-
-            if not records:
+            budget = _int_option(table_options, "max_records_per_batch", DEFAULT_MAX_RECORDS)
+            resources, cursor = self._read_type(table_name, since, budget, table_options)
+            if not resources or not cursor or cursor == since:
+                # Nothing new, or nothing a cursor can advance past (every resource
+                # lacks meta.lastUpdated): an unchanged offset ends the trigger.
                 return iter([]), start_offset or {}
+            return iter(self._records([(r, None) for r in resources])), {"cursor": cursor}
 
-            # Detect if server ignored the _lastUpdated filter.
-            # Only raise if there are records with a datable lastUpdated AND none of them are
-            # newer than since — that combination is evidence the filter was ignored.
-            # Records with null lastUpdated are excluded from this check (cardinality 0..1 in spec).
-            if since:
-                has_datable = [r for r in records if r.get(CURSOR_FIELD)]
-                since_dt = _parse_ts(since)
-                newer = [r for r in has_datable if _parse_ts(r[CURSOR_FIELD]) > since_dt]
-                if has_datable and not newer:
-                    raise RuntimeError(
-                        f"FHIR server appears to have ignored the '_lastUpdated=gt{since}' filter — "
-                        f"all {len(has_datable)} records with a lastUpdated for '{table_name}' have "
-                        f"lastUpdated <= '{since}'. "
-                        f"This server may not support the _lastUpdated search parameter. "
-                        f"See README.md for server requirements."
-                    )
+        def read_table_deletes(
+            self, table_name: str, start_offset: dict, table_options: dict[str, str]
+        ) -> tuple[Iterator[dict], dict]:
+            """Read deletions of one resource type from GET [type]/_history (track_deletes=true).
 
-            # Advance cursor to max lastUpdated across batch.
-            cursors = [r[CURSOR_FIELD] for r in records if r.get(CURSOR_FIELD)]
-            if not cursors:
-                return iter(records), start_offset or {}
+            Runs once per trigger (the `run_ts` guard, as in bulk mode): history is
+            newest-first, so it cannot be truncated safely and is read in full
+            from the cursor. The cursor is this trigger's start minus
+            HISTORY_OVERLAP_SECONDS, so the next trigger re-reads a small window
+            rather than trust the server's clock to match the driver's.
 
-            last_cursor = max(cursors, key=_parse_ts)
-            end_offset = {"cursor": last_cursor}
-
-            if start_offset and start_offset == end_offset:
+            The first trigger reads nothing: its upsert stream loads current
+            state, in which deleted resources are already absent.
+            """
+            self._validate_table(table_name)
+            if start_offset and start_offset.get("run_ts") == self._init_ts:
                 return iter([]), start_offset
 
+            next_since = _parse_ts(self._init_ts) - timedelta(seconds=HISTORY_OVERLAP_SECONDS)
+            end_offset = {"cursor": _canonical_ts(next_since.isoformat()), "run_ts": self._init_ts}
+            since = start_offset.get("cursor") if start_offset else None
+            if not since:
+                return iter([]), end_offset
+            return iter(self._read_deletes(table_name, since, table_options)), end_offset
+
+        def _read_deletes(self, table_name: str, since: str, table_options: dict) -> list[dict]:
+            """Delete records for every resource whose newest history entry is a DELETE.
+
+            Some servers (HAPI, measured) give DELETE entries no timestamp. Because
+            history is newest-first, the closest newer entry's timestamp bounds the
+            deletion from above, so it is used as the delete's sequence value: it
+            is later than the resource's last version, so the delete wins the
+            merge. Deletions newer than every timestamped entry get the read time.
+            A resource re-created after its deletion is left alone.
+            """
+            params = {
+                "_since": since,
+                "_count": str(_int_option(table_options, "page_size", DEFAULT_PAGE_SIZE)),
+            }
+            page_delay = _float_option(table_options, "page_delay", PAGE_DELAY)
+            read_at = datetime.now(timezone.utc).isoformat()
+            newer = read_at
+            seen: set[str] = set()
+            deleted: list[tuple[str, str]] = []
+            try:
+                for entry in iter_bundle_entries(
+                    self._client, f"{table_name}/_history", params, page_delay=page_delay
+                ):
+                    resource = entry.get("resource") or {}
+                    stamp = (entry.get("response") or {}).get("lastModified") or _last_updated(resource)
+                    resource_id = resource.get("id") or _history_id(entry, table_name)
+                    if resource_id and resource_id not in seen:
+                        seen.add(resource_id)
+                        if (entry.get("request") or {}).get("method") == "DELETE":
+                            deleted.append((resource_id, stamp or newer))
+                    if stamp:
+                        newer = stamp
+            except RuntimeError as exc:
+                raise RuntimeError(
+                    f"track_deletes=true needs the server to support GET {table_name}/_history "
+                    f"with _since: {exc}"
+                ) from exc
+
+            fhir_version = self._server_fhir_version()
+            return [
+                {
+                    "resource_type": table_name,
+                    "resource_id": resource_id,
+                    "last_updated": deleted_at,
+                    "resource": None,
+                    "fhir_version": fhir_version,
+                    "ingested_at": read_at,
+                }
+                for resource_id, deleted_at in deleted
+            ]
+
+        def _read_type(
+            self, resource_type: str, since: Optional[str], budget: int, table_options: dict
+        ) -> tuple[list[dict], Optional[str]]:
+            """Read one resource type from `since`; return (resources, cursor).
+
+            Truncates at `budget`, but never inside a run of equal lastUpdated
+            values: the next read asks for lastUpdated > cursor, so a tie left
+            behind the cut would never be fetched. The batch may therefore exceed
+            the budget by the size of the boundary tie.
+            """
+            if since and _parse_ts(since) >= _parse_ts(self._init_ts):
+                return [], since
+
+            page_size = _int_option(table_options, "page_size", DEFAULT_PAGE_SIZE)
+            page_delay = _float_option(table_options, "page_delay", PAGE_DELAY)
+            # The upper bound is what makes _init_ts a real cap: resources written
+            # after this trigger started wait for the next one. Repeating
+            # _lastUpdated ANDs the two bounds (FHIR search, R4 §3.1.1.4.8).
+            bounds = [f"le{_canonical_ts(self._init_ts)}"]
+            if since:
+                bounds.insert(0, f"gt{since}")
+            params: dict = {"_count": str(page_size), "_sort": "_lastUpdated", "_lastUpdated": bounds}
+
+            resources: list[dict] = []
+            boundary = None  # lastUpdated of the resource that filled the budget
+            truncated = False
+            out_of_order = False
+            prev_dt = None
+            for resource in iter_bundle_pages(
+                self._client, resource_type, params, page_delay=page_delay
+            ):
+                ts = _last_updated(resource)
+                dt = _parse_ts(ts) if ts else None
+                if boundary is not None and dt != boundary:
+                    truncated = True
+                    break
+                if dt is not None:
+                    if prev_dt is not None and dt < prev_dt:
+                        out_of_order = True
+                    prev_dt = dt
+                resources.append(resource)
+                if boundary is None and len(resources) >= budget:
+                    boundary = dt
+                    if boundary is None:
+                        # No timestamp to extend a tie on; cut here.
+                        truncated = True
+                        break
+
+            # A truncated batch is only safe if results arrive sorted: otherwise the
+            # cursor (max lastUpdated) jumps past resources not yet fetched.
+            if truncated and out_of_order:
+                raise RuntimeError(
+                    f"FHIR server returned '{resource_type}' results out of _lastUpdated order — "
+                    f"it appears to have ignored '_sort=_lastUpdated'. Truncating the batch at "
+                    f"max_records_per_batch would skip resources permanently. "
+                    f"Raise max_records_per_batch above the resource count, or use bulk export."
+                )
+
+            stamps = [ts for ts in map(_last_updated, resources) if ts]
+            # Resources with a lastUpdated, none newer than `since`, mean the server
+            # ignored the filter. Resources with no lastUpdated (0..1 in the spec)
+            # are not evidence either way.
+            if since and stamps and all(_parse_ts(ts) <= _parse_ts(since) for ts in stamps):
+                raise RuntimeError(
+                    f"FHIR server appears to have ignored the '_lastUpdated=gt{since}' filter — "
+                    f"all {len(stamps)} '{resource_type}' resources with a lastUpdated are "
+                    f"<= '{since}'. This server may not support the _lastUpdated search "
+                    f"parameter. See README.md for server requirements."
+                )
+
+            cursor = max(stamps, key=_parse_ts) if stamps else since
+            return resources, cursor
+
+        def _read_table_bulk(self, table_name: str, start_offset: dict) -> tuple[Iterator[dict], dict]:
+            """Bulk export path: one $export, scoped to this table's type, per trigger.
+
+            The offset carries `run_ts`, this process's frozen `_init_ts`, so a
+            later call in the same trigger short-circuits: a bulk $export is a whole
+            server-side job (hours on real EHRs; Epic enforces a 24h cooldown per
+            group), so a trigger must never run a second one just to find nothing
+            new. A new trigger is a new process with a new `_init_ts`, so it exports
+            again. No instance "already exported" flag is used: on a cache miss the
+            framework replays a batch via readBetweenOffsets -> read_table, and a
+            sticky flag would make that replay return nothing.
+
+            `run_ts` is stamped even when the export is empty or the cursor cannot
+            move. Leaving the offset unchanged makes the framework call again and
+            run a second $export for the same trigger (measured against HAPI).
+
+            There is no per-batch record cap: the cursor is the export's snapshot
+            instant, which covers every resource in the manifest, so truncating
+            while advancing it would drop the remainder permanently.
+            """
+            full_mode = self._bulk_incremental_mode == "full"
+            if start_offset and start_offset.get("run_ts") == self._init_ts:
+                return iter([]), start_offset
+
+            if full_mode:
+                cursor = since = None
+            else:
+                cursor = start_offset.get("cursor") if start_offset else None
+                if cursor and _parse_ts(cursor) >= _parse_ts(self._init_ts):
+                    return iter([]), start_offset
+                # The overlap widens the query window only; the stored cursor tracks
+                # transactionTime so it always moves forward.
+                since = self._widen_since(cursor)
+
+            transaction_time, exported = self._bulk_client.export(
+                resource_types=[table_name],
+                since=since,
+                incremental_mode=self._bulk_incremental_mode,
+            )
+            records = self._bulk_records(table_name, exported)
+            if full_mode:
+                return iter(records), {"run_ts": self._init_ts}
+
+            # Advance the cursor to the newest instant we can justify, never
+            # backwards: start-time servers report a transactionTime that precedes
+            # the stored cursor once a widened window is in play, and regressing
+            # would re-read the same span every trigger.
+            cursor_value = _canonical_ts(transaction_time) if transaction_time else cursor
+            if cursor_value and cursor and _parse_ts(cursor_value) < _parse_ts(cursor):
+                logger.warning(
+                    "Bulk export reported transactionTime %s, which precedes the stored "
+                    "cursor %s; keeping the stored cursor.",
+                    transaction_time,
+                    cursor,
+                )
+                cursor_value = cursor
+
+            end_offset = {"run_ts": self._init_ts}
+            if cursor_value:
+                end_offset["cursor"] = cursor_value
             return iter(records), end_offset
+
+        def _bulk_records(self, table_name: str, exported: list[tuple[str, dict]]) -> list[dict]:
+            """Turn (raw NDJSON line, parsed resource) pairs into table records.
+
+            The raw line becomes the VARIANT value, so FHIR decimals keep the
+            precision the server sent; a json.loads/json.dumps round-trip would
+            round them to float64. Each resource is typed by its own resourceType,
+            so manifest entries that omit "type" are still ingested; resources of
+            another type are dropped, and a resource listed twice (one file under
+            two entries) is kept once.
+            """
+            by_id: dict[str, tuple[str, dict]] = {}
+            ignored: dict[str, int] = {}
+            for raw, resource in exported:
+                resource_type = resource.get("resourceType")
+                if resource_type != table_name:
+                    ignored[resource_type] = ignored.get(resource_type, 0) + 1
+                    continue
+                by_id[resource.get("id")] = (raw, resource)
+            if ignored:
+                logger.warning(
+                    "Bulk export for '%s' also returned other resource types; ignoring %s",
+                    table_name,
+                    ignored,
+                )
+            return self._records([(resource, raw) for raw, resource in by_id.values()])
+
+        def _records(self, pairs: list[tuple[dict, Optional[str]]]) -> list[dict]:
+            """Build table records from (resource, raw JSON text or None) pairs."""
+            fhir_version = self._server_fhir_version()
+            ingested_at = datetime.now(timezone.utc).isoformat()
+            return [
+                extract_record(resource, raw=raw, fhir_version=fhir_version, ingested_at=ingested_at)
+                for resource, raw in pairs
+            ]
+
+        def _server_fhir_version(self) -> Optional[str]:
+            """FHIR version from the server's CapabilityStatement, fetched once per instance."""
+            if self._fhir_version is _UNSET:
+                self._fhir_version = None
+                try:
+                    resp = self._client.get("metadata")
+                    if resp.status_code == 200:
+                        self._fhir_version = resp.json().get("fhirVersion")
+                except Exception as exc:  # pylint: disable=broad-except
+                    # Informational column only; never fail a read over it.
+                    logger.warning("Could not read fhirVersion from /metadata: %s", exc)
+            return self._fhir_version
+
+        def _widen_since(self, cursor: Optional[str]) -> Optional[str]:
+            """Rewind the `_since` sent to the server by bulk_overlap_seconds.
+
+            Servers differ on whether transactionTime marks the start or the end of
+            an export, so a cursor taken from it can sit after resources that were
+            written while the export ran. Widening only the query re-reads that
+            window; duplicates are absorbed by the upsert on the primary key.
+            """
+            if not cursor:
+                return None
+            if not self._bulk_overlap_seconds:
+                # Canonicalise even with no overlap: a stored "+00:00" cursor would
+                # otherwise reach _typeFilter verbatim and be corrupted there.
+                return _canonical_ts(cursor)
+            shifted = _parse_ts(cursor) - timedelta(seconds=self._bulk_overlap_seconds)
+            return _canonical_ts(shifted.isoformat())
 
         def _validate_table(self, table_name: str) -> None:
             if table_name not in self._resources:
                 raise ValueError(
-                    f"Resource type '{table_name}' is not configured. "
-                    f"Configured: {self._resources}"
+                    f"Resource type '{table_name}' is not configured. Configured: {self._resources}"
                 )
 
 
-    _base_patient = _patient
+    def _last_updated(resource: dict) -> Optional[str]:
+        return (resource.get("meta") or {}).get("lastUpdated")
+
+
+    def _history_id(entry: dict, resource_type: str) -> Optional[str]:
+        """Resource id from a history entry's request.url ("Patient/1/_history/2") or fullUrl."""
+        for url in ((entry.get("request") or {}).get("url"), entry.get("fullUrl")):
+            parts = (url or "").split("/")
+            if resource_type in parts:
+                i = len(parts) - 1 - parts[::-1].index(resource_type)
+                if i + 1 < len(parts) and parts[i + 1]:
+                    return parts[i + 1]
+        return None
+
+
+    _retry_after = retry_after
 
 
     ########################################################
