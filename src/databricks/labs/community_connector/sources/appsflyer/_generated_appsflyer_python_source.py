@@ -48,6 +48,11 @@ import requests
 
 def register_lakeflow_source(spark):
     """Register the Lakeflow Python source with Spark."""
+    spark.dataSource.register(_build_lakeflow_source())
+
+
+def _build_lakeflow_source():
+    """Build the source without capturing a driver-only SparkSession."""
 
     ########################################################
     # src/databricks/labs/community_connector/libs/utils.py
@@ -255,6 +260,14 @@ def register_lakeflow_source(spark):
                     and other configurations.
             """
             self.options = options
+
+        def requires_trigger_available_now(self) -> bool:
+            """Return whether this connector requires Spark Trigger.AvailableNow.
+
+            The default preserves the behavior of existing connectors. Streaming
+            connectors may opt in when they pin a finite source target per run.
+            """
+            return False
 
         @abstractmethod
         def list_tables(self) -> list[str]:
@@ -1312,11 +1325,17 @@ def register_lakeflow_source(spark):
             self.options = options
             self.lakeflow_connect = lakeflow_connect
             self.schema = schema
+            self._available_now_prepared = False
 
         def initialOffset(self):
             return {}
 
         def read(self, start: dict) -> (Iterator[tuple], dict):
+            if (
+                self.lakeflow_connect.requires_trigger_available_now()
+                and not self._available_now_prepared
+            ):
+                raise ValueError("This connector requires Spark Trigger.AvailableNow")
             is_delete_flow = self.options.get(IS_DELETE_FLOW) == "true"
             # Strip delete flow options before passing to connector
             table_options = {
@@ -1343,8 +1362,7 @@ def register_lakeflow_source(spark):
             return self.read(start)[0]
 
         def prepareForTriggerAvailableNow(self) -> None:
-            # No need to do anything special here. Everything is handled in the __init__ method.
-            pass
+            self._available_now_prepared = True
 
 
     class LakeflowPartitionedStreamReader(DataSourceStreamReader, SupportsTriggerAvailableNow):
@@ -1365,6 +1383,7 @@ def register_lakeflow_source(spark):
             self.lakeflow_connect = lakeflow_connect
             self.table_name = options[TABLE_NAME]
             self.table_options = {k: v for k, v in options.items() if k != IS_DELETE_FLOW}
+            self._available_now_prepared = False
 
         def initialOffset(self):
             return {}
@@ -1385,6 +1404,11 @@ def register_lakeflow_source(spark):
                     f"got {type(limit).__name__}. Micro-batch sizing must be controlled "
                     f"by the connector implementation (table_options), not the engine."
                 )
+            if (
+                self.lakeflow_connect.requires_trigger_available_now()
+                and not self._available_now_prepared
+            ):
+                raise ValueError("This connector requires Spark Trigger.AvailableNow")
             return self.lakeflow_connect.latest_offset(
                 self.table_name, self.table_options, start
             )
@@ -1403,8 +1427,7 @@ def register_lakeflow_source(spark):
             return map(lambda x: parse_value(x, self.schema), records)
 
         def prepareForTriggerAvailableNow(self) -> None:
-            # No need to do anything special here. Everything is handled in the __init__ method.
-            pass
+            self._available_now_prepared = True
 
 
     class LakeflowBatchReader(DataSourceReader):
@@ -1606,4 +1629,4 @@ def register_lakeflow_source(spark):
             return LakeflowStreamReader(self.options, schema, self.lakeflow_connect)
 
 
-    spark.dataSource.register(LakeflowSource)
+    return LakeflowSource

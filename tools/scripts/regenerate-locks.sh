@@ -50,6 +50,11 @@ mkdir -p "${REQ_DIR}"
 compile() {
     out="$1"
     shift
+    jetstream_cutoff=""
+    if [ "${1:-}" = "--jetstream-lakehouse-cutoff" ]; then
+        jetstream_cutoff="jetstream-lakehouse=2026-11-12T16:33:00Z"
+        shift
+    fi
     printf '  %s\n' "${out}"
     # `--exclude-newer-package pip=...` exempts pip from the global cutoff.
     # Required when resolving via JFrog Artifactory: its PyPI proxy strips
@@ -57,6 +62,9 @@ compile() {
     # against `--exclude-newer` and refuses every pip version. Pip is the
     # bootstrap and is hash-pinned in the resulting lock — the cutoff is
     # not the integrity control, the hash is. No-op on arca/direct PyPI.
+    if [ -n "${jetstream_cutoff}" ]; then
+        set -- "$@" --exclude-newer-package "${jetstream_cutoff}"
+    fi
     uv pip compile "$@" \
         --generate-hashes \
         --exclude-newer "${CUTOFF}" \
@@ -128,6 +136,7 @@ done | grep -E '^[[:space:]]*"[A-Za-z]' \
     | sed -e 's/^[[:space:]]*"//' -e 's/",\?[[:space:]]*$//' \
     | grep -viE '^(lakeflow-community-connectors|pyspark|pytest|pytest-cov)\b' \
     | sort -u | compile "${REQ_DIR}/sources.txt" \
+    --jetstream-lakehouse-cutoff \
     pyproject.toml \
     "${REQ_DIR}/_pip.in" \
     - \

@@ -1,0 +1,7 @@
+{
+  "version": 1,
+  "scope": "b2e0d905e95086f324e417310dc5093daf0b3b89eceed3005696a2f536065dfd",
+  "seq": 2,
+  "after": 0,
+  "plan": "[{\"after\":0,\"through\":2,\"segments\":[{\"name\":\"seg_0000000000.jss\",\"index\":0,\"checksum\":\"0000000000000000\",\"minSeq\":1,\"maxSeq\":7,\"mode\":\"segment\"}]}]"
+}

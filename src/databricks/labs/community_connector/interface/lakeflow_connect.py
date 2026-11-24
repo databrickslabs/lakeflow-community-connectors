@@ -20,6 +20,14 @@ class LakeflowConnect(ABC):
         """
         self.options = options
 
+    def requires_trigger_available_now(self) -> bool:
+        """Return whether this connector requires Spark Trigger.AvailableNow.
+
+        The default preserves the behavior of existing connectors. Streaming
+        connectors may opt in when they pin a finite source target per run.
+        """
+        return False
+
     @abstractmethod
     def list_tables(self) -> list[str]:
         """

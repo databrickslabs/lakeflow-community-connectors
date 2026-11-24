@@ -1,0 +1,20 @@
+{
+  "connection_name": "bluesky_jetstream",
+  "objects": [
+    {
+      "table": {
+        "source_table": "events",
+        "destination_catalog": "main",
+        "destination_schema": "bluesky",
+        "destination_table": "events",
+        "table_configuration": {
+          "scd_type": "APPEND_ONLY",
+          "starting_cursor": "0",
+          "collections": "app.bsky.feed.post",
+          "max_events_per_refresh": "10000",
+          "include_raw_payload": "true"
+        }
+      }
+    }
+  ]
+}

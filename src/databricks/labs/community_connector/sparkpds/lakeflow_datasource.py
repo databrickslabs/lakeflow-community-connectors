@@ -115,11 +115,17 @@ class LakeflowStreamReader(SimpleDataSourceStreamReader, SupportsTriggerAvailabl
         self.options = options
         self.lakeflow_connect = lakeflow_connect
         self.schema = schema
+        self._available_now_prepared = False
 
     def initialOffset(self):
         return {}
 
     def read(self, start: dict) -> (Iterator[tuple], dict):
+        if (
+            self.lakeflow_connect.requires_trigger_available_now()
+            and not self._available_now_prepared
+        ):
+            raise ValueError("This connector requires Spark Trigger.AvailableNow")
         is_delete_flow = self.options.get(IS_DELETE_FLOW) == "true"
         # Strip delete flow options before passing to connector
         table_options = {
@@ -146,8 +152,7 @@ class LakeflowStreamReader(SimpleDataSourceStreamReader, SupportsTriggerAvailabl
         return self.read(start)[0]
 
     def prepareForTriggerAvailableNow(self) -> None:
-        # No need to do anything special here. Everything is handled in the __init__ method.
-        pass
+        self._available_now_prepared = True
 
 
 class LakeflowPartitionedStreamReader(DataSourceStreamReader, SupportsTriggerAvailableNow):
@@ -168,6 +173,7 @@ class LakeflowPartitionedStreamReader(DataSourceStreamReader, SupportsTriggerAva
         self.lakeflow_connect = lakeflow_connect
         self.table_name = options[TABLE_NAME]
         self.table_options = {k: v for k, v in options.items() if k != IS_DELETE_FLOW}
+        self._available_now_prepared = False
 
     def initialOffset(self):
         return {}
@@ -188,6 +194,11 @@ class LakeflowPartitionedStreamReader(DataSourceStreamReader, SupportsTriggerAva
                 f"got {type(limit).__name__}. Micro-batch sizing must be controlled "
                 f"by the connector implementation (table_options), not the engine."
             )
+        if (
+            self.lakeflow_connect.requires_trigger_available_now()
+            and not self._available_now_prepared
+        ):
+            raise ValueError("This connector requires Spark Trigger.AvailableNow")
         return self.lakeflow_connect.latest_offset(
             self.table_name, self.table_options, start
         )
@@ -206,8 +217,7 @@ class LakeflowPartitionedStreamReader(DataSourceStreamReader, SupportsTriggerAva
         return map(lambda x: parse_value(x, self.schema), records)
 
     def prepareForTriggerAvailableNow(self) -> None:
-        # No need to do anything special here. Everything is handled in the __init__ method.
-        pass
+        self._available_now_prepared = True
 
 
 class LakeflowBatchReader(DataSourceReader):
