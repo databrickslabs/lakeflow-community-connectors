@@ -1,0 +1,52 @@
+[
+  {
+    "_rowid": 0,
+    "id": 1000,
+    "text": "hotel-435",
+    "category": "lima-362",
+    "embedding": [
+      954.81,
+      535.89
+    ],
+    "updated_at": "2024-01-27T01:17:08Z"
+  },
+  {
+    "_rowid": 1,
+    "id": 1001,
+    "text": "echo-707",
+    "category": "quebec-947",
+    "embedding": [
+      785.71
+    ],
+    "updated_at": "2024-01-04T09:49:28Z"
+  },
+  {
+    "_rowid": 2,
+    "id": 1002,
+    "text": "foxtrot-220",
+    "category": "oscar-422",
+    "embedding": [],
+    "updated_at": "2024-01-13T12:16:17Z"
+  },
+  {
+    "_rowid": 3,
+    "id": 1003,
+    "text": "oscar-965",
+    "category": "oscar-561",
+    "embedding": [
+      173.16
+    ],
+    "updated_at": "2024-01-26T01:33:13Z"
+  },
+  {
+    "_rowid": 4,
+    "id": 1004,
+    "text": "mike-108",
+    "category": "golf-969",
+    "embedding": [
+      613.03,
+      355.81
+    ],
+    "updated_at": "2024-01-18T14:06:20Z"
+  }
+]
