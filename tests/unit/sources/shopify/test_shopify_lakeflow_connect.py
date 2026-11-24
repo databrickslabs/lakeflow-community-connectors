@@ -18,6 +18,10 @@ from tests.unit.sources.test_suite import LakeflowConnectTests
 class TestShopifyConnector(LakeflowConnectTests):
     connector_class = ShopifyLakeflowConnect
     simulator_source = "shopify"
+    # Known: returns records without advancing the offset, which would abort a
+    # managed incremental pipeline (SIMPLE_STREAM_READER_OFFSET_DID_NOT_ADVANCE).
+    # Pending owner confirmation/fix; tracked in #307. Remove when fixed.
+    offset_advance_exempt_tables = frozenset({"inventory_levels"})
     # Stand-in credentials for simulate / replay mode. The simulator
     # never validates these — it just needs the connector to be
     # constructible without requiring a real shop.

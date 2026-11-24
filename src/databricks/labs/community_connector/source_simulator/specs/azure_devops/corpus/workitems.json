@@ -2,7 +2,14 @@
   {
     "id": 1000,
     "rev": 14194,
-    "fields": "papa-340",
+    "fields": {
+      "System.Id": 1000,
+      "System.Rev": 14194,
+      "System.Title": "Simulated work item 1000",
+      "System.WorkItemType": "Task",
+      "System.State": "Active",
+      "System.ChangedDate": "2024-01-01T10:00:00Z"
+    },
     "relations": [
       {
         "rel": "oscar-172",
@@ -16,7 +23,14 @@
   {
     "id": 1001,
     "rev": 54526,
-    "fields": "lima-844",
+    "fields": {
+      "System.Id": 1001,
+      "System.Rev": 54526,
+      "System.Title": "Simulated work item 1001",
+      "System.WorkItemType": "Task",
+      "System.State": "Active",
+      "System.ChangedDate": "2024-01-02T10:00:00Z"
+    },
     "relations": [
       {
         "rel": "tango-424",
@@ -34,7 +48,14 @@
   {
     "id": 1002,
     "rev": 90389,
-    "fields": "alpha-848",
+    "fields": {
+      "System.Id": 1002,
+      "System.Rev": 90389,
+      "System.Title": "Simulated work item 1002",
+      "System.WorkItemType": "Task",
+      "System.State": "Active",
+      "System.ChangedDate": "2024-01-03T10:00:00Z"
+    },
     "relations": [
       {
         "rel": "xray-682",
@@ -52,7 +73,14 @@
   {
     "id": 1003,
     "rev": 63900,
-    "fields": "echo-524",
+    "fields": {
+      "System.Id": 1003,
+      "System.Rev": 63900,
+      "System.Title": "Simulated work item 1003",
+      "System.WorkItemType": "Task",
+      "System.State": "Active",
+      "System.ChangedDate": "2024-01-04T10:00:00Z"
+    },
     "relations": [],
     "url": "sierra-950",
     "organization": "papa-856",
