@@ -1,0 +1,85 @@
+[
+  {
+    "id": "xray-445-pk0",
+    "url": "papa-859",
+    "path": "mike-431",
+    "type": "delta-744",
+    "accessibility": "uniform-435",
+    "protection": "xray-297",
+    "recipients": [
+      "foxtrot-730"
+    ],
+    "notify": true,
+    "link_to_current": false,
+    "creation_date": "2024-01-01T00:00:00Z",
+    "created_by": "uniform-908",
+    "resource_id": "victor-221",
+    "egnyte_domain": "mike-836"
+  },
+  {
+    "id": "hotel-72-pk1",
+    "url": "kilo-726",
+    "path": "bravo-707",
+    "type": "yankee-149",
+    "accessibility": "romeo-307",
+    "protection": "quebec-610",
+    "recipients": [],
+    "notify": false,
+    "link_to_current": false,
+    "creation_date": "2024-01-01T01:00:00Z",
+    "created_by": "romeo-579",
+    "resource_id": "bravo-973",
+    "egnyte_domain": "victor-130"
+  },
+  {
+    "id": "uniform--pk2",
+    "url": "yankee-732",
+    "path": "romeo-776",
+    "type": "delta-459",
+    "accessibility": "oscar-293",
+    "protection": "india-691",
+    "recipients": [
+      "papa-205",
+      "november-294"
+    ],
+    "notify": true,
+    "link_to_current": false,
+    "creation_date": "2024-01-01T02:00:00Z",
+    "created_by": "tango-519",
+    "resource_id": "echo-308",
+    "egnyte_domain": "uniform-997"
+  },
+  {
+    "id": "bravo-81-pk3",
+    "url": "foxtrot-337",
+    "path": "november-359",
+    "type": "november-193",
+    "accessibility": "quebec-578",
+    "protection": "romeo-438",
+    "recipients": [],
+    "notify": false,
+    "link_to_current": true,
+    "creation_date": "2024-01-01T03:00:00Z",
+    "created_by": "juliet-881",
+    "resource_id": "uniform-716",
+    "egnyte_domain": "juliet-658"
+  },
+  {
+    "id": "zulu-712-pk4",
+    "url": "sierra-839",
+    "path": "charlie-908",
+    "type": "yankee-524",
+    "accessibility": "lima-520",
+    "protection": "juliet-730",
+    "recipients": [
+      "xray-405",
+      "yankee-764"
+    ],
+    "notify": false,
+    "link_to_current": false,
+    "creation_date": "2024-01-01T04:00:00Z",
+    "created_by": "foxtrot-741",
+    "resource_id": "golf-307",
+    "egnyte_domain": "uniform-327"
+  }
+]
