@@ -10,6 +10,7 @@ from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Any, Iterator, Sequence
 import json
+import re
 import time
 
 from email.utils import parsedate_to_datetime
@@ -1571,10 +1572,19 @@ def register_lakeflow_source(spark):
         return value
 
 
+    _FRACTION = re.compile(r"\.(\d+)(?=[+-]|$)")
+
+
     def _timestamp(value: str) -> datetime:
         """Reject missing/ambiguous cursors instead of advancing past unknown data."""
         try:
-            parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+            # Python 3.10's fromisoformat only accepts 3 or 6 fractional digits.
+            normalized = _FRACTION.sub(
+                lambda match: "." + match.group(1)[:6].ljust(6, "0"),
+                value.replace("Z", "+00:00"),
+                count=1,
+            )
+            parsed = datetime.fromisoformat(normalized)
             if parsed.tzinfo is not None:
                 return parsed.astimezone(timezone.utc)
         except (AttributeError, TypeError, ValueError):

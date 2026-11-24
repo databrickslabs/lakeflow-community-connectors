@@ -167,7 +167,28 @@ def test_bad_page_never_advances_checkpoint(connector, transport, body):
         read(connector)
 
 
-@pytest.mark.parametrize("value", [None, "bad", "2026-11-11T10:00:00"])
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        ("2026-11-11T10:00:00Z", "2026-11-11T10:00:00.000000+00:00"),
+        ("2026-11-11T10:00:00.5Z", "2026-11-11T10:00:00.500000+00:00"),
+        ("2026-11-11T06:00:00.12-05:00", "2026-11-11T11:00:00.120000+00:00"),
+        ("2026-11-11T10:00:00.123+00:00", "2026-11-11T10:00:00.123000+00:00"),
+        ("2026-11-11T10:00:00.1234+01:00", "2026-11-11T09:00:00.123400+00:00"),
+        ("2026-11-11T10:00:00.123456Z", "2026-11-11T10:00:00.123456+00:00"),
+        ("2026-11-11T10:00:00.1234567Z", "2026-11-11T10:00:00.123456+00:00"),
+    ],
+)
+def test_any_fraction_length_parses_on_every_supported_python(connector, transport, raw, expected):
+    connector._init_time = CUTOFF
+    transport[1].append(response(page([incident("a", raw)], next_cursor=None)))
+    rows, _ = read(connector)
+    assert [row["updated_at"] for row in rows] == [expected]
+
+
+@pytest.mark.parametrize(
+    "value", [None, "bad", "2026-11-11T10:00:00", "2026-11-11T10:00:00.5", "2026-11-11T10:00:00.5.5Z"]
+)
 def test_missing_or_ambiguous_updated_at_fails(connector, transport, value):
     transport[1].append(response(page([incident("a", value)], next_cursor=None)))
     with pytest.raises(ValueError, match="timezone-aware"):

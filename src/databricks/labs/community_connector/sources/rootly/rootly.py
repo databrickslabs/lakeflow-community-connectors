@@ -2,6 +2,7 @@
 
 import json
 import math
+import re
 import time
 from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
@@ -260,10 +261,19 @@ def _prepare_row(value, data_type):
     return value
 
 
+_FRACTION = re.compile(r"\.(\d+)(?=[+-]|$)")
+
+
 def _timestamp(value: str) -> datetime:
     """Reject missing/ambiguous cursors instead of advancing past unknown data."""
     try:
-        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        # Python 3.10's fromisoformat only accepts 3 or 6 fractional digits.
+        normalized = _FRACTION.sub(
+            lambda match: "." + match.group(1)[:6].ljust(6, "0"),
+            value.replace("Z", "+00:00"),
+            count=1,
+        )
+        parsed = datetime.fromisoformat(normalized)
         if parsed.tzinfo is not None:
             return parsed.astimezone(timezone.utc)
     except (AttributeError, TypeError, ValueError):
