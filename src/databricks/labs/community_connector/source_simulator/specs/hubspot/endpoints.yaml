@@ -22,6 +22,14 @@ endpoints:
       single_entity: true
       pagination_style: none
 
+  # Compatibility fallback when the date-versioned route is unavailable.
+  - path: /crm/v3/schemas
+    method: GET
+    corpus: schemas
+    response:
+      single_entity: true
+      pagination_style: none
+
   # Discovery — properties per object type. The connector handles an empty
   # list by building the minimal base schema.
   - path: /crm/properties/2026-09/{object_type}

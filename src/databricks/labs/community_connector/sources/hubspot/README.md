@@ -57,6 +57,8 @@ Custom tables keep their lowercase schema names while API requests use HubSpot's
 canonical `objectTypeId`. Directional schema definitions add association columns
 for standard, custom, and self relationships. Association batch reads page each
 parent independently and fail before checkpointing if a response is incomplete.
+When custom objects exist, their directional definitions can therefore add new
+association columns to standard tables as well as custom tables.
 
 Association columns are ID arrays by default. Source-specific table options can
 change that behavior:
