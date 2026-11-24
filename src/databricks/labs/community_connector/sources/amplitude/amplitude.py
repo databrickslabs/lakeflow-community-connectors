@@ -29,10 +29,11 @@ serves JSON built from the table schema).
 import gzip
 import io
 import json
+import tempfile
 import time
 import zipfile
 from datetime import datetime, timedelta, timezone
-from typing import Iterator
+from typing import IO, Iterator
 
 import requests
 from requests.auth import HTTPBasicAuth
@@ -43,6 +44,8 @@ from databricks.labs.community_connector.interface import LakeflowConnect
 from databricks.labs.community_connector.sources.amplitude.amplitude_schemas import (
     BASE_URLS,
     DEFAULT_TIMEOUT,
+    EXPORT_CHUNK_SIZE,
+    EXPORT_SPOOL_MAX_MEMORY,
     EXPORT_TIMEOUT,
     INITIAL_BACKOFF,
     MAX_RETRIES,
@@ -250,47 +253,73 @@ class AmplitudeLakeflowConnect(LakeflowConnect):
 
         # 404 = no data in the requested window (not an error).
         if resp.status_code == 404:
-            records = []
+            records: Iterator[dict] = iter([])
         elif resp.status_code != 200:
             raise RuntimeError(
                 f"Amplitude Export API error: {resp.status_code} {resp.text[:500]}"
             )
         else:
-            records = self._parse_export_body(resp.content)
+            # Download now so network errors surface here, but parse lazily:
+            # a busy window can hold hundreds of thousands of events, and
+            # materializing them all exceeds the 1 GB Python UDF limit on
+            # serverless.
+            records = self._iter_export_body(self._spool_response(resp))
 
         # The Export API treats ``end`` as *inclusive* at hourly resolution, so
         # the next window must start one hour past ``window_end_dt`` — otherwise
         # the boundary hour is fetched in both windows and, because ``events`` is
         # append-only (no load-time dedup), every record in it is ingested twice.
         end_offset = {"cursor": (window_end_dt + timedelta(hours=1)).isoformat()}
-        return iter(records), end_offset
+        return records, end_offset
 
     @staticmethod
-    def _parse_export_body(content: bytes) -> list[dict]:
-        """Parse the Export API body into a list of event dicts.
+    def _spool_response(resp: requests.Response) -> IO[bytes]:
+        """Copy a streamed response body to a temp file (in memory if small)."""
+        body = tempfile.SpooledTemporaryFile(max_size=EXPORT_SPOOL_MAX_MEMORY)
+        if getattr(resp, "raw", None) is None:
+            # Built in memory (source simulator / cassette replay): no stream.
+            body.write(resp.content or b"")
+        else:
+            for chunk in resp.iter_content(chunk_size=EXPORT_CHUNK_SIZE):
+                body.write(chunk)
+        body.seek(0)
+        return body
+
+    @classmethod
+    def _iter_export_body(cls, body: IO[bytes]) -> Iterator[dict]:
+        """Yield event dicts from a spooled Export API body, then close it."""
+        with body:
+            if zipfile.is_zipfile(body):
+                body.seek(0)
+                yield from cls._iter_export_zip(body)
+            else:
+                body.seek(0)
+                yield from cls._parse_non_zip_body(body.read())
+
+    @staticmethod
+    def _iter_export_zip(body: IO[bytes]) -> Iterator[dict]:
+        """Real Export API — ZIP of gzipped NDJSON, read one line at a time."""
+        with zipfile.ZipFile(body) as zf:
+            for name in zf.namelist():
+                with zf.open(name) as entry:
+                    with gzip.open(entry, "rt", encoding="utf-8") as fh:
+                        for line in fh:
+                            line = line.strip()
+                            if line:
+                                yield json.loads(line)
+
+    @classmethod
+    def _parse_export_body(cls, content: bytes) -> list[dict]:
+        """Parse an in-memory Export API body into a list of event dicts.
 
         Real API: a ZIP archive of gzipped NDJSON files.  Simulator: a plain
         JSON array (or NDJSON) of event rows.  Both shapes are handled.
         """
-        if not content:
-            return []
+        return list(cls._iter_export_body(io.BytesIO(content)))
 
-        # Real Export API — ZIP of gzipped NDJSON.
-        try:
-            with zipfile.ZipFile(io.BytesIO(content)) as zf:
-                records: list[dict] = []
-                for name in zf.namelist():
-                    with zf.open(name) as entry:
-                        with gzip.open(entry, "rt", encoding="utf-8") as fh:
-                            for line in fh:
-                                line = line.strip()
-                                if line:
-                                    records.append(json.loads(line))
-                return records
-        except zipfile.BadZipFile:
-            pass
-
-        # Fallback (simulator / non-zip): JSON array, wrapped array, or NDJSON.
+    @staticmethod
+    def _parse_non_zip_body(content: bytes) -> list[dict]:
+        """Fallback (simulator / non-zip): JSON array, wrapped array, or NDJSON."""
         text = content.decode("utf-8", errors="replace").strip()
         if not text:
             return []
