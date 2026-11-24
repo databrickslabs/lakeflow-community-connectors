@@ -143,6 +143,14 @@ class FutureRecordsSynthesis:
 
 
 @dataclass
+class ValidationCursor:
+    """Pair live and synthetic continuation tokens during response validation only."""
+
+    request_param: str
+    response_path: str
+
+
+@dataclass
 class EndpointSpec:
     """A single endpoint's spec entry, post-load."""
 
@@ -167,6 +175,7 @@ class EndpointSpec:
     ignored: List[str] = field(default_factory=list)
     # Optional cap-validation directive — see ``FutureRecordsSynthesis``.
     synthesize_future_records: Optional[FutureRecordsSynthesis] = None
+    validation_cursor: Optional[ValidationCursor] = None
 
     def known_param_names(self) -> set:
         """All query-param names this endpoint declares."""
@@ -260,6 +269,17 @@ def _parse_endpoint(raw: dict) -> EndpointSpec:
 
     for name, info in (raw.get("params") or {}).items():
         _attach_param(spec, name, info)
+
+    cursor = raw.get("validation_cursor")
+    if cursor is not None:
+        if not isinstance(cursor, dict) or any(
+            not isinstance(cursor.get(key), str) or not cursor[key].strip()
+            for key in ("request_param", "response_path")
+        ):
+            raise ValueError("validation_cursor requires request_param and response_path strings")
+        if cursor["request_param"] not in spec.known_param_names():
+            raise ValueError("validation_cursor.request_param must be declared in params")
+        spec.validation_cursor = ValidationCursor(**cursor)
 
     sfr_raw = raw.get("synthesize_future_records")
     if sfr_raw is not None:

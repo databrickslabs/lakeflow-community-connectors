@@ -1,0 +1,148 @@
+[
+  {
+    "id": "synthetic-severities-1",
+    "type": "severities",
+    "attributes": {
+      "name": "oscar-402",
+      "slug": "alpha-994",
+      "description": "oscar-440",
+      "severity": "uniform-963",
+      "color": "charlie-812",
+      "position": 83734,
+      "notify_emails": [
+        "kilo-296",
+        "yankee-754"
+      ],
+      "slack_channels": [
+        {
+          "id": "zulu-775",
+          "name": "romeo-810"
+        },
+        {
+          "id": "tango-134",
+          "name": "yankee-522"
+        }
+      ],
+      "slack_aliases": [
+        {
+          "id": "quebec-882",
+          "name": "tango-551"
+        }
+      ],
+      "created_at": "romeo-586",
+      "updated_at": "oscar-308"
+    }
+  },
+  {
+    "id": "synthetic-severities-2",
+    "type": "severities",
+    "attributes": {
+      "name": "sierra-340",
+      "slug": "tango-299",
+      "description": "mike-130",
+      "severity": "echo-810",
+      "color": "kilo-403",
+      "position": 79557,
+      "notify_emails": [],
+      "slack_channels": [
+        {
+          "id": "uniform-763",
+          "name": "victor-400"
+        }
+      ],
+      "slack_aliases": [],
+      "created_at": "foxtrot-939",
+      "updated_at": "november-962"
+    }
+  },
+  {
+    "id": "synthetic-severities-3",
+    "type": "severities",
+    "attributes": {
+      "name": "bravo-298",
+      "slug": "papa-572",
+      "description": "juliet-941",
+      "severity": "golf-820",
+      "color": "echo-991",
+      "position": 8809,
+      "notify_emails": [
+        "sierra-797"
+      ],
+      "slack_channels": [
+        {
+          "id": "uniform-735",
+          "name": "charlie-620"
+        }
+      ],
+      "slack_aliases": [
+        {
+          "id": "alpha-984",
+          "name": "yankee-569"
+        },
+        {
+          "id": "bravo-190",
+          "name": "papa-109"
+        }
+      ],
+      "created_at": "golf-421",
+      "updated_at": "juliet-787"
+    }
+  },
+  {
+    "id": "synthetic-severities-4",
+    "type": "severities",
+    "attributes": {
+      "name": "charlie-284",
+      "slug": "november-865",
+      "description": "tango-572",
+      "severity": "hotel-445",
+      "color": "papa-714",
+      "position": 3702,
+      "notify_emails": [],
+      "slack_channels": [
+        {
+          "id": "juliet-927",
+          "name": "uniform-110"
+        }
+      ],
+      "slack_aliases": [
+        {
+          "id": "lima-239",
+          "name": "golf-557"
+        }
+      ],
+      "created_at": "tango-490",
+      "updated_at": "zulu-430"
+    }
+  },
+  {
+    "id": "synthetic-severities-5",
+    "type": "severities",
+    "attributes": {
+      "name": "uniform-300",
+      "slug": "alpha-611",
+      "description": "foxtrot-750",
+      "severity": "uniform-500",
+      "color": "papa-843",
+      "position": 41130,
+      "notify_emails": [
+        "lima-241",
+        "juliet-153"
+      ],
+      "slack_channels": [
+        {
+          "id": "alpha-383",
+          "name": "victor-561"
+        }
+      ],
+      "slack_aliases": [
+        {
+          "id": "golf-320",
+          "name": "zulu-708"
+        }
+      ],
+      "created_at": "echo-511",
+      "updated_at": "tango-918"
+    }
+  }
+]
