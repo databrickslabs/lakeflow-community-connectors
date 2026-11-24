@@ -1,0 +1,141 @@
+# Power BI Semantic Model Community Connector Spec
+# This file defines the specification for the connector including
+# connection parameters and allowlist options.
+
+# ============================================================================
+# Connection Parameters
+# These are provided when creating the Unity Catalog connection.
+# ============================================================================
+connection:
+  # ---------------------------------------------------------------------------
+  # Authentication Methods
+  # Power BI's own docs describe exactly two ways to call its REST API;
+  # choose ONE when creating the connection. The connector runs the Entra ID
+  # token exchange itself for either — there is no UC-managed OAuth flow
+  # here, so client_secret / password never leave the connector's options.
+  # ---------------------------------------------------------------------------
+  auth_methods:
+    - name: service_principal
+      description: >
+        Authenticate as a Microsoft Entra ID service principal via the
+        OAuth 2.0 client-credentials (app-only) flow. Preferred: no user
+        account required, and works with MFA-enforced tenants.
+      parameters:
+        - name: tenant_id
+          type: string
+          required: true
+          description: >
+            Entra ID (Azure AD) tenant ID in which the service principal's
+            app registration lives. Format: UUID or domain name (e.g.,
+            00000000-0000-0000-0000-000000000000 or tenant.onmicrosoft.com).
+
+        - name: client_id
+          type: string
+          required: true
+          description: >
+            Application (client) ID of the Entra ID service principal.
+            Issued by Azure Portal when you register the app. Format: UUID.
+
+        - name: client_secret
+          type: string
+          required: true
+          secret: true
+          description: >
+            Client secret for the Entra ID service principal. Created in the
+            Azure Portal under "Certificates & secrets". Treat as a
+            password — do not log or share.
+
+    - name: user
+      description: >
+        Authenticate as a specific Power BI user (the classic "master user"
+        pattern) via Entra ID's Resource Owner Password Credentials (ROPC)
+        grant. The user needs a Power BI Pro/PPU license and access to the
+        workspaces being queried. Microsoft treats ROPC as legacy, and it
+        does not support interactive challenges — the account must not have
+        MFA enabled.
+      parameters:
+        - name: tenant_id
+          type: string
+          required: true
+          description: >
+            Entra ID (Azure AD) tenant ID in which the user account and app
+            registration live. Format: UUID or domain name (e.g.,
+            00000000-0000-0000-0000-000000000000 or tenant.onmicrosoft.com).
+
+        - name: client_id
+          type: string
+          required: true
+          description: >
+            Application (client) ID of the Entra ID app registration used to
+            run the ROPC exchange. Must allow the public client / ROPC flow.
+            Format: UUID.
+
+        - name: username
+          type: string
+          required: true
+          description: >
+            User principal name (UPN) / email of the Power BI user to
+            authenticate as, e.g. user@tenant.onmicrosoft.com.
+
+        - name: password
+          type: string
+          required: true
+          secret: true
+          description: >
+            Password for that user. Treat as a secret — do not log or share.
+
+  # ---------------------------------------------------------------------------
+  # Common Parameters (shared across both authentication methods)
+  # ---------------------------------------------------------------------------
+  parameters:
+    - name: base_url
+      type: string
+      required: false
+      description: >
+        Base URL for the Power BI REST API. Override if using a custom
+        instance or a non-production cloud (e.g., a government cloud).
+        Default: https://api.powerbi.com/v1.0/myorg
+
+    - name: timeout_seconds
+      type: int
+      required: false
+      description: >
+        Per-request HTTP timeout in seconds. Minimum 1 second.
+        Default: 60 seconds.
+
+    - name: use_admin_api
+      type: bool
+      required: false
+      description: >
+        Whether to prefer the tenant-wide /admin endpoints when reading
+        workspaces and datasets. If "false", falls back to the workspace
+        membership-scoped endpoints. Admin endpoints are more efficient
+        but require the service principal to be enabled for the Power BI
+        Admin APIs by a tenant admin.
+        Default: true.
+
+# ============================================================================
+# External Options Allowlist
+# Table-specific options that must be included in the externalOptionsAllowList
+# parameter of the UC connection to allow them to be passed through.
+# ============================================================================
+external_options_allowlist: >
+  workspace_ids,
+  dataset_ids,
+  workspace_filter,
+  use_admin_api,
+  page_size,
+  max_pages,
+  scan_batch_size,
+  datasets_per_partition,
+  workspaces_per_partition,
+  top,
+  max_records_per_batch,
+  scan_poll_seconds,
+  scan_timeout_seconds,
+  dax_query,
+  workspace_id,
+  dataset_id,
+  dax_columns,
+  include_nulls,
+  impersonated_user_name
