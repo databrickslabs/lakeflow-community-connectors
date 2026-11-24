@@ -6,6 +6,8 @@ The connector performs a **read-only** extract of governance domains (business d
 
 > **Public preview API.** This connector targets the Purview Unified Catalog Data Governance data-plane API at `api-version=2026-03-20-preview`, which is in **public preview**. Field names, endpoint shapes, and the `api-version` string can change before general availability. See [Limitations](#limitations).
 
+> **Purview Data Governance is being retired.** On Nov 12, 2026 Microsoft [announced](https://techcommunity.microsoft.com/blog/microsoft-security-blog/a-next-step-in-the-evolution-of-the-microsoft-data-governance-strategy/4572227) that support for Purview Data Governance ends **Nov 12, 2027**. This connector reads that API, so if you want to keep your domains, glossary terms, and data products in Unity Catalog, land them well before then; the preview API may change or degrade earlier.
+
 > **Not affiliated with Microsoft.** This is a community-maintained Lakeflow connector. It is **not** affiliated with, approved, endorsed, or sponsored by Microsoft. "Microsoft Purview", "Microsoft Entra", and "Azure" are trademarks of the Microsoft group of companies, used here solely to identify the source system the connector reads from.
 
 ## Prerequisites
@@ -82,7 +84,7 @@ The connector defines the ingestion mode, primary key, and incremental cursor fo
 | `data_products` | Published data products | `cdc` | `id` | `systemData.lastModifiedAt` (ISO-8601) |
 | `terms` | Business glossary terms | `cdc` | `id` | `systemData.lastModifiedAt` (ISO-8601) |
 
-All primary keys are server-assigned UUIDs stored as strings. The two `cdc` tables share the same incremental cursor field, `systemData.lastModifiedAt` (a nested, ISO-8601 UTC date-time string — which sorts lexicographically). `business_domains` is fetched as a full snapshot each run because the domain taxonomy changes infrequently.
+All primary keys are server-assigned UUIDs stored as strings. The two `cdc` tables share the same incremental cursor field, `systemData.lastModifiedAt` (a nested, ISO-8601 UTC date-time string, compared as a parsed timestamp). `business_domains` is fetched as a full snapshot each run because the domain taxonomy changes infrequently.
 
 ### How the metadata assembles across tables
 
@@ -119,7 +121,7 @@ Purview JSON fields are mapped to Spark types as follows:
 | Purview field type | Example fields | Connector Spark type | Notes |
 |--------------------|----------------|----------------------|-------|
 | UUID (string) | `id`, `domain`, `parentId`, contact `id`, `systemData.*By` | `StringType` | Never cast UUIDs to binary/long. |
-| ISO-8601 date-time (string) | `systemData.createdAt`, `systemData.lastModifiedAt`, `systemData.expiredAt` | `StringType` | UTC ISO-8601; lexicographically ordered, which is what the incremental cursor relies on. |
+| ISO-8601 date-time (string) | `systemData.createdAt`, `systemData.lastModifiedAt`, `systemData.expiredAt` | `StringType` | UTC ISO-8601 with 100-ns precision (e.g. `2026-09-22T20:32:33.4438881Z`). The incremental cursor parses it before comparing. |
 | string / enum | `name`, `description`, `status`, `type`, `updateFrequency` | `StringType` | |
 | boolean | `endorsed`, `isRestricted`, `isLeaf`, `managedAttributes[].isRequired` | `BooleanType` | |
 | int64 | `additionalProperties.assetCount`, `activeSubscriberCount` | `LongType` | `LongType` (not `IntegerType`) to avoid overflow. |
@@ -159,7 +161,22 @@ pipeline_spec = {
 ingest(spark, pipeline_spec)
 ```
 
-To scope a table, add `table_options` (and make sure the option is in the connection's `externalOptionsAllowList`). For example, to fetch only the data products in one governance domain:
+To scope a table, pass table options (and make sure each option is in the connection's `externalOptionsAllowList`). Where they go depends on how the pipeline was created.
+
+**Managed ingestion pipelines** (created from the "Add data" UI or `community-connector create_pipeline`): put source options under `connector_options.community_connector_options.options`. `table_configuration` only carries ingestion controls (`scd_type`, `primary_keys`, `sequence_by`) there. For example, to fetch only the data products in one governance domain:
+
+```yaml
+connection_name: my_purview_connection
+objects:
+  - table:
+      source_table: data_products
+      connector_options:
+        community_connector_options:
+          options:
+            domain_id: b3b4cc6e-6a91-4d34-8af3-90e2f93d6c7a
+```
+
+**`ingest.py` pipelines** (as in the snippet above): put source options in `table_configuration`:
 
 ```python
 pipeline_spec = {
@@ -168,7 +185,7 @@ pipeline_spec = {
         {
             "table": {
                 "source_table": "data_products",
-                "table_options": {"domain_id": "b3b4cc6e-6a91-4d34-8af3-90e2f93d6c7a"},
+                "table_configuration": {"domain_id": "b3b4cc6e-6a91-4d34-8af3-90e2f93d6c7a"},
             }
         },
     ],
@@ -186,6 +203,7 @@ Because the Purview Unified Catalog list endpoints have **no server-side modifie
 - The `data_products` and `terms` readers page through the full collection and apply the saved cursor as a strict `> since` filter (so the boundary record is not re-emitted on resume).
 - At startup the connector records an upper-bound timestamp (`_init_ts`) and skips any record modified after it. This caps a single `Trigger.AvailableNow` microbatch so it terminates; records modified after startup are picked up on the next trigger with a fresh bound.
 - When no new records are emitted, the offset is returned unchanged so the framework sees `end_offset == start_offset` and converges.
+- A non-empty batch always advances the offset. In the anomalous case where no record in a batch has a parseable `lastModifiedAt`, the batch is dropped with a warning instead of aborting the pipeline.
 
 Because records are not guaranteed to arrive in cursor order (`orderBy` on the nested `systemData/lastModifiedAt` path is not yet verified against a live tenant), the connector drains the full collection per run rather than truncating by count. CDC upsert on the primary key (`id`) tolerates the re-reads. See [Limitations](#limitations).
 

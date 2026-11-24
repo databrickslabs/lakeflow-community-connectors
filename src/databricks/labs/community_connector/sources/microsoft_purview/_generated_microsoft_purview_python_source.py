@@ -10,6 +10,7 @@ from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Any, Iterator, Sequence
 import json
+import re
 import time
 
 from pyspark.sql import Row
@@ -1037,9 +1038,15 @@ def register_lakeflow_source(spark):
     # survives being copied into a workspace or merged into a single file, where
     # package metadata isn't available. Must equal `version` in pyproject.toml; a
     # unit test enforces that. Answers "which version is my pipeline running?"
-    CONNECTOR_VERSION = "1.0.1"
+    CONNECTOR_VERSION = "1.0.2"
 
     DEFAULT_MAX_RECORDS_PER_BATCH = 5000
+
+    # ISO-8601 date-time split into (up-to-seconds, fraction, zone). Purview emits
+    # 100-ns precision (7 fractional digits) with a trailing 'Z'.
+    _ISO_TS = re.compile(
+        r"^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})(?:\.(\d+))?([Zz]|[+-]\d{2}:\d{2})?$"
+    )
 
     # Catalog path prefixes (relative to the data-plane endpoint).
     _CATALOG_BASE = "/datagovernance/catalog"
@@ -1100,9 +1107,9 @@ def register_lakeflow_source(spark):
             # Cap incremental cursors at init time so a single Trigger.AvailableNow
             # run only drains data that existed when the connector started; data
             # modified after this point is picked up by the next trigger with a
-            # fresh _init_ts. This is the termination guard. ISO-8601 UTC string to
-            # match the systemData.lastModifiedAt cursor unit (ISO strings compare
-            # lexicographically).
+            # fresh _init_ts. This is the termination guard. Kept as an ISO-8601 UTC
+            # string; the incremental engine parses it and the cursor to datetimes
+            # before comparing (see _parse_ts).
             self._init_ts = datetime.now(timezone.utc).isoformat()
 
         def _configure_auth(self, options: dict[str, str]) -> None:
@@ -1266,15 +1273,23 @@ def register_lakeflow_source(spark):
             """
             start_offset = start_offset or {}
             since = start_offset.get("cursor")
+            # Compare as parsed datetimes, not strings: Purview emits a trailing 'Z'
+            # with 7 fractional digits while _init_ts (datetime.isoformat()) uses
+            # '+00:00' with 6, and a string compare of mixed spellings is wrong at
+            # the boundary.
+            since_dt = self._parse_ts(since)
+            init_dt = self._parse_ts(self._init_ts)
 
             # Already caught up to init time — nothing new can be emitted.
-            if since is not None and since >= self._init_ts:
+            if since_dt is not None and since_dt >= init_dt:
                 return iter([]), start_offset
 
             records: list[dict[str, Any]] = []
             max_seen = since
+            max_seen_dt = since_dt
             for raw in record_iter:
                 cursor = self._record_cursor(raw)
+                cursor_dt = self._parse_ts(cursor)
                 # Strict `>` boundary: skip records at or below the watermark so a
                 # resumed run never re-emits the boundary record. This is required by
                 # the SimpleDataSourceStreamReader contract — a non-empty batch MUST
@@ -1285,22 +1300,60 @@ def register_lakeflow_source(spark):
                 # systemData.lastModifiedAt carries sub-second (100-ns) precision (e.g.
                 # 2026-09-22T20:32:33.4438881Z), so distinct records effectively never
                 # share an exact cursor value.
-                if since is not None and cursor is not None and cursor <= since:
+                if since_dt is not None and cursor_dt is not None and cursor_dt <= since_dt:
                     continue
                 # Init-time cap: skip records modified after the connector started.
-                if cursor is not None and cursor > self._init_ts:
+                if cursor_dt is not None and cursor_dt > init_dt:
                     continue
 
                 records.append(transform(raw))
-                if cursor is not None and (max_seen is None or cursor > max_seen):
-                    max_seen = cursor
+                if cursor_dt is not None and (max_seen_dt is None or cursor_dt > max_seen_dt):
+                    max_seen, max_seen_dt = cursor, cursor_dt
 
-            if not records or max_seen is None or max_seen == since:
+            if max_seen_dt is None or max_seen == since:
                 # No forward progress — return the offset unchanged so the
-                # framework sees end_offset == start_offset and terminates.
-                return iter(records), start_offset
+                # framework sees end_offset == start_offset and terminates. The
+                # batch must be empty too: a non-empty batch that doesn't advance
+                # the offset aborts the pipeline (SimpleDataSourceStreamReader
+                # contract). That can only happen if no emitted record had a
+                # parseable cursor, which a lastModifiedAt-CDC source shouldn't
+                # produce, so it is logged rather than dropped silently.
+                if records:
+                    _LOG.warning(
+                        "Dropping %d record(s) with no parseable "
+                        "systemData.lastModifiedAt; the offset cannot advance",
+                        len(records),
+                    )
+                return iter([]), start_offset
 
             return iter(records), {"cursor": max_seen}
+
+        @staticmethod
+        def _parse_ts(value: str | None) -> tuple[datetime, int] | None:
+            """Parse an ISO-8601 timestamp into a sortable ``(utc_second, ns)`` key.
+
+            Accepts Purview's spelling (trailing ``Z``, 7 fractional digits) and
+            ``datetime.isoformat()``'s (``+00:00``, 6 digits). The fraction is kept
+            separately as nanoseconds rather than parsed by ``datetime``, which
+            holds only microseconds: truncating would merge records 100 ns apart
+            and skip the later one at the watermark. (``fromisoformat`` on Python
+            3.10 also rejects more than 6 digits.) Returns ``None`` for an absent
+            or unparseable value so it is treated as uncomparable.
+            """
+            if not isinstance(value, str):
+                return None
+            match = _ISO_TS.match(value.strip())
+            if not match:
+                return None
+            base, fraction, zone = match.groups()
+            if zone in (None, "Z", "z"):
+                zone = "+00:00"
+            try:
+                parsed = datetime.fromisoformat(base + zone)
+            except ValueError:
+                return None
+            nanos = int((fraction or "").ljust(9, "0")[:9])
+            return parsed.astimezone(timezone.utc), nanos
 
         @staticmethod
         def _record_cursor(raw: dict[str, Any]) -> str | None:
