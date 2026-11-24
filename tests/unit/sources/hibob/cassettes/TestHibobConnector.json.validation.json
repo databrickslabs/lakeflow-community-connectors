@@ -1,0 +1,111 @@
+{
+  "version": 1,
+  "generated_at": "2026-10-04T10:59:18.586027Z",
+  "endpoints": [
+    {
+      "method": "GET",
+      "spec_path": "/v1/bulk/people/employment",
+      "sample_url": "https://api.hibob.com/v1/bulk/people/employment?limit=200&includeArchived=false",
+      "status": "validated",
+      "calls": 62,
+      "matched": 62,
+      "mismatched": 0,
+      "no_spec": 0,
+      "issues": []
+    },
+    {
+      "method": "GET",
+      "spec_path": "/v1/bulk/people/lifecycle",
+      "sample_url": "https://api.hibob.com/v1/bulk/people/lifecycle?limit=200&includeArchived=false",
+      "status": "validated",
+      "calls": 101,
+      "matched": 101,
+      "mismatched": 0,
+      "no_spec": 0,
+      "issues": []
+    },
+    {
+      "method": "GET",
+      "spec_path": "/v1/bulk/people/work",
+      "sample_url": "https://api.hibob.com/v1/bulk/people/work?limit=200&includeArchived=false",
+      "status": "validated",
+      "calls": 227,
+      "matched": 227,
+      "mismatched": 0,
+      "no_spec": 0,
+      "issues": []
+    },
+    {
+      "method": "GET",
+      "spec_path": "/v1/company/named-lists",
+      "sample_url": "https://api.hibob.com/v1/company/named-lists?includeArchived=false",
+      "status": "validated",
+      "calls": 3,
+      "matched": 3,
+      "mismatched": 0,
+      "no_spec": 0,
+      "issues": []
+    },
+    {
+      "method": "GET",
+      "spec_path": "/v1/company/people/fields",
+      "sample_url": "https://api.hibob.com/v1/company/people/fields",
+      "status": "validated",
+      "calls": 3,
+      "matched": 3,
+      "mismatched": 0,
+      "no_spec": 0,
+      "issues": []
+    },
+    {
+      "method": "GET",
+      "spec_path": "/v1/company/reports/{reportId}/download",
+      "sample_url": "https://api.hibob.com/v1/company/reports/31115110/download?format=csv",
+      "status": "validated",
+      "calls": 1,
+      "matched": 1,
+      "mismatched": 0,
+      "no_spec": 0,
+      "issues": []
+    },
+    {
+      "method": "GET",
+      "spec_path": "/v1/people/custom-tables/metadata",
+      "sample_url": "https://api.hibob.com/v1/people/custom-tables/metadata",
+      "status": "validated",
+      "calls": 3,
+      "matched": 3,
+      "mismatched": 0,
+      "no_spec": 0,
+      "issues": []
+    },
+    {
+      "method": "POST",
+      "spec_path": "/v1/people/search",
+      "sample_url": "https://api.hibob.com/v1/people/search",
+      "status": "validated",
+      "calls": 3,
+      "matched": 3,
+      "mismatched": 0,
+      "no_spec": 0,
+      "issues": []
+    },
+    {
+      "method": "GET",
+      "spec_path": "/v1/timeoff/requests/changes",
+      "sample_url": "https://api.hibob.com/v1/timeoff/requests/changes?since=2026-04-07T10%3A53%3A20Z&to=2026-04-14T10%3A53%3A20Z&includePending=false",
+      "status": "validated",
+      "calls": 14,
+      "matched": 14,
+      "mismatched": 0,
+      "no_spec": 0,
+      "issues": []
+    }
+  ],
+  "summary": {
+    "endpoints_total": 9,
+    "endpoints_validated": 9,
+    "endpoints_mismatched": 0,
+    "endpoints_missing_spec": 0
+  }
+}

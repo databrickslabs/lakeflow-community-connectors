@@ -1,0 +1,44 @@
+[
+  {
+    "id": "category_9000000000020__table_9000000000021",
+    "name": "Test Table One",
+    "category": "category_9000000000020",
+    "description": null,
+    "columns": [
+      {
+        "id": "column_9000000000022",
+        "name": "Test Column A",
+        "description": null,
+        "mandatory": true,
+        "type": "text",
+        "typeData": {}
+      },
+      {
+        "id": "column_9000000000023",
+        "name": "Test Column B",
+        "description": "A test list column",
+        "mandatory": false,
+        "type": "list",
+        "typeData": {
+          "listId": "custom.field_9000000000010"
+        }
+      }
+    ]
+  },
+  {
+    "id": "category_9000000000020__table_9000000000024",
+    "name": "Test Table Two",
+    "category": "category_9000000000020",
+    "description": "Second test table",
+    "columns": [
+      {
+        "id": "column_9000000000025",
+        "name": "Test Column C",
+        "description": null,
+        "mandatory": false,
+        "type": "date",
+        "typeData": {}
+      }
+    ]
+  }
+]
