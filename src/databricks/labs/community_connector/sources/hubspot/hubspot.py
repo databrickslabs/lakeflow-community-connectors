@@ -1,4 +1,5 @@
 import json
+import math
 import time
 from datetime import datetime, timezone
 from typing import Dict, Iterator, List, Tuple
@@ -15,9 +16,31 @@ from pyspark.sql.types import (
 )
 
 from databricks.labs.community_connector.interface import LakeflowConnect
+from databricks.labs.community_connector.sources.hubspot.hubspot_associations import (
+    HubspotAssociations,
+)
+
+HUBSPOT_SCHEMA_ROUTES = (
+    "/crm-object-schemas/2026-09/schemas",
+    "/crm/v3/schemas",
+)
+HUBSPOT_SCHEMA_MAX_RETRIES = 5
+HUBSPOT_SCHEMA_MAX_BACKOFF_S = 30.0
 
 
 class HubspotLakeflowConnect(LakeflowConnect):
+    _STANDARD_OBJECT_TYPES = {
+        "contacts": "0-1",
+        "companies": "0-2",
+        "deals": "0-3",
+        "tickets": "0-5",
+        "calls": "0-48",
+        "emails": "0-49",
+        "meetings": "0-47",
+        "tasks": "0-27",
+        "notes": "0-46",
+    }
+
     def __init__(self, options: dict) -> None:
         self.access_token = options["access_token"]
         self.base_url = "https://api.hubapi.com"
@@ -29,6 +52,9 @@ class HubspotLakeflowConnect(LakeflowConnect):
         self._schema_cache = {}
         # Cache for table metadata
         self._metadata_cache = {}
+        self._custom_objects = None
+        self._custom_object_types = {}
+        self._custom_object_configs = {}
 
         # Freeze the upper cursor bound at init time so read_table returns a
         # stable cursor across microbatches in a single Trigger.AvailableNow
@@ -117,6 +143,54 @@ class HubspotLakeflowConnect(LakeflowConnect):
             "associations": [],
             "supports_deletes": False,  # Custom objects don't support archived queries by default
         }
+        self._associations = HubspotAssociations(
+            self.base_url,
+            self._post_association_read,
+            get=self._get_association_page,
+        )
+
+    def _post_association_read(
+        self, kind: str, url: str, body: dict, min_interval: float
+    ) -> dict:
+        """POST to HubSpot's idempotent association batch-read endpoint."""
+        del kind, min_interval
+        response = requests.post(
+            url, headers=self.auth_header, json=body, timeout=60
+        )
+        if response.status_code not in (200, 207):
+            raise RuntimeError(
+                f"HubSpot association POST failed (status={response.status_code})"
+            )
+        data = response.json()
+        if not isinstance(data, dict):
+            raise RuntimeError("Malformed HubSpot association response")
+        return data
+
+    def _get_association_page(
+        self, kind: str, url: str, params: dict, min_interval: float
+    ) -> dict:
+        """GET one association page without exposing response bodies in errors."""
+        del kind, min_interval
+        try:
+            response = requests.get(
+                url,
+                headers=self.auth_header,
+                params=params,
+                timeout=60,
+            )
+        except requests.RequestException:
+            raise RuntimeError("HubSpot association GET request failed") from None
+        if response.status_code != 200:
+            raise RuntimeError(
+                f"HubSpot association GET failed (status={response.status_code})"
+            )
+        try:
+            data = response.json()
+        except ValueError:
+            raise RuntimeError("Malformed HubSpot association GET JSON") from None
+        if not isinstance(data, dict):
+            raise RuntimeError("Malformed HubSpot association GET response")
+        return data
 
     def list_tables(self) -> list[str]:
         """
@@ -136,45 +210,202 @@ class HubspotLakeflowConnect(LakeflowConnect):
         ]
 
         # Add dynamic discovery of custom objects
-        try:
-            custom_objects = self._discover_custom_objects()
-            standard_tables.extend(custom_objects)
-        except Exception as e:
-            print(f"Warning: Could not discover custom objects: {e}")
+        standard_tables.extend(self._discover_custom_objects())
 
         return standard_tables
+
+    @staticmethod
+    def _schema_retry_delay(response, attempt: int) -> float:
+        retry_after = (getattr(response, "headers", None) or {}).get("Retry-After")
+        if retry_after is not None:
+            try:
+                seconds = float(retry_after)
+                if math.isfinite(seconds) and seconds >= 0:
+                    return min(seconds, HUBSPOT_SCHEMA_MAX_BACKOFF_S)
+            except (TypeError, ValueError):
+                pass
+        return min(2.0 ** attempt, HUBSPOT_SCHEMA_MAX_BACKOFF_S)
+
+    def _get_custom_schemas(self):
+        last_status = None
+        for route_index, route in enumerate(HUBSPOT_SCHEMA_ROUTES):
+            url = self.base_url + route
+            for attempt in range(HUBSPOT_SCHEMA_MAX_RETRIES + 1):
+                try:
+                    response = requests.get(
+                        url, headers=self.auth_header, timeout=60
+                    )
+                except (requests.ConnectionError, requests.Timeout) as error:
+                    if attempt < HUBSPOT_SCHEMA_MAX_RETRIES:
+                        time.sleep(self._schema_retry_delay(None, attempt))
+                        continue
+                    raise RuntimeError(
+                        "HubSpot schema discovery request failed"
+                    ) from error
+                last_status = response.status_code
+                if last_status in {200, 403}:
+                    return response
+                if last_status in {404, 410} and route_index == 0:
+                    break
+                if last_status == 429 or 500 <= last_status < 600:
+                    if attempt < HUBSPOT_SCHEMA_MAX_RETRIES:
+                        time.sleep(self._schema_retry_delay(response, attempt))
+                        continue
+                raise RuntimeError(
+                    f"HubSpot schema discovery failed: HTTP {last_status}"
+                )
+        raise RuntimeError(f"HubSpot schema discovery failed: HTTP {last_status}")
 
     def _discover_custom_objects(self) -> List[str]:
         """
         Discover custom objects from HubSpot CRM schemas API
         """
-        try:
-            url = f"{self.base_url}/crm/v3/schemas"
-            resp = requests.get(url, headers=self.auth_header, timeout=60)
-
-            if resp.status_code != 200:
-                return []
-
-            data = resp.json()
-            custom_objects = []
-
-            # Extract custom object names
-            for schema in data.get("results", []):
-                object_type = schema.get("objectTypeId", "")
-                name = schema.get("name", "")
-
-                # Skip standard objects, only include custom ones
-                if object_type not in ["0-1", "0-2", "0-3", "0-5"] and name:
-                    custom_objects.append(name.lower())
-
-            return custom_objects
-        except Exception as e:
-            print(f"Error discovering custom objects: {e}")
+        if self._custom_objects is not None:
+            return list(self._custom_objects)
+        resp = self._get_custom_schemas()
+        if resp.status_code == 403:
+            self._custom_objects = []
             return []
+        if resp.status_code != 200:
+            raise RuntimeError(
+                f"HubSpot schema discovery failed: HTTP {resp.status_code}"
+            )
+        schemas = resp.json().get("results")
+        if not isinstance(schemas, list):
+            raise RuntimeError("Malformed HubSpot schema discovery results")
+
+        names_by_type = {value: name for name, value in self._STANDARD_OBJECT_TYPES.items()}
+        custom_types = {}
+        for schema in schemas:
+            if not isinstance(schema, dict):
+                raise RuntimeError("Malformed HubSpot custom schema")
+            object_type = schema.get("objectTypeId")
+            name = schema.get("name")
+            if object_type in self._STANDARD_OBJECT_TYPES.values():
+                continue
+            if (
+                not isinstance(object_type, str)
+                or not object_type.startswith("2-")
+                or not isinstance(name, str)
+                or not name
+            ):
+                raise RuntimeError("HubSpot custom schema requires name and objectTypeId")
+            alias = name.lower()
+            if (
+                alias in self._object_config
+                or alias in custom_types
+                or object_type in names_by_type
+            ):
+                raise RuntimeError("HubSpot custom schema has a conflicting identity")
+            custom_types[alias] = object_type
+            names_by_type[object_type] = alias
+
+        configs = {
+            name: {**config, "associations": list(config["associations"])}
+            for name, config in self._object_config.items()
+        }
+        configs.update(
+            {
+                name: {
+                    **self._default_object_config,
+                    "associations": [],
+                    "supports_deletes": True,
+                }
+                for name in custom_types
+            }
+        )
+        reserved = {"id", "createdat", "updatedat", "archived", "properties"}
+        discovered = {name: set() for name in configs}
+        for schema in schemas:
+            definitions = schema.get("associations", [])
+            if not isinstance(definitions, list):
+                raise RuntimeError("Malformed HubSpot association definitions")
+            for definition in definitions:
+                if not isinstance(definition, dict):
+                    raise RuntimeError("Malformed HubSpot association definition")
+                source = names_by_type.get(definition.get("fromObjectTypeId"))
+                target = names_by_type.get(definition.get("toObjectTypeId"))
+                if source is None or target is None:
+                    # HubSpot auto-creates association definitions between a new
+                    # custom object and internal object types the connector does
+                    # not model (for example 0-18 communication, 0-116 postal
+                    # mail, 0-51 conversation session, 0-4 engagement). There is
+                    # no table to attach an association column to, so skip the
+                    # edge instead of failing discovery for every table.
+                    unresolved = [
+                        value for value, resolved in (
+                            (definition.get("fromObjectTypeId"), source),
+                            (definition.get("toObjectTypeId"), target),
+                        ) if resolved is None
+                    ]
+                    if all(
+                        isinstance(value, str) and value.startswith("0-")
+                        for value in unresolved
+                    ):
+                        continue
+                    # An unresolved custom type means a schema was dropped or the
+                    # account is mid-provisioning; do not silently lose the edge.
+                    raise RuntimeError("Unsupported HubSpot association object type")
+                if target.lower() in reserved:
+                    raise RuntimeError(
+                        "HubSpot association column conflicts with a base field"
+                    )
+                discovered[source].add(target)
+        for name, targets in discovered.items():
+            configs[name]["associations"].extend(
+                sorted(targets - set(configs[name]["associations"]))
+            )
+
+        self._custom_object_types = custom_types
+        self._custom_object_configs = {
+            name: configs[name] for name in custom_types
+        }
+        self._object_config = {
+            name: configs[name] for name in self._object_config
+        }
+        self._custom_objects = list(custom_types)
+        return list(self._custom_objects)
+
+    def _get_api_object_type(self, table_name: str) -> str:
+        """Address custom types by objectTypeId while preserving table aliases."""
+        if table_name not in self._object_config:
+            self._discover_custom_objects()
+        return self._custom_object_types.get(table_name, table_name)
 
     def _get_object_config(self, table_name: str) -> Dict:
         """Get configuration for a specific object type"""
-        return self._object_config.get(table_name, self._default_object_config)
+        return self._object_config.get(
+            table_name,
+            self._custom_object_configs.get(table_name, self._default_object_config),
+        )
+
+    @staticmethod
+    def _association_sync_mode(table_options: Dict[str, str] | None) -> str:
+        mode = (table_options or {}).get("association_sync_mode", "incremental")
+        if mode not in ("incremental", "full_refresh"):
+            raise ValueError(
+                "association_sync_mode must be incremental or full_refresh"
+            )
+        return mode
+
+    @staticmethod
+    def _association_value_mode(table_options: Dict[str, str] | None) -> str:
+        mode = (table_options or {}).get("association_value_mode", "ids")
+        if mode not in ("ids", "typed"):
+            raise ValueError("association_value_mode must be ids or typed")
+        return mode
+
+    def _association_cache_key(
+        self, table_name: str, table_options: Dict[str, str] | None
+    ) -> tuple:
+        options = table_options or {}
+        selected = tuple(self._get_associations_for_object(table_name, options))
+        return (
+            table_name,
+            selected,
+            self._association_sync_mode(options),
+            self._association_value_mode(options),
+        )
 
     def get_table_schema(
         self, table_name: str, table_options: Dict[str, str]
@@ -195,15 +426,15 @@ class HubspotLakeflowConnect(LakeflowConnect):
                 f"Supported tables are: {supported_tables}"
             )
 
-        # Check cache first
-        if table_name in self._schema_cache:
-            return self._schema_cache[table_name]
+        cache_key = self._association_cache_key(table_name, table_options)
+        if cache_key in self._schema_cache:
+            return self._schema_cache[cache_key]
 
         # Discover schema via API
-        schema = self._discover_table_schema(table_name)
+        schema = self._discover_table_schema(table_name, table_options)
 
         # Cache the result
-        self._schema_cache[table_name] = schema
+        self._schema_cache[cache_key] = schema
 
         return schema
 
@@ -248,18 +479,21 @@ class HubspotLakeflowConnect(LakeflowConnect):
             )
 
         # Check cache first
-        if table_name in self._metadata_cache:
-            return self._metadata_cache[table_name]
+        cache_key = self._association_cache_key(table_name, table_options)
+        if cache_key in self._metadata_cache:
+            return self._metadata_cache[cache_key]
 
         # Get metadata from object configuration
-        metadata = self._get_table_metadata(table_name)
+        metadata = self._get_table_metadata(table_name, table_options)
 
         # Cache the result
-        self._metadata_cache[table_name] = metadata
+        self._metadata_cache[cache_key] = metadata
 
         return metadata
 
-    def _discover_table_schema(self, table_name: str) -> StructType:
+    def _discover_table_schema(
+        self, table_name: str, table_options: Dict[str, str] | None = None
+    ) -> StructType:
         """
         Discover table schema by calling HubSpot Properties API.
 
@@ -270,9 +504,11 @@ class HubspotLakeflowConnect(LakeflowConnect):
             StructType representing the table schema
         """
         # All CRM objects follow the same schema pattern
-        return self._discover_crm_object_schema(table_name)
+        return self._discover_crm_object_schema(table_name, table_options)
 
-    def _get_table_metadata(self, table_name: str) -> dict:
+    def _get_table_metadata(
+        self, table_name: str, table_options: Dict[str, str] | None = None
+    ) -> dict:
         """
         Get metadata for a table based on object configuration.
         """
@@ -281,21 +517,28 @@ class HubspotLakeflowConnect(LakeflowConnect):
         # Get property names and cursor property field for API calls
         properties = self._get_object_properties(table_name)
         property_names = [prop["name"] for prop in properties]
+        associations = self._get_associations_for_object(table_name, table_options)
+        association_value_mode = self._association_value_mode(table_options)
 
         # Use cdc_with_deletes only for tables that support archived queries
         supports_deletes = config.get("supports_deletes", False)
         ingestion_type = "cdc_with_deletes" if supports_deletes else "cdc"
+        if self._association_sync_mode(table_options) == "full_refresh":
+            ingestion_type = "snapshot"
 
         return {
             "primary_keys": config["primary_keys"],
             "cursor_field": config["cursor_field"],
             "cursor_property_field": config["cursor_property_field"],
             "property_names": property_names,
-            "associations": config.get("associations", []),
+            "associations": associations,
+            "association_value_mode": association_value_mode,
             "ingestion_type": ingestion_type,
         }
 
-    def _discover_crm_object_schema(self, table_name: str) -> StructType:
+    def _discover_crm_object_schema(
+        self, table_name: str, table_options: Dict[str, str] | None = None
+    ) -> StructType:
         """
         Discover CRM object schema using HubSpot Properties API.
         Works for contacts, companies, deals, tickets, and custom objects.
@@ -312,9 +555,14 @@ class HubspotLakeflowConnect(LakeflowConnect):
             StructField("archived", BooleanType(), True),
         ]
 
-        # Add association fields based on configuration
-        for association in config["associations"]:
-            base_fields.append(StructField(association, ArrayType(StringType()), True))
+        associations = self._get_associations_for_object(table_name, table_options)
+        association_type = (
+            self._typed_association_type()
+            if self._association_value_mode(table_options) == "typed"
+            else ArrayType(StringType(), True)
+        )
+        for association in associations:
+            base_fields.append(StructField(association, association_type, True))
 
         # Build nested properties schema based on API response
         properties_fields = []
@@ -338,16 +586,34 @@ class HubspotLakeflowConnect(LakeflowConnect):
 
         return schema
 
-    def _get_associations_for_object(self, table_name: str) -> List[str]:
-        """Get associations to include for the given object type"""
+    def _get_associations_for_object(
+        self, table_name: str, table_options: Dict[str, str] | None = None
+    ) -> List[str]:
+        """Return all, none, or a validated named subset of associations."""
         config = self._get_object_config(table_name)
-        return config["associations"]
+        available = list(config["associations"])
+        options = table_options or {}
+        if "associations" not in options:
+            return available
+        raw = options["associations"]
+        if not isinstance(raw, str):
+            raise ValueError("associations must be a comma-separated string")
+        selected = [value.strip() for value in raw.split(",") if value.strip()]
+        if len(selected) != len(set(selected)):
+            raise ValueError("associations contains duplicate names")
+        unknown = sorted(set(selected) - set(available))
+        if unknown:
+            raise ValueError(
+                f"Unknown associations for {table_name}: {', '.join(unknown)}"
+            )
+        return selected
 
     def _get_object_properties(self, object_type: str) -> List[Dict]:
         """
         Fetch object properties from HubSpot Properties API
         """
-        url = f"{self.base_url}/properties/v2/{object_type}/properties"
+        api_type = self._get_api_object_type(object_type)
+        url = f"{self.base_url}/crm/properties/2026-09/{api_type}"
 
         try:
             resp = requests.get(url, headers=self.auth_header, timeout=60)
@@ -357,7 +623,7 @@ class HubspotLakeflowConnect(LakeflowConnect):
                     f"{resp.status_code} {resp.text}"
                 )
 
-            return resp.json()
+            return resp.json()["results"]
         except Exception as e:
             # Re-raise (don't return an error dict): callers iterate this as a
             # list of property dicts, so a dict here turns a real API error into
@@ -411,6 +677,9 @@ class HubspotLakeflowConnect(LakeflowConnect):
         is_incremental = (
             start_offset is not None and start_offset.get("updatedAt") is not None
         )
+        if self._association_sync_mode(table_options) == "full_refresh":
+            is_incremental = False
+            start_offset = {}
 
         return self._read_data(
             table_name,
@@ -533,6 +802,7 @@ class HubspotLakeflowConnect(LakeflowConnect):
         property_names = metadata.get("property_names", [])
         cursor_property_field = metadata.get("cursor_property_field")
         associations = metadata.get("associations", [])
+        association_value_mode = metadata.get("association_value_mode", "ids")
 
         # Only cap on the incremental path — full-refresh snapshots need
         # to drain everything in a single call to keep the snapshot atomic.
@@ -566,8 +836,13 @@ class HubspotLakeflowConnect(LakeflowConnect):
             if not records:
                 break
 
+            self._hydrate_associations(
+                table_name, records, associations, association_value_mode
+            )
             # Transform records
-            transformed_records = self._transform_records(records, table_name)
+            transformed_records = self._transform_records(
+                records, table_name, associations, association_value_mode
+            )
             all_records.extend(transformed_records)
 
             # Update latest timestamp
@@ -595,6 +870,35 @@ class HubspotLakeflowConnect(LakeflowConnect):
         offset = {"updatedAt": latest_updated} if latest_updated else {}
         return all_records, offset
 
+    def _hydrate_associations(
+        self,
+        table_name: str,
+        records: List[Dict],
+        targets: List[str],
+        association_value_mode: str = "ids",
+    ) -> None:
+        if not targets or not records:
+            return
+        from_type = self._get_api_object_type(table_name)
+        parent_ids = [str(record["id"]) for record in records]
+        with_types = association_value_mode == "typed"
+        for target in targets:
+            target_type = self._get_api_object_type(target)
+            links = self._associations.read(
+                from_type,
+                target_type,
+                parent_ids,
+                **({"with_types": True} if with_types else {}),
+            )
+            for record in records:
+                record["associations"] = record.get("associations") or {}
+                values = links[str(record["id"])]
+                record["associations"][target] = {
+                    "results": values if with_types else [
+                        {"id": value} for value in values
+                    ]
+                }
+
     def _fetch_full_refresh_batch(
         self,
         table_name: str,
@@ -605,14 +909,14 @@ class HubspotLakeflowConnect(LakeflowConnect):
     ):
         """Fetch a batch of records using full refresh API"""
         archived_param = "true" if archived else "false"
-        url = f"{self.base_url}/crm/v3/objects/{table_name}?limit=100&archived={archived_param}"
+        api_type = self._get_api_object_type(table_name)
+        url = f"{self.base_url}/crm/objects/2026-09/{api_type}?limit=100&archived={archived_param}"
 
         if after:
             url += f"&after={after}"
         if property_names:
             url += f"&properties={','.join(property_names)}"
-        if associations:
-            url += f"&associations={','.join(associations)}"
+        # Associations are read separately so each parent can be fully paged.
 
         resp = requests.get(url, headers=self.auth_header, timeout=60)
         if resp.status_code != 200:
@@ -668,7 +972,8 @@ class HubspotLakeflowConnect(LakeflowConnect):
         if after:
             search_body["after"] = after
 
-        url = f"{self.base_url}/crm/v3/objects/{table_name}/search"
+        api_type = self._get_api_object_type(table_name)
+        url = f"{self.base_url}/crm/objects/2026-09/{api_type}/search"
         resp = requests.post(url, headers=self.auth_header, json=search_body, timeout=60)
 
         if resp.status_code != 200:
@@ -689,11 +994,28 @@ class HubspotLakeflowConnect(LakeflowConnect):
 
         return records, next_after, latest_in_batch
 
-    def _transform_records(self, records: List[Dict], table_name: str) -> List[Dict]:
+    def _transform_records(
+        self,
+        records: List[Dict],
+        table_name: str,
+        associations: List[str] | None = None,
+        association_value_mode: str = "ids",
+    ) -> List[Dict]:
         """Transform HubSpot records by flattening properties and associations"""
-        return [self._transform_single_record(record, table_name) for record in records]
+        return [
+            self._transform_single_record(
+                record, table_name, associations, association_value_mode
+            )
+            for record in records
+        ]
 
-    def _transform_single_record(self, record: Dict, table_name: str) -> Dict:
+    def _transform_single_record(
+        self,
+        record: Dict,
+        table_name: str,
+        associations: List[str] | None = None,
+        association_value_mode: str = "ids",
+    ) -> Dict:
         """Transform a single HubSpot record"""
         transformed_record = {}
 
@@ -708,7 +1030,15 @@ class HubspotLakeflowConnect(LakeflowConnect):
             transformed_record["properties"] = self._sanitize_properties(record["properties"])
 
         # Handle associations
-        transformed_record.update(self._extract_associations(record, table_name))
+        transformed_record.update(
+            self._extract_associations(
+                record,
+                associations
+                if associations is not None
+                else self._get_associations_for_object(table_name),
+                association_value_mode,
+            )
+        )
 
         return transformed_record
 
@@ -722,11 +1052,28 @@ class HubspotLakeflowConnect(LakeflowConnect):
             return properties
         return {k: (None if v == "" else v) for k, v in properties.items()}
 
-    def _extract_associations(self, record: Dict, table_name: str) -> Dict:
-        """Extract association IDs from record"""
+    @staticmethod
+    def _typed_association_type() -> ArrayType:
+        return ArrayType(
+            StructType(
+                [
+                    StructField("id", StringType(), True),
+                    StructField("typeId", LongType(), True),
+                    StructField("category", StringType(), True),
+                    StructField("label", StringType(), True),
+                ]
+            ),
+            True,
+        )
+
+    @staticmethod
+    def _extract_associations(
+        record: Dict,
+        expected_associations: List[str],
+        association_value_mode: str = "ids",
+    ) -> Dict:
+        """Extract association IDs or typed edge values from a hydrated record."""
         associations_data = record.get("associations", {})
-        config = self._get_object_config(table_name)
-        expected_associations = config["associations"]
         result = {}
 
         for association_type in expected_associations:
@@ -734,13 +1081,26 @@ class HubspotLakeflowConnect(LakeflowConnect):
             if association_type in associations_data:
                 assoc_data = associations_data[association_type]
                 if isinstance(assoc_data, dict) and "results" in assoc_data:
-                    association_list = [
-                        item.get("id", "") for item in assoc_data["results"]
-                    ]
+                    values = assoc_data["results"]
                 elif isinstance(assoc_data, list):
+                    values = assoc_data
+                else:
+                    values = []
+                if association_value_mode == "typed":
+                    association_list = [
+                        {
+                            "id": item.get("id"),
+                            "typeId": item.get("typeId"),
+                            "category": item.get("category"),
+                            "label": item.get("label"),
+                        }
+                        for item in values
+                        if isinstance(item, dict)
+                    ]
+                else:
                     association_list = [
                         str(item) if not isinstance(item, dict) else item.get("id", "")
-                        for item in assoc_data
+                        for item in values
                     ]
 
             result[association_type] = association_list
@@ -750,7 +1110,7 @@ class HubspotLakeflowConnect(LakeflowConnect):
     def test_connection(self) -> dict:
         """Test the connection to HubSpot API"""
         try:
-            url = f"{self.base_url}/crm/v3/objects/contacts?limit=1"
+            url = f"{self.base_url}/crm/objects/2026-09/contacts?limit=1"
             resp = requests.get(url, headers=self.auth_header, timeout=60)
 
             if resp.status_code == 200:
