@@ -1,0 +1,44 @@
+{
+    "organisations": {},
+    "employees": {
+        "organisation_id": "your-org-id"
+    },
+    "certifications": {
+        "organisation_id": "your-org-id"
+    },
+    "cost_centres": {
+        "organisation_id": "your-org-id"
+    },
+    "custom_fields": {
+        "organisation_id": "your-org-id"
+    },
+    "employing_entities": {
+        "organisation_id": "your-org-id"
+    },
+    "leave_categories": {
+        "organisation_id": "your-org-id"
+    },
+    "leave_requests": {
+        "organisation_id": "your-org-id",
+        "start_date": "2026-01-01"
+    },
+    "policies": {
+        "organisation_id": "your-org-id"
+    },
+    "roles": {
+        "organisation_id": "your-org-id"
+    },
+    "teams": {
+        "organisation_id": "your-org-id"
+    },
+    "timesheet_entries": {
+        "organisation_id": "your-org-id",
+        "start_date": "2026-01-01"
+    },
+    "work_locations": {
+        "organisation_id": "your-org-id"
+    },
+    "work_sites": {
+        "organisation_id": "your-org-id"
+    }
+}
