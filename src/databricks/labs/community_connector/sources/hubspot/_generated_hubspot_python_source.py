@@ -7,14 +7,15 @@
 
 from abc import ABC, abstractmethod
 from datetime import datetime, timezone
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 from typing import (
     Any,
+    Callable,
     Dict,
     Iterator,
     List,
+    Optional,
     Sequence,
-    Tuple,
 )
 import json
 import time
@@ -47,8 +48,13 @@ from pyspark.sql.types import (
     VariantType,
     VariantVal,
 )
+from urllib.parse import quote
 import base64
+import hashlib
+import math
 import requests
+import sqlite3
+import tempfile
 
 
 def register_lakeflow_source(spark):
@@ -597,10 +603,1093 @@ def register_lakeflow_source(spark):
 
 
     ########################################################
+    # src/databricks/labs/community_connector/sources/hubspot/hubspot_associations.py
+    ########################################################
+
+    ASSOCIATION_BATCH_READ_SIZE = 1000
+    ASSOCIATION_MIN_INTERVAL_S = 0.11
+    ASSOCIATION_MAX_RETRIES = 5
+    ASSOCIATION_MAX_BACKOFF_S = 30.0
+    ASSOCIATION_SAFE_ERROR_LABELS = frozenset({
+        "VALIDATION_ERROR", "OBJECT_NOT_FOUND", "MISSING_SCOPES",
+        "INVALID_AUTHENTICATION", "RATE_LIMITS", "INTERNAL_ERROR",
+        "FORBIDDEN", "CONFLICT",
+    })
+    ASSOCIATION_TYPE_CATEGORIES = frozenset({
+        "HUBSPOT_DEFINED", "INTEGRATOR_DEFINED", "USER_DEFINED", "WORK",
+    })
+
+
+    def _association_error_labels(errors: list) -> tuple[str, str]:
+        """Emit only fixed diagnostic labels, never arbitrary API error text."""
+        categories, codes = set(), set()
+
+        def label(value):
+            if isinstance(value, str) and value in ASSOCIATION_SAFE_ERROR_LABELS:
+                return value
+            return "UNKNOWN"
+
+        for error in errors:
+            if not isinstance(error, dict):
+                categories.add("UNKNOWN")
+                continue
+            if "category" in error:
+                categories.add(label(error["category"]))
+            details = error.get("errors", [])
+            if not isinstance(details, list):
+                codes.add("UNKNOWN")
+                continue
+            for detail in details:
+                if isinstance(detail, dict) and "code" in detail:
+                    codes.add(label(detail["code"]))
+                elif not isinstance(detail, dict):
+                    codes.add("UNKNOWN")
+        return "|".join(sorted(categories)) or "NONE", "|".join(sorted(codes)) or "NONE"
+
+
+    def _association_identifier(value, kind: str) -> str:
+        # HubSpot may encode object IDs as JSON numbers or strings. Never coerce
+        # booleans, nulls, containers or fractional numbers into plausible IDs.
+        if isinstance(value, int) and not isinstance(value, bool) and value >= 0:
+            return str(value)
+        if isinstance(value, str) and value and value.strip() == value:
+            return value
+        raise RuntimeError(f"Malformed HubSpot association {kind}")
+
+
+    def _association_edge(kind: dict) -> tuple[int, str, str | None]:
+        """Return a validated association type, category and optional label."""
+        if (
+            not isinstance(kind, dict)
+            or not isinstance(kind.get("typeId"), int)
+            or isinstance(kind.get("typeId"), bool)
+            or kind["typeId"] < 0
+            or kind.get("category") not in ASSOCIATION_TYPE_CATEGORIES
+        ):
+            raise RuntimeError("Malformed HubSpot association type")
+        label = kind.get("label")
+        if label in (None, ""):
+            label = None
+        elif not isinstance(label, str):
+            raise RuntimeError("Malformed HubSpot association type")
+        return kind["typeId"], kind["category"], label
+
+
+    def _association_next_cursor(result: dict):
+        if "paging" not in result:
+            return None
+        paging = result["paging"]
+        if not isinstance(paging, dict):
+            raise RuntimeError("Malformed HubSpot association paging")
+        if "next" not in paging:
+            return None
+        next_page = paging["next"]
+        if not isinstance(next_page, dict) or "after" not in next_page:
+            raise RuntimeError("Malformed HubSpot association next page")
+        return _association_identifier(next_page["after"], "cursor")
+
+
+    class HubspotAssociations:
+        """Read all associations for each requested parent, or raise."""
+
+        def __init__(
+            self,
+            base_url: str,
+            post: Callable[[str, str, dict, float], dict],
+            sleep: Callable[[float], None] = time.sleep,
+            *,
+            get: Callable[[str, str, dict, float], dict] | None = None,
+        ) -> None:
+            self.base_url = base_url.rstrip("/")
+            self._post = post
+            self._sleep = sleep
+            self._get = get
+
+        def read(
+            self,
+            from_type: str,
+            to_type: str,
+            parent_ids: list[str],
+            *,
+            with_types: bool = False,
+        ) -> dict[str, list]:
+            """Return sorted unique target IDs or typed edges.
+
+            Five additional attempts are allowed for each unresolved parent/page.
+            Successful pages reset that budget, so legitimate page counts are unlimited.
+            Non-COMPLETE batches are validated but their results are not committed.
+            """
+            parents = [
+                _association_identifier(parent, "requested parent ID")
+                for parent in parent_ids
+            ]
+            if len(set(parents)) != len(parents):
+                raise RuntimeError("Duplicate HubSpot association requested parent ID")
+            targets = {parent: set() for parent in parents}
+            url = (
+                f"{self.base_url}/crm/associations/2026-09/"
+                f"{from_type}/{to_type}/batch/read"
+            )
+            for start in range(0, len(parents), ASSOCIATION_BATCH_READ_SIZE):
+                pending = dict.fromkeys(parents[start : start + ASSOCIATION_BATCH_READ_SIZE])
+                retries = dict.fromkeys(pending, 0)
+                seen = {parent: set() for parent in pending}
+                while pending:
+                    inputs = [
+                        {"id": parent, **({"after": cursor} if cursor is not None else {})}
+                        for parent, cursor in pending.items()
+                    ]
+                    data = self._post(
+                        "associations",
+                        url,
+                        {"inputs": inputs},
+                        ASSOCIATION_MIN_INTERVAL_S,
+                    )
+                    unresolved = self._advance_batch(
+                        data,
+                        pending,
+                        retries,
+                        seen,
+                        targets,
+                        from_type,
+                        to_type,
+                        with_types,
+                    )
+                    if unresolved:
+                        delay = min(
+                            2.0 ** (max(unresolved) - 1), ASSOCIATION_MAX_BACKOFF_S
+                        )
+                        self._sleep(delay)
+            if not with_types:
+                return {parent: sorted(ids) for parent, ids in targets.items()}
+
+            def edge(item):
+                object_id, type_id, category, label = item
+                return {
+                    "id": object_id,
+                    "typeId": type_id,
+                    "category": category,
+                    "label": label,
+                }
+
+            return {
+                parent: sorted(
+                    (edge(item) for item in found),
+                    key=lambda item: (
+                        item["id"],
+                        -1 if item["typeId"] is None else item["typeId"],
+                        item["category"] or "",
+                        item["label"] or "",
+                    ),
+                )
+                for parent, found in targets.items()
+            }
+
+        def _advance_batch(
+            self,
+            data,
+            pending,
+            retries,
+            seen,
+            targets,
+            from_type,
+            to_type,
+            with_types,
+        ) -> list[int]:
+            results = self._validate_results(data, pending, with_types=with_types)
+            errors = data.get("errors", [])
+            error_count = data.get("numErrors", 0)
+            if (
+                not isinstance(errors, list)
+                or isinstance(error_count, bool)
+                or not isinstance(error_count, int)
+                or error_count < 0
+            ):
+                raise RuntimeError("Malformed HubSpot association error envelope")
+            has_errors = bool(errors) or error_count > 0
+            empty = self._empty_association_parents(data)
+            unresolved = []
+            for parent in list(pending):
+                if parent in empty and parent not in results:
+                    del pending[parent]
+                    continue
+                incomplete = (
+                    has_errors
+                    or data.get("status") != "COMPLETE"
+                    or parent not in results
+                )
+                if incomplete:
+                    if retries[parent] >= ASSOCIATION_MAX_RETRIES:
+                        self._reconcile_or_raise(
+                            data,
+                            results,
+                            pending,
+                            targets,
+                            from_type,
+                            to_type,
+                            with_types,
+                        )
+                        return []
+                    retries[parent] += 1
+                    unresolved.append(retries[parent])
+                    continue
+                found, cursor = results[parent]
+                if cursor is not None and cursor in seen[parent]:
+                    raise RuntimeError("Repeated or cyclic HubSpot association cursor")
+                targets[parent].update(found)
+                if cursor is None:
+                    del pending[parent]
+                else:
+                    seen[parent].add(cursor)
+                    pending[parent] = cursor
+                    retries[parent] = 0
+            return unresolved
+
+        def _reconcile_or_raise(
+            self,
+            data,
+            results,
+            pending,
+            targets,
+            from_type,
+            to_type,
+            with_types,
+        ) -> None:
+            if self._get is not None and self._can_reconcile_not_found(data):
+                reconciled = {
+                    parent: self._read_one(
+                        from_type, to_type, parent, with_types=with_types
+                    )
+                    for parent in pending
+                }
+                targets.update(reconciled)
+                pending.clear()
+                return
+            status = data.get("status")
+            valid_statuses = {"COMPLETE", "PENDING", "PROCESSING", "CANCELED"}
+            if not isinstance(status, str) or status not in valid_statuses:
+                status = "MISSING" if status is None else "UNKNOWN"
+            errors = data.get("errors", [])
+            error_count = len(errors) if isinstance(errors, list) else "malformed"
+            categories, codes = _association_error_labels(errors)
+            raise RuntimeError(
+                "Incomplete HubSpot associations: exhausted retries "
+                f"(from_type={from_type}, to_type={to_type}, "
+                f"status={status}, requested={len(pending)}, "
+                f"returned={len(results)}, errors={error_count}, "
+                f"numErrors={data.get('numErrors', 0)}, "
+                f"error_categories={categories}, error_codes={codes})"
+            )
+
+        @staticmethod
+        def _empty_association_parents(data: dict) -> set:
+            """Parents HubSpot explicitly reported as having no associations.
+
+            A parent with no links is not a missing parent: the batch read returns
+            ``status: COMPLETE`` with an ``OBJECT_NOT_FOUND`` error whose
+            ``subCategory`` is ``crm.associations.NO_ASSOCIATIONS_FOUND`` and whose
+            ``context.fromObjectId`` names that parent. Trusting that answer avoids
+            five retries plus two per-parent requests for every association-less
+            record, which otherwise dominates a large snapshot.
+
+            Only the explicit sub-category is trusted. Any other OBJECT_NOT_FOUND
+            (for example a parent that genuinely does not exist) still retries and
+            may still fall back to a per-parent read.
+            """
+            empty = set()
+            errors = data.get("errors")
+            if not isinstance(errors, list):
+                return empty
+            for error in errors:
+                if not isinstance(error, dict):
+                    continue
+                if error.get("category") != "OBJECT_NOT_FOUND":
+                    continue
+                if "NO_ASSOCIATIONS_FOUND" not in str(error.get("subCategory") or ""):
+                    continue
+                context = error.get("context")
+                if not isinstance(context, dict):
+                    continue
+                parents = context.get("fromObjectId")
+                if not isinstance(parents, list):
+                    continue
+                for parent in parents:
+                    if isinstance(parent, str) and parent:
+                        empty.add(parent)
+            return empty
+
+        @staticmethod
+        def _can_reconcile_not_found(data: dict) -> bool:
+            errors = data.get("errors")
+            count = data.get("numErrors")
+            return (
+                data.get("status") == "COMPLETE"
+                and isinstance(data.get("results"), list)
+                and isinstance(errors, list)
+                and bool(errors)
+                and isinstance(count, int)
+                and not isinstance(count, bool)
+                and count == len(errors)
+                and all(
+                    isinstance(error, dict)
+                    and error.get("category") == "OBJECT_NOT_FOUND"
+                    for error in errors
+                )
+            )
+
+        def _read_one(
+            self, from_type: str, to_type: str, parent: str, *, with_types: bool = False
+        ) -> set:
+            base = (
+                f"{self.base_url}/crm/objects/2026-09/"
+                f"{quote(from_type, safe='')}/{quote(parent, safe='')}"
+            )
+            url = f"{base}/associations/{quote(to_type, safe='')}"
+            targets, seen = set(), set()
+            cursor = None
+            while True:
+                params = {"limit": 500, **({"after": cursor} if cursor is not None else {})}
+                data = self._get("associations", url, params, ASSOCIATION_MIN_INTERVAL_S)
+                if (not isinstance(data, dict) or not isinstance(data.get("results"), list)
+                        or any(key in data for key in ("errors", "numErrors", "category"))
+                        or data.get("status", "COMPLETE") != "COMPLETE"):
+                    raise RuntimeError("Malformed HubSpot association GET collection")
+                for result in data["results"]:
+                    if not isinstance(result, dict):
+                        raise RuntimeError("Malformed HubSpot association GET target")
+                    object_id = _association_identifier(result.get("toObjectId"), "GET target ID")
+                    kinds = result.get("associationTypes")
+                    if not isinstance(kinds, list):
+                        raise RuntimeError("Malformed HubSpot association GET target")
+                    if with_types:
+                        if not kinds:
+                            targets.add((object_id, None, None, None))
+                        for kind in kinds:
+                            type_id, category, label = _association_edge(kind)
+                            targets.add((object_id, type_id, category, label))
+                    else:
+                        targets.add(object_id)
+                cursor = _association_next_cursor(data)
+                if cursor is None:
+                    break
+                if cursor in seen:
+                    raise RuntimeError("Repeated or cyclic HubSpot association GET cursor")
+                seen.add(cursor)
+            if not targets:
+                # An empty collection cannot establish that the parent still exists.
+                obj = self._get(
+                    "associations",
+                    base,
+                    {"properties": "hs_object_id", "archived": "false"},
+                    ASSOCIATION_MIN_INTERVAL_S,
+                )
+                if (not isinstance(obj, dict) or obj.get("archived") is not False
+                        or any(key in obj for key in ("errors", "numErrors", "category"))
+                        or obj.get("status", "COMPLETE") != "COMPLETE"
+                        or _association_identifier(obj.get("id"), "GET parent ID") != parent):
+                    raise RuntimeError("Unproven HubSpot association GET parent identity")
+            return targets
+
+        @staticmethod
+        def _validate_results(data, pending: dict, *, with_types: bool = False) -> dict:
+            if not isinstance(data, dict):
+                raise RuntimeError("Malformed HubSpot association batch")
+            results = data.get("results", [])
+            if not isinstance(results, list):
+                raise RuntimeError("Malformed HubSpot association results")
+            parsed = {}
+            for result in results:
+                if not isinstance(result, dict) or not isinstance(result.get("from"), dict):
+                    raise RuntimeError("Malformed HubSpot association parent")
+                parent = _association_identifier(result["from"].get("id"), "parent ID")
+                if parent not in pending or parent in parsed:
+                    raise RuntimeError("Unrequested or duplicate HubSpot association parent")
+                if not isinstance(result.get("to"), list):
+                    raise RuntimeError("Malformed HubSpot association target list")
+                found = set()
+                for target in result["to"]:
+                    if not isinstance(target, dict):
+                        raise RuntimeError("Malformed HubSpot association target")
+                    object_id = _association_identifier(target.get("toObjectId"), "target ID")
+                    validated = []
+                    if with_types:
+                        kinds = target.get("associationTypes")
+                        if kinds is not None and not isinstance(kinds, list):
+                            raise RuntimeError("Malformed HubSpot association type")
+                        validated = [_association_edge(kind) for kind in (kinds or [])]
+                    if with_types:
+                        if not validated:
+                            found.add((object_id, None, None, None))
+                        for type_id, category, label in validated:
+                            found.add((object_id, type_id, category, label))
+                    else:
+                        found.add(object_id)
+                parsed[parent] = (found, _association_next_cursor(result))
+            return parsed
+
+
+    ########################################################
+    # src/databricks/labs/community_connector/sources/hubspot/hubspot_http.py
+    ########################################################
+
+    HUBSPOT_MAX_RETRIES = 5
+    HUBSPOT_MAX_BACKOFF_S = 30.0
+    HUBSPOT_REQUEST_TIMEOUT_S = 60
+    HUBSPOT_RETRIABLE_STATUSES = frozenset({429, 500, 502, 503})
+
+
+    class HubspotHttpClient:
+        """Replay only safe GETs and read-only POSTs after transient failures."""
+
+        def __init__(
+            self,
+            auth_header: dict,
+            sleep: Optional[Callable[[float], None]] = None,
+            throttle: Optional[Callable[[str, float], None]] = None,
+        ) -> None:
+            self._auth_header = auth_header
+            self._sleep = sleep or time.sleep
+            self._external_throttle = throttle
+            self._last_call = {}
+
+        @staticmethod
+        def retry_delay(response, attempt: int) -> float:
+            """Return a finite, bounded delay from Retry-After or exponential backoff."""
+            headers = getattr(response, "headers", None) or {}
+            retry_after = headers.get("Retry-After")
+            if retry_after is not None:
+                try:
+                    seconds = float(retry_after)
+                    if math.isfinite(seconds) and seconds >= 0:
+                        return min(seconds, HUBSPOT_MAX_BACKOFF_S)
+                except (TypeError, ValueError):
+                    pass
+            return min(2.0 ** attempt, HUBSPOT_MAX_BACKOFF_S)
+
+        def _throttle(self, kind: Optional[str], min_interval: float) -> None:
+            if not kind or min_interval <= 0:
+                return
+            if self._external_throttle is not None:
+                self._external_throttle(kind, min_interval)
+                return
+            now = time.monotonic()
+            last = self._last_call.get(kind)
+            if last is not None and now - last < min_interval:
+                self._sleep(min_interval - (now - last))
+            self._last_call[kind] = time.monotonic()
+
+        def _request(
+            self,
+            method: str,
+            url: str,
+            *,
+            operation: str,
+            params: Optional[dict] = None,
+            json_body: Optional[dict] = None,
+            kind: Optional[str] = None,
+            min_interval: float = 0,
+            timeout: int = HUBSPOT_REQUEST_TIMEOUT_S,
+        ):
+            """Issue an idempotent read and retry only bounded transient failures."""
+            send = getattr(requests, method)
+            request_args = {"headers": self._auth_header, "timeout": timeout}
+            if params is not None:
+                request_args["params"] = params
+            if json_body is not None:
+                request_args["json"] = json_body
+
+            for attempt in range(HUBSPOT_MAX_RETRIES + 1):
+                self._throttle(kind, min_interval)
+                try:
+                    response = send(url, **request_args)
+                except requests.RequestException:
+                    if attempt < HUBSPOT_MAX_RETRIES:
+                        self._sleep(min(2.0 ** attempt, HUBSPOT_MAX_BACKOFF_S))
+                        continue
+                    raise RuntimeError(
+                        f"HubSpot {operation} failed after retries (request error)"
+                    ) from None
+
+                if response.status_code in HUBSPOT_RETRIABLE_STATUSES:
+                    if attempt < HUBSPOT_MAX_RETRIES:
+                        self._sleep(self.retry_delay(response, attempt))
+                        continue
+                    raise RuntimeError(
+                        f"HubSpot {operation} failed after retries "
+                        f"(status={response.status_code})"
+                    ) from None
+                return response
+
+            raise RuntimeError(f"HubSpot {operation} exhausted retries")  # pragma: no cover
+
+        def get(self, url: str, *, operation: str, params=None, kind=None, min_interval=0):
+            return self._request(
+                "get", url, operation=operation, params=params,
+                kind=kind, min_interval=min_interval,
+            )
+
+        def post(self, url: str, body: dict, *, operation: str, kind=None, min_interval=0):
+            """POST only to HubSpot Search, batch-read, and list-read endpoints."""
+            return self._request(
+                "post", url, operation=operation, json_body=body,
+                kind=kind, min_interval=min_interval,
+            )
+
+
+    ########################################################
+    # src/databricks/labs/community_connector/sources/hubspot/hubspot_non_crm.py
+    ########################################################
+
+    NON_CRM_TABLES = (
+        "owners", "pipelines", "forms", "contact_lists",
+        "contact_list_memberships", "form_submissions",
+    )
+    NON_CRM_MAX_RETRIES = HUBSPOT_MAX_RETRIES
+    NON_CRM_TIMEOUT_S = HUBSPOT_REQUEST_TIMEOUT_S
+    NON_CRM_MIN_INTERVAL_S = 0.11
+    LEGACY_LIST_PAGE = 250
+    LEGACY_MAP_BATCH = 10_000
+    NON_CRM_CURSOR_HISTORY = 64
+    NON_CRM_MAX_PAGES = 100_000
+    NON_CRM_MAX_CURSOR_BYTES = 4096
+    NON_CRM_PIPELINE_TYPES = {
+        "0-3", "0-5", "0-27", "0-421", "0-410", "0-136", "0-420",
+        "0-123", "0-970", "0-162", "0-115",
+    }
+    NON_CRM_KEYS = {
+        "owners": ["id"], "pipelines": ["objectTypeId", "id"], "forms": ["id"],
+        "contact_lists": ["listId"], "contact_list_memberships": ["listId", "recordId"],
+        "form_submissions": ["formId", "conversionId"],
+    }
+
+
+    def _non_crm_id(value):
+        if isinstance(value, int) and not isinstance(value, bool) and value >= 0:
+            return str(value)
+        if isinstance(value, str) and value and value.strip() == value:
+            return value
+        raise RuntimeError("Malformed HubSpot non-CRM identity or cursor")
+
+
+    def _non_crm_json(value):
+        return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+
+
+    def _non_crm_after(data):
+        if "paging" not in data:
+            return None
+        paging = data["paging"]
+        if not isinstance(paging, dict):
+            raise RuntimeError("Malformed HubSpot non-CRM paging")
+        if "next" not in paging:
+            return None
+        nxt = paging["next"]
+        if not isinstance(nxt, dict) or "after" not in nxt:
+            raise RuntimeError("Malformed HubSpot non-CRM next page")
+        cursor = _non_crm_id(nxt["after"])
+        if len(cursor.encode("utf-8")) > NON_CRM_MAX_CURSOR_BYTES:
+            raise RuntimeError("Malformed HubSpot non-CRM identity or cursor")
+        return cursor
+
+
+    def _non_crm_with_identity(source, field, identity):
+        if field in source:
+            if _non_crm_id(source[field]) != identity:
+                raise RuntimeError("Conflicting HubSpot non-CRM partition identity")
+            return dict(source)
+        return {**source, field: identity}
+
+
+    def _non_crm_fields(names, dtype=None):
+        return [StructField(name, dtype or StringType(), True) for name in names]
+
+
+    class HubspotNonCrm:
+        """Read all partitions and pages before returning a snapshot."""
+
+        _MAX_PAGES = NON_CRM_MAX_PAGES
+        _CURSOR_HISTORY = NON_CRM_CURSOR_HISTORY
+
+        def __init__(self, base_url, auth_header, custom_types: Callable, post: Callable,
+                     sleep: Callable = time.sleep, http=None):
+            self.base_url = base_url.rstrip("/")
+            self.auth_header = auth_header
+            self._custom_types = custom_types
+            self._post = post
+            self._sleep = sleep
+            self._http = http or HubspotHttpClient(auth_header, sleep=sleep)
+
+        @staticmethod
+        def list_tables() -> list[str]:
+            return list(NON_CRM_TABLES)
+
+        @staticmethod
+        def read_table_metadata(table) -> dict:
+            if table not in NON_CRM_KEYS:
+                raise ValueError("Unknown HubSpot non-CRM table")
+            return {"primary_keys": list(NON_CRM_KEYS[table]), "cursor_field": None,
+                    "ingestion_type": "snapshot"}
+
+        @staticmethod
+        def get_table_schema(table) -> StructType:
+            HubspotNonCrm.read_table_metadata(table)
+            team = StructType(_non_crm_fields(["id", "name"]) +
+                              _non_crm_fields(["primary"], BooleanType()))
+            stage = StructType(_non_crm_fields(["id", "label", "createdAt", "updatedAt"]) +
+                               _non_crm_fields(["displayOrder"], LongType()) +
+                               _non_crm_fields(["metadata"], MapType(StringType(), StringType())))
+            value = StructType(_non_crm_fields(["name", "value"]))
+            fields = {
+                "owners": _non_crm_fields([
+                    "id", "email", "firstName", "lastName", "type", "userId",
+                    "userIdIncludingInactive", "createdAt", "updatedAt",
+                ]) + _non_crm_fields(["archived"], BooleanType()) +
+                    _non_crm_fields(["teams"], ArrayType(team)),
+                "pipelines": _non_crm_fields([
+                    "objectTypeId", "id", "label", "createdAt", "updatedAt",
+                ]) + _non_crm_fields(["displayOrder"], LongType()) +
+                    _non_crm_fields(["archived"], BooleanType()) +
+                    _non_crm_fields(["stages"], ArrayType(stage)),
+                "forms": _non_crm_fields([
+                    "id", "name", "formType", "createdAt", "updatedAt", "archivedAt",
+                    "configuration", "displayOptions", "fieldGroups", "legalConsentOptions",
+                ]) + _non_crm_fields(["archived"], BooleanType()),
+                "contact_lists": _non_crm_fields([
+                    "listId", "legacyListId", "name", "objectTypeId",
+                    "processingType", "processingStatus",
+                    "createdAt", "updatedAt", "additionalProperties",
+                ]) + _non_crm_fields(["listVersion"], LongType()),
+                "contact_list_memberships": _non_crm_fields([
+                    "listId", "recordId", "membershipTimestamp",
+                ]),
+                "form_submissions": _non_crm_fields(["formId", "conversionId", "pageUrl"]) +
+                    _non_crm_fields(["submittedAt"], LongType()) +
+                    _non_crm_fields(["values"], ArrayType(value)),
+            }
+            return StructType(fields[table] + _non_crm_fields(["payload"]))
+
+        def _get(self, route, params):
+            response = self._http.get(
+                self.base_url + route,
+                operation="non-CRM GET",
+                params=params,
+                kind="non_crm",
+                min_interval=NON_CRM_MIN_INTERVAL_S,
+            )
+            if response.status_code != 200:
+                raise RuntimeError(f"HubSpot non-CRM HTTP {response.status_code}")
+            try:
+                return response.json()
+            except ValueError:
+                raise RuntimeError("Malformed HubSpot non-CRM JSON") from None
+
+        @staticmethod
+        def _page_state():
+            return {"pages": 0, "recent_hashes": [], "recent_set": set()}
+
+        def _page_batches(
+            self,
+            route,
+            params=None,
+            body=None,
+            state=None,
+            records_key="results",
+            offset_paging=False,
+        ):
+            cursor = None
+            offset = 0
+            state = state or self._page_state()
+            while True:
+                if state["pages"] >= self._MAX_PAGES:
+                    raise RuntimeError("HubSpot non-CRM snapshot exceeded the page limit")
+                arguments = dict(body if body is not None else (params or {}))
+                if offset_paging and offset:
+                    arguments["offset"] = offset
+                elif cursor is not None:
+                    arguments["after"] = cursor
+                if body is None:
+                    data = self._get(route, arguments)
+                else:
+                    data = self._post("non_crm", self.base_url + route, arguments,
+                                      NON_CRM_MIN_INTERVAL_S)
+                if not isinstance(data, dict) or not isinstance(data.get(records_key), list):
+                    raise RuntimeError("Malformed HubSpot non-CRM results")
+                if any(not isinstance(row, dict) for row in data[records_key]):
+                    raise RuntimeError("Malformed HubSpot non-CRM result")
+                if data.get("errors") or data.get("status") in {"PENDING", "PROCESSING", "CANCELED"}:
+                    raise RuntimeError("Incomplete HubSpot non-CRM page")
+                state["pages"] += 1
+                if offset_paging:
+                    has_more, next_offset = self._list_page_offset(
+                        data, data[records_key], offset
+                    )
+                    next_cursor = None
+                else:
+                    has_more = False
+                    next_offset = 0
+                    next_cursor = _non_crm_after(data)
+                if not offset_paging and next_cursor is not None:
+                    cursor_hash = hashlib.sha256(
+                        f"{route}\0{next_cursor}".encode("utf-8")
+                    ).hexdigest()
+                    if cursor_hash in state["recent_set"]:
+                        raise RuntimeError("Repeated or cyclic HubSpot non-CRM cursor")
+                    state["recent_set"].add(cursor_hash)
+                    state["recent_hashes"].append(cursor_hash)
+                    if len(state["recent_hashes"]) > self._CURSOR_HISTORY:
+                        state["recent_set"].remove(state["recent_hashes"].pop(0))
+                yield data[records_key]
+                if offset_paging:
+                    if not has_more:
+                        return
+                    offset = next_offset
+                    continue
+                if next_cursor is None:
+                    return
+                cursor = next_cursor
+
+        @staticmethod
+        def _list_page_offset(data, records, offset):
+            has_more = data.get("hasMore")
+            next_offset = data.get("offset")
+            total = data.get("total")
+            valid_offset = (
+                isinstance(next_offset, int)
+                and not isinstance(next_offset, bool)
+                and next_offset >= 0
+            )
+            valid_total = (
+                isinstance(total, int)
+                and not isinstance(total, bool)
+                and total >= 0
+            )
+            if not isinstance(has_more, bool) or not valid_offset or not valid_total:
+                raise RuntimeError("Malformed HubSpot list offset paging")
+            if has_more and (not records or next_offset <= offset):
+                raise RuntimeError("Non-advancing HubSpot list offset")
+            return has_more, next_offset
+
+        def _pages(
+            self,
+            route,
+            params=None,
+            body=None,
+            records_key="results",
+            offset_paging=False,
+        ):
+            rows = []
+            for page in self._page_batches(
+                route,
+                params,
+                body,
+                records_key=records_key,
+                offset_paging=offset_paging,
+            ):
+                rows.extend(page)
+            return rows
+
+        def _membership_rows(self):
+            state = self._page_state()
+            inventory_body = {
+                "objectTypeId": "0-1",
+                "processingTypes": ["MANUAL", "DYNAMIC", "SNAPSHOT"],
+                "additionalProperties": [],
+                # Keep only the current list parent while its membership pages drain.
+                "count": 1,
+            }
+            with tempfile.TemporaryDirectory(prefix="hubspot-membership-") as directory:
+                seen = sqlite3.connect(f"{directory}/seen.sqlite3")
+                try:
+                    seen.execute("CREATE TABLE parents (list_id TEXT PRIMARY KEY)")
+                    seen.execute(
+                        "CREATE TABLE memberships ("
+                        "list_id TEXT, record_id TEXT, PRIMARY KEY (list_id, record_id))"
+                    )
+                    for inventory_page in self._page_batches(
+                        "/crm/lists/2026-09/search",
+                        body=inventory_body,
+                        state=state,
+                        records_key="lists",
+                        offset_paging=True,
+                    ):
+                        parents = []
+                        for parent_source in inventory_page:
+                            if parent_source.get("objectTypeId") != "0-1":
+                                raise RuntimeError(
+                                    "Non-contact list in HubSpot contact-list inventory"
+                                )
+                            parent = self._row("contact_lists", parent_source)
+                            if parent.get("processingStatus") != "COMPLETE":
+                                raise RuntimeError("HubSpot list membership is not COMPLETE")
+                            identity = parent["listId"]
+                            try:
+                                seen.execute("INSERT INTO parents VALUES (?)", (identity,))
+                            except sqlite3.IntegrityError as err:
+                                raise RuntimeError(
+                                    "Duplicate HubSpot list identity across snapshot"
+                                ) from err
+                            parents.append(identity)
+                        for identity in parents:
+                            yield from self._membership_pages(seen, identity, state)
+                finally:
+                    seen.close()
+
+        def _membership_pages(self, seen, identity, state):
+            route = f"/crm/lists/2026-09/{quote(identity, safe='')}/memberships"
+            for membership_page in self._page_batches(
+                route, {"limit": 100}, state=state
+            ):
+                for source in membership_page:
+                    source = _non_crm_with_identity(source, "listId", identity)
+                    row = self._row("contact_list_memberships", source)
+                    key = tuple(
+                        row[name]
+                        for name in NON_CRM_KEYS["contact_list_memberships"]
+                    )
+                    try:
+                        seen.execute("INSERT INTO memberships VALUES (?, ?)", key)
+                    except sqlite3.IntegrityError as err:
+                        raise RuntimeError(
+                            "Duplicate HubSpot non-CRM identity across snapshot"
+                        ) from err
+                    yield row
+
+        def _inventory(self, table):
+            if table in {"owners", "forms"}:
+                route = "/crm/owners/2026-09" if table == "owners" else "/marketing/v3/forms"
+                rows = []
+                for archived in (False, True):
+                    params = {"archived": str(archived).lower(), "limit": 100}
+                    if table == "forms":
+                        params["formTypes"] = "all"
+                    for source in self._pages(route, params):
+                        row = dict(source)
+                        row.setdefault("archived", archived)
+                        rows.append(row)
+                return rows
+            rows = self._pages(
+                "/crm/lists/2026-09/search",
+                body={
+                    "objectTypeId": "0-1",
+                    "processingTypes": ["MANUAL", "DYNAMIC", "SNAPSHOT"],
+                    "additionalProperties": [],
+                    "count": 500,
+                },
+                records_key="lists",
+                offset_paging=True,
+            )
+            for row in rows:
+                if row.get("objectTypeId") != "0-1":
+                    raise RuntimeError("Non-contact list in HubSpot contact-list inventory")
+            return rows
+
+        def _legacy_list_catalog(self):
+            """Return v1 list IDs, or None when HubSpot has retired the catalog."""
+            offset = None
+            seen = set()
+            identities = []
+            known = set()
+            while True:
+                params = {"count": LEGACY_LIST_PAGE}
+                if offset is not None:
+                    params["offset"] = offset
+                try:
+                    data = self._get("/contacts/v1/lists", params)
+                except RuntimeError as exc:
+                    if offset is None and str(exc) in {
+                        "HubSpot non-CRM HTTP 403", "HubSpot non-CRM HTTP 404",
+                        "HubSpot non-CRM HTTP 410",
+                    }:
+                        return None
+                    raise
+                if not isinstance(data, dict) or not isinstance(data.get("lists"), list):
+                    raise RuntimeError("Malformed HubSpot legacy list catalog")
+                for source in data["lists"]:
+                    if not isinstance(source, dict):
+                        raise RuntimeError("Malformed HubSpot legacy list catalog")
+                    identity = _non_crm_id(source.get("listId"))
+                    if identity not in known:
+                        known.add(identity)
+                        identities.append(identity)
+                has_more = data.get("has-more")
+                if not isinstance(has_more, bool):
+                    raise RuntimeError("Malformed HubSpot legacy list catalog")
+                if not has_more:
+                    return identities
+                nxt = data.get("offset")
+                if isinstance(nxt, bool) or not isinstance(nxt, (int, str)) or str(nxt) == "":
+                    raise RuntimeError("Malformed HubSpot legacy list catalog")
+                token = str(nxt)
+                if token in seen:
+                    raise RuntimeError("Repeated or cyclic HubSpot legacy list catalog")
+                seen.add(token)
+                offset = nxt
+
+        def _legacy_by_list_id(self):
+            """Map current v3 list IDs to their corresponding v1 IDs."""
+            legacy_ids = self._legacy_list_catalog()
+            if not legacy_ids:
+                return {}
+            mapping = {}
+            for start in range(0, len(legacy_ids), LEGACY_MAP_BATCH):
+                requested = legacy_ids[start : start + LEGACY_MAP_BATCH]
+                data = self._post(
+                    "non_crm",
+                    self.base_url + "/crm/lists/2026-09/idmapping",
+                    requested,
+                    NON_CRM_MIN_INTERVAL_S,
+                )
+                if not isinstance(data, dict):
+                    raise RuntimeError("Malformed HubSpot list id mapping")
+                pairs = data.get("legacyListIdsToIdsMapping")
+                missing = data.get("missingLegacyListIds")
+                if not isinstance(pairs, list) or not isinstance(missing, list):
+                    raise RuntimeError("Malformed HubSpot list id mapping")
+                accounted = set()
+                for pair in pairs:
+                    if not isinstance(pair, dict):
+                        raise RuntimeError("Malformed HubSpot list id mapping")
+                    current = _non_crm_id(pair.get("listId"))
+                    legacy = _non_crm_id(pair.get("legacyListId"))
+                    if legacy not in requested or legacy in accounted:
+                        raise RuntimeError("Unexpected HubSpot legacy list id mapping")
+                    accounted.add(legacy)
+                    if current in mapping and mapping[current] != legacy:
+                        raise RuntimeError("Conflicting HubSpot legacy list id")
+                    mapping[current] = legacy
+                for value in missing:
+                    legacy = _non_crm_id(value)
+                    if legacy not in requested or legacy in accounted:
+                        raise RuntimeError("Unexpected HubSpot missing legacy list id")
+                    accounted.add(legacy)
+                if accounted != set(requested):
+                    raise RuntimeError("Incomplete HubSpot list id mapping")
+            return mapping
+
+        def read_table(self, table, table_options=None) -> list[dict]:
+            self.read_table_metadata(table)
+            if table == "contact_list_memberships":
+                return self._membership_rows()
+            legacy_by_list_id = {}
+            if table in {"owners", "forms", "contact_lists"}:
+                sources = self._inventory(table)
+                if table == "contact_lists" and sources:
+                    legacy_by_list_id = self._legacy_by_list_id()
+            elif table == "pipelines":
+                options = table_options or {}
+                if "pipeline_object_types" in options:
+                    types = options["pipeline_object_types"].split(",")
+                    types = [value.strip() for value in types]
+                else:
+                    types = ["0-3", "0-5", "0-27", *self._custom_types()]
+                sources = []
+                for object_type in dict.fromkeys(types):
+                    object_type = _non_crm_id(object_type)
+                    if object_type not in NON_CRM_PIPELINE_TYPES and not (
+                        object_type.startswith("2-") and object_type[2:].isdigit()
+                    ):
+                        raise ValueError("Unsupported HubSpot pipeline object type")
+                    for source in self._pages(f"/crm/pipelines/2026-09/{object_type}"):
+                        sources.append(_non_crm_with_identity(source, "objectTypeId", object_type))
+            else:
+                inventory_table = "forms" if table == "form_submissions" else "contact_lists"
+                parents = self.read_table(inventory_table, {})
+                sources = []
+                for parent in parents:
+                    if table == "contact_list_memberships":
+                        if parent.get("processingStatus") == "PROCESSING":
+                            raise RuntimeError("HubSpot list membership is still PROCESSING")
+                        identity = parent["listId"]
+                        route = f"/crm/lists/2026-09/{quote(identity, safe='')}/memberships"
+                        field, limit = "listId", 100
+                    else:
+                        identity = parent["id"]
+                        route = f"/form-integrations/v1/submissions/forms/{quote(identity, safe='')}"
+                        field, limit = "formId", 50
+                    for source in self._pages(route, {"limit": limit}):
+                        sources.append(_non_crm_with_identity(source, field, identity))
+            output = {}
+            for source in sources:
+                row = self._row(table, source)
+                if table == "contact_lists":
+                    row["legacyListId"] = legacy_by_list_id.get(row["listId"])
+                identity = tuple(row[key] for key in NON_CRM_KEYS[table])
+                if identity in output and output[identity] != row:
+                    raise RuntimeError("Conflicting duplicate HubSpot non-CRM identity")
+                output[identity] = row
+            return list(output.values())
+
+        def _row(self, table, source):
+            row = {field.name: source.get(field.name) for field in self.get_table_schema(table)}
+            for key in NON_CRM_KEYS[table]:
+                row[key] = _non_crm_id(source.get(key))
+            for key in ("userId", "userIdIncludingInactive"):
+                if key in row and row[key] is not None:
+                    row[key] = _non_crm_id(row[key])
+            for key in ("configuration", "displayOptions", "fieldGroups",
+                        "legalConsentOptions", "additionalProperties"):
+                if key in source:
+                    row[key] = _non_crm_json(source[key])
+            for key in ("teams", "stages", "values"):
+                if key not in row or row[key] is None:
+                    continue
+                if not isinstance(row[key], list) or any(not isinstance(v, dict) for v in row[key]):
+                    raise RuntimeError("Malformed HubSpot non-CRM nested array")
+                nested = []
+                for value in row[key]:
+                    value = dict(value)
+                    if key in {"teams", "stages"}:
+                        value["id"] = _non_crm_id(value.get("id"))
+                    if key == "stages" and value.get("metadata") is not None:
+                        if not isinstance(value["metadata"], dict):
+                            raise RuntimeError("Malformed HubSpot pipeline stage metadata")
+                        value["metadata"] = {
+                            k: v if isinstance(v, str) else _non_crm_json(v)
+                            for k, v in value["metadata"].items()
+                        }
+                    nested.append(value)
+                row[key] = nested
+            row["payload"] = _non_crm_json(source)
+            return row
+
+
+    ########################################################
     # src/databricks/labs/community_connector/sources/hubspot/hubspot.py
     ########################################################
 
+    def _parse_property_list(raw: str | None) -> List[str] | None:
+        if not raw:
+            return None
+        return [value.strip() for value in raw.split(",") if value.strip()]
+
+
+    def filter_property_names(
+        names: List[str],
+        table_options: Dict[str, str] | None,
+        cursor_property: str | None = None,
+    ) -> List[str]:
+        """Apply property filters while retaining the incremental cursor field."""
+        options = table_options or {}
+        include = _parse_property_list(options.get("include_properties"))
+        exclude = set(_parse_property_list(options.get("exclude_properties")) or [])
+        selected = [name for name in names if include is None or name in set(include)]
+        selected = [name for name in selected if name not in exclude]
+        if cursor_property and cursor_property not in selected:
+            selected.append(cursor_property)
+        return selected
+
+
     class HubspotLakeflowConnect(LakeflowConnect):
+        _SNAPSHOT_CURSOR_HISTORY = 64
+        _SNAPSHOT_MAX_PAGES = 100_000
+        _MAX_OBJECT_CURSOR_LENGTH = 4096
+
+        _STANDARD_OBJECT_TYPES = {
+            "contacts": "0-1", "companies": "0-2", "deals": "0-3", "tickets": "0-5",
+            "calls": "0-48", "emails": "0-49", "meetings": "0-47", "tasks": "0-27",
+            "notes": "0-46",
+        }
+
         def __init__(self, options: dict) -> None:
             self.access_token = options["access_token"]
             self.base_url = "https://api.hubapi.com"
@@ -610,8 +1699,12 @@ def register_lakeflow_source(spark):
             }
             # Cache for discovered schemas to avoid repeated API calls
             self._schema_cache = {}
+            self._property_types = {}
             # Cache for table metadata
             self._metadata_cache = {}
+            self._custom_objects = None
+            self._custom_object_types = {}
+            self._custom_object_configs = {}
 
             # Freeze the upper cursor bound at init time so read_table returns a
             # stable cursor across microbatches in a single Trigger.AvailableNow
@@ -625,7 +1718,7 @@ def register_lakeflow_source(spark):
             )
 
             # Centralized object metadata configuration
-            # supports_deletes: HubSpot only supports archived/deleted queries for core CRM objects
+            # Meetings reject archived listing; complete active snapshots reconcile removals.
             self._object_config = {
                 "contacts": {
                     "primary_keys": ["id"],
@@ -660,7 +1753,7 @@ def register_lakeflow_source(spark):
                     "cursor_field": "updatedAt",
                     "cursor_property_field": "hs_lastmodifieddate",
                     "associations": ["contacts", "companies", "deals", "tickets"],
-                    "supports_deletes": False,  # HubSpot doesn't support archived queries for calls
+                    "supports_deletes": True,
                 },
                 "emails": {
                     "primary_keys": ["id"],
@@ -674,7 +1767,7 @@ def register_lakeflow_source(spark):
                     "cursor_field": "updatedAt",
                     "cursor_property_field": "hs_lastmodifieddate",
                     "associations": ["contacts", "companies", "deals", "tickets"],
-                    "supports_deletes": False,  # HubSpot doesn't support archived queries for meetings
+                    "supports_deletes": False,
                 },
                 "tasks": {
                     "primary_keys": ["id"],
@@ -698,8 +1791,59 @@ def register_lakeflow_source(spark):
                 "cursor_field": "updatedAt",
                 "cursor_property_field": "hs_lastmodifieddate",
                 "associations": [],
-                "supports_deletes": False,  # Custom objects don't support archived queries by default
+                # Fallback only, for a table whose config was never resolved. Discovered
+                # custom objects opt into deletes explicitly in _discover_custom_objects.
+                "supports_deletes": False,
             }
+
+            self._http = HubspotHttpClient(self.auth_header)
+            self._associations = HubspotAssociations(
+                self.base_url, self._post_read, get=self._get_association_page
+            )
+            self._non_crm = HubspotNonCrm(
+                self.base_url, self.auth_header, self._custom_api_types, self._post_read,
+                http=self._http,
+            )
+
+        def _post_read(self, kind: str, url: str, body: dict, min_interval: float) -> dict:
+            """POST to an idempotent read endpoint under the shared retry policy."""
+            response = self._http.post(
+                url,
+                body,
+                operation=f"{kind} POST",
+                kind=kind,
+                min_interval=min_interval,
+            )
+            if response.status_code not in (200, 207):
+                raise RuntimeError(
+                    f"HubSpot {kind} POST failed (status={response.status_code})"
+                )
+            try:
+                return response.json()
+            except ValueError:
+                raise RuntimeError(f"Malformed HubSpot {kind} POST JSON") from None
+
+        def _get_association_page(self, kind, url, params, min_interval):
+            """Bounded GET transport without response bodies or record IDs in errors."""
+            response = self._http.get(
+                url,
+                operation="association GET",
+                params=params,
+                kind=kind,
+                min_interval=min_interval,
+            )
+            if response.status_code != 200:
+                raise RuntimeError(
+                    f"HubSpot association GET failed (status={response.status_code})"
+                )
+            try:
+                return response.json()
+            except ValueError:
+                raise RuntimeError("Malformed HubSpot association GET JSON") from None
+
+        def _custom_api_types(self) -> List[str]:
+            self._discover_custom_objects(require_access=True)
+            return list(self._custom_object_types.values())
 
         def list_tables(self) -> list[str]:
             """
@@ -719,45 +1863,159 @@ def register_lakeflow_source(spark):
             ]
 
             # Add dynamic discovery of custom objects
-            try:
-                custom_objects = self._discover_custom_objects()
-                standard_tables.extend(custom_objects)
-            except Exception as e:
-                print(f"Warning: Could not discover custom objects: {e}")
+            custom_objects = self._discover_custom_objects()
+            standard_tables.extend(custom_objects)
 
-            return standard_tables
+            return standard_tables + self._non_crm.list_tables()
 
-        def _discover_custom_objects(self) -> List[str]:
+        def _discover_custom_objects(self, require_access: bool = False) -> List[str]:
             """
             Discover custom objects from HubSpot CRM schemas API
             """
-            try:
-                url = f"{self.base_url}/crm/v3/schemas"
-                resp = requests.get(url, headers=self.auth_header, timeout=60)
-
-                if resp.status_code != 200:
-                    return []
-
-                data = resp.json()
-                custom_objects = []
-
-                # Extract custom object names
-                for schema in data.get("results", []):
-                    object_type = schema.get("objectTypeId", "")
-                    name = schema.get("name", "")
-
-                    # Skip standard objects, only include custom ones
-                    if object_type not in ["0-1", "0-2", "0-3", "0-5"] and name:
-                        custom_objects.append(name.lower())
-
-                return custom_objects
-            except Exception as e:
-                print(f"Error discovering custom objects: {e}")
+            if self._custom_objects is not None:
+                return list(self._custom_objects)
+            url = f"{self.base_url}/crm-object-schemas/2026-09/schemas"
+            resp = self._http.get(url, operation="schema discovery GET")
+            # Schema access is optional for accounts ingesting only standard CRM
+            # objects. Do not cache a denied response as successful empty discovery.
+            if resp.status_code == 403 and not require_access:
                 return []
+            if resp.status_code != 200:
+                raise RuntimeError(f"HubSpot schema discovery failed: HTTP {resp.status_code}")
+            try:
+                schemas = resp.json().get("results")
+            except ValueError:
+                raise RuntimeError("Malformed HubSpot schema discovery JSON") from None
+            if not isinstance(schemas, list):
+                raise RuntimeError("Malformed HubSpot schema discovery results")
+            names_by_type = {v: k for k, v in self._STANDARD_OBJECT_TYPES.items()}
+            custom_types = self._custom_type_map(schemas, names_by_type)
+
+            configs = {
+                name: {**config, "associations": list(config["associations"])}
+                for name, config in self._object_config.items()
+            }
+            # Custom objects do support archived listing (verified live: the
+            # `archived=true` object listing returns records with `archived` and
+            # `archivedAt`, plus requested properties). Without a delete flow an
+            # archived custom record never leaves the destination and keeps looking
+            # active, so opt discovered custom objects into deletes.
+            configs.update({
+                name: {**self._default_object_config, "associations": [], "supports_deletes": True}
+                for name in custom_types
+            })
+            reserved = {"id", "createdat", "updatedat", "archived", "properties"}
+            # Resolve after collecting every type so custom/custom relationships do
+            # not depend on schema order. Definitions are directional, not inferred.
+            discovered = {name: set() for name in configs}
+            for schema in schemas:
+                definitions = schema.get("associations", [])
+                if not isinstance(definitions, list):
+                    raise RuntimeError("Malformed HubSpot association definitions")
+                for definition in definitions:
+                    if not isinstance(definition, dict):
+                        raise RuntimeError("Malformed HubSpot association definition")
+                    source = names_by_type.get(definition.get("fromObjectTypeId"))
+                    target = names_by_type.get(definition.get("toObjectTypeId"))
+                    if source is None or target is None:
+                        # HubSpot auto-creates association definitions between a new
+                        # custom object and internal object types the connector does
+                        # not model (for example 0-18 communication, 0-116 postal
+                        # mail, 0-51 conversation session, 0-4 engagement). There is
+                        # no table to attach an association column to, so skip the
+                        # edge instead of failing discovery for every table.
+                        unresolved = [
+                            value for value, resolved in (
+                                (definition.get("fromObjectTypeId"), source),
+                                (definition.get("toObjectTypeId"), target),
+                            ) if resolved is None
+                        ]
+                        if all(
+                            isinstance(value, str) and value.startswith("0-")
+                            for value in unresolved
+                        ):
+                            continue
+                        # An unresolved custom type means a schema was dropped or the
+                        # account is mid-provisioning; do not silently lose the edge.
+                        raise RuntimeError("Unsupported HubSpot association object type")
+                    if target.lower() in reserved:
+                        raise RuntimeError("HubSpot association column conflicts with a base field")
+                    discovered[source].add(target)
+            for name, targets in discovered.items():
+                existing = set(configs[name]["associations"])
+                configs[name]["associations"].extend(sorted(targets - existing))
+            # Commit discovery atomically: failures must not leave a partial graph.
+            self._custom_object_types = custom_types
+            self._custom_object_configs = {name: configs[name] for name in custom_types}
+            self._object_config = {name: configs[name] for name in self._object_config}
+            self._custom_objects = list(custom_types)
+            # A prior optional 403 may have cached standard schemas before the
+            # complete association graph became available. Rebuild every dependent
+            # schema and metadata entry after discovery commits successfully.
+            self._schema_cache.clear()
+            self._metadata_cache.clear()
+            return list(self._custom_objects)
+
+        def _custom_type_map(self, schemas: list, names_by_type: dict) -> dict:
+            custom_types = {}
+            for schema in schemas:
+                if not isinstance(schema, dict):
+                    raise RuntimeError("Malformed HubSpot custom schema")
+                object_type, name = schema.get("objectTypeId"), schema.get("name")
+                if object_type in self._STANDARD_OBJECT_TYPES.values():
+                    continue
+                if (
+                    not isinstance(object_type, str)
+                    or not object_type.startswith("2-")
+                    or not isinstance(name, str)
+                    or not name
+                ):
+                    raise RuntimeError("HubSpot custom schema requires name and objectTypeId")
+                alias = name.lower()
+                if (
+                    alias in self._object_config
+                    or alias in NON_CRM_TABLES
+                    or alias in custom_types
+                    or object_type in names_by_type
+                ):
+                    raise RuntimeError("HubSpot custom schema has a conflicting identity")
+                custom_types[alias] = object_type
+                names_by_type[object_type] = alias
+            return custom_types
+
+        def _get_api_object_type(self, table_name: str) -> str:
+            """Keep public table names stable, but address custom types by HubSpot ID."""
+            if table_name not in self._object_config:
+                self._discover_custom_objects()
+            return self._custom_object_types.get(table_name, table_name)
 
         def _get_object_config(self, table_name: str) -> Dict:
             """Get configuration for a specific object type"""
-            return self._object_config.get(table_name, self._default_object_config)
+            fallback = self._custom_object_configs.get(
+                table_name, self._default_object_config
+            )
+            return self._object_config.get(table_name, fallback)
+
+        @staticmethod
+        def _association_sync_mode(table_options: Dict[str, str] | None) -> str:
+            mode = (table_options or {}).get("association_sync_mode", "incremental")
+            if mode not in ("incremental", "full_refresh"):
+                raise ValueError("association_sync_mode must be incremental or full_refresh")
+            return mode
+
+        @staticmethod
+        def _association_value_mode(table_options: Dict[str, str] | None) -> str:
+            mode = (table_options or {}).get("association_value_mode", "ids")
+            if mode not in ("ids", "typed"):
+                raise ValueError("association_value_mode must be ids or typed")
+            return mode
+
+        @staticmethod
+        def _numeric_value_mode(table_options: Dict[str, str] | None) -> str:
+            mode = (table_options or {}).get("numeric_value_mode", "legacy")
+            if mode not in ("legacy", "decimal"):
+                raise ValueError("numeric_value_mode must be legacy or decimal")
+            return mode
 
         def get_table_schema(
             self, table_name: str, table_options: Dict[str, str]
@@ -771,6 +2029,8 @@ def register_lakeflow_source(spark):
             Returns:
                 A StructType object representing the schema of the table.
             """
+            if table_name in NON_CRM_TABLES:
+                return self._non_crm.get_table_schema(table_name)
             supported_tables = self.list_tables()
             if table_name not in supported_tables:
                 raise ValueError(
@@ -778,15 +2038,23 @@ def register_lakeflow_source(spark):
                     f"Supported tables are: {supported_tables}"
                 )
 
-            # Check cache first
-            if table_name in self._schema_cache:
-                return self._schema_cache[table_name]
+            if "associations" in table_options:
+                self._get_associations_for_object(table_name, table_options)
+            self._association_value_mode(table_options)
+            self._numeric_value_mode(table_options)
+
+            # Cache key includes the property filters — the schema is a function of
+            # (table_name, table_options), so cached entries must not leak across
+            # different include_properties / exclude_properties values.
+            cache_key = self._options_cache_key(table_name, table_options)
+            if cache_key in self._schema_cache:
+                return self._schema_cache[cache_key]
 
             # Discover schema via API
-            schema = self._discover_table_schema(table_name)
+            schema = self._discover_table_schema(table_name, table_options)
 
             # Cache the result
-            self._schema_cache[table_name] = schema
+            self._schema_cache[cache_key] = schema
 
             return schema
 
@@ -823,6 +2091,8 @@ def register_lakeflow_source(spark):
                         - "cdc": capture incremental changes
                         - "append": incremental append
             """
+            if table_name in NON_CRM_TABLES:
+                return self._non_crm.read_table_metadata(table_name)
             supported_tables = self.list_tables()
             if table_name not in supported_tables:
                 raise ValueError(
@@ -830,62 +2100,118 @@ def register_lakeflow_source(spark):
                     f"Supported tables are: {supported_tables}"
                 )
 
-            # Check cache first
-            if table_name in self._metadata_cache:
-                return self._metadata_cache[table_name]
+            if "associations" in table_options:
+                self._get_associations_for_object(table_name, table_options)
+            self._association_value_mode(table_options)
+            self._numeric_value_mode(table_options)
+
+            cache_key = self._options_cache_key(table_name, table_options)
+            if cache_key in self._metadata_cache:
+                return self._metadata_cache[cache_key]
 
             # Get metadata from object configuration
-            metadata = self._get_table_metadata(table_name)
+            metadata = self._get_table_metadata(table_name, table_options)
 
             # Cache the result
-            self._metadata_cache[table_name] = metadata
+            self._metadata_cache[cache_key] = metadata
 
             return metadata
 
-        def _discover_table_schema(self, table_name: str) -> StructType:
+        @classmethod
+        def _uses_snapshot(cls, table_name: str, table_options: Dict[str, str] | None) -> bool:
+            # HubSpot rejects archived-object paging for MEETING_EVENT (0-47).
+            # Complete active snapshots preserve current-state removal reconciliation.
+            return (
+                table_name == "meetings"
+                or cls._association_sync_mode(table_options) == "full_refresh"
+            )
+
+        @classmethod
+        def _options_cache_key(cls, table_name: str, table_options: Dict[str, str] | None) -> tuple:
+            """Cache key covering the options that change schema/metadata output."""
+            opts = table_options or {}
+            return (
+                table_name,
+                opts.get("include_properties"),
+                opts.get("exclude_properties"),
+                opts.get("associations"),
+                cls._association_sync_mode(opts),
+                cls._association_value_mode(opts),
+                cls._numeric_value_mode(opts),
+            )
+
+        def _discover_table_schema(self, table_name: str, table_options: Dict[str, str]) -> StructType:
             """
             Discover table schema by calling HubSpot Properties API.
 
             Args:
                 table_name: Name of the table/object to discover schema for
+                table_options: Table options (include_properties / exclude_properties)
 
             Returns:
                 StructType representing the table schema
             """
             # All CRM objects follow the same schema pattern
-            return self._discover_crm_object_schema(table_name)
+            return self._discover_crm_object_schema(table_name, table_options)
 
-        def _get_table_metadata(self, table_name: str) -> dict:
+        def _get_table_metadata(
+            self, table_name: str, table_options: Dict[str, str] | None = None
+        ) -> dict:
             """
             Get metadata for a table based on object configuration.
             """
+            table_options = table_options or {}
             config = self._get_object_config(table_name)
 
-            # Get property names and cursor property field for API calls
+            # Get property names and cursor property field for API calls.
+            # include_properties / exclude_properties bound the requested set;
+            # the cursor property is always retained so incremental reads work.
             properties = self._get_object_properties(table_name)
-            property_names = [prop["name"] for prop in properties]
+            property_names = filter_property_names(
+                [prop["name"] for prop in properties],
+                table_options,
+                cursor_property=config["cursor_property_field"],
+            )
+            associations = self._get_associations_for_object(table_name, table_options)
+            association_value_mode = self._association_value_mode(table_options)
+            numeric_value_mode = self._numeric_value_mode(table_options)
 
             # Use cdc_with_deletes only for tables that support archived queries
             supports_deletes = config.get("supports_deletes", False)
             ingestion_type = "cdc_with_deletes" if supports_deletes else "cdc"
+            if self._uses_snapshot(table_name, table_options):
+                ingestion_type = "snapshot"
 
             return {
                 "primary_keys": config["primary_keys"],
                 "cursor_field": config["cursor_field"],
                 "cursor_property_field": config["cursor_property_field"],
                 "property_names": property_names,
-                "associations": config.get("associations", []),
+                "associations": associations,
+                "association_value_mode": association_value_mode,
+                "numeric_value_mode": numeric_value_mode,
                 "ingestion_type": ingestion_type,
             }
 
-        def _discover_crm_object_schema(self, table_name: str) -> StructType:
+        def _discover_crm_object_schema(
+            self, table_name: str, table_options: Dict[str, str] | None = None
+        ) -> StructType:
             """
             Discover CRM object schema using HubSpot Properties API.
             Works for contacts, companies, deals, tickets, and custom objects.
             """
-            # Get object configuration and properties
+            # Get object configuration and properties (filtered by table options)
             config = self._get_object_config(table_name)
             properties = self._get_object_properties(table_name)
+            property_names = filter_property_names(
+                [prop.get("name", "") for prop in properties],
+                table_options,
+                cursor_property=config["cursor_property_field"],
+            )
+            property_by_name = {prop.get("name", ""): prop for prop in properties}
+            associations = self._get_associations_for_object(table_name, table_options)
+            association_value_mode = self._association_value_mode(table_options)
+            numeric_value_mode = self._numeric_value_mode(table_options)
 
             # Build base schema fields (these are always present for CRM objects)
             base_fields = [
@@ -895,21 +2221,24 @@ def register_lakeflow_source(spark):
                 StructField("archived", BooleanType(), True),
             ]
 
-            # Add association fields based on configuration
-            for association in config["associations"]:
-                base_fields.append(StructField(association, ArrayType(StringType()), True))
+            association_type = (
+                self._typed_association_type()
+                if association_value_mode == "typed"
+                else ArrayType(StringType(), True)
+            )
+            for association in associations:
+                base_fields.append(StructField(association, association_type, True))
 
             # Build nested properties schema based on API response
             properties_fields = []
 
-            if isinstance(properties, list):
-                for prop in properties:
-                    prop_name = prop.get("name", "")
-                    prop_type = prop.get("type", "string")
+            for prop_name in property_names:
+                prop = property_by_name.get(prop_name, {})
+                prop_type = prop.get("type", "string")
 
-                    # Map HubSpot property types to Spark types
-                    spark_type = self._map_hubspot_type_to_spark(prop_type)
-                    properties_fields.append(StructField(prop_name, spark_type, True))
+                # Map HubSpot property types to Spark types
+                spark_type = self._map_hubspot_type_to_spark(prop_type, numeric_value_mode)
+                properties_fields.append(StructField(prop_name, spark_type, True))
 
             # Create nested properties StructType
             properties_struct = StructType(properties_fields) if properties_fields else StructType([])
@@ -921,26 +2250,55 @@ def register_lakeflow_source(spark):
 
             return schema
 
-        def _get_associations_for_object(self, table_name: str) -> List[str]:
-            """Get associations to include for the given object type"""
-            config = self._get_object_config(table_name)
-            return config["associations"]
+        def _get_associations_for_object(
+            self, table_name: str, table_options: Dict[str, str] | None = None
+        ) -> List[str]:
+            """Resolve one validated association target list for every read surface."""
+            available = list(self._get_object_config(table_name).get("associations", []))
+            options = table_options or {}
+            if "associations" not in options:
+                return available
+            raw = options["associations"]
+            if not isinstance(raw, str):
+                raise ValueError("associations must be a string")
+            if raw == "":
+                return []
+            selected = raw.split(",")
+            if any(not value or value.strip() != value for value in selected):
+                raise ValueError("associations must be a comma-separated list without whitespace")
+            if len(set(selected)) != len(selected):
+                raise ValueError("associations must not contain duplicate targets")
+            unknown = set(selected) - set(available)
+            if unknown:
+                raise ValueError("associations contains an unsupported target")
+            selected_set = set(selected)
+            return [target for target in available if target in selected_set]
 
         def _get_object_properties(self, object_type: str) -> List[Dict]:
             """
             Fetch object properties from HubSpot Properties API
             """
-            url = f"{self.base_url}/properties/v2/{object_type}/properties"
+            api_type = self._get_api_object_type(object_type)
+            url = f"{self.base_url}/crm/properties/2026-09/{api_type}"
 
             try:
-                resp = requests.get(url, headers=self.auth_header, timeout=60)
+                resp = self._http.get(url, operation="properties GET")
                 if resp.status_code != 200:
                     raise RuntimeError(
                         f"HubSpot Properties API error for {object_type}: "
-                        f"{resp.status_code} {resp.text}"
+                        f"status={resp.status_code}"
                     )
 
-                return resp.json()
+                try:
+                    properties = resp.json()["results"]
+                except (KeyError, TypeError, ValueError):
+                    raise RuntimeError(
+                        f"Malformed HubSpot properties response for {object_type}"
+                    ) from None
+                self._property_types[object_type] = {
+                    prop["name"]: str(prop.get("type", "string")).lower() for prop in properties
+                }
+                return properties
             except Exception as e:
                 # Re-raise (don't return an error dict): callers iterate this as a
                 # list of property dicts, so a dict here turns a real API error into
@@ -949,16 +2307,22 @@ def register_lakeflow_source(spark):
                     f"Failed to get object properties for {object_type}: {e}"
                 ) from e
 
-        def _map_hubspot_type_to_spark(self, hubspot_type: str) -> DataType:
+        def _map_hubspot_type_to_spark(
+            self, hubspot_type: str, numeric_value_mode: str = "legacy"
+        ) -> DataType:
             """
             Map HubSpot property types to Spark DataTypes
-            Following the requirement: strings -> StringType, integers -> LongType
+            Preserve the existing BIGINT contract unless decimal mode is requested.
             """
             type_mapping = {
                 "string": StringType(),
                 "enumeration": StringType(),
                 "bool": BooleanType(),  # Keep boolean as boolean for better data handling
-                "number": LongType(),
+                "number": (
+                    DecimalType(38, 18)
+                    if numeric_value_mode == "decimal"
+                    else LongType()
+                ),
                 "date": StringType(),  # Store as string to preserve ISO format
                 "date-time": StringType(),  # Store as string to preserve ISO format
                 "datetime": StringType(),
@@ -983,6 +2347,8 @@ def register_lakeflow_source(spark):
             Returns:
                 Tuple of (records, new_offset)
             """
+            if table_name in NON_CRM_TABLES:
+                return iter(self._non_crm.read_table(table_name, table_options)), {}
             supported_tables = self.list_tables()
             if table_name not in supported_tables:
                 raise ValueError(
@@ -990,10 +2356,18 @@ def register_lakeflow_source(spark):
                     f"Supported tables are: {supported_tables}"
                 )
 
+            if "associations" in table_options:
+                self._get_associations_for_object(table_name, table_options)
+            self._association_value_mode(table_options)
+            self._numeric_value_mode(table_options)
+
+            start_offset = start_offset or {}
             # Determine if this is an incremental read
             is_incremental = (
-                start_offset is not None and start_offset.get("updatedAt") is not None
+                start_offset.get("updatedAt") is not None
             )
+            if self._uses_snapshot(table_name, table_options):
+                return self._read_snapshot(table_name, table_options), {}
 
             return self._read_data(
                 table_name,
@@ -1002,99 +2376,158 @@ def register_lakeflow_source(spark):
                 table_options=table_options,
             )
 
-        def read_table_deletes(
-            self, table_name: str, start_offset: dict, table_options: Dict[str, str]
-        ) -> (Iterator[dict], dict):
-            """
-            Read deleted (archived) records from HubSpot API.
-
-            HubSpot uses "archived" status to represent deleted records. This method
-            fetches all archived records and filters them client-side for incremental reads.
-
-            Internally uses archivedAt for filtering, but copies it to updatedAt in the
-            output records and offset for consistency with the normal read flow cursor.
-
-            Args:
-                table_name: Name of the table to read deleted records from
-                start_offset: Dictionary containing cursor information for incremental reads
-                             (uses 'updatedAt' key, which stores archivedAt values)
-                table_options: Additional options for reading
-
-            Returns:
-                Tuple of (deleted_records, new_offset) where updatedAt contains archivedAt value
-            """
-            supported_tables = self.list_tables()
-            if table_name not in supported_tables:
-                raise ValueError(
-                    f"Unsupported table: {table_name}. "
-                    f"Supported tables are: {supported_tables}"
-                )
-
-            # Short-circuit once the cursor has caught up to the init-time cap,
-            # so Trigger.AvailableNow can terminate.
-            if (
-                start_offset
-                and start_offset.get("updatedAt", "") >= self._init_ts
-            ):
-                return [], start_offset
-
-            # Get discovered properties (no associations needed for deletes)
+        def _read_snapshot(self, table_name: str, table_options: Dict[str, str]):
+            """Yield complete active-object snapshot pages with bounded state."""
             metadata = self.read_table_metadata(table_name, table_options)
             property_names = metadata.get("property_names", [])
+            associations = metadata.get("associations", [])
+            association_value_mode = metadata.get("association_value_mode", "ids")
+            numeric_value_mode = metadata.get("numeric_value_mode", "legacy")
 
-            max_records = self._parse_max_records(table_options)
+            def pages():
+                after = None
+                recent_hashes = []
+                recent_set = set()
+                previous_page_ids = set()
+                page_count = 0
+                while True:
+                    if page_count >= self._SNAPSHOT_MAX_PAGES:
+                        raise RuntimeError("HubSpot snapshot exceeded the page limit")
+                    records, next_after = self._fetch_full_refresh_batch(
+                        table_name, property_names, associations, after, archived=False
+                    )
+                    page_count += 1
+                    if not records and next_after is not None:
+                        raise RuntimeError("Empty HubSpot snapshot page has pagination")
+                    page_ids = set()
+                    for record in records:
+                        if not isinstance(record, dict):
+                            raise RuntimeError("Malformed HubSpot snapshot record")
+                        identity = record.get("id")
+                        if (isinstance(identity, bool)
+                                or not isinstance(identity, (str, int))
+                                or not str(identity).strip()
+                                or record.get("archived", False) is not False):
+                            raise RuntimeError("Malformed HubSpot active snapshot identity")
+                        identity = str(identity)
+                        if identity in page_ids:
+                            raise RuntimeError("Duplicate HubSpot snapshot identity in page")
+                        page_ids.add(identity)
+                    if page_ids & previous_page_ids:
+                        raise RuntimeError("Duplicate HubSpot snapshot identity across pages")
+                    if next_after is not None:
+                        cursor_hash = self._cursor_hash(next_after)
+                        if cursor_hash in recent_set:
+                            raise RuntimeError("HubSpot snapshot pagination cursor repeated")
+                        recent_set.add(cursor_hash)
+                        recent_hashes.append(cursor_hash)
+                        if len(recent_hashes) > self._SNAPSHOT_CURSOR_HISTORY:
+                            recent_set.remove(recent_hashes.pop(0))
+                    self._hydrate_associations(
+                        table_name, records, associations, association_value_mode
+                    )
+                    for record in records:
+                        yield self._transform_single_record(
+                            record,
+                            table_name,
+                            property_names,
+                            associations,
+                            association_value_mode,
+                            numeric_value_mode,
+                        )
+                    previous_page_ids = page_ids
+                    if next_after is None:
+                        return
+                    after = next_after
+                    time.sleep(0.1)
 
-            all_records = []
+            return pages()
+
+        @staticmethod
+        def _cursor_hash(cursor) -> str:
+            return hashlib.sha256(str(cursor).encode("utf-8")).hexdigest()
+
+        @staticmethod
+        def _archive_time(value):
+            if not isinstance(value, str):
+                raise RuntimeError("Malformed HubSpot archive timestamp")
+            try:
+                parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+            except ValueError as exc:
+                raise RuntimeError("Malformed HubSpot archive timestamp") from exc
+            if parsed.tzinfo is None:
+                raise RuntimeError("Malformed HubSpot archive timestamp timezone")
+            return parsed.astimezone(timezone.utc)
+
+        def read_table_deletes(self, table_name, start_offset, table_options):
+            """Reconcile all archived pages in a frozen window before checkpointing.
+
+            Object listing is not ordered by archivedAt. Admission cannot truncate
+            this scan without skipping older archive times on later pages.
+            """
+            start = start_offset or {}
+            if table_name in NON_CRM_TABLES:
+                return iter([]), start
+            if table_name not in self.list_tables():
+                raise ValueError(f"Unsupported table: {table_name}")
+            if "associations" in table_options:
+                self._get_associations_for_object(table_name, table_options)
+            self._association_value_mode(table_options)
+            if not self._get_object_config(table_name).get("supports_deletes", False):
+                return iter([]), start
+            upper = self._archive_time(self._init_ts)
+            checkpoint = self._archive_time(start["updatedAt"]) if "updatedAt" in start else None
+            if checkpoint is not None and checkpoint >= upper:
+                return iter([]), start
+            properties = self.read_table_metadata(table_name, table_options).get(
+                "property_names", []
+            )
+            rows, seen_ids, seen_cursors = [], {}, set()
             after = None
-            # Use updatedAt from offset (which stores archivedAt values for delete flow)
-            checkpoint = start_offset.get("updatedAt") if start_offset else None
-            latest_archived = checkpoint
-
             while True:
-                # Fetch archived records using the Objects API with archived=true
-                records, after = self._fetch_full_refresh_batch(
-                    table_name, property_names, associations=[], after=after, archived=True
+                records, next_after = self._fetch_full_refresh_batch(
+                    table_name, properties, associations=[], after=after, archived=True
                 )
-
-                if not records:
+                if not records and next_after is not None:
+                    raise RuntimeError("Empty HubSpot archive page has pagination")
+                for record in records:
+                    if not isinstance(record, dict) or record.get("archived") is not True:
+                        raise RuntimeError("Malformed HubSpot archive record")
+                    raw_id = record.get("id")
+                    if (
+                        isinstance(raw_id, bool)
+                        or not isinstance(raw_id, (str, int))
+                        or not str(raw_id).strip()
+                    ):
+                        raise RuntimeError("Malformed HubSpot archive identity")
+                    identity = str(raw_id)
+                    archived = self._archive_time(record.get("archivedAt"))
+                    if identity in seen_ids:
+                        if seen_ids[identity] != record:
+                            raise RuntimeError("Conflicting duplicate HubSpot archive identity")
+                        continue
+                    seen_ids[identity] = record
+                    if archived > upper or (checkpoint is not None and archived <= checkpoint):
+                        continue
+                    row = self._transform_single_record(
+                        {**record, "id": identity},
+                        table_name,
+                        properties,
+                        [],
+                        numeric_value_mode=self._numeric_value_mode(table_options),
+                    )
+                    row["updatedAt"] = archived.isoformat(
+                        timespec="milliseconds"
+                    ).replace("+00:00", "Z")
+                    rows.append(row)
+                if next_after is None:
                     break
-
-                # Filter client-side for incremental deletes based on archivedAt (from raw records)
-                if checkpoint:
-                    records = [r for r in records if r.get("archivedAt", "") > checkpoint]
-
-                # Transform records
-                transformed_records = self._transform_records(records, table_name)
-
-                # Copy archivedAt to updatedAt for consistency with normal flow cursor
-                for i, transformed in enumerate(transformed_records):
-                    archived_at = records[i].get("archivedAt")
-                    if archived_at:
-                        transformed["updatedAt"] = archived_at
-                        if not latest_archived or archived_at > latest_archived:
-                            latest_archived = archived_at
-
-                all_records.extend(transformed_records)
-
-                if not after:
-                    break
-
-                # Stop if we've hit the per-microbatch record cap. The next
-                # microbatch resumes from latest_archived via the cursor filter.
-                if max_records is not None and len(all_records) >= max_records:
-                    break
-
-                # Rate limiting
+                if str(next_after) in seen_cursors:
+                    raise RuntimeError("HubSpot archive pagination cursor repeated")
+                seen_cursors.add(str(next_after))
+                after = next_after
                 time.sleep(0.1)
-
-            # Cap the returned cursor at the init-time bound so the next call
-            # eventually short-circuits.
-            if latest_archived and latest_archived > self._init_ts:
-                latest_archived = self._init_ts
-
-            # Return offset with updatedAt key for consistency with normal flow
-            offset = {"updatedAt": latest_archived} if latest_archived else {}
-            return all_records, offset
+            return iter(rows), {"updatedAt": self._init_ts}
 
         def _read_data(
             self, table_name: str, start_offset: dict = None, incremental: bool = False,
@@ -1116,12 +2549,15 @@ def register_lakeflow_source(spark):
             property_names = metadata.get("property_names", [])
             cursor_property_field = metadata.get("cursor_property_field")
             associations = metadata.get("associations", [])
+            association_value_mode = metadata.get("association_value_mode", "ids")
+            numeric_value_mode = metadata.get("numeric_value_mode", "legacy")
 
             # Only cap on the incremental path — full-refresh snapshots need
             # to drain everything in a single call to keep the snapshot atomic.
             max_records = self._parse_max_records(table_options) if incremental else None
 
             all_records = []
+            snapshot_ids, snapshot_cursors = set(), set()
             after = None
             checkpoint = start_offset.get("updatedAt") if start_offset else None
             latest_updated = checkpoint
@@ -1129,28 +2565,74 @@ def register_lakeflow_source(spark):
             while True:
                 if incremental:
                     # Use search API for incremental reads
-                    records, after, updated_time = self._fetch_incremental_batch(
+                    records, after, _ = self._fetch_incremental_batch(
                         table_name,
                         property_names,
                         cursor_property_field,
                         start_offset,
                         after,
                     )
-                    if updated_time and (
-                        not latest_updated or updated_time > latest_updated
-                    ):
-                        latest_updated = updated_time
+                    # Strict > boundary: the search filter is GTE-inclusive, so the
+                    # record that set the watermark is returned again. Re-emitting it
+                    # without advancing the offset violates the
+                    # SimpleDataSourceStreamReader contract (a non-empty batch MUST
+                    # advance the end offset past the start) and the managed pipeline
+                    # aborts with SIMPLE_STREAM_READER_OFFSET_DID_NOT_ADVANCE.
+                    # Equal timestamps are common in bulk imports. Drain each
+                    # group before checkpointing past it.
+                    if checkpoint:
+                        records = [
+                            r for r in records
+                            if (r.get("updatedAt") or "") > checkpoint
+                        ]
                 else:
                     # Use objects API for full refresh
                     records, after = self._fetch_full_refresh_batch(
                         table_name, property_names, associations, after, archived=False
                     )
 
+                if not incremental:
+                    if not records and after is not None:
+                        raise RuntimeError("Empty HubSpot snapshot page has pagination")
+                    if after is not None:
+                        cursor = str(after)
+                        if cursor in snapshot_cursors:
+                            raise RuntimeError("HubSpot snapshot pagination cursor repeated")
+                        snapshot_cursors.add(cursor)
+                    self._validate_snapshot_records(records, snapshot_ids)
+
                 if not records:
+                    if incremental and after:
+                        time.sleep(0.1)
+                        continue
                     break
 
+                # Admission control is a soft cap: only stop when the next page
+                # starts after the timestamp already drained. Checking after
+                # consuming this page would skip its unprocessed equal-time peers.
+                if (
+                    incremental
+                    and max_records is not None
+                    and len(all_records) >= max_records
+                    and latest_updated
+                    and (records[0].get("updatedAt") or "") > latest_updated
+                ):
+                    break
+
+                # Neither embedded list responses nor Search establish complete
+                # relationships. Hydrate every selected parent before publishing it.
+                self._hydrate_associations(
+                    table_name, records, associations, association_value_mode
+                )
                 # Transform records
-                transformed_records = self._transform_records(records, table_name)
+                transformed_records = self._transform_records(
+                    records,
+                    table_name,
+                    property_names,
+                    associations,
+                    association_value_mode,
+                    numeric_value_mode,
+                )
                 all_records.extend(transformed_records)
 
                 # Update latest timestamp
@@ -1159,12 +2641,7 @@ def register_lakeflow_source(spark):
                     if updated_at and (not latest_updated or updated_at > latest_updated):
                         latest_updated = updated_at
 
-                if not after:
-                    break
-
-                # Stop if we've hit the per-microbatch record cap. The next
-                # microbatch resumes from latest_updated via the cursor filter.
-                if max_records is not None and len(all_records) >= max_records:
+                if after is None:
                     break
 
                 # Rate limiting
@@ -1178,6 +2655,51 @@ def register_lakeflow_source(spark):
             offset = {"updatedAt": latest_updated} if latest_updated else {}
             return all_records, offset
 
+        @staticmethod
+        def _validate_snapshot_records(records: List[Dict], snapshot_ids: set) -> None:
+            for record in records:
+                if not isinstance(record, dict):
+                    raise RuntimeError("Malformed HubSpot snapshot record")
+                identity = record.get("id")
+                if (
+                    isinstance(identity, bool)
+                    or not isinstance(identity, (str, int))
+                    or not str(identity).strip()
+                    or record.get("archived", False) is not False
+                ):
+                    raise RuntimeError("Malformed HubSpot active snapshot identity")
+                identity = str(identity)
+                if identity in snapshot_ids:
+                    raise RuntimeError("Duplicate HubSpot snapshot identity")
+                snapshot_ids.add(identity)
+
+        def _hydrate_associations(
+            self,
+            table_name: str,
+            records: List[Dict],
+            targets: List[str],
+            association_value_mode: str = "ids",
+        ) -> None:
+            if not targets or not records:
+                return
+            from_type = self._get_api_object_type(table_name)
+            parent_ids = [str(record["id"]) for record in records]
+            with_types = association_value_mode == "typed"
+            for target in targets:
+                target_type = self._get_api_object_type(target)
+                if with_types:
+                    links = self._associations.read(
+                        from_type, target_type, parent_ids, with_types=True
+                    )
+                else:
+                    links = self._associations.read(from_type, target_type, parent_ids)
+                for record in records:
+                    record["associations"] = record.get("associations") or {}
+                    values = links[str(record["id"])]
+                    record["associations"][target] = {
+                        "results": values if with_types else [{"id": value} for value in values]
+                    }
+
         def _fetch_full_refresh_batch(
             self,
             table_name: str,
@@ -1188,24 +2710,46 @@ def register_lakeflow_source(spark):
         ):
             """Fetch a batch of records using full refresh API"""
             archived_param = "true" if archived else "false"
-            url = f"{self.base_url}/crm/v3/objects/{table_name}?limit=100&archived={archived_param}"
+            api_type = self._get_api_object_type(table_name)
+            url = f"{self.base_url}/crm/objects/2026-09/{api_type}"
+            params = {"limit": 100, "archived": archived_param}
 
-            if after:
-                url += f"&after={after}"
+            if after is not None:
+                if (isinstance(after, bool) or not isinstance(after, (str, int)) or not str(after)
+                        or len(str(after).encode("utf-8")) > self._MAX_OBJECT_CURSOR_LENGTH):
+                    raise RuntimeError("Malformed HubSpot object pagination cursor")
+                params["after"] = after
             if property_names:
-                url += f"&properties={','.join(property_names)}"
-            if associations:
-                url += f"&associations={','.join(associations)}"
+                params["properties"] = ",".join(property_names)
+            # Relationships are read separately with complete per-parent pagination.
 
-            resp = requests.get(url, headers=self.auth_header, timeout=60)
+            resp = self._http.get(url, operation="object-list GET", params=params)
             if resp.status_code != 200:
-                raise Exception(
-                    f"HubSpot API error for {table_name}: {resp.status_code} {resp.text}"
-                )
+                raise RuntimeError(f"HubSpot object-list GET failed (status={resp.status_code})")
 
-            data = resp.json()
-            records = data.get("results", [])
-            next_after = data.get("paging", {}).get("next", {}).get("after")
+            try:
+                data = resp.json()
+            except ValueError:
+                raise RuntimeError("Malformed HubSpot object-list JSON") from None
+            if not isinstance(data, dict) or not isinstance(data.get("results"), list):
+                raise RuntimeError("Malformed HubSpot object results")
+            if (any(key in data for key in ("errors", "numErrors", "category"))
+                    or ("status" in data and data["status"] not in ("success", "SUCCESS"))):
+                raise RuntimeError("HubSpot object response contains an error envelope")
+            records = data["results"]
+            paging = data.get("paging", {})
+            if not isinstance(paging, dict):
+                raise RuntimeError("Malformed HubSpot object pagination")
+            next_after = None
+            if "next" in paging:
+                nxt = paging["next"]
+                if not isinstance(nxt, dict) or "after" not in nxt:
+                    raise RuntimeError("Malformed HubSpot object pagination cursor")
+                next_after = nxt["after"]
+                if (isinstance(next_after, bool) or not isinstance(next_after, (str, int))
+                        or not str(next_after)
+                        or len(str(next_after).encode("utf-8")) > self._MAX_OBJECT_CURSOR_LENGTH):
+                    raise RuntimeError("Malformed HubSpot object pagination cursor")
 
             return records, next_after
 
@@ -1226,7 +2770,7 @@ def register_lakeflow_source(spark):
                     datetime.fromisoformat(last_updated.replace("Z", "+00:00")).timestamp()
                     * 1000
                 )
-            except:
+            except ValueError:
                 last_updated_ms = 0
 
             search_body = {
@@ -1248,18 +2792,20 @@ def register_lakeflow_source(spark):
                 "properties": property_names or [],
             }
 
-            if after:
+            if after is not None:
                 search_body["after"] = after
 
-            url = f"{self.base_url}/crm/v3/objects/{table_name}/search"
-            resp = requests.post(url, headers=self.auth_header, json=search_body, timeout=60)
+            api_type = self._get_api_object_type(table_name)
+            url = f"{self.base_url}/crm/objects/2026-09/{api_type}/search"
+            resp = self._http.post(url, search_body, operation="object-search POST")
 
             if resp.status_code != 200:
-                raise Exception(
-                    f"HubSpot API error for {table_name}: {resp.status_code} {resp.text}"
-                )
+                raise RuntimeError(f"HubSpot object-search POST failed (status={resp.status_code})")
 
-            data = resp.json()
+            try:
+                data = resp.json()
+            except ValueError:
+                raise RuntimeError("Malformed HubSpot object-search JSON") from None
             records = data.get("results", [])
             next_after = data.get("paging", {}).get("next", {}).get("after")
 
@@ -1272,11 +2818,31 @@ def register_lakeflow_source(spark):
 
             return records, next_after, latest_in_batch
 
-        def _transform_records(self, records: List[Dict], table_name: str) -> List[Dict]:
+        def _transform_records(
+            self, records: List[Dict], table_name: str, property_names=None,
+            associations: List[str] | None = None,
+            association_value_mode: str = "ids",
+            numeric_value_mode: str = "legacy",
+        ) -> List[Dict]:
             """Transform HubSpot records by flattening properties and associations"""
-            return [self._transform_single_record(record, table_name) for record in records]
+            return [
+                self._transform_single_record(
+                    record,
+                    table_name,
+                    property_names,
+                    associations,
+                    association_value_mode,
+                    numeric_value_mode,
+                )
+                for record in records
+            ]
 
-        def _transform_single_record(self, record: Dict, table_name: str) -> Dict:
+        def _transform_single_record(
+            self, record: Dict, table_name: str, property_names=None,
+            associations: List[str] | None = None,
+            association_value_mode: str = "ids",
+            numeric_value_mode: str = "legacy",
+        ) -> Dict:
             """Transform a single HubSpot record"""
             transformed_record = {}
 
@@ -1288,28 +2854,111 @@ def register_lakeflow_source(spark):
             # Copy properties with empty string to None conversion
             # HubSpot API returns "" for null values in many fields
             if "properties" in record:
-                transformed_record["properties"] = self._sanitize_properties(record["properties"])
+                transformed_record["properties"] = self._sanitize_properties(
+                    record["properties"],
+                    table_name,
+                    property_names,
+                    numeric_value_mode,
+                )
 
             # Handle associations
-            transformed_record.update(self._extract_associations(record, table_name))
+            transformed_record.update(self._extract_associations(
+                record, associations if associations is not None else
+                self._get_associations_for_object(table_name),
+                association_value_mode,
+            ))
 
             return transformed_record
 
-        def _sanitize_properties(self, properties: Dict) -> Dict:
-            """Convert empty strings to None in properties dict.
+        @staticmethod
+        def _decimal_property(value):
+            """Fit exact decimals and recognizable binary64 expansions into decimal(38,18)."""
+            try:
+                number = Decimal(str(value))
+            except InvalidOperation as exc:
+                raise ValueError("Invalid HubSpot numeric property") from exc
+            if not number.is_finite():
+                raise ValueError("Nonfinite HubSpot numeric property")
+            def packed(candidate):
+                if candidate == 0:
+                    return Decimal(0)
+                sign, digits, exponent = candidate.as_tuple()
+                digits = list(digits)
+                while digits and digits[-1] == 0:
+                    digits.pop()
+                    exponent += 1
+                scale = max(-exponent, 0)
+                integer_digits = max(len(digits) + exponent, 0)
+                return sign, digits, exponent, scale, integer_digits
 
-            HubSpot API returns empty strings "" instead of null for many fields,
-            which causes issues when parsing to typed schemas (e.g., LongType).
-            """
+            parts = packed(number)
+            if parts == Decimal(0):
+                return Decimal(0)
+            sign, digits, exponent, scale, integer_digits = parts
+            if scale > 18:
+                # HubSpot sometimes serializes a short binary floating-point value
+                # as its exact, long base-10 expansion. Normalize only when the
+                # input is exactly the expansion of that binary64 value; arbitrary
+                # high-precision decimals still fail rather than being rounded.
+                binary = float(number)
+                if Decimal.from_float(binary) != number:
+                    raise ValueError("HubSpot numeric property exceeds decimal(38,18)")
+                shortest = Decimal(str(binary))
+                if not shortest.is_finite():
+                    raise ValueError("HubSpot numeric property exceeds decimal(38,18)")
+                parts = packed(shortest)
+                if parts == Decimal(0):
+                    return Decimal(0)
+                sign, digits, exponent, scale, integer_digits = parts
+            if scale > 18 or integer_digits > 20:
+                raise ValueError("HubSpot numeric property exceeds decimal(38,18)")
+            return Decimal((sign, tuple(digits), exponent))
+
+        def _sanitize_properties(
+            self,
+            properties: Dict,
+            table_name: str = None,
+            property_names=None,
+            numeric_value_mode: str = "legacy",
+        ) -> Dict:
+            """Normalize HubSpot nulls and preserve representable numeric values."""
             if not properties:
                 return properties
-            return {k: (None if v == "" else v) for k, v in properties.items()}
+            types = self._property_types.get(table_name, {})
+            output = {}
+            for name, value in properties.items():
+                if value == "" or value is None:
+                    output[name] = None
+                elif (
+                    numeric_value_mode == "decimal"
+                    and types.get(name) == "number"
+                    and (property_names is None or name in property_names)
+                ):
+                    output[name] = self._decimal_property(value)
+                else:
+                    output[name] = value
+            return output
 
-        def _extract_associations(self, record: Dict, table_name: str) -> Dict:
-            """Extract association IDs from record"""
+        @staticmethod
+        def _typed_association_type() -> ArrayType:
+            return ArrayType(
+                StructType([
+                    StructField("id", StringType(), True),
+                    StructField("typeId", LongType(), True),
+                    StructField("category", StringType(), True),
+                    StructField("label", StringType(), True),
+                ]),
+                True,
+            )
+
+        @staticmethod
+        def _extract_associations(
+            record: Dict,
+            expected_associations: List[str],
+            association_value_mode: str = "ids",
+        ) -> Dict:
+            """Extract association IDs or typed edge values from a hydrated record."""
             associations_data = record.get("associations", {})
-            config = self._get_object_config(table_name)
-            expected_associations = config["associations"]
             result = {}
 
             for association_type in expected_associations:
@@ -1317,13 +2966,26 @@ def register_lakeflow_source(spark):
                 if association_type in associations_data:
                     assoc_data = associations_data[association_type]
                     if isinstance(assoc_data, dict) and "results" in assoc_data:
-                        association_list = [
-                            item.get("id", "") for item in assoc_data["results"]
-                        ]
+                        values = assoc_data["results"]
                     elif isinstance(assoc_data, list):
+                        values = assoc_data
+                    else:
+                        values = []
+                    if association_value_mode == "typed":
+                        association_list = [
+                            {
+                                "id": item.get("id"),
+                                "typeId": item.get("typeId"),
+                                "category": item.get("category"),
+                                "label": item.get("label"),
+                            }
+                            for item in values
+                            if isinstance(item, dict)
+                        ]
+                    else:
                         association_list = [
                             str(item) if not isinstance(item, dict) else item.get("id", "")
-                            for item in assoc_data
+                            for item in values
                         ]
 
                 result[association_type] = association_list
@@ -1333,15 +2995,15 @@ def register_lakeflow_source(spark):
         def test_connection(self) -> dict:
             """Test the connection to HubSpot API"""
             try:
-                url = f"{self.base_url}/crm/v3/objects/contacts?limit=1"
-                resp = requests.get(url, headers=self.auth_header, timeout=60)
+                url = f"{self.base_url}/crm/objects/2026-09/contacts?limit=1"
+                resp = self._http.get(url, operation="connection-test GET")
 
                 if resp.status_code == 200:
                     return {"status": "success", "message": "Connection successful"}
                 else:
                     return {
                         "status": "error",
-                        "message": f"API error: {resp.status_code} {resp.text}",
+                        "message": f"API error: {resp.status_code}",
                     }
             except Exception as e:
                 return {"status": "error", "message": f"Connection failed: {str(e)}"}

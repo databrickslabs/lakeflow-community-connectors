@@ -1,0 +1,21 @@
+[
+  {
+    "id": "owner-1",
+    "type": "PERSON",
+    "email": "synthetic@example.invalid",
+    "firstName": "Synthetic",
+    "lastName": "Owner",
+    "userId": 100,
+    "userIdIncludingInactive": 100,
+    "createdAt": "2024-03-01T00:00:00.000Z",
+    "updatedAt": "2024-03-01T00:00:00.000Z",
+    "archived": false,
+    "teams": [
+      {
+        "id": "team-1",
+        "name": "Synthetic team",
+        "primary": true
+      }
+    ]
+  }
+]
