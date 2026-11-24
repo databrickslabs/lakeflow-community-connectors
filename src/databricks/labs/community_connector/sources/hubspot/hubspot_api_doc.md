@@ -51,8 +51,11 @@ connector follows it until either:
 | `tasks`      | `GET /crm/v3/objects/tasks`              | `POST /crm/v3/objects/tasks/search`            | `id`        | `updatedAt`  |
 | `notes`      | `GET /crm/v3/objects/notes`              | `POST /crm/v3/objects/notes/search`            | `id`        | `updatedAt`  |
 
-Custom objects discovered via `GET /crm/v3/schemas` are exposed as additional
-tables using the same patterns as the standard objects above.
+Custom objects are discovered through
+`GET /crm-object-schemas/2026-09/schemas`. The connector retries 429 and 5xx
+responses, then fails closed so a transient discovery gap cannot silently remove
+tables or association columns. If that date-versioned route reports 404 or 410,
+the connector falls back to `GET /crm/v3/schemas` for tenant compatibility.
 
 ### Resource snapshot tables
 

@@ -7,6 +7,7 @@ from urllib.parse import parse_qs, urlparse
 from unittest import mock
 
 import pytest
+import requests
 from pyspark.sql.types import ArrayType, StringType, StructType, _make_type_verifier
 
 from databricks.labs.community_connector.sources.hubspot import hubspot as hubspot_module
@@ -14,13 +15,112 @@ from databricks.labs.community_connector.sources.hubspot.hubspot import HubspotL
 
 
 class _Response:
-    status_code = 200
-
-    def __init__(self, payload):
+    def __init__(self, payload=None, status_code=200, headers=None):
         self.payload = payload
+        self.status_code = status_code
+        self.headers = headers or {}
 
     def json(self):
         return self.payload
+
+
+@pytest.mark.parametrize("generated", [False, True])
+@pytest.mark.parametrize("status", [429, 500, 502, 503, 599])
+def test_schema_discovery_retries_transient_statuses(generated, status):
+    conn = _connector_class(generated)({"access_token": "test-only-token"})
+    responses = [
+        _Response(status_code=status, headers={"Retry-After": "0"}),
+        _Response({"results": []}),
+    ]
+    with mock.patch("requests.get", side_effect=responses) as get, mock.patch(
+        "time.sleep"
+    ) as sleep:
+        assert "notes" in conn.list_tables()
+    assert get.call_count == 2
+    sleep.assert_called_once_with(0.0)
+
+
+@pytest.mark.parametrize("generated", [False, True])
+@pytest.mark.parametrize("error_type", [requests.ConnectionError, requests.Timeout])
+def test_schema_discovery_retries_transient_network_errors(generated, error_type):
+    conn = _connector_class(generated)({"access_token": "test-only-token"})
+    responses = [
+        error_type("transient schema discovery failure"),
+        _Response({"results": []}),
+    ]
+    with mock.patch("requests.get", side_effect=responses) as get, mock.patch(
+        "time.sleep"
+    ) as sleep:
+        assert "notes" in conn.list_tables()
+    assert get.call_count == 2
+    sleep.assert_called_once_with(1.0)
+
+
+@pytest.mark.parametrize("generated", [False, True])
+@pytest.mark.parametrize("error_type", [requests.ConnectionError, requests.Timeout])
+def test_schema_discovery_exhausts_network_error_retries(generated, error_type):
+    conn = _connector_class(generated)({"access_token": "test-only-token"})
+    with mock.patch(
+        "requests.get",
+        side_effect=error_type("persistent schema discovery failure"),
+    ) as get, mock.patch("time.sleep") as sleep:
+        with pytest.raises(RuntimeError, match="request failed") as exc_info:
+            conn.list_tables()
+    assert isinstance(exc_info.value.__cause__, error_type)
+    assert get.call_count == 6
+    assert sleep.call_args_list == [
+        mock.call(1.0),
+        mock.call(2.0),
+        mock.call(4.0),
+        mock.call(8.0),
+        mock.call(16.0),
+    ]
+
+
+@pytest.mark.parametrize("generated", [False, True])
+def test_schema_discovery_exhausts_retries_before_failing(generated):
+    conn = _connector_class(generated)({"access_token": "test-only-token"})
+    with mock.patch(
+        "requests.get", return_value=_Response(status_code=500)
+    ) as get, mock.patch("time.sleep") as sleep:
+        with pytest.raises(RuntimeError, match="HTTP 500"):
+            conn.list_tables()
+    assert get.call_count == 6
+    assert sleep.call_count == 5
+
+
+@pytest.mark.parametrize("generated", [False, True])
+def test_schema_discovery_fails_401_and_caches_403(generated):
+    conn = _connector_class(generated)({"access_token": "test-only-token"})
+    with mock.patch(
+        "requests.get", return_value=_Response(status_code=401)
+    ) as get:
+        with pytest.raises(RuntimeError, match="HTTP 401"):
+            conn.list_tables()
+    get.assert_called_once()
+
+    conn = _connector_class(generated)({"access_token": "test-only-token"})
+    with mock.patch(
+        "requests.get", return_value=_Response(status_code=403)
+    ) as get:
+        assert conn.list_tables() == conn.list_tables()
+        with pytest.raises(RuntimeError, match="HTTP 403"):
+            conn._custom_api_types()
+    get.assert_called_once()
+
+
+@pytest.mark.parametrize("generated", [False, True])
+def test_schema_discovery_falls_back_when_versioned_route_is_unavailable(generated):
+    conn = _connector_class(generated)({"access_token": "test-only-token"})
+    with mock.patch("requests.get", side_effect=[
+        _Response(status_code=404),
+        _Response({"results": []}),
+    ]) as get:
+        conn.list_tables()
+    assert [call.args[0] for call in get.call_args_list] == [
+        "https://api.hubapi.com/crm-object-schemas/2026-09/schemas",
+        "https://api.hubapi.com/crm/v3/schemas",
+    ]
 
 
 def _empty_associations(url, json, **_kwargs):

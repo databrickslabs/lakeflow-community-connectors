@@ -1,10 +1,12 @@
 import hashlib
 import json
+import math
 import time
 from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
 from typing import Dict, Iterator, List, Tuple
 
+import requests
 from pyspark.sql.types import (
     ArrayType,
     BooleanType,
@@ -27,6 +29,13 @@ from databricks.labs.community_connector.sources.hubspot.hubspot_non_crm import 
     NON_CRM_TABLES,
     HubspotNonCrm,
 )
+
+HUBSPOT_SCHEMA_ROUTES = (
+    "/crm-object-schemas/2026-09/schemas",
+    "/crm/v3/schemas",
+)
+HUBSPOT_SCHEMA_MAX_RETRIES = 5
+HUBSPOT_SCHEMA_MAX_BACKOFF_S = 30.0
 
 
 class HubspotLakeflowConnect(LakeflowConnect):
@@ -57,6 +66,7 @@ class HubspotLakeflowConnect(LakeflowConnect):
         # Cache for table metadata
         self._metadata_cache = {}
         self._custom_objects = None
+        self._custom_schema_access_denied = False
         self._custom_object_types = {}
         self._custom_object_configs = {}
 
@@ -233,6 +243,48 @@ class HubspotLakeflowConnect(LakeflowConnect):
 
         return standard_tables + self._non_crm.list_tables()
 
+    @staticmethod
+    def _schema_retry_delay(response, attempt: int) -> float:
+        retry_after = (getattr(response, "headers", None) or {}).get("Retry-After")
+        if retry_after is not None:
+            try:
+                seconds = float(retry_after)
+                if math.isfinite(seconds) and seconds >= 0:
+                    return min(seconds, HUBSPOT_SCHEMA_MAX_BACKOFF_S)
+            except (TypeError, ValueError):
+                pass
+        return min(2.0 ** attempt, HUBSPOT_SCHEMA_MAX_BACKOFF_S)
+
+    def _get_custom_schemas(self):
+        last_status = None
+        for route_index, route in enumerate(HUBSPOT_SCHEMA_ROUTES):
+            url = self.base_url + route
+            for attempt in range(HUBSPOT_SCHEMA_MAX_RETRIES + 1):
+                try:
+                    response = requests.get(
+                        url, headers=self.auth_header, timeout=60
+                    )
+                except (requests.ConnectionError, requests.Timeout) as error:
+                    if attempt < HUBSPOT_SCHEMA_MAX_RETRIES:
+                        time.sleep(self._schema_retry_delay(None, attempt))
+                        continue
+                    raise RuntimeError(
+                        "HubSpot schema discovery request failed"
+                    ) from error
+                last_status = response.status_code
+                if last_status in {200, 403}:
+                    return response
+                if last_status in {404, 410} and route_index == 0:
+                    break
+                if last_status == 429 or 500 <= last_status < 600:
+                    if attempt < HUBSPOT_SCHEMA_MAX_RETRIES:
+                        time.sleep(self._schema_retry_delay(response, attempt))
+                        continue
+                raise RuntimeError(
+                    f"HubSpot schema discovery failed: HTTP {last_status}"
+                )
+        raise RuntimeError(f"HubSpot schema discovery failed: HTTP {last_status}")
+
     def _discover_custom_objects(  # pylint: disable=too-many-statements
         self, require_access: bool = False
     ) -> List[str]:
@@ -240,10 +292,13 @@ class HubspotLakeflowConnect(LakeflowConnect):
         Discover custom objects from HubSpot CRM schemas API
         """
         if self._custom_objects is not None:
+            if require_access and self._custom_schema_access_denied:
+                raise RuntimeError("HubSpot schema discovery failed: HTTP 403")
             return list(self._custom_objects)
-        url = f"{self.base_url}/crm-object-schemas/2026-09/schemas"
-        resp = self._http.get(url, operation="schema discovery GET")
+        resp = self._get_custom_schemas()
         if resp.status_code == 403 and not require_access:
+            self._custom_schema_access_denied = True
+            self._custom_objects = []
             return []
         if resp.status_code != 200:
             raise RuntimeError(
