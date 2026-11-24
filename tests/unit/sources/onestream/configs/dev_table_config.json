@@ -1,0 +1,11 @@
+{
+    "cube_data": {
+        "years": "2025,2026",
+        "max_data_units_per_batch": "4",
+        "max_partitions": "2",
+        "page_size": "2"
+    },
+    "fx_rates": {
+        "page_size": "4"
+    }
+}
