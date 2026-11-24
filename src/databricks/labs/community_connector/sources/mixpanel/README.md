@@ -78,7 +78,7 @@ The Mixpanel connector supports the following objects with their respective sche
 ### Events
 - **Primary Keys**: `["$insert_id"]`
 - **Ingestion Type**: `cdc` (Change Data Capture)
-- **Incremental Cursor**: `properties.time`
+- **Incremental Cursor**: `time` (top-level copy of `properties.time`)
 - **Schema**: Event data with nested `properties` structure. The `$insert_id` field is at the top level for primary key purposes. Standard Mixpanel properties are defined as typed fields within the properties struct, and all custom/application-specific event properties are captured in `properties.custom_properties` map
 - **Key Fields**: `event`, `$insert_id`, `properties.distinct_id`, `properties.time`, `properties.$browser`, `properties.$city`, `properties.$os`, `properties.custom_properties`
 - **Description**: All events tracked in your Mixpanel project with their associated properties. The `$insert_id` is extracted to the top level to serve as the primary key. Standard Mixpanel SDK properties are available as typed fields, while custom properties are preserved in the `properties.custom_properties` map to ensure no data loss
@@ -102,7 +102,7 @@ The Mixpanel connector supports the following objects with their respective sche
 ### Engage (User Profiles)
 - **Primary Keys**: `["$distinct_id"]`
 - **Ingestion Type**: `cdc` (Change Data Capture)
-- **Incremental Cursor**: `$properties.$last_seen`
+- **Incremental Cursor**: `$last_seen` (top-level copy of `$properties.$last_seen`)
 - **Schema**: User profiles with nested `$properties` structure. Standard Mixpanel people properties are defined as typed fields within the $properties struct, and all custom profile properties are captured in `$properties.custom_properties` map
 - **Key Fields**: `$distinct_id`, `$properties.$first_name`, `$properties.$last_name`, `$properties.$email`, `$properties.$last_seen`, `$properties.custom_properties`
 - **Description**: Individual user profiles with demographic and behavioral data. Standard Mixpanel people properties are available as typed fields, while custom profile properties are preserved in the `custom_properties` map to ensure no data loss
