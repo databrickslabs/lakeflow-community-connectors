@@ -69,7 +69,7 @@ class PageNumber:
     def parse_request(self, query, headers, spec) -> Tuple[int, int]:
         per_page = _resolve_per_page(query, spec)
         page = _resolve_page(query, spec)
-        return (page - 1) * per_page, per_page
+        return (page - _page_base(spec)) * per_page, per_page
 
     def render_response(
         self, page, total, offset, limit, request_url
@@ -85,14 +85,14 @@ class PageNumberWithLinkHeader:
     def parse_request(self, query, headers, spec) -> Tuple[int, int]:
         per_page = _resolve_per_page(query, spec)
         page = _resolve_page(query, spec)
-        return (page - 1) * per_page, per_page
+        return (page - _page_base(spec)) * per_page, per_page
 
     def render_response(
         self, page, total, offset, limit, request_url
     ) -> Tuple[Any, Dict[str, str]]:
         if limit <= 0:
             return page, {}
-        current_page = (offset // limit) + 1
+        current_page = (offset // limit) + 1  # link math stays 1-based
         last_page = max(1, (total + limit - 1) // limit)
         links = []
         if current_page < last_page:
@@ -162,14 +162,25 @@ def _resolve_per_page(query: Dict[str, str], spec: EndpointSpec) -> int:
     return max(1, min(v, spec.per_page.max))
 
 
+def _page_base(spec: EndpointSpec) -> int:
+    """First page number for this endpoint (1 unless the spec says otherwise)."""
+    return spec.page.base if spec.page else 1
+
+
 def _resolve_page(query: Dict[str, str], spec: EndpointSpec) -> int:
+    """Return the requested page number, clamped to the endpoint's first page.
+
+    Callers convert to a corpus offset with ``(page - _page_base(spec))``, so a
+    0-indexed endpoint and a 1-indexed one both map their first page to 0.
+    """
+    base = _page_base(spec)
     name = spec.page.name if spec.page else "page"
-    raw = query.get(name, "1")
+    raw = query.get(name, str(base))
     try:
         v = int(raw)
     except (TypeError, ValueError):
-        return 1
-    return max(1, v)
+        return base
+    return max(base, v)
 
 
 def _resolve_offset(query: Dict[str, str], spec: EndpointSpec) -> int:

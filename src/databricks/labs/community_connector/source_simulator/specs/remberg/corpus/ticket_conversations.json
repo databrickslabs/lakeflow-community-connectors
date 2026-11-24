@@ -1,0 +1,51 @@
+[
+  {
+    "creator": {
+      "id": "delta-905-us0",
+      "firstName": "Ingrid",
+      "lastName": "Bauer",
+      "email": "ingrid.bauer@example.com"
+    },
+    "createdAt": "2024-02-01T09:12:00Z",
+    "kind": "inboundEmail",
+    "plainText": "The conveyor stops intermittently after roughly ten minutes of operation.",
+    "subject": "Conveyor stopping intermittently",
+    "header": {
+      "from": "ingrid.bauer@example.com",
+      "to": ["support@example.com"],
+      "cc": [],
+      "bcc": []
+    }
+  },
+  {
+    "creator": {
+      "id": "echo-441-us1",
+      "firstName": "Tomas",
+      "lastName": "Novak",
+      "email": "tomas.novak@example.com"
+    },
+    "createdAt": "2024-02-01T10:05:00Z",
+    "kind": "note",
+    "plainText": "Checked remotely - drive controller reports an overtemperature fault.",
+    "subject": null,
+    "header": null
+  },
+  {
+    "creator": {
+      "id": "echo-441-us1",
+      "firstName": "Tomas",
+      "lastName": "Novak",
+      "email": "tomas.novak@example.com"
+    },
+    "createdAt": "2024-02-01T10:41:00Z",
+    "kind": "outboundEmail",
+    "plainText": "A technician is scheduled for tomorrow morning to replace the drive fan.",
+    "subject": "RE: Conveyor stopping intermittently",
+    "header": {
+      "from": "support@example.com",
+      "to": ["ingrid.bauer@example.com"],
+      "cc": ["dispatch@example.com"],
+      "bcc": []
+    }
+  }
+]

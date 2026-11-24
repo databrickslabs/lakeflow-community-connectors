@@ -1,0 +1,38 @@
+[
+  {
+    "id": "papa-560-in0",
+    "storageAsset": {
+      "id": "hotel-220-as0",
+      "assetNumber": "AS-0001",
+      "assetType": "warehouse"
+    },
+    "partTypeId": "corpus-placeholder-overwritten-by-injection",
+    "availableStock": 42,
+    "totalStock": 50,
+    "createdAt": "2024-01-15T09:00:00Z"
+  },
+  {
+    "id": "quebec-77-in1",
+    "storageAsset": {
+      "id": "mike-733-as1",
+      "assetNumber": "AS-0002",
+      "assetType": "service van"
+    },
+    "partTypeId": "corpus-placeholder-overwritten-by-injection",
+    "availableStock": 3,
+    "totalStock": 3,
+    "createdAt": "2024-01-16T11:30:00Z"
+  },
+  {
+    "id": "romeo-903-in2",
+    "storageAsset": {
+      "id": "november-45-as2",
+      "assetNumber": "AS-0003",
+      "assetType": "warehouse"
+    },
+    "partTypeId": "corpus-placeholder-overwritten-by-injection",
+    "availableStock": 0,
+    "totalStock": 12,
+    "createdAt": "2024-01-18T15:45:00Z"
+  }
+]

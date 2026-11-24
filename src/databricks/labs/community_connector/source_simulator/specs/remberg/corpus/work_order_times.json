@@ -1,0 +1,20 @@
+[
+  {
+    "performingPersonId": "alpha-311-pp0",
+    "startTime": "2024-02-04T07:00:00Z",
+    "endTime": "2024-02-04T09:30:00Z",
+    "durationInSeconds": 9000
+  },
+  {
+    "performingPersonId": "bravo-748-pp1",
+    "startTime": "2024-02-04T10:15:00Z",
+    "endTime": "2024-02-04T11:00:00Z",
+    "durationInSeconds": 2700
+  },
+  {
+    "performingPersonId": "alpha-311-pp0",
+    "startTime": "2024-02-05T06:45:00Z",
+    "endTime": "2024-02-05T07:15:00Z",
+    "durationInSeconds": 1800
+  }
+]

@@ -1,0 +1,62 @@
+[
+  {
+    "id": "alpha-620-ss0",
+    "createdAt": "2024-01-01T00:00:00Z",
+    "reportedAt": "2024-01-01T00:00:00Z",
+    "resolvedAt": "2024-01-01T04:30:00Z",
+    "status": "stopped",
+    "asset": {
+      "id": "hotel-220-as0",
+      "assetNumber": "AS-0001",
+      "assetType": "warehouse"
+    }
+  },
+  {
+    "id": "bravo-118-ss1",
+    "createdAt": "2024-01-01T01:00:00Z",
+    "reportedAt": "2024-01-01T00:58:00Z",
+    "resolvedAt": null,
+    "status": "warning",
+    "asset": {
+      "id": "mike-733-as1",
+      "assetNumber": "AS-0002",
+      "assetType": "service van"
+    }
+  },
+  {
+    "id": "charlie-77-ss2",
+    "createdAt": "2024-01-01T02:00:00Z",
+    "reportedAt": "2024-01-01T02:00:00Z",
+    "resolvedAt": null,
+    "status": "running",
+    "asset": {
+      "id": "november-45-as2",
+      "assetNumber": "AS-0003",
+      "assetType": "warehouse"
+    }
+  },
+  {
+    "id": "delta-902-ss3",
+    "createdAt": "2024-01-01T03:00:00Z",
+    "reportedAt": "2024-01-01T02:55:00Z",
+    "resolvedAt": "2024-01-02T08:00:00Z",
+    "status": "inactive",
+    "asset": {
+      "id": "hotel-220-as0",
+      "assetNumber": "AS-0001",
+      "assetType": "warehouse"
+    }
+  },
+  {
+    "id": "echo-534-ss4",
+    "createdAt": "2024-01-01T04:00:00Z",
+    "reportedAt": "2024-01-01T04:00:00Z",
+    "resolvedAt": null,
+    "status": "new",
+    "asset": {
+      "id": "mike-733-as1",
+      "assetNumber": "AS-0002",
+      "assetType": "service van"
+    }
+  }
+]
