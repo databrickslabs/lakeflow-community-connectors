@@ -1,0 +1,71 @@
+{
+  "network": "tango-73-pk0",
+  "contract": {
+    "address": "sierra-7-pk0",
+    "name": "alpha-207",
+    "symbol": "zulu-955",
+    "totalSupply": "oscar-408",
+    "tokenType": "quebec-368",
+    "contractDeployer": "delta-741",
+    "deployedBlockNumber": 70439,
+    "openSeaMetadata": {
+      "floorPrice": 495.09,
+      "collectionName": "hotel-562",
+      "safelistRequestStatus": "tango-116",
+      "imageUrl": "foxtrot-958",
+      "description": "bravo-750",
+      "externalUrl": "india-862",
+      "twitterUsername": "papa-218",
+      "discordUrl": "alpha-368",
+      "bannerImageUrl": "sierra-423",
+      "lastIngestedAt": "delta-721"
+    },
+    "isSpam": "juliet-742",
+    "spamClassifications": []
+  },
+  "tokenId": "november-pk0",
+  "tokenType": "india-661",
+  "name": "alpha-660",
+  "description": "juliet-995",
+  "image": {
+    "cachedUrl": "papa-270",
+    "thumbnailUrl": "charlie-514",
+    "pngUrl": "golf-632",
+    "contentType": "sierra-496",
+    "size": 56712,
+    "originalUrl": "uniform-329"
+  },
+  "raw": {
+    "tokenUri": "papa-495",
+    "metadata": {
+      "key_0": "victor-371",
+      "key_1": "zulu-360"
+    },
+    "error": "alpha-753"
+  },
+  "collection": {
+    "name": "whiskey-272",
+    "slug": "lima-478",
+    "externalUrl": "hotel-413",
+    "bannerImageUrl": "november-767"
+  },
+  "tokenUri": "india-550",
+  "timeLastUpdated": "charlie-164",
+  "animation": {
+    "cachedUrl": "oscar-204",
+    "contentType": "india-451",
+    "size": 52432,
+    "originalUrl": "kilo-789"
+  },
+  "mint": {
+    "mintAddress": "zulu-248",
+    "blockNumber": 94234,
+    "timestamp": "india-778",
+    "transactionHash": "lima-374"
+  },
+  "owners": [
+    "mike-711",
+    "hotel-320"
+  ],
+  "contract_address": "sierra-7-pk0"
+}
