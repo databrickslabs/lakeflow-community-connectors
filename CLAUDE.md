@@ -4,7 +4,17 @@ Lakeflow Community Connectors — data ingestion from source systems into Databr
 
 ## Key Constraint
 
-When developing a connector, only modify files under `src/databricks/labs/community_connector/sources/{source}/`. Do **not** change library, pipeline, or interface code unless explicitly asked.
+When developing a connector, only modify files under `src/databricks/labs/community_connector/sources/{source}/` and its prebuilt wheel in `wheelhouse/{source}/`. Do **not** change library, pipeline, or interface code unless explicitly asked.
+
+## Versions and prebuilt wheels
+
+Whenever you change a connector's packaged files (`*.py`, `connector_spec.yaml`, `pyproject.toml` under `sources/{source}/`), in the same change:
+
+1. Bump `version` in `sources/{source}/pyproject.toml` using the rules in `CONTRIBUTING.md` (Versioning): MAJOR if any table needs a full refresh or the user must change their configuration, MINOR for new capability, PATCH for fixes. Docs-only edits don't bump.
+2. Run `python tools/scripts/build_wheelhouse.py {source}` to rebuild `wheelhouse/{source}/`.
+3. Run `python tools/scripts/build_wheelhouse.py {source} --check --base origin/master` and fix anything it reports.
+
+Framework changes (outside `sources/`, when explicitly asked) follow the same steps with the root `pyproject.toml` and `--framework`. Full workflow: `.claude/skills/build_connector_package/SKILL.md`.
 
 ## Reference Files
 

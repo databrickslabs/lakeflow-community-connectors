@@ -34,10 +34,19 @@ jobs:
           # reachable (the default shallow clone does not include the base).
           fetch-depth: 0
 
-      - name: Set up Python
-        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7.0.0
+      # setup-uv instead of actions/setup-python: on runners with no cached Python,
+      # setup-python upgrades pip from pypi.org, which the protected runners can't reach.
+      - name: Setup uv
+        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2  # v10.3.3
         with:
-          python-version: '3.10'
+          version: "0.11.7"
+          checksum: "6681d691eb7f9c00ac6a3af54252f7ab29ae72f0c8f95bdc7f9d1401c23ea868"
+          # Fork code runs in this job; keep it from writing a shared cache.
+          enable-cache: false
+      - name: Set up Python
+        run: |
+          uv venv --python 3.10 "$RUNNER_TEMP/venv"
+          echo "$RUNNER_TEMP/venv/bin" >> "$GITHUB_PATH"
 
       - name: Compute changed files
         id: changed-files
