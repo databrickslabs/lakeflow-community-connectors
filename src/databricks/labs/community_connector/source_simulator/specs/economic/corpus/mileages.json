@@ -1,0 +1,46 @@
+[
+  {
+    "number": 1,
+    "projectNumber": 1,
+    "employeeNumber": 2,
+    "date": "2022-06-02T00:00:00",
+    "distance": 2000.0,
+    "from": "Milan",
+    "to": "Minsk",
+    "isApproved": false,
+    "objectVersion": "23f436dc1753dc49"
+  },
+  {
+    "number": 2,
+    "projectNumber": 5,
+    "employeeNumber": 2,
+    "date": "2022-05-27T00:00:00",
+    "distance": 200.0,
+    "from": "Milan",
+    "to": "Rome",
+    "isApproved": false,
+    "objectVersion": "3203c71b2e34d8cd"
+  },
+  {
+    "number": 3,
+    "projectNumber": 1,
+    "employeeNumber": 2,
+    "date": "2022-06-25T00:00:00",
+    "distance": 1000.0,
+    "from": "Milan",
+    "to": "Paris",
+    "isApproved": false,
+    "objectVersion": "19f38cd0eb06592c"
+  },
+  {
+    "number": 4,
+    "projectNumber": 1,
+    "employeeNumber": 6,
+    "date": "2022-06-02T00:00:00",
+    "distance": 2000.0,
+    "from": "Rome",
+    "to": "Copenhagen",
+    "isApproved": false,
+    "objectVersion": "f229993c0fd4680"
+  }
+]

@@ -1,0 +1,38 @@
+[
+  {
+    "number": 1,
+    "name": "Invoiceable cost type",
+    "costGroupNumber": 1,
+    "vatCode": "I25  ",
+    "isBarred": false,
+    "lastUpdated": "2022-05-31T13:57:00",
+    "objectVersion": "eb243aafadc7e2db"
+  },
+  {
+    "number": 2,
+    "name": "Non-invoiceable cost type group",
+    "costGroupNumber": 2,
+    "vatCode": "I25  ",
+    "isBarred": false,
+    "lastUpdated": "2022-05-31T13:58:00",
+    "objectVersion": "d09c7fca89f4d7e6"
+  },
+  {
+    "number": 3,
+    "name": "Barred cost type",
+    "costGroupNumber": 1,
+    "vatCode": "OBPK ",
+    "isBarred": true,
+    "lastUpdated": "2022-05-31T13:58:00",
+    "objectVersion": "11d96c6474034cac"
+  },
+  {
+    "number": 4,
+    "name": "Cost type 4",
+    "costGroupNumber": 1,
+    "vatCode": "OBPS ",
+    "isBarred": false,
+    "lastUpdated": "2022-05-31T13:58:00",
+    "objectVersion": "ea96b56824ca02af"
+  }
+]

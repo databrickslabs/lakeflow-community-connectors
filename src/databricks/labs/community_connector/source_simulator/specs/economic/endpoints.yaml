@@ -1,0 +1,219 @@
+# Visma e-conomic OpenAPI family (https://apis.e-conomic.com/).
+#
+# Each domain is a separate "resource API" with its own version segment:
+#   /projectsapi/v1.1.0/{Employees,Projects,TimeEntries,Activities,
+#       ActivityGroups,EmployeeGroups,ProjectGroups,ProjectStatuses,Mileages,
+#       project-employees,project-customers,TimeEntryPrices,CostTypes}
+#   /customersapi/v3.1.0/{Customers,Contacts,DeliveryLocations}
+# The version segment is a placeholder so connector-side version overrides
+# (projects_api_version / customers_api_version options) still match.
+#
+# Connector flow:
+#   * read_table(employees)            -> GET /projectsapi/{v}/Employees      (snapshot)
+#   * read_table(customers)            -> GET /customersapi/{v}/Customers     (snapshot)
+#   * read_table(projects)             -> GET /projectsapi/{v}/Projects       (cdc, lastUpdated)
+#   * read_table(project_time_entries) -> GET /projectsapi/{v}/TimeEntries    (cdc, lastUpdated)
+#   * activities / activity_groups / employee_groups / project_groups /
+#     project_statuses / mileages / project_employees / project_customers /
+#     time_entry_prices                -> GET /projectsapi/{v}/<Resource>     (snapshot)
+#   * read_table(cost_types)           -> GET /projectsapi/{v}/CostTypes      (cdc, lastUpdated)
+#   * read_table(customer_contacts)    -> GET /customersapi/{v}/Contacts      (cdc, lastUpdated)
+#   * read_table(customer_delivery_locations)
+#                                      -> GET /customersapi/{v}/DeliveryLocations (cdc, lastUpdated)
+#
+# Query params the connector sends:
+#   filter  e-conomic filter syntax, e.g.
+#           lastUpdated$gte:2024-01-01T00:00:00$and:number$gt:42
+#           (cdc tables only; snapshot reads send no filter)
+#   cursor  opaque continuation token taken from the previous response
+#
+# Response envelope: {"items": [...], "cursor": "<next>"}; ``cursor`` is
+# omitted on the last page. Neither the composite ``filter`` expression nor
+# the body-cursor pagination maps onto the declarative param-role pipeline,
+# so every endpoint is served by ``handlers/cursor_list.py`` (filter
+# evaluation + cursor paging over the corpus, small page size so the
+# connector's cursor loop is exercised).
+#
+# Live-validated 2026-11-02 against the public "demo" agreement:
+#   * envelope is {"items": [...]} with no ``cursor`` key on the last page
+#     (demo tables are 5-10 rows, so a second page never occurs live;
+#     cursor paging is exercised only by the simulator's 5-item pages)
+#   * ``lastUpdated$gte:YYYY-MM-DDTHH:MM:SS`` and the combined
+#     ``...$and:number$gt:N`` form both return 200 with correctly filtered
+#     rows; an unmatched bound returns {"items": []}
+#   * timestamps are naive whole-minute values (no zone, no fraction); they
+#     appear to be Danish local time (a time entry whose text says
+#     "23:13:32 +01:00" has lastUpdated 23:14:00), not UTC
+#   * projects.lastUpdated was non-null on every demo row
+# Corpus = the live demo rows, unmodified (re-seeded from the cassette via
+# tools.cassette_to_corpus), followed by 5 synthetic rows per table from
+# tools.corpus_from_schema.generate_records (seed 42 + _str_seed(table),
+# primary keys 1000-1004, timestamps rewritten to the live naive format).
+# The demo agreement leaves many customers columns and
+# projects.departmentNumber null; the synthetic rows cover them.
+#
+# Termination: the connector caps its committed lastUpdated cursor at an
+# init-time snapshot and stamps completed scans with ``synced_at``.
+# ``synthesize_future_records`` adds post-now lastUpdated clones on every
+# cdc endpoint (Projects, TimeEntries, CostTypes, Contacts,
+# DeliveryLocations) so the init-time cap is exercised.
+#
+# Batch-2 corpora (activities ... customer_delivery_locations) were
+# live-validated 2026-11-02 the same way (16/16 endpoints, no drift) and
+# re-seeded from the cassette. Every column is populated by the demo rows
+# except customer_contacts.{notes,eInvoiceId} and
+# customer_delivery_locations.{termsOfDelivery,eInvoiceId}; only those two
+# corpora carry the 5 appended synthetic rows (PKs 1000-1004, same seed and
+# timestamp rewrite as above).
+
+endpoints:
+  - path: "/projectsapi/{version}/Employees"
+    method: GET
+    corpus: employees
+    handler: databricks.labs.community_connector.source_simulator.specs.economic.handlers.cursor_list:serve_cursor_list
+    params:
+      filter: {role: ignore}
+      cursor: {role: ignore}
+
+  - path: "/customersapi/{version}/Customers"
+    method: GET
+    corpus: customers
+    handler: databricks.labs.community_connector.source_simulator.specs.economic.handlers.cursor_list:serve_cursor_list
+    params:
+      filter: {role: ignore}
+      cursor: {role: ignore}
+
+  - path: "/projectsapi/{version}/Projects"
+    method: GET
+    corpus: projects
+    handler: databricks.labs.community_connector.source_simulator.specs.economic.handlers.cursor_list:serve_cursor_list
+    params:
+      filter: {role: ignore}
+      cursor: {role: ignore}
+    synthesize_future_records:
+      cursor_field: lastUpdated
+      count: 3
+
+  - path: "/projectsapi/{version}/TimeEntries"
+    method: GET
+    corpus: project_time_entries
+    handler: databricks.labs.community_connector.source_simulator.specs.economic.handlers.cursor_list:serve_cursor_list
+    params:
+      filter: {role: ignore}
+      cursor: {role: ignore}
+    synthesize_future_records:
+      cursor_field: lastUpdated
+      count: 3
+
+  # ---------------------------------------------------------------------
+  # Batch 2 (added 2026-11-02): 10 projectsapi + 2 customersapi endpoints.
+  # Same envelope, cursor paging and handler as above. Snapshot reads send
+  # no filter; the three cdc endpoints (CostTypes, Contacts,
+  # DeliveryLocations) send the same lastUpdated$gte[$and:number$gt] filter
+  # as Projects / TimeEntries.
+  # ---------------------------------------------------------------------
+
+  - path: "/projectsapi/{version}/Activities"
+    method: GET
+    corpus: activities
+    handler: databricks.labs.community_connector.source_simulator.specs.economic.handlers.cursor_list:serve_cursor_list
+    params:
+      filter: {role: ignore}
+      cursor: {role: ignore}
+
+  - path: "/projectsapi/{version}/ActivityGroups"
+    method: GET
+    corpus: activity_groups
+    handler: databricks.labs.community_connector.source_simulator.specs.economic.handlers.cursor_list:serve_cursor_list
+    params:
+      filter: {role: ignore}
+      cursor: {role: ignore}
+
+  - path: "/projectsapi/{version}/EmployeeGroups"
+    method: GET
+    corpus: employee_groups
+    handler: databricks.labs.community_connector.source_simulator.specs.economic.handlers.cursor_list:serve_cursor_list
+    params:
+      filter: {role: ignore}
+      cursor: {role: ignore}
+
+  - path: "/projectsapi/{version}/ProjectGroups"
+    method: GET
+    corpus: project_groups
+    handler: databricks.labs.community_connector.source_simulator.specs.economic.handlers.cursor_list:serve_cursor_list
+    params:
+      filter: {role: ignore}
+      cursor: {role: ignore}
+
+  - path: "/projectsapi/{version}/ProjectStatuses"
+    method: GET
+    corpus: project_statuses
+    handler: databricks.labs.community_connector.source_simulator.specs.economic.handlers.cursor_list:serve_cursor_list
+    params:
+      filter: {role: ignore}
+      cursor: {role: ignore}
+
+  - path: "/projectsapi/{version}/Mileages"
+    method: GET
+    corpus: mileages
+    handler: databricks.labs.community_connector.source_simulator.specs.economic.handlers.cursor_list:serve_cursor_list
+    params:
+      filter: {role: ignore}
+      cursor: {role: ignore}
+
+  - path: "/projectsapi/{version}/project-employees"
+    method: GET
+    corpus: project_employees
+    handler: databricks.labs.community_connector.source_simulator.specs.economic.handlers.cursor_list:serve_cursor_list
+    params:
+      filter: {role: ignore}
+      cursor: {role: ignore}
+
+  - path: "/projectsapi/{version}/project-customers"
+    method: GET
+    corpus: project_customers
+    handler: databricks.labs.community_connector.source_simulator.specs.economic.handlers.cursor_list:serve_cursor_list
+    params:
+      filter: {role: ignore}
+      cursor: {role: ignore}
+
+  - path: "/projectsapi/{version}/TimeEntryPrices"
+    method: GET
+    corpus: time_entry_prices
+    handler: databricks.labs.community_connector.source_simulator.specs.economic.handlers.cursor_list:serve_cursor_list
+    params:
+      filter: {role: ignore}
+      cursor: {role: ignore}
+
+  - path: "/projectsapi/{version}/CostTypes"
+    method: GET
+    corpus: cost_types
+    handler: databricks.labs.community_connector.source_simulator.specs.economic.handlers.cursor_list:serve_cursor_list
+    params:
+      filter: {role: ignore}
+      cursor: {role: ignore}
+    synthesize_future_records:
+      cursor_field: lastUpdated
+      count: 3
+
+  - path: "/customersapi/{version}/Contacts"
+    method: GET
+    corpus: customer_contacts
+    handler: databricks.labs.community_connector.source_simulator.specs.economic.handlers.cursor_list:serve_cursor_list
+    params:
+      filter: {role: ignore}
+      cursor: {role: ignore}
+    synthesize_future_records:
+      cursor_field: lastUpdated
+      count: 3
+
+  - path: "/customersapi/{version}/DeliveryLocations"
+    method: GET
+    corpus: customer_delivery_locations
+    handler: databricks.labs.community_connector.source_simulator.specs.economic.handlers.cursor_list:serve_cursor_list
+    params:
+      filter: {role: ignore}
+      cursor: {role: ignore}
+    synthesize_future_records:
+      cursor_field: lastUpdated
+      count: 3

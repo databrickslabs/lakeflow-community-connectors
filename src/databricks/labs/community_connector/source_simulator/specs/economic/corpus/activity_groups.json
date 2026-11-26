@@ -1,0 +1,41 @@
+[
+  {
+    "number": 1,
+    "name": "Invoiceable activities group",
+    "type": 1,
+    "includeCostPriceInFinance": true,
+    "costAccountClosed": 2212,
+    "costAccountOngoing": 1025,
+    "costAccountOngoingType": 0,
+    "costContraAccountOngoing": 1026,
+    "includeSalesPriceInFinance": true,
+    "salesAccountClosed": 3130,
+    "salesAccountOngoing": 1021,
+    "salesAccountOngoingType": 0,
+    "salesContraAccountOngoing": 3130,
+    "objectVersion": "f65f6ff29a659276"
+  },
+  {
+    "number": 2,
+    "name": "Non-invoiceable activity group",
+    "type": 2,
+    "includeCostPriceInFinance": true,
+    "costAccountClosed": 2230,
+    "costAccountOngoing": 1025,
+    "costAccountOngoingType": 0,
+    "costContraAccountOngoing": 2212,
+    "includeSalesPriceInFinance": false,
+    "salesAccountOngoingType": 0,
+    "objectVersion": "114a6b033dc34edb"
+  },
+  {
+    "number": 3,
+    "name": "Unproductive activity group",
+    "type": 3,
+    "includeCostPriceInFinance": false,
+    "costAccountOngoingType": 0,
+    "includeSalesPriceInFinance": false,
+    "salesAccountOngoingType": 0,
+    "objectVersion": "e3ee8aa9e049456f"
+  }
+]
