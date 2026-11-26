@@ -1,0 +1,38 @@
+[
+  {
+    "advertiser_name": "Example North America", "advertiser_id": "3001",
+    "campaign_name": "Summer Launch", "campaign_id": "4001", "delivery_country": "United States",
+    "campaign_start_date": "2026-08-01", "campaign_end_date": "2026-08-23",
+    "delivery_date": "2026-08-20", "impressions": 4000, "unique_reach_impression_reach": "1500"
+  },
+  {
+    "advertiser_name": "Example North America", "advertiser_id": "3001",
+    "campaign_name": "Brand Awareness", "campaign_id": "4002", "delivery_country": "United States",
+    "campaign_start_date": "2026-08-01", "campaign_end_date": "2026-08-23",
+    "delivery_date": "2026-08-20", "impressions": 2000, "unique_reach_impression_reach": "-"
+  },
+  {
+    "advertiser_name": "Example Europe", "advertiser_id": "3002",
+    "campaign_name": "Product Launch", "campaign_id": "4003", "delivery_country": "United States",
+    "campaign_start_date": "2026-08-01", "campaign_end_date": "2026-08-23",
+    "delivery_date": "2026-08-20", "impressions": 1000, "unique_reach_impression_reach": ""
+  },
+  {
+    "advertiser_name": "Example Europe", "advertiser_id": "3002",
+    "campaign_name": "Long Campaign", "campaign_id": "4004", "delivery_country": "United States",
+    "campaign_start_date": "2026-01-01", "campaign_end_date": "2026-08-23",
+    "delivery_date": "2026-08-20", "impressions": 8000, "unique_reach_impression_reach": "5000"
+  },
+  {
+    "advertiser_name": "Example Europe", "advertiser_id": "3002",
+    "campaign_name": "Unknown Start", "campaign_id": "4005", "delivery_country": "United States",
+    "campaign_start_date": "", "campaign_end_date": "2026-08-23",
+    "delivery_date": "2026-08-20", "impressions": 200, "unique_reach_impression_reach": "100"
+  },
+  {
+    "advertiser_name": "Example Europe", "advertiser_id": "3002",
+    "campaign_name": "Zero Reach", "campaign_id": "4006", "delivery_country": "United States",
+    "campaign_start_date": "2026-08-01", "campaign_end_date": "2026-08-23",
+    "delivery_date": "2026-08-20", "impressions": 100, "unique_reach_impression_reach": "0"
+  }
+]
