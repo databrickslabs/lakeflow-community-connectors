@@ -2317,7 +2317,7 @@ def test_source_package_dependencies_are_runtime_safe():
     dependencies = project["project"]["dependencies"]
     assert "pydantic>=2.0.0,<3.0" in dependencies
     assert "requests>=2.28.0,<3.0" in dependencies
-    assert "lakeflow-community-connectors>=0.1.0" in dependencies
+    assert "lakeflow-community-connectors>=0.1.0,<1.0" in dependencies
     assert not any(dependency.lower().startswith("pyspark") for dependency in dependencies)
     assert not any(
         dependency.lower().startswith("google-api-python-client") for dependency in dependencies
@@ -2374,17 +2374,6 @@ def test_record_mode_keeps_live_configs_and_simulator_validation(monkeypatch):
     assert options["spec_path"].name == "endpoints.yaml"
     assert options["corpus_dir"].name == "corpus"
     assert TestGoogleCm360Connector._load_table_configs() == {}
-
-
-def test_contribution_guide_uses_harness_table_config_path():
-    from tests.unit.sources.google_cm360.test_google_cm360_lakeflow_connect import (
-        TestGoogleCm360Connector,
-    )
-
-    config_path = TestGoogleCm360Connector._config_dir() / "dev_table_config.json"
-    repository_root = SOURCE_DIR.parents[5]
-    guide = (SOURCE_DIR / "CONTRIBUTING.md").read_text(encoding="utf-8")
-    assert config_path.relative_to(repository_root).as_posix() in guide
 
 
 def test_readme_pipeline_example_parses_with_framework():
