@@ -1,0 +1,68 @@
+# KX KDB HDB Lakeflow community connector specification.
+
+display_name: KX KDB HDB
+connection:
+  parameters:
+    - name: hdb_root_path
+      type: string
+      required: true
+      description: >
+        FUSE-mounted root path of the KDB HDB dataset, such as
+        /Volumes/<catalog>/<schema>/<volume>/kdb_hdb. The root must contain
+        the HDB sym file and date partition directories.
+
+    - name: license_volume_path
+      type: string
+      required: true
+      description: >
+        Directory that holds the KX license (kc.lic or k4.lic), for example
+        /Volumes/<catalog>/<schema>/<volume>/keys/. Every other bootstrap file
+        must be in the same Unity Catalog Volume. Without an offline bundle,
+        `QLIC` points at this directory and PyKX and KDB-X must already be in
+        the pipeline environment. On Databricks, customers must provide a
+        commercial KX license whose terms permit third-party-cloud use.
+
+    - name: kdbx_license_file_path
+      type: string
+      required: false
+      description: >
+        Optional path to the KX license file or license directory, in the same
+        Unity Catalog Volume as license_volume_path. Defaults to the license
+        found in license_volume_path. A file named k4.lic is treated as a
+        commercial k4 license.
+
+    - name: kdbx_license_kind
+      type: string
+      required: false
+      description: >
+        License file type for KDB-X installation: `k4` for a commercial k4.lic
+        license or `kc` for a kc.lic license. Defaults to the license file name,
+        otherwise `kc`.
+
+    - name: kdbx_offline_bundle_path
+      type: string
+      required: false
+      description: >
+        Optional path to a KDB-X air-gapped bundle, in the same Unity Catalog
+        Volume as license_volume_path. Use l64arm-bundle.zip for ARM64 runtimes
+        (including current Lakeflow serverless) and l64-bundle.zip for x86_64.
+        When set, or when a matching bundle is found in license_volume_path or
+        its sibling kdbx directory, the connector installs KDB-X once per node
+        with `install_kdb.sh --offline`. The connector never downloads KDB-X.
+
+    - name: kdbx_offline_bundle_sha256
+      type: string
+      required: false
+      description: >
+        Recommended SHA-256 digest (64 hexadecimal characters) of the offline
+        bundle. Each node verifies its copy of the bundle against it before
+        installing.
+
+    - name: discovery_sample_dates
+      type: integer
+      required: false
+      description: >
+        Optional limit for table discovery. Set to 0 or omit to scan all date
+        partitions when listing tables.
+
+external_options_allowlist: "start_date,end_date,ingestion_mode,max_dates_per_batch,max_tasks_per_batch,max_rows_per_task,min_partition_age_minutes,missing_columns"
